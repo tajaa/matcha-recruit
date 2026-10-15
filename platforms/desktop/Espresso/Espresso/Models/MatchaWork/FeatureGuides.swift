@@ -81,7 +81,6 @@ extension SidebarSectionOrderStore.Section {
         case .email: return .email
         case .assistant: return .assistant
         case .tasks: return .tasks
-        case .jobs: return .jobSearch
         }
     }
 }
@@ -277,6 +276,7 @@ extension FeatureGuide {
              points: [
                 "Ask Espresso in its chat, or type what you want in the box at the top of Tasks and click Ask Espresso.",
                 "If it needs more, like a move-in date, it posts a short form in the chat. Fill it in, add files if it asks for them, and start it. Typing your answer works too.",
+                "Job searches live here too: click New job search, or ask Espresso for one.",
                 "Running tasks show as a count next to Tasks in the sidebar, with a dot when one needs you.",
              ]),
         Page(stage: .howTo, icon: "slider.horizontal.3",
@@ -336,16 +336,17 @@ extension FeatureGuide {
         Page(stage: .howTo, icon: "plus.circle.fill",
              title: "Start a search",
              points: [
-                "Click + at the top of the list (⌘N).",
+                "In Tasks, click New job search. Your searches are listed there with your other tasks.",
                 "Describe the job in your own words. Add titles, places, remote or on-site, and a minimum base if you have one.",
                 "Choose whether Espresso may use your saved résumé to judge fit and write the drafts.",
                 "Read what's shared and where, tick I agree, then Start search.",
+                "If you have Tasks, you can also ask Espresso in its chat. It asks for what it needs with a short form.",
              ]),
         Page(stage: .expect, icon: "clock.fill",
              title: "Give it a few minutes",
              points: [
                 "It searches Google Jobs and company job boards, drops what doesn't fit, reads the postings and ranks them.",
-                "You can leave while it works. The list fills in as it goes, and Cancel stops it.",
+                "You can leave while it works. The list fills in as it goes, Cancel stops it, and you get a notification when it's done.",
                 "Ranking follows What matters. Change the weights to re-rank anytime.",
              ]),
         Page(stage: .expect, icon: "dollarsign.circle.fill",
@@ -365,7 +366,7 @@ extension FeatureGuide {
         Page(stage: .expect, icon: "lock.fill",
              title: "Limits and privacy",
              points: [
-                "Each new search counts toward your monthly allowance, shown under your searches.",
+                "Each new search uses units from your monthly allowance, shown at the bottom of Tasks.",
                 "Search terms go to the job listing services. Your résumé is used only by Espresso's AI models, never sent to job sites.",
                 "Deleting a search removes its jobs and drafts, but it still counts for the month.",
              ]),

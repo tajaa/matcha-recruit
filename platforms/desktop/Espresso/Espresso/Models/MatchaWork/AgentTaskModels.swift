@@ -301,6 +301,9 @@ struct AgentTaskRound: Decodable, Identifiable, Hashable {
 struct AgentTask: Decodable, Identifiable, Hashable {
     var id: String
     var playbook: String
+    /// `chain` (Espresso's own), `job_search` (a job search, shown with its own view).
+    var engine: String = "chain"
+    var jobSearchId: String?
     var title: String
     var directive: String
     /// `queued`, `running`, `waiting`, `done`, `failed`, `cancelled`.
@@ -316,7 +319,8 @@ struct AgentTask: Decodable, Identifiable, Hashable {
     var completedAt: Date?
 
     enum CodingKeys: String, CodingKey {
-        case id, playbook, title, directive, status, phase, progress, error, unseen
+        case id, playbook, engine, title, directive, status, phase, progress, error, unseen
+        case jobSearchId = "job_search_id"
         case currentRound = "current_round"
         case itemCount = "item_count"
         case shownCount = "shown_count"
@@ -335,6 +339,8 @@ struct AgentTask: Decodable, Identifiable, Hashable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
         playbook = c.value(.playbook) ?? "research"
+        engine = c.value(.engine) ?? "chain"
+        jobSearchId = c.value(.jobSearchId)
         title = c.value(.title) ?? ""
         directive = c.value(.directive) ?? ""
         status = c.value(.status) ?? "queued"
@@ -351,6 +357,8 @@ struct AgentTask: Decodable, Identifiable, Hashable {
 
     var isLive: Bool { status == "queued" || status == "running" }
     var isWaiting: Bool { status == "waiting" }
+    /// A job search: Tasks shows the search's own view for it.
+    var isJobSearch: Bool { engine == "job_search" && jobSearchId != nil }
     var displayTitle: String { title.isEmpty ? directive : title }
 
     var statusLabel: String {
@@ -374,6 +382,12 @@ struct AgentTask: Decodable, Identifiable, Hashable {
         case "rank": return "Ranking…"
         case "summarize": return "Writing it up…"
         case "refine": return "Reading your change…"
+        // A job search's own phases.
+        case "planning": return "Planning…"
+        case "discovering": return "Searching…"
+        case "screening": return "Checking what fits…"
+        case "enriching": return "Reading postings…"
+        case "approaching": return "Drafting approaches…"
         default: return "Working…"
         }
     }
@@ -407,7 +421,7 @@ struct AgentTaskDetail: Decodable {
     }
     var visibleItems: [AgentTaskItem] { items.filter { !$0.isHidden } }
     var hiddenItems: [AgentTaskItem] { items.filter(\.isHidden) }
-    var canFollowUp: Bool { task.status == "done" || task.status == "waiting" }
+    var canFollowUp: Bool { !task.isJobSearch && (task.status == "done" || task.status == "waiting") }
 }
 
 struct AgentTaskStatus: Decodable {
@@ -760,8 +774,11 @@ struct IntakeFormAnswer: Encodable {
 
 /// A task (and one of its findings) for Tasks to open next (`openTasks`).
 struct TasksFocus: Equatable {
-    let taskId: String
-    let itemId: String?
+    var taskId: String?
+    var itemId: String? = nil
+    /// A job search to open (a chat card, an old link), and one of its jobs.
+    var jobSearchId: String? = nil
+    var leadId: String? = nil
 }
 
 /// A new Espresso conversation to start a task in, with the directive drafted.

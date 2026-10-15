@@ -25,9 +25,9 @@ final class SidebarSectionOrderStore {
         case email
         /// The person's private conversation with Espresso (the assistant).
         case assistant
-        /// Job search: ranked postings and drafted approaches.
-        case jobs
-        /// Espresso Tasks: background work and what it found.
+        /// Espresso Tasks: background work and what it found, job searches
+        /// included. (Job search had its own section, `jobs`, until it moved
+        /// here; a saved order that still names it just drops it.)
         case tasks
 
         var id: String { rawValue }
@@ -43,7 +43,6 @@ final class SidebarSectionOrderStore {
             case .threads:  return "bubble.left.and.bubble.right"
             case .email:    return "envelope"
             case .assistant: return "sparkles"
-            case .jobs: return "briefcase"
             case .tasks: return "list.bullet.clipboard"
             }
         }
@@ -60,7 +59,6 @@ final class SidebarSectionOrderStore {
             case .threads:  return "Threads"
             case .email:    return "Email"
             case .assistant: return "Espresso"
-            case .jobs: return "Job search"
             case .tasks: return "Tasks"
             }
         }

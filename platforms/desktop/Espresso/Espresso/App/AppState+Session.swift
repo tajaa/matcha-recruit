@@ -103,8 +103,6 @@ extension AppState {
         showEmailHub = false
         showAssistantHub = false
         showCalendarHub = false
-        showJobSearchHub = false
-        jobSearchFocus = nil
         pendingAssistantJobContext = nil
         showTasksHub = false
         tasksFocus = nil

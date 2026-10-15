@@ -1,129 +1,41 @@
 import SwiftUI
 import AppKit
 
-/// The Job search section: the person's searches on the left, the open
-/// search's ranked jobs in the middle, and the open job (pay with its source,
-/// how to approach it, drafted answers and letter) on the right.
-struct JobSearchWorkspace: View {
+/// A job search, as Tasks shows it (job searches are tasks): its ranked jobs
+/// in the middle, and the open job (pay with its source, how to approach it,
+/// drafted answers and letter) on the right. Tasks owns the list, starting a
+/// search and deleting one.
+struct JobSearchDetailView: View {
     @Environment(AppState.self) private var appState
+    let searchId: String
+    /// A job to open (a chat card, a link to it).
+    var focusLeadId: String? = nil
     @State private var vm = JobSearchViewModel()
-    @State private var showNew = false
     @State private var showWeights = false
-    @State private var deleting: JobSearchSummary?
 
     var body: some View {
         HStack(spacing: 0) {
-            rail.frame(width: 240)
-            Divider().opacity(0.2)
-            content.frame(maxWidth: .infinity, maxHeight: .infinity)
+            content.frame(minWidth: 380, maxWidth: .infinity, maxHeight: .infinity)
             if vm.selectedLeadId != nil {
                 Divider().opacity(0.2)
                 JobLeadDetailView(vm: vm, onClose: { Task { await vm.selectLead(nil) } })
                     .frame(width: 440)
             }
         }
-        .background(ThemeRadialBackground())
         .featureGuideOnFirstVisit(.jobSearch)
-        .task(id: appState.currentUser?.id) {
-            vm.reset()
-            await openFocus()
-            await vm.load()
+        .task(id: searchId) {
+            await vm.open(searchId, leadId: focusLeadId)
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(5))
                 guard !Task.isCancelled else { break }
                 await vm.poll()
             }
         }
-        .onChange(of: appState.jobSearchFocus) { _, _ in Task { await openFocus() } }
+        .onChange(of: focusLeadId) { _, leadId in
+            if let leadId { Task { await vm.selectLead(leadId) } }
+        }
         .onChange(of: vm.planFeature) { _, feature in
             if let feature { appState.presentPaywall(for: feature); vm.planFeature = nil }
-        }
-        .sheet(isPresented: $showNew) {
-            NewJobSearchSheet(vm: vm).environment(appState)
-        }
-        .confirmationDialog(
-            "Delete this job search?",
-            isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
-            presenting: deleting
-        ) { search in
-            Button("Delete", role: .destructive) { Task { await vm.delete(search.id) } }
-        } message: { _ in
-            Text("Its jobs and drafts are removed. It still counts toward this month's searches.")
-        }
-    }
-
-    /// A job the app was asked to show (an assistant card, a link).
-    private func openFocus() async {
-        guard let focus = appState.jobSearchFocus else { return }
-        appState.jobSearchFocus = nil
-        await vm.select(focus.searchId, leadId: focus.leadId)
-    }
-
-    // MARK: Rail
-
-    private var rail: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("Job search")
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundColor(appState.themeText)
-                Spacer()
-                FeatureGuideButton(id: .jobSearch)
-                Button { showNew = true } label: {
-                    Image(systemName: "plus").font(.system(size: 12, weight: .semibold))
-                }
-                .buttonStyle(.plain)
-                .foregroundColor(appState.themeText)
-                .disabled(!vm.available)
-                .help("New search")
-                .keyboardShortcut("n", modifiers: .command)
-            }
-            .padding(.horizontal, 14).padding(.top, 14).padding(.bottom, 10)
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 2) {
-                    ForEach(vm.searches) { search in
-                        searchRow(search)
-                    }
-                }
-                .padding(.horizontal, 8)
-            }
-            Spacer(minLength: 0)
-            if let line = JobSearchViewModel.usageLine(vm.usage) {
-                Text(line)
-                    .font(.system(size: 10))
-                    .foregroundColor(appState.themeTextSecondary)
-                    .padding(.horizontal, 14).padding(.vertical, 10)
-            }
-        }
-    }
-
-    private func searchRow(_ search: JobSearchSummary) -> some View {
-        let selected = vm.selectedSearchId == search.id
-        return Button {
-            Task { await vm.select(search.id) }
-        } label: {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(search.displayTitle)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(appState.themeText)
-                    .lineLimit(1)
-                HStack(spacing: 5) {
-                    if search.isLive { ProgressView().controlSize(.mini) }
-                    Text(JobSearchStatus.label(search.status))
-                    if search.leadCount > 0 { Text("\u{00B7} \(search.leadCount) jobs") }
-                }
-                .font(.system(size: 10))
-                .foregroundColor(appState.themeTextSecondary)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 8).padding(.vertical, 7)
-            .contentShape(Rectangle())
-            .background(RoundedRectangle(cornerRadius: 6)
-                .fill(selected ? appState.themeAccent.opacity(0.1) : Color.clear))
-        }
-        .buttonStyle(.plain)
-        .contextMenu {
-            Button("Delete…", role: .destructive) { deleting = search }
         }
     }
 
@@ -131,27 +43,7 @@ struct JobSearchWorkspace: View {
 
     @ViewBuilder
     private var content: some View {
-        if !vm.hasLoaded && vm.errorMessage == nil {
-            ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if !vm.hasLoaded, let error = vm.errorMessage {
-            // Never the empty state: someone with searches would think they
-            // were gone and start (and pay for) a new one.
-            emptyState(icon: "exclamationmark.triangle", title: "Couldn't load your job searches",
-                       text: error, action: ("Try again", { Task { await vm.load() } }))
-        } else if !vm.available {
-            emptyState(icon: "briefcase", title: "Job search isn't available yet",
-                       text: "It hasn't been set up on this server.", action: nil)
-        } else if vm.searches.isEmpty {
-            emptyState(
-                icon: "briefcase",
-                title: "Start a job search",
-                text: "Say what you're after (\u{201C}COO roles across the US, mostly about salary, bonus "
-                    + "and equity\u{201D}). Espresso finds the postings, reads each one for pay and what the "
-                    + "application asks, ranks them by what you care about, and drafts how to approach the best "
-                    + "ones. Nothing is sent or submitted for you.",
-                action: ("New search", { showNew = true })
-            )
-        } else if let detail = vm.detail {
+        if let detail = vm.detail {
             VStack(spacing: 0) {
                 header(detail.search)
                 Divider().opacity(0.2)
@@ -159,11 +51,26 @@ struct JobSearchWorkspace: View {
                 filters(detail)
                 leadsTable
             }
-        } else {
-            VStack {
-                if let error = vm.errorMessage { errorBanner(error) }
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if let error = vm.errorMessage {
+            VStack(spacing: 10) {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.system(size: 30))
+                    .foregroundColor(appState.themeTextSecondary.opacity(0.7))
+                Text("Couldn't load this job search")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(appState.themeText)
+                Text(error)
+                    .font(.system(size: 12))
+                    .foregroundColor(appState.themeTextSecondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 460)
+                Button("Try again") { Task { await vm.open(searchId, leadId: nil) } }
+                    .buttonStyle(.borderedProminent)
+                    .tint(appState.themeAccent)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
@@ -301,32 +208,6 @@ struct JobSearchWorkspace: View {
     }
 
     // MARK: Pieces
-
-    private func emptyState(icon: String, title: String, text: String,
-                            action: (String, () -> Void)?) -> some View {
-        VStack(spacing: 10) {
-            Image(systemName: icon)
-                .font(.system(size: 30))
-                .foregroundColor(appState.themeTextSecondary.opacity(0.7))
-            Text(title)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundColor(appState.themeText)
-            Text(text)
-                .font(.system(size: 12))
-                .foregroundColor(appState.themeTextSecondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 460)
-            if let action {
-                Button(action.0, action: action.1)
-                    .buttonStyle(.borderedProminent)
-                    .tint(appState.themeAccent)
-            }
-            if let line = JobSearchViewModel.usageLine(vm.usage) {
-                Text(line).font(.system(size: 10)).foregroundColor(appState.themeTextSecondary)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
 
     private func errorBanner(_ text: String) -> some View {
         HStack(spacing: 6) {

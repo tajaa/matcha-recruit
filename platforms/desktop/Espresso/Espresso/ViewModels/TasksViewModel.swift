@@ -18,6 +18,8 @@ final class TasksViewModel {
     var hasLoaded = false
 
     var selectedTaskId: String?
+    /// A job to open in the selected job search (a chat card, a link).
+    var jobLeadFocus: String?
     var detail: AgentTaskDetail?
     var selectedItemId: String?
     var item: AgentTaskItem?
@@ -57,12 +59,26 @@ final class TasksViewModel {
         } catch { report(error) }
     }
 
+    /// Open what the app was asked to show: a task, or a job search by its id.
+    func open(_ focus: TasksFocus) async {
+        if let taskId = focus.taskId {
+            await select(taskId, itemId: focus.itemId)
+            return
+        }
+        guard let searchId = focus.jobSearchId else { return }
+        if Self.task(forSearch: searchId, in: tasks) == nil { await refreshList() }
+        guard let task = Self.task(forSearch: searchId, in: tasks) else { return }
+        await select(task.id)
+        jobLeadFocus = focus.leadId
+    }
+
     func select(_ taskId: String, itemId: String? = nil) async {
         if selectedTaskId != taskId {
             selectedTaskId = taskId
             detail = nil
             selectedItemId = nil
             item = nil
+            jobLeadFocus = nil
             filter = .fits
         }
         await loadDetail(taskId)
@@ -211,7 +227,7 @@ final class TasksViewModel {
     /// The person signed out, or another account signed in.
     func reset() {
         tasks = []; usage = nil; hasLoaded = false
-        selectedTaskId = nil; detail = nil; selectedItemId = nil; item = nil
+        selectedTaskId = nil; detail = nil; selectedItemId = nil; item = nil; jobLeadFocus = nil
         errorMessage = nil; planFeature = nil
     }
 
@@ -227,6 +243,11 @@ final class TasksViewModel {
         case .saved: return items.filter { $0.userState == "saved" || $0.userState == "chosen" }
         case .hidden: return items.filter(\.isHidden)
         }
+    }
+
+    /// The task that is this job search.
+    nonisolated static func task(forSearch searchId: String, in tasks: [AgentTask]) -> AgentTask? {
+        tasks.first { $0.isJobSearch && $0.jobSearchId == searchId }
     }
 
     nonisolated static func usageLine(_ usage: AgentTaskUnits?) -> String? {
