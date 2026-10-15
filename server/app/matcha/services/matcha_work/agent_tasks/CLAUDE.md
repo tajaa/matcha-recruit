@@ -182,7 +182,7 @@ refine starts at `refine`, "search more" at `providers`.
 | Field library, reading pages, checking claims (pure) | `fields.py` |
 | Hard constraints, bands, scores (pure) | `ranking.py` |
 | Finish contracts and their checks (pure) | `contracts.py` |
-| Google Shopping / Google Maps via SearchAPI (`SEARCH_API_KEY`), else SerpApi (`SERP_API_KEY`); a Shopping product's stores (`stores`, `with_store`) | `providers.py` |
+| Google Maps from Google's Places API (New) Text Search (`GooglePlaces`, `GOOGLE_MAPS_API_KEY`, the key Tell-Us uses), else as Shopping is; Google Shopping via SearchAPI (`SEARCH_API_KEY`), else SerpApi (`SERP_API_KEY`); a Shopping product's stores (`stores`, `with_store`); `choose_provider(source)` picks | `providers.py` |
 | The model's page loader: agent cards' page facts plus the page's same-site links | `fetch.py` |
 | No-model phases, `rerank`, `Deps` | `phases.py` |
 | Model phases | `model_phases.py` |
@@ -219,11 +219,11 @@ read as a monthly rent. `research` stays the catch-all. A task row's
 ### Distance from a named place (`research/geo.py`)
 
 An apartments brief's `near` ("Lady Bird Lake") is the anchor: found once per
-task by `phases.ensure_anchor` (Google Maps through the provider, one provider
-call; else the US Census geocoder for a street address) and kept in the plan
+task by `phases.ensure_anchor` (Google Maps through the places provider, one
+provider call; else the US Census geocoder for a street address) and kept in the plan
 as `anchor` (`{name, lat, lng, source, label}`, or `{name, error}`, so a place
 that can't be found isn't looked up again). A finding's point: a Google Maps
-result's `gps_coordinates` (`ProviderItem.point`), its page's schema.org `geo`
+result's point (`gps_coordinates`, or Places `location`: `ProviderItem.point`), its page's schema.org `geo`
 (`page_extract` adds `geo` to a listing or place only when the page has one),
 else its stored address through the Census geocoder (a street number needed).
 `distance` (miles, straight line, shown "12.4 mi north") and `direction` (the
@@ -241,7 +241,12 @@ each direction asked (between the miles, or 5 past "at least", or
 `DIRECTION_MILES` with none), or on the anchor for "within", and
 `run_providers` searches the kind's `area_query` ("apartments") around each
 before the plan's own queries, at 13z (at 12z Google drifted to the city's
-dense middle: a centre 15 mi south came back 4-9 mi out). A planner that
+dense middle: a centre 15 mi south came back 4-9 mi out). `GooglePlaces` turns
+`ll` into a `locationRestriction` rectangle (`providers.map_box`: 5 mi each way
+at 13z, doubling per zoom level out), so its answers stay inside the area; the
+search APIs take `ll` as a map centre. Live on 2026-10-15, Lady Bird Lake +
+"at least 10 mi, north or south": 20 places 10–17 mi north (19 with their own
+site), 12 places 11–20 mi south (7). A planner that
 writes four northern suburbs and one southern one still gets the south
 searched, and with two or more directions `prerank` takes the room (30
 buildings) from each in turn (`by_direction`), not whichever way most

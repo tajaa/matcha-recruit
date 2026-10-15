@@ -232,16 +232,17 @@ async def test_the_anchor_is_found_once_and_kept_in_the_plan(conn):
     provider = AsyncMock()
     provider.locate = AsyncMock(return_value=("Lady Bird Lake", LAKE))
     task = task_row(playbook="apartments", brief=json.dumps(BRIEF))
-    anchor = await phases.ensure_anchor(task, _deps(provider=lambda: provider), _guard())
-    assert anchor["lat"] == LAKE[0]
+    asked = []
+    anchor = await phases.ensure_anchor(task, _deps(provider=lambda source: asked.append(source) or provider), _guard())
+    assert anchor["lat"] == LAKE[0] and asked == ["places"]
     saved = conn.ran("jsonb_build_object('anchor'")
     assert saved and json.loads(saved[0][2][2])["name"] == "Lady Bird Lake" and saved[0][2][1] == TOKEN
     # Kept: no second lookup.
-    assert (await phases.ensure_anchor(task, _deps(provider=lambda: provider), _guard()))["lat"] == LAKE[0]
+    assert (await phases.ensure_anchor(task, _deps(provider=lambda *_: provider), _guard()))["lat"] == LAKE[0]
     provider.locate.assert_awaited_once()
     # Not found: kept as not found, distances stay unknown.
     lost = task_row(playbook="apartments", brief=json.dumps(BRIEF))
-    deps = _deps(provider=lambda: None, geocode=AsyncMock(return_value=None))
+    deps = _deps(provider=lambda *_: None, geocode=AsyncMock(return_value=None))
     assert await phases.ensure_anchor(lost, deps, _guard()) is None
     assert "error" in phases.plan_of(lost)["anchor"]
     assert await phases.ensure_anchor(task_row(), _deps(), _guard()) is None  # nothing named
@@ -262,7 +263,7 @@ async def test_google_maps_buildings_become_listings_with_distance(conn, monkeyp
     conn.on("COUNT(*) FROM mw_agent_task_items", 0)
     plan = contracts.plan_from_brief("apartments", BRIEF, today=TODAY, kind=kinds.APARTMENTS)
     task = task_row(playbook="apartments", brief=json.dumps(BRIEF), plan=json.dumps(plan))
-    out = await phases.run_providers(task, _deps(provider=lambda: provider), _guard())
+    out = await phases.run_providers(task, _deps(provider=lambda *_: provider), _guard())
     assert "Google Maps" in out.progress["note"]
     records = insert.await_args.args[4]
     # Each search finds both (the store keeps one of each): east breaks a limit, so it is last.
@@ -316,7 +317,7 @@ async def test_nothing_measured_searches_only_the_plans_queries(conn, monkeypatc
     brief = {"location": "Austin, TX", "budget_max": 2000}
     plan = contracts.plan_from_brief("apartments", brief, today=TODAY, kind=kinds.APARTMENTS)
     task = task_row(playbook="apartments", brief=json.dumps(brief), plan=json.dumps(plan))
-    await phases.run_providers(task, _deps(provider=lambda: provider), _guard())
+    await phases.run_providers(task, _deps(provider=lambda *_: provider), _guard())
     assert provider.search.await_args_list and all("ll" not in c.kwargs for c in provider.search.await_args_list)
 
 

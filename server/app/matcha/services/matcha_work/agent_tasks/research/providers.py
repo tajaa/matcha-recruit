@@ -1,15 +1,20 @@
-"""Structured listings for research tasks: Google Shopping and Google Maps via SearchAPI.
+"""Structured listings for research tasks: Google Maps and Google Shopping.
 
-For products and places, a provider gives what a web search can't: a price, a
-rating and a link as data rather than prose a model read. Those come in as
-findings whose fields are verified with origin `provider`, the way Google Jobs
-is for job search. Anything else (homes, events) has no provider and is found
-by the model with web search.
+For products, places and apartment buildings, a provider gives what a web
+search can't: a price, a rating, a point on the map and a link as data rather
+than prose a model read. Those come in as findings whose fields are verified
+with origin `provider`, the way Google Jobs is for job search. Anything else
+(events) has no provider and is found by the model with web search.
 
-Through SearchAPI (`SEARCH_API_KEY`) when set, else SerpApi (`SERP_API_KEY`),
-the same keys job search uses: both serve Google's results as JSON with
-nearly the same fields. Only the query text leaves the server. Every call
-counts against the round's provider budget (`chain.grant`).
+Google Maps comes straight from Google (`GooglePlaces`: the Places API (New)
+Text Search with `GOOGLE_MAPS_API_KEY`, the Google Maps Platform key Tell-Us's
+place search uses), else from a search API as Shopping does. Google has no
+public API for Shopping results, so those come through SearchAPI
+(`SEARCH_API_KEY`) when set, else SerpApi (`SERP_API_KEY`), the same keys job
+search uses: both serve Google's results as JSON with nearly the same fields.
+`choose_provider(source)` picks. Only the query text (and, for an area, its
+map box) leaves the server. Every call counts against the round's provider
+budget (`chain.grant`).
 
 A Shopping result links to Google's own product page, not a store's: neither
 provider gives the store's link in the results. A second call per product
@@ -22,6 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import re
 from dataclasses import dataclass, field, replace
 from datetime import date
@@ -211,6 +217,50 @@ def place_item(raw: dict, *, today: date) -> ProviderItem | None:
 
 
 SleepFn = Callable[[float], Awaitable[None]]
+SendFn = Callable[[httpx.AsyncClient], Awaitable[httpx.Response]]
+
+
+def _why(response: httpx.Response) -> str:
+    """What an API said was wrong, briefly: SerpApi's `error` text or Google's error status."""
+    try:
+        body = response.json()
+    except ValueError:
+        return ""
+    error = body.get("error") if isinstance(body, dict) else None
+    if isinstance(error, dict):
+        error = error.get("status") or error.get("message")
+    return f" ({F.clean_text(error, 160)})" if error else ""
+
+
+async def _answer(name: str, send: SendFn, *, transport: httpx.AsyncBaseTransport | None,
+                  sleep: SleepFn) -> dict:
+    """One JSON object from a listings API. A refused key is fatal; a 429, a
+    5xx or a dropped connection is tried once more after 2 s."""
+    last: Exception | None = None
+    for attempt in range(2):
+        try:
+            async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS, transport=transport) as client:
+                response = await send(client)
+        except httpx.HTTPError as exc:
+            last = exc
+        else:
+            if response.status_code in (401, 403):
+                raise ProviderError(f"{name} refused the API key{_why(response)}", fatal=True)
+            if response.status_code == 429 or response.status_code >= 500:
+                last = ProviderError(f"{name} answered {response.status_code}{_why(response)}")
+            elif response.status_code >= 400:
+                raise ProviderError(f"{name} answered {response.status_code}{_why(response)}")
+            else:
+                try:
+                    data = response.json()
+                except ValueError as exc:
+                    raise ProviderError(f"{name} returned something other than JSON") from exc
+                if not isinstance(data, dict):
+                    raise ProviderError(f"{name} returned an unexpected shape")
+                return data
+        if attempt == 0:
+            await sleep(2.0)
+    raise ProviderError(f"{name} did not answer: {last if isinstance(last, ProviderError) else type(last).__name__}")
 
 
 class _Api:
@@ -233,34 +283,14 @@ class _Api:
         return {**params, "ll": ll} if ll and params.get("engine") == "google_maps" else params
 
     async def _get(self, params: dict) -> dict:
-        last: Exception | None = None
-        for attempt in range(2):
-            try:
-                async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS, transport=self._transport) as client:
-                    response = await client.get(self.base_url, params={**params, "api_key": self._key})
-            except httpx.HTTPError as exc:
-                last = exc
-            else:
-                if response.status_code in (401, 403):
-                    raise ProviderError(f"{self.name} refused the API key", fatal=True)
-                if response.status_code == 429 or response.status_code >= 500:
-                    last = ProviderError(f"{self.name} answered {response.status_code}")
-                elif response.status_code >= 400:
-                    raise ProviderError(f"{self.name} answered {response.status_code}")
-                else:
-                    try:
-                        data = response.json()
-                    except ValueError as exc:
-                        raise ProviderError(f"{self.name} returned something other than JSON") from exc
-                    if not isinstance(data, dict):
-                        raise ProviderError(f"{self.name} returned an unexpected shape")
-                    error = str(data.get("error") or "")
-                    if error and "hasn't returned any results" not in error and "no results" not in error.lower():
-                        raise ProviderError(f"{self.name}: {error[:200]}")
-                    return data
-            if attempt == 0:
-                await self._sleep(2.0)
-        raise ProviderError(f"{self.name} did not answer: {type(last).__name__}")
+        data = await _answer(
+            self.name, lambda client: client.get(self.base_url, params={**params, "api_key": self._key}),
+            transport=self._transport, sleep=self._sleep,
+        )
+        error = str(data.get("error") or "")
+        if error and "hasn't returned any results" not in error and "no results" not in error.lower():
+            raise ProviderError(f"{self.name}: {error[:200]}")
+        return data
 
     async def search(self, source: str, query: str, *, page: int = 1, ll: str | None = None) -> list[ProviderItem]:
         """One page of `shopping` or `places` results for the query text; a
@@ -353,6 +383,121 @@ class SerpApi(_Api):
         return out
 
 
+# ── Google Maps from Google ──────────────────────────────────────────────────
+
+PLACES_URL = "https://places.googleapis.com/v1/places:searchText"
+# Website, phone, rating and hours make each search Google's "Enterprise" Text
+# Search SKU; the building's own site is what the task reads next, so it stays.
+SEARCH_MASK = ",".join([*(f"places.{f}" for f in (
+    "id", "displayName", "formattedAddress", "location", "websiteUri", "nationalPhoneNumber", "rating",
+    "userRatingCount", "priceLevel", "primaryTypeDisplayName", "regularOpeningHours.weekdayDescriptions",
+    "businessStatus")), "nextPageToken"])
+LOCATE_MASK = "places.displayName,places.location"
+# Text Search answers at most three pages of 20.
+MAX_PAGES = 3
+PRICE_LEVELS = {"PRICE_LEVEL_FREE": "Free", "PRICE_LEVEL_INEXPENSIVE": "$", "PRICE_LEVEL_MODERATE": "$$",
+                "PRICE_LEVEL_EXPENSIVE": "$$$", "PRICE_LEVEL_VERY_EXPENSIVE": "$$$$"}
+_LL = re.compile(r"@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?),(\d+(?:\.\d+)?)z")
+MILES_PER_DEGREE = 69.0
+
+
+def map_box(ll: str | None) -> dict | None:
+    """The area a map centred on `ll` (`@lat,lng,zoom`) shows, as a Places
+    rectangle: 5 miles each way at 13z, twice that for each zoom level out."""
+    match = _LL.fullmatch(ll or "")
+    if not match:
+        return None
+    lat, lng, zoom = float(match[1]), float(match[2]), float(match[3])
+    half = 5.0 * 2 ** (13 - zoom)
+    dlat = half / MILES_PER_DEGREE
+    dlng = half / (MILES_PER_DEGREE * max(0.05, math.cos(math.radians(lat))))
+    return {"low": {"latitude": max(-90.0, lat - dlat), "longitude": max(-180.0, lng - dlng)},
+            "high": {"latitude": min(90.0, lat + dlat), "longitude": min(180.0, lng + dlng)}}
+
+
+def _text(raw: Any) -> Any:
+    """A Places `LocalizedText`'s text."""
+    return raw.get("text") if isinstance(raw, dict) else None
+
+
+def google_place_item(raw: dict, *, today: date) -> ProviderItem | None:
+    """A Places API place, made the way `place_item` makes a search API's
+    Google Maps result. A place Google marks closed for good is skipped."""
+    if raw.get("businessStatus") == "CLOSED_PERMANENTLY":
+        return None
+    hours = raw.get("regularOpeningHours") if isinstance(raw.get("regularOpeningHours"), dict) else {}
+    days = [d for d in hours.get("weekdayDescriptions") or [] if isinstance(d, str)]
+    return place_item({
+        "title": _text(raw.get("displayName")), "place_id": raw.get("id"), "website": raw.get("websiteUri"),
+        "address": raw.get("formattedAddress"), "rating": raw.get("rating"), "reviews": raw.get("userRatingCount"),
+        "price": PRICE_LEVELS.get(raw.get("priceLevel")), "phone": raw.get("nationalPhoneNumber"),
+        "type": _text(raw.get("primaryTypeDisplayName")), "hours": "; ".join(days[:7]) or None,
+        "gps_coordinates": raw.get("location"),
+    }, today=today)
+
+
+class GooglePlaces:
+    """Google Maps places from Google's own Places API (New) Text Search. Places
+    only: there is no Shopping here."""
+
+    name = "Google Places"
+
+    def __init__(self, key: str, *, transport: httpx.AsyncBaseTransport | None = None,
+                 sleep: SleepFn = asyncio.sleep, today: Callable[[], date] = date.today):
+        self._key = key
+        self._transport = transport
+        self._sleep = sleep
+        self._today = today
+
+    async def _post(self, body: dict, mask: str) -> dict:
+        headers = {"X-Goog-Api-Key": self._key, "X-Goog-FieldMask": mask}
+        return await _answer(self.name, lambda client: client.post(PLACES_URL, json=body, headers=headers),
+                             transport=self._transport, sleep=self._sleep)
+
+    async def search(self, source: str, query: str, *, page: int = 1, ll: str | None = None) -> list[ProviderItem]:
+        """One page of places for the query text, kept inside the map area
+        `ll` shows when given. Google pages by token, so page n takes n calls."""
+        if source != "places":
+            raise ValueError(f"{self.name} has no {source!r} search")
+        if page > MAX_PAGES:
+            return []
+        body: dict = {"textQuery": query, "pageSize": MAX_RESULTS, "languageCode": "en"}
+        box = map_box(ll)
+        if box:
+            body["locationRestriction"] = {"rectangle": box}
+        data: dict = {}
+        token = None
+        for n in range(page):
+            if n and not token:
+                return []
+            data = await self._post({**body, "pageToken": token} if token else body, SEARCH_MASK)
+            token = data.get("nextPageToken")
+        today = self._today()
+        rows = data.get("places")
+        items = []
+        for raw in (rows if isinstance(rows, list) else [])[:MAX_RESULTS]:
+            if isinstance(raw, dict):
+                made = google_place_item(raw, today=today)
+                if made is not None:
+                    items.append(made)
+        return items
+
+    async def locate(self, query: str) -> tuple[str, tuple[float, float]] | None:
+        """One place on the map, `(its name, (lat, lng))`: Google's first answer."""
+        data = await self._post({"textQuery": query, "pageSize": 1, "languageCode": "en"}, LOCATE_MASK)
+        rows = data.get("places") if isinstance(data.get("places"), list) else []
+        for row in rows[:1]:
+            if isinstance(row, dict) and point_of(row.get("location")):
+                return F.clean_text(_text(row.get("displayName")), 120) or query, point_of(row["location"])
+        return None
+
+
+def _google_key() -> str | None:
+    from app.config import get_settings
+
+    return getattr(get_settings(), "google_maps_api_key", None) or None
+
+
 def _keys() -> tuple[str | None, str | None]:
     from app.config import get_settings
 
@@ -369,8 +514,14 @@ def configured() -> bool:
         return False
 
 
-def choose_provider(*, transport: httpx.AsyncBaseTransport | None = None,
-                    sleep: SleepFn = asyncio.sleep) -> _Api | None:
+def choose_provider(source: str | None = None, *, transport: httpx.AsyncBaseTransport | None = None,
+                    sleep: SleepFn = asyncio.sleep) -> _Api | GooglePlaces | None:
+    """The API for a `source`: Google's own for `places` when its key is set,
+    else (and for `shopping`) SearchAPI, else SerpApi; None with none of them."""
+    if source == "places":
+        google = _google_key()
+        if google:
+            return GooglePlaces(google, transport=transport, sleep=sleep)
     search_api, serp_api = _keys()
     if search_api:
         return SearchApi(search_api, transport=transport, sleep=sleep)

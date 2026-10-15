@@ -110,7 +110,8 @@ async def _default_rehost(images: list[dict], **kwargs) -> tuple[list[dict], lis
 
 @dataclass
 class Deps:
-    provider: Callable[[], Any] = providers.choose_provider
+    # The listings API for a source (`places`, `shopping`), or None.
+    provider: Callable[[str], Any] = providers.choose_provider
     page_fetch: Callable[..., Awaitable[Any]] = fetch_public
     # Model phases: the model client for a model id, and the model's page tools.
     client: Callable[[str], Any] = _default_client
@@ -158,7 +159,7 @@ async def ensure_anchor(task: dict, deps: Deps, guard: chain.Guard) -> dict | No
     plan = plan_of(task)
     anchor = plan.get("anchor")
     if not (isinstance(anchor, dict) and anchor.get("name") == near):
-        provider = deps.provider()
+        provider = deps.provider("places")
         budget = Budget(left=await chain.grant(_chain(), task["id"], "provider_calls", 1, BUDGETS.provider_calls)
                         if provider is not None else 0)
         anchor = await geo.resolve_anchor(near, brief_of(task).get("location"),
@@ -307,7 +308,7 @@ async def run_providers(task: dict, deps: Deps, guard: chain.Guard) -> PhaseOutc
     cursor = cursor_of(task)
     source = plan.get("source")
     anchor = await ensure_anchor(task, deps, guard)
-    provider = deps.provider() if source in ("shopping", "places") else None
+    provider = deps.provider(source) if source in ("shopping", "places") else None
     if source in ("shopping", "places") and provider is None:
         logger.info("research task=%s wanted %s but no listings provider is configured", task["id"], source)
     added = 0

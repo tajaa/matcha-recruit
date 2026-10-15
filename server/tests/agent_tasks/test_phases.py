@@ -72,12 +72,14 @@ async def test_providers_add_findings_then_hand_to_the_web(conn, monkeypatch):
     conn.on("COUNT(*) FROM mw_agent_task_items", 0)
     task = task_row(plan=json.dumps({**PLAN, "source": "shopping", "queries": ["balm", "lip balm"]}),
                     phase_cursor=json.dumps({"provider_page": 2}))
-    out = await phases.run_providers(task, _deps(provider=lambda: provider), _guard())
+    asked = []
+    out = await phases.run_providers(task, _deps(provider=lambda source: asked.append(source) or provider), _guard())
     assert out.phase == phases.DISCOVER and out.cursor["provider_added"] == 1 and "Google Shopping" in out.progress["note"]
+    assert asked == ["shopping"]
     assert provider.search.await_args_list[0].kwargs == {"page": 2}
     assert insert.await_args.args[4][0]["origin"] == "provider"
     # The web: no provider to ask.
-    out = await phases.run_providers(task_row(), _deps(provider=lambda: provider), _guard())
+    out = await phases.run_providers(task_row(), _deps(provider=lambda *_: provider), _guard())
     assert out.phase == phases.DISCOVER and out.progress["note"] == "Searching the web…"
 
 
@@ -125,7 +127,7 @@ async def test_shopping_findings_are_kept_at_their_stores_page(conn, monkeypatch
     conn.on("COUNT(*) FROM mw_agent_task_items", 0)
     conn.on("SELECT title, subtitle FROM mw_agent_task_items", [{"title": "Tin", "subtitle": "Tin Co"}])
     task = task_row(plan=json.dumps({**PLAN, "source": "shopping", "queries": ["balm", "lip balm"]}))
-    out = await phases.run_providers(task, _deps(provider=lambda: provider), _guard())
+    out = await phases.run_providers(task, _deps(provider=lambda *_: provider), _guard())
     assert out.cursor["provider_added"] == 3
     records = insert.await_args.args[4]
     # Each query's best first; the repeat and the one the task has aren't looked up.
@@ -139,7 +141,7 @@ async def test_shopping_findings_are_kept_at_their_stores_page(conn, monkeypatch
     # A failed lookup keeps Google's link; with no budget left nothing is asked.
     provider.search = AsyncMock(return_value=[_shop("Balm", "Acme", token="fail")])
     provider.stores.reset_mock()
-    await phases.run_providers(task, _deps(provider=lambda: provider), _guard())
+    await phases.run_providers(task, _deps(provider=lambda *_: provider), _guard())
     assert insert.await_args.args[4][0]["url"].startswith("https://www.google.com/")
     conn.on("RETURNING GREATEST(LEAST($2, $3 - cur.before), 0)", lambda row_id, want, limit: 0)
     provider.search = AsyncMock(return_value=[_shop("Balm", "Acme")])
@@ -175,13 +177,13 @@ async def test_store_lookups_are_only_paid_for_findings_there_is_room_for(conn, 
     # Room for one more finding: one lookup.
     provider.search = AsyncMock(return_value=three)
     conn.on("COUNT(*) FROM mw_agent_task_items", phases.BUDGETS.items - 1)
-    await phases.run_providers(task, _deps(provider=lambda: provider), _guard())
+    await phases.run_providers(task, _deps(provider=lambda *_: provider), _guard())
     assert provider.stores.await_count == 1
     # Full: nothing is looked up, and nothing is asked about what it has.
     provider.stores.reset_mock()
     conn.calls.clear()
     conn.on("COUNT(*) FROM mw_agent_task_items", phases.BUDGETS.items)
-    await phases.run_providers(task, _deps(provider=lambda: provider), _guard())
+    await phases.run_providers(task, _deps(provider=lambda *_: provider), _guard())
     provider.stores.assert_not_awaited()
     assert not conn.ran("SELECT title, subtitle FROM mw_agent_task_items")
 
