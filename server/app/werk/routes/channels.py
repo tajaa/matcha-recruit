@@ -1704,15 +1704,22 @@ async def delete_channel_message(
         ):
             raise HTTPException(status_code=403, detail="This message is too old to delete")
 
-        await conn.execute(
-            """
-            UPDATE channel_messages
-            SET deleted_at = NOW(),
-                deleted_by = $2
-            WHERE id = $1
-            """,
-            message_id, current_user.id,
-        )
+        from ...matcha.services.matcha_work.agent_runtime import inputs as agent_inputs
+
+        async with conn.transaction():
+            await conn.execute(
+                """
+                UPDATE channel_messages
+                SET deleted_at = NOW(),
+                    deleted_by = $2
+                WHERE id = $1
+                """,
+                message_id, current_user.id,
+            )
+            # Files given to Espresso go with the message: no run reads them
+            # again and they stop counting against the person's space.
+            removed_inputs = await agent_inputs.delete_for_message(conn, message_id)
+    await agent_inputs.remove_stored(removed_inputs)
 
     # Fan out deletion over the channel WebSocket so every connected
     # member updates their view without needing to refetch.
