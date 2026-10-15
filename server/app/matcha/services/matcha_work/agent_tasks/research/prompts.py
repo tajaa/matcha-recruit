@@ -62,20 +62,40 @@ when what was already found can't satisfy the change (a new area, a different ki
 give new queries then. Call finish once. Today is {{today}}. {_DATA}"""
 
 
-def _brief_lines(directive: str, brief: dict) -> list[str]:
+BRIEF_LABELS = {"location": "Where", "budget_max": "Budget (max)", "currency": "Currency",
+                "must_haves": "Must have", "nice_to_haves": "Nice to have", "avoid": "Avoid",
+                "needed_by": "Needed by"}
+
+
+def _shown(value) -> str:
+    if isinstance(value, list):
+        return ", ".join(str(v) for v in value)
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value)
+
+
+def _brief_lines(directive: str, brief: dict, labels: dict[str, str] | None = None) -> list[str]:
+    """The ask and every answer, by the playbook's own labels where it has them."""
     lines = [f"Ask: {directive}"]
-    labels = {"location": "Where", "budget_max": "Budget (max)", "currency": "Currency",
-              "must_haves": "Must have", "nice_to_haves": "Nice to have", "avoid": "Avoid",
-              "needed_by": "Needed by"}
-    for key, label in labels.items():
-        value = brief.get(key)
+    named = {**BRIEF_LABELS, **(labels or {})}
+    for key, value in brief.items():
         if value not in (None, "", []):
-            lines.append(f"{label}: {', '.join(value) if isinstance(value, list) else value}")
+            lines.append(f"{named.get(key, key.replace('_', ' ').capitalize())}: {_shown(value)}")
     return lines
 
 
-def plan_turn(directive: str, brief: dict, files_text: str | None) -> str:
-    lines = ["----", *_brief_lines(directive, brief)]
+def plan_instructions(today: date, kind=None) -> str:
+    """The planner's instructions, and what this kind of search is, if it is one."""
+    text = PLAN.format(today=today.isoformat())
+    if kind is not None:
+        text += (f"\n\nKind of search: {kind.label}. Its item_kind and source are fixed "
+                 f"({kind.item_kind}, {kind.source}). {kind.plan_hint}")
+    return text
+
+
+def plan_turn(directive: str, brief: dict, files_text: str | None, *, labels: dict[str, str] | None = None) -> str:
+    lines = ["----", *_brief_lines(directive, brief, labels)]
     lines.append("Fields allowed: " + ", ".join(f"{k} ({s.label})" for k, s in F.LIBRARY.items()))
     if files_text:
         lines.append(files_text)

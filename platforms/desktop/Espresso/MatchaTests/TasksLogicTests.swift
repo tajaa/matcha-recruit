@@ -371,4 +371,10 @@ final class TasksLogicTests: XCTestCase {
         let request = try JSONEncoder().encode(AgentTaskActionRequest(params: ["quantity": "2"]))
         XCTAssertEqual(String(data: request, encoding: .utf8), #"{"params":{"quantity":"2"}}"#)
     }
+
+    func testATaskSaysWhatKindItIs() throws {
+        let task = try decode(AgentTask.self, #"{"id": "t1", "playbook": "apartments", "playbook_label": "Apartments"}"#)
+        XCTAssertEqual(task.playbookLabel, "Apartments")
+        XCTAssertEqual(try decode(AgentTask.self, #"{"id": "t2"}"#).playbookLabel, "")
+    }
 }

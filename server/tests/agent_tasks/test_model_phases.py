@@ -271,3 +271,22 @@ async def test_a_refine_it_cant_read_is_free(refining, monkeypatch):
 def test_needs_reading():
     row = {"url": "https://apts.test/1", "fields": json.dumps({"pets": {"status": "verified"}})}
     assert not M._needs_reading(row, ["pets"]) and M._needs_reading(row, ["pets", "amenities"])
+
+
+@pytest.mark.asyncio
+async def test_a_kind_of_search_plans_as_its_kind(conn, monkeypatch):
+    """An apartments task: the planner is told what it is, the person's answers
+    reach it by their own labels, and the plan is fixed to its kind."""
+    brief = json.dumps({"location": "San Francisco", "budget_max": 3500, "beds_min": 1, "pets": ["dogs"],
+                        "move_in": "2026-11-01"})
+    seen = _model(monkeypatch, {"title": "1bd", "item_kind": "product", "source": "shopping",
+                                "queries": ["1 bedroom"], "fields": ["rating"], "constraints": [],
+                                "preferences": [], "fit_weight": 0.4, "prefer_sources": [], "summary": ""})
+    await M.plan(task_row(playbook="apartments", brief=brief), _deps(), _guard())
+    assert "Kind of search: Apartments. Its item_kind and source are fixed (listing, web)." in seen[0]["instructions"]
+    assert "Bedrooms (at least): 1" in seen[0]["user_text"] and "Pets: dogs" in seen[0]["user_text"]
+    saved = json.loads(conn.ran("SET plan = $3::jsonb")[0][2][2])
+    assert saved["item_kind"] == "listing" and saved["source"] == "web"
+    assert saved["fields"][:3] == ["price", "beds", "baths"] and "rating" in saved["fields"]
+    limits = {(c["field"], c["op"]) for c in saved["constraints"] if c["source"] == "brief"}
+    assert limits == {("price", "lte"), ("beds", "gte"), ("pets", "includes"), ("available_date", "before")}

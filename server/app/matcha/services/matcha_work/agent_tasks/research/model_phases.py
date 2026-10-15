@@ -26,7 +26,7 @@ from app.matcha.services.matcha_work.agent_runtime.phase_run import NoteProgress
 
 from .. import items as items_mod
 from .. import model_run
-from . import contracts, prompts
+from . import contracts, kinds, prompts
 from . import fields as F
 from .phases import (
     BUDGETS, DISCOVER, ENRICH, PROVIDERS, RANK, SCREEN, SUMMARIZE, Deps, _chain, count_items,
@@ -97,23 +97,24 @@ async def plan(task: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
     brief = decode_jsonb(task.get("brief"), {}) or {}
     today = deps.today()
     directive = task.get("directive") or ""
-    user_text = prompts.plan_turn(directive, brief, None)
+    kind = kinds.of(task)
+    user_text = prompts.plan_turn(directive, brief, None, labels=kind.labels() if kind else None)
     files = await _files(task)
     try:
         outcome = await model_run.run_model_phase(
             task, phase="plan", abilities=(),
             contract=runner.ResultContract(
                 finish=contracts.PLAN_FINISH,
-                normalize=lambda args, _state: contracts.normalize_plan(args, brief=brief, today=today),
+                normalize=lambda args, _state: contracts.normalize_plan(args, brief=brief, today=today, kind=kind),
             ),
-            instructions=prompts.PLAN.format(today=today.isoformat()), user_text=user_text,
+            instructions=prompts.plan_instructions(today, kind), user_text=user_text,
             limits=PLAN_LIMITS, progress=_progress(guard), client_factory=deps.client,
             first_note="Planning…", first_input=_first_input(user_text, files),
         )
         planned = outcome.result
     except runner.AgentRunError:
         logger.info("research plan fell back to the directive task=%s", task["id"])
-        planned = contracts.plan_from_brief(directive, brief, today=today)
+        planned = contracts.plan_from_brief(directive, brief, today=today, kind=kind)
     async with connection_or_direct() as conn:
         await conn.execute(
             """UPDATE mw_agent_tasks SET plan = $3::jsonb,
@@ -388,7 +389,8 @@ async def refine(task: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
             task, phase="refine", abilities=(),
             contract=runner.ResultContract(
                 finish=contracts.REFINE_FINISH,
-                normalize=lambda args, _state: contracts.normalize_refine(args, plan=plan_, brief=brief, today=today),
+                normalize=lambda args, _state: contracts.normalize_refine(args, plan=plan_, brief=brief, today=today,
+                                                                          kind=kinds.of(task)),
             ),
             instructions=prompts.REFINE.format(today=today.isoformat()),
             user_text=prompts.refine_turn(task.get("directive") or "", plan_, change),

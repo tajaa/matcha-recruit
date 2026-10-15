@@ -9,9 +9,10 @@ from typing import Mapping
 
 from .job_tasks import PLAYBOOK as JOB_SEARCH
 from .playbook import PhaseFn, Playbook
+from .research import KIND_PLAYBOOKS
 from .research import PLAYBOOK as RESEARCH
 
-PLAYBOOKS: Mapping[str, Playbook] = {p.key: p for p in (RESEARCH, JOB_SEARCH)}
+PLAYBOOKS: Mapping[str, Playbook] = {p.key: p for p in (*KIND_PLAYBOOKS, RESEARCH, JOB_SEARCH)}
 # What Espresso can start from chat or a form: its own chains, and job
 # searches (which run on their own engine).
 STARTABLE_ENGINES = ("chain", "job_search")
@@ -40,10 +41,18 @@ def chain_phases() -> dict[str, PhaseFn]:
 
 
 def validate_registry(playbooks: Mapping[str, Playbook] = PLAYBOOKS) -> None:
+    named: dict[str, PhaseFn] = {}
     for key, playbook in playbooks.items():
         if key != playbook.key:
             raise ValueError(f"playbook registered as {key!r} is {playbook.key!r}")
         playbook.validate()
+        if playbook.engine != "chain":
+            continue
+        # Playbooks may share phases (a kind of search runs research's), but a
+        # phase name runs one function.
+        for name, fn in playbook.phases.items():
+            if named.setdefault(playbook.phase_key(name), fn) is not fn:
+                raise ValueError(f"playbook {key!r}: phase {playbook.phase_key(name)!r} is another's")
 
 
 validate_registry()
