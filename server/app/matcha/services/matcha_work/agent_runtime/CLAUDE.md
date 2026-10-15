@@ -456,6 +456,7 @@ exception is a run already on a worker that serves the browser queue
 starts): waiting on that queue from its one slot would wait on itself, so the
 view runs in-process. That covers the default setup, where assistant runs
 fall back to `agent_cards` on the same `matcha-agent-worker`.
+On dev, `scripts/dev-remote.sh` does the same with `AGENT_BROWSER_QUEUE=agent_browser` and a worker in the `browser` window that serves only that queue. It skips both when `server/venv`'s Playwright can't launch its Chromium.
 Chromium never runs on the main worker: without `AGENT_BROWSER_QUEUE` neither
 ability is offered at all. The worker for it is the `matcha-agent-worker` compose service
 (profile `agent-worker`).
