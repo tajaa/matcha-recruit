@@ -20,16 +20,24 @@ E2DR5ZV7O32BE   dburfxi3p5e15.cloudfront.net
   origin custom headers: X-Cappe-Origin-Verify, X-Matcha-Origin-Verify
 ```
 
-**Detached 2026-10-08.** The ACL is no longer associated with the distribution
-(`WebACLId` cleared on `E2DR5ZV7O32BE`; pre-change config saved on the app EC2
-at `~/waf-detach-20261008-085007/dist-before.json`). The ACL and its rules
-still exist and still bill; re-associate before launch or on any sign of abuse
-by restoring that snapshot's `DistributionConfig` with a fresh ETag. While it
-is off, the only working thing it provided — the AWS managed KnownBadInputs
-filter — is gone; the body/rate rules below had never matched (see Known
-Gaps). The origin gate, nginx limits and the application governors are
-unaffected. The rule inventory below describes the ACL as it still exists, not
-what is currently evaluating traffic.
+**Detached 2026-10-08, deleted 2026-10-15.** The ACL was detached from the
+distribution on 2026-10-08 (`WebACLId` cleared on `E2DR5ZV7O32BE`; pre-change
+config saved on the app EC2 at `~/waf-detach-20261008-085007/dist-before.json`)
+but kept, and kept billing about $13/month (ACL fee + per-rule fees; request
+charges stopped on detach). It was deleted 2026-10-15 to stop that. **There is
+no WAF on this distribution now.** To bring one back, recreate it from
+`docs/ops/waf/cappe-public-edge.acl.json` (the full `get-web-acl` output taken
+just before deletion, `LockToken` removed) with `aws wafv2 create-web-acl`, then
+set `WebACLId` on the distribution config with a fresh ETag. The five regex
+pattern sets it referenced (`cappe-booking-suggestion-access-path`,
+`cappe-booking-suggestion-path`, `matcha-ir-chat-path`, `matcha-symlink-json-path`,
+`matcha-symlink-path`) were left in place (free); the snapshot's rule ARNs point
+at them, so re-fetch their ARNs if any are ever deleted. The only working thing
+the ACL provided — the AWS managed KnownBadInputs filter — is gone; the body/rate
+rules had never matched (see Known Gaps). The origin gate, nginx limits and the
+application governors are unaffected. **The ACL rule inventory and the update /
+rollback commands further down describe the deleted ACL — historical reference
+only; they will not run as written.**
 
 Two consequences that are easy to miss:
 
