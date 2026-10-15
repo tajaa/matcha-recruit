@@ -151,6 +151,8 @@ extension AppState {
         entitlements = nil
         showPaywall = false
         paywallFeature = nil
+        featureGuide = nil
+        autoFeatureGuide = nil
         clearRealtimeHandlers()
         MatchaWorkService.shared.updateCacheScope(nil)
         // Drop the detail-VM tier too: these retain the previous user's loaded

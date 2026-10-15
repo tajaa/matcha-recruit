@@ -36,6 +36,7 @@ struct AgentResultView: View {
                 Label("Espresso agent", systemImage: "sparkle.magnifyingglass")
                     .font(.ticket(size: 11))
                     .foregroundColor(.secondary)
+                FeatureGuideButton(id: .agentCards, size: 11)
                 Spacer()
                 if doneRuns.count > 1 {
                     Picker("", selection: Binding(
@@ -48,6 +49,7 @@ struct AgentResultView: View {
                     .fixedSize()
                 }
             }
+            .featureGuideOnFirstVisit(.agentCards)
 
             if runs == nil {
                 HStack(spacing: 6) {

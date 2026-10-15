@@ -52,6 +52,7 @@ struct ChannelsLibraryView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .foldsRailForSidePane($railFoldedForPane)
+        .featureGuideOnFirstVisit(.channels, when: appState.selectedChannelId == nil)
         .task { await load() }
         .onChange(of: appState.channelsListGeneration) { _, _ in Task { await load() } }
         .sheet(isPresented: $showCreate) {
@@ -148,6 +149,8 @@ struct ChannelsLibraryView: View {
                         .font(.system(size: 12)).foregroundColor(appState.themeTextSecondary)
                 }
                 Spacer()
+                FeatureGuideButton(id: .channels, size: 14)
+                    .padding(.trailing, 2)
                 Button { browse() } label: {
                     HStack(spacing: 5) { Image(systemName: "magnifyingglass"); Text("Browse").font(.system(size: 12, weight: .semibold)) }
                         .padding(.horizontal, 12).padding(.vertical, 7)

@@ -34,6 +34,7 @@ struct ProductivityWorkspace: View {
         }
         .background(ThemeRadialBackground())
         .foldsRailForSidePane($railFoldedForPane)
+        .featureGuideOnFirstVisit(.productivity)
         .task { await vm.loadBoards() }
     }
 
@@ -45,6 +46,7 @@ struct ProductivityWorkspace: View {
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(appState.themeSidebarTextSecondary)
                 Spacer()
+                FeatureGuideButton(id: .productivity)
                 Button { railCollapsed = true } label: {
                     Image(systemName: "sidebar.left").font(.system(size: 12))
                 }

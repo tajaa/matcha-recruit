@@ -23,6 +23,7 @@ struct JobSearchWorkspace: View {
             }
         }
         .background(ThemeRadialBackground())
+        .featureGuideOnFirstVisit(.jobSearch)
         .task(id: appState.currentUser?.id) {
             vm.reset()
             await openFocus()
@@ -67,6 +68,7 @@ struct JobSearchWorkspace: View {
                     .font(.system(size: 15, weight: .bold))
                     .foregroundColor(appState.themeText)
                 Spacer()
+                FeatureGuideButton(id: .jobSearch)
                 Button { showNew = true } label: {
                     Image(systemName: "plus").font(.system(size: 12, weight: .semibold))
                 }

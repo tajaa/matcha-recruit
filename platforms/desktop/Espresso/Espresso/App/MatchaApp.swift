@@ -124,6 +124,15 @@ struct MatchaApp: App {
                 }
                 .disabled(!appState.isAuthenticated)
             }
+            // Help ▸ Feature Guides: every feature's how-it-works wizard.
+            CommandGroup(after: .help) {
+                Menu("Feature Guides") {
+                    ForEach(appState.availableFeatureGuides) { id in
+                        Button(FeatureGuide.guide(for: id).name) { appState.showFeatureGuide(id) }
+                    }
+                }
+                .disabled(!appState.isAuthenticated)
+            }
         }
 
         // Secondary windows — opened via openWindow(id:"aux", value:) from
