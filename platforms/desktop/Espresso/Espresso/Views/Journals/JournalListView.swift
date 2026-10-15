@@ -385,6 +385,7 @@ struct JournalsWorkspace: View {
             }
         }
         .background(ThemeRadialBackground())
+        .featureGuideOnFirstVisit(.journals)
         // ⌘N anywhere in the workspace — the list header's compose button is
         // a menu, which can't carry a shortcut of its own.
         .background {
@@ -430,6 +431,7 @@ struct JournalsWorkspace: View {
                     .environment(appState)
             }
             Spacer(minLength: 4)
+            FeatureGuideButton(id: .journals, size: 11)
             Button { Task { await createNote(.note) } } label: {
                 Label("New note", systemImage: "square.and.pencil")
                     .font(.system(size: 11, weight: .medium))

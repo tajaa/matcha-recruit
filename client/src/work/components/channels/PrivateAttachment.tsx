@@ -27,13 +27,20 @@ export default function PrivateAttachment({ att, inputId }: { att: Attachment; i
     return () => { cancelled = true }
   }, [inputId, isImage])
 
-  async function open() {
-    try {
-      const link = await getAssistantInputLink(inputId)
-      window.open(link.url, '_blank', 'noopener,noreferrer')
-    } catch {
-      setFailed(true)
-    }
+  function open() {
+    // The tab opens during the click and is pointed at the link once it
+    // arrives: Safari and Firefox block a window opened after an await.
+    const tab = window.open('', '_blank')
+    if (tab) tab.opener = null
+    getAssistantInputLink(inputId)
+      .then((link) => {
+        if (tab) tab.location.href = link.url
+        else window.open(link.url, '_blank', 'noopener,noreferrer')
+      })
+      .catch(() => {
+        tab?.close()
+        setFailed(true)
+      })
   }
 
   if (isImage && imageUrl && !failed) {

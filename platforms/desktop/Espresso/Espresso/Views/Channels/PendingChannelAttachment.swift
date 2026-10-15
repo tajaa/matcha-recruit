@@ -32,10 +32,11 @@ struct AttachmentRules: Equatable {
         ]
     )
 
-    /// HEIC is converted to JPEG before upload (`convertingHEIC`).
+    /// HEIC is converted to JPEG before upload (`convertingHEIC`). No `.doc`:
+    /// the server reads only `.docx` (agent_runtime/inputs.py).
     static let espresso = AttachmentRules(
         maxFiles: 5, maxFileBytes: 10 * 1024 * 1024, maxTotalBytes: 25 * 1024 * 1024,
-        allowed: ["pdf", "docx", "doc", "txt", "md", "csv", "json", "png", "jpg", "jpeg", "webp", "heic", "heif"],
+        allowed: ["pdf", "docx", "txt", "md", "csv", "json", "png", "jpg", "jpeg", "webp", "heic", "heif"],
         blocked: []
     )
 
@@ -46,6 +47,7 @@ struct AttachmentRules: Equatable {
         let ext = (filename as NSString).pathExtension.lowercased()
         if blocked.contains(ext) { return "File type .\(ext) isn't allowed" }
         if let allowed, !allowed.contains(ext) {
+            if ext == "doc" { return "Save older Word files as .docx or PDF first" }
             return "Espresso reads PDF, Word, text, Markdown, CSV and JSON files, and images"
         }
         if pending.count >= maxFiles {

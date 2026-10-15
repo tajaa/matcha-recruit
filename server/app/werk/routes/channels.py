@@ -199,6 +199,19 @@ async def _resolve_assistant_run_states(conn, messages, *, channel_id: UUID):
         return messages
 
 
+async def _resolve_history_overlays(conn, messages, *, channel_id: UUID):
+    """Every live-state overlay a page of history gets, in one place.
+
+    Both history reads go through this: the channel's first page (inside
+    `get_channel`) and older pages (`get_channel_messages`). The first page
+    once skipped the assistant overlay, so every Espresso run in a reopened
+    chat showed "Starting…" however it had ended.
+    """
+    messages = await _resolve_event_draft_action_statuses(conn, messages, channel_id=channel_id)
+    messages = await _resolve_agent_card_prompt_statuses(conn, messages, channel_id=channel_id)
+    return await _resolve_assistant_run_states(conn, messages, channel_id=channel_id)
+
+
 async def _resolve_event_draft_action_statuses(conn, messages, *, channel_id: UUID):
     """Overlay canonical draft state onto persisted action-card metadata.
 
@@ -1513,10 +1526,7 @@ async def get_channel(
             _msg_query("m.channel_id = $1", limit_param="50"),
             channel_id,
         )
-        messages = await _resolve_event_draft_action_statuses(
-            conn, messages, channel_id=channel_id,
-        )
-        messages = await _resolve_agent_card_prompt_statuses(conn, messages, channel_id=channel_id)
+        messages = await _resolve_history_overlays(conn, messages, channel_id=channel_id)
         msg_ids = [m["id"] for m in messages]
         reactions_map = await _fetch_reactions_map(conn, msg_ids)
 
@@ -1644,11 +1654,7 @@ async def get_channel_messages(
                 channel_id, limit,
             )
 
-        rows = await _resolve_event_draft_action_statuses(
-            conn, rows, channel_id=channel_id,
-        )
-        rows = await _resolve_agent_card_prompt_statuses(conn, rows, channel_id=channel_id)
-        rows = await _resolve_assistant_run_states(conn, rows, channel_id=channel_id)
+        rows = await _resolve_history_overlays(conn, rows, channel_id=channel_id)
         msg_ids = [r["id"] for r in rows]
         reactions_map = await _fetch_reactions_map(conn, msg_ids)
         return [_row_to_message(r, reactions_map) for r in reversed(rows)]
@@ -1704,15 +1710,22 @@ async def delete_channel_message(
         ):
             raise HTTPException(status_code=403, detail="This message is too old to delete")
 
-        await conn.execute(
-            """
-            UPDATE channel_messages
-            SET deleted_at = NOW(),
-                deleted_by = $2
-            WHERE id = $1
-            """,
-            message_id, current_user.id,
-        )
+        from ...matcha.services.matcha_work.agent_runtime import inputs as agent_inputs
+
+        async with conn.transaction():
+            await conn.execute(
+                """
+                UPDATE channel_messages
+                SET deleted_at = NOW(),
+                    deleted_by = $2
+                WHERE id = $1
+                """,
+                message_id, current_user.id,
+            )
+            # Files given to Espresso go with the message: no run reads them
+            # again and they stop counting against the person's space.
+            removed_inputs = await agent_inputs.delete_for_message(conn, message_id)
+    await agent_inputs.remove_stored(removed_inputs)
 
     # Fan out deletion over the channel WebSocket so every connected
     # member updates their view without needing to refetch.
