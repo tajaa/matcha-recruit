@@ -371,4 +371,17 @@ final class TasksLogicTests: XCTestCase {
         let request = try JSONEncoder().encode(AgentTaskActionRequest(params: ["quantity": "2"]))
         XCTAssertEqual(String(data: request, encoding: .utf8), #"{"params":{"quantity":"2"}}"#)
     }
+
+    @MainActor
+    func testAnActionsSwitchStartsAsTheServerSays() throws {
+        let action = try decode(AgentTaskAction.self, """
+        {"key": "buy", "label": "Buy", "icon": "cart", "available": true,
+         "params": [{"key": "quantity", "label": "Quantity", "type": "number"},
+                    {"key": "fill_in", "label": "Fill in my email and saved address", "type": "boolean", "value": "yes"}]}
+        """)
+        let flow = TaskActionFlow(taskId: "t", itemId: "i", itemTitle: "Balm", action: action)
+        XCTAssertEqual(flow.values["fill_in"], "yes")
+        XCTAssertNil(flow.values["quantity"])
+        XCTAssertEqual(TaskActionFlow.params(flow.values, fields: action.params), ["fill_in": "yes"])
+    }
 }

@@ -97,5 +97,7 @@ class ItemAction:
 
 
 def outcome(headline: str, lines: tuple[Line, ...] = (), url: str | None = None) -> dict:
-    """What `perform` returns, and what the app shows after."""
+    """What `perform` returns, and what the app shows after. A `stored_url`
+    added to it is the link kept afterwards, when `url` carries the
+    person's details."""
     return {"headline": headline, "lines": [line.view() for line in lines], "url": url}

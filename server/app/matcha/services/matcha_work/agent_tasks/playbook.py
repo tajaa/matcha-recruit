@@ -56,12 +56,16 @@ class IntakeField:
     accept: tuple[FileKind, ...] = ()
     max_count: int = 1
     max_bytes: int = 0
+    # What the field starts as in a form ("yes" for a switch that starts on).
+    default: str = ""
 
     def view(self) -> dict:
         out: dict[str, Any] = {
             "key": self.key, "label": self.label, "type": self.type,
             "required": self.required, "ask": self.ask, "help": self.help,
         }
+        if self.default:
+            out["value"] = self.default
         if self.options:
             out["options"] = list(self.options)
         if self.type == "file":
