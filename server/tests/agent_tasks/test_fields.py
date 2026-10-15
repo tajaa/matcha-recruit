@@ -133,3 +133,25 @@ def test_check_text_lists_every_value():
 @pytest.mark.parametrize("raw,want", [("yes", ["pets_ok"]), ("no", ["none"]), ("pet-friendly", ["pets_ok"])])
 def test_pet_words(raw, want):
     assert F.tags_in("pets", raw) == want
+
+
+def test_a_product_printed_twice_is_one_product():
+    """Seen on primallypure.com: the theme prints its Product block twice, and
+    the page's price and stock were dropped as if it listed two products."""
+    offer = {"price": 6.0, "currency": "USD", "availability": "InStock", "url": "https://shop.test/p?variant=1"}
+    other = {**offer, "url": "https://shop.test/p?variant=2"}
+    # Every variant's offer, then the current variant's again (its price as text).
+    twice = {"products": [{"name": "Lip Balm", "offers": [offer, other]},
+                          {"name": "Lip Balm", "offers": [{**offer, "price": "6.0"}]}]}
+    found = F.from_page(twice, url="https://shop.test/p", title="Primally Pure NATURAL LIP BALM", today=TODAY)
+    assert found["price"]["value"] == 6.0 and found["in_stock"]["value"] is True
+    # The fuller copy is the one kept, whichever comes first.
+    found = F.from_page({"products": list(reversed(twice["products"]))}, url="https://shop.test/p",
+                        title="Lip Balm", today=TODAY)
+    assert found["in_stock"]["value"] is True
+    # Two different products is still a page about many: nothing taken.
+    many = {"products": [{"name": "Lip Balm", "offers": [offer]},
+                         {"name": "Lip Balm", "offers": [{**offer, "price": 9.0}]}]}
+    assert F.from_page(many, url="https://shop.test/p", title="Lip Balm", today=TODAY) == {}
+    named = {"products": [{"name": "Lip Balm", "offers": [offer]}, {"name": "Lip Scrub", "offers": [offer]}]}
+    assert F.from_page(named, url="https://shop.test/p", title="Lip Balm", today=TODAY)["price"]["value"] == 6.0

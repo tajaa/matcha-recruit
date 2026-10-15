@@ -41,6 +41,7 @@ WRITES = frozenset({"commit", "draft"})
 FINISH_AFTER_ACTION = ("Not accepted: an action in this same turn had not finished yet. "
                        "Read its outcome, then call finish again.")
 FINISH_NUDGE = "Call the finish tool with the structured result now."
+FINISH_TWICE = "Not accepted: a result was already accepted this turn, and it stands."
 # Without stored responses there is no chain to follow, so every call resends
 # the whole conversation. Reasoning comes back encrypted and goes back as is.
 REASONING_INCLUDE = "reasoning.encrypted_content"
@@ -458,6 +459,12 @@ async def run_agent(
             name, args = call["name"], dict(call["arguments"] or {})
             if name == contract.finish.name and acts:
                 outputs.append(tool_output_item(call["call_id"], {"error": FINISH_AFTER_ACTION}))
+                continue
+            if name == contract.finish.name and result is not None:
+                # Two finishes in one turn: the first accepted one stands. A
+                # model that answers twice sometimes makes the second a stub
+                # ("x"), which must not replace a real result.
+                outputs.append(tool_output_item(call["call_id"], {"error": FINISH_TWICE}))
                 continue
             if name == contract.finish.name:
                 try:

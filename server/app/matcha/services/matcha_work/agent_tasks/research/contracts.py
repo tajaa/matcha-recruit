@@ -178,6 +178,17 @@ def brief_constraints(brief: dict, *, item_kind: str, today: date, budget_unit: 
     return out
 
 
+_WORD = re.compile(r"[a-z0-9]+")
+
+
+def names_place(query: str, location: str) -> bool:
+    """Whether a query already says where: every word of the place is in it,
+    whatever the punctuation ("Mission District San Francisco" names
+    "Mission District, San Francisco")."""
+    words = set(_WORD.findall(query.casefold()))
+    return all(w in words for w in _WORD.findall(location.casefold()))
+
+
 def finalize_plan(plan: dict, brief: dict, *, today: date, kind: SearchKind | None = None) -> dict:
     """The person's own limits merged in (replacing the model's on the same
     field and op), every constrained or preferred field shown, caps applied.
@@ -202,7 +213,7 @@ def finalize_plan(plan: dict, brief: dict, *, today: date, kind: SearchKind | No
     location = brief.get("location")
     queries = list(plan.get("queries") or [])
     if location:
-        queries = [q if location.casefold() in q.casefold() else f"{q} {location}"[:160] for q in queries]
+        queries = [q if names_place(q, location) else f"{q} {location}"[:160] for q in queries]
     return {
         **plan,
         "item_kind": item_kind,
