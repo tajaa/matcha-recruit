@@ -190,8 +190,19 @@ def test_a_finding_moves_to_its_sellers_own_page():
     assert P.with_store(balm, [], today=TODAY) is balm
 
 
+def test_a_fallback_store_keeps_the_listings_currency():
+    listing = P.shopping_item({"title": "Balm", "source": "Boots", "price": "£4.50", "extracted_price": 4.5,
+                               "currency": "GBP", "product_link": GOOGLE_PRODUCT}, today=TODAY)
+    other = P.with_store(listing, [P.Store(name="Superdrug", link="https://superdrug.test/balm", price=4.25)],
+                         today=TODAY)
+    assert other.fields["price"]["value"] == 4.25 and other.fields["price"]["currency"] == "GBP"
+
+
 def test_google_pages_are_never_a_stores_own():
     assert P.is_google("https://shopping.google.co.uk/p") and P.is_google(GOOGLE_PRODUCT)
+    # Ad clicks: following one would register a paid click.
+    assert P.is_google("https://www.googleadservices.com/pagead/aclk?sa=L") and P.is_google("https://ad.doubleclick.net/x")
+    assert P.store_link("https://www.googleadservices.com/pagead/aclk?sa=L") is None
     assert not P.is_google("https://www.drbronner.com/x") and not P.is_google(None)
     assert P.store_link("https://www.google.com/url?url=https://shop.test/a") == "https://shop.test/a"
     assert P.store_link("https://www.google.com/url?q=https://www.google.com/x") is None

@@ -150,6 +150,27 @@ async def test_shopping_findings_are_kept_at_their_stores_page(conn, monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_store_lookups_are_only_paid_for_findings_there_is_room_for(conn, monkeypatch):
+    provider = AsyncMock()
+    provider.stores = AsyncMock(return_value=[providers.Store(name="Acme", link="https://acme.test/balm")])
+    monkeypatch.setattr(items_mod, "insert_items", AsyncMock(return_value=0))
+    task = task_row(plan=json.dumps({**PLAN, "source": "shopping", "queries": ["balm"]}))
+    three = [_shop("Balm", "Acme"), _shop("Wax", "Bee Co", n=2), _shop("Tin", "Tin Co", n=3)]
+    # Room for one more finding: one lookup.
+    provider.search = AsyncMock(return_value=three)
+    conn.on("COUNT(*) FROM mw_agent_task_items", phases.BUDGETS.items - 1)
+    await phases.run_providers(task, _deps(provider=lambda: provider), _guard())
+    assert provider.stores.await_count == 1
+    # Full: nothing is looked up, and nothing is asked about what it has.
+    provider.stores.reset_mock()
+    conn.calls.clear()
+    conn.on("COUNT(*) FROM mw_agent_task_items", phases.BUDGETS.items)
+    await phases.run_providers(task, _deps(provider=lambda: provider), _guard())
+    provider.stores.assert_not_awaited()
+    assert not conn.ran("SELECT title, subtitle FROM mw_agent_task_items")
+
+
+@pytest.mark.asyncio
 async def test_enrich_one_reads_the_items_own_page(monkeypatch):
     row = dict(item_row(fields=json.dumps({}), kind="listing", image_candidates="[]"))
     fetch = AsyncMock(return_value=_fetched(_html()))

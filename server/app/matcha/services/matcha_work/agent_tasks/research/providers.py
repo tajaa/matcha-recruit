@@ -78,10 +78,18 @@ def _http(url: Any) -> str | None:
     return url.strip() if isinstance(url, str) and normalize_url(url) else None
 
 
+# Ad-click and tracking hosts: following one of these registers a paid click.
+AD_HOSTS = ("googleadservices.com", "doubleclick.net", "googlesyndication.com", "google-analytics.com")
+
+
 def is_google(url: str | None) -> bool:
-    """A page of Google's (Shopping, Maps, search), never a store's or place's own."""
+    """A page of Google's (Shopping, Maps, search, its ad clicks), never a
+    store's or place's own."""
     normalized = normalize_url(url)
-    return bool(normalized) and "google" in normalized.split("/")[2].split(".")
+    if not normalized:
+        return False
+    host = normalized.split("/")[2]
+    return "google" in host.split(".") or any(host == h or host.endswith("." + h) for h in AD_HOSTS)
 
 
 def store_link(raw: Any) -> str | None:
@@ -112,9 +120,11 @@ def with_store(item: ProviderItem, stores: list[Store], *, today: date) -> Provi
     if match is not None:
         return replace(item, url=match.link)
     store = stores[0]
+    # The offers carry no currency of their own: the listing's is the market's.
+    currency = (item.fields.get("price") or {}).get("currency")
     out = {k: v for k, v in item.fields.items() if k not in ("price", "seller", "shipping")}
     if store.price is not None:
-        _put(out, "price", store.price, url=store.link, today=today,
+        _put(out, "price", store.price, url=store.link, today=today, currency=currency,
              quote=f"Google Shopping: {store.price_text or store.price} at {store.name}")
     _put(out, "seller", store.name, url=store.link, today=today, quote=f"Google Shopping seller {store.name}")
     return replace(item, url=store.link, subtitle=store.name, fields=out)

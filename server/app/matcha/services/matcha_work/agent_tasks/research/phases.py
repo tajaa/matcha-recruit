@@ -175,10 +175,12 @@ def store_lookups(found: list[providers.ProviderItem], known: set[tuple[str, str
 
 
 async def with_stores(task: dict, provider: Any, found: list[providers.ProviderItem],
-                      known: set[tuple[str, str]], today: date) -> list[providers.ProviderItem]:
-    """Shopping findings at a store's own page, for as many as the budget allows
-    (`STORE_LOOKUPS` a round); the rest keep Google's link."""
-    picks = store_lookups(found, known, STORE_LOOKUPS)
+                      known: set[tuple[str, str]], today: date,
+                      limit: int = STORE_LOOKUPS) -> list[providers.ProviderItem]:
+    """Shopping findings at a store's own page, for as many as the budget and
+    `limit` (at most `STORE_LOOKUPS` a round, never more than the task has room
+    to keep) allow; the rest keep Google's link."""
+    picks = store_lookups(found, known, limit)
     if not picks:
         return found
     budget = Budget(left=await chain.grant(_chain(), task["id"], "provider_calls", len(picks),
@@ -230,12 +232,13 @@ async def run_providers(task: dict, deps: Deps, guard: chain.Guard) -> PhaseOutc
         await asyncio.gather(*(one(n, q) for n, q in enumerate(queries)))
         await chain.refund(_chain(), task["id"], "provider_calls", budget.left)
         found = interleave(per_query)
-        if source == "shopping" and found:
-            async with connection_or_direct() as conn:
-                known = await items_mod.known_names(conn, task["id"])
-            found = await with_stores(task, provider, found, known, deps.today())
         async with connection_or_direct() as conn:
             room = await item_room(conn, task["id"])
+            # Paid lookups only for findings the task still has room to keep.
+            known = await items_mod.known_names(conn, task["id"]) if source == "shopping" and found and room else set()
+        if source == "shopping" and found and room:
+            found = await with_stores(task, provider, found, known, deps.today(), limit=min(STORE_LOOKUPS, room))
+        async with connection_or_direct() as conn:
             added = await items_mod.insert_items(conn, task, guard.token, int(task["current_round"]),
                                                  [provider_record(i) for i in found], room=room)
     return PhaseOutcome(
