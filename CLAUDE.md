@@ -398,10 +398,26 @@ Keep `LOG_LEVEL` at `INFO` or lower — some log calls sit at `WARNING` delibera
 
 **⚠️ `dev-remote.sh`'s frontend runs on `:5174` (tmux session `matcha-dev-remote`) — it is almost always already running.** If you spin up your own throwaway `npm run dev` (e.g. to screenshot-verify a change), do NOT clean it up with a port-pattern `pkill -f "vite --port ..."` — that regex also matches the user's real dev-remote.sh frontend process (same command line) and kills it. Track your own process by PID (`$!` / a pidfile) and `kill` that PID specifically instead.
 
+**Backend `:8001` and frontend `:5174` never move.** The Espresso dev build only knows `127.0.0.1:8001/api`, and OAuth redirects point at `:5174`. Re-running `dev-remote.sh` stops the running session *before* it checks ports. It also stops a leftover dev server from the same checkout, matched by the process's working directory and stopped by PID. Anything else on either port makes the script exit with that pid and command. Until 2026-10-15 the check ran before the old session was stopped, so every restart quietly slid to `:8002`/`:5175` and the app showed "Lost connection to the server". If you see a backend on `:8002`, that is the old script: re-run `./scripts/dev-remote.sh` from the main checkout. To run a second backend on purpose, use `BACKEND_PORT=… ` together with `MATCHA_API_URL` for Espresso.
+
 **Dev test account — PRIMARY (matcha-ops, restaurant/retail)**: `tessu2022+pocoffee@gmail.com` / `devpass123` in the local dev DB — client role, company **"Po Coffee Co"** (`c4c256c3-60ef-4cf5-8d4c-55e963c58416`, `signup_source=product:matcha-ops`), with `employee_schedule`/`huume`/`matcha_work`/`matcha_ops`/`inventory`/`sales_intake`/`ems`/`schedule_intelligence` enabled. Two stores: "Po Coffee Co — Downtown" (`c0ffeeee-0001-4001-8001-000000000001`) and "— Mission" (`…0002`), 15 employees, 5 jobs, 72 shifts. **Use this one by default** — restaurants/retail is the segment we actually sell into, so its data shape (per-store jobs, hourly crew, partially-filled qualified lists) is the realistic one.
 ⚠️ That address is a REAL deliverable Gmail alias, not a reserved test domain. Never point bulk-invite, newsletter, or any fan-out send at it — see the Test Data rules below.
 
 **Dev test account (full-featured Matcha-X, dental)**: `maria.chen@example.com` / `devpass123` — client role, company "Sunset Smile Dental Group" (`signup_source=matcha_x`), `employee_schedule`/`huume`/`matcha_work`/`matcha_ops` enabled. Locations include "Sunset Smile Dental — Downtown" (`e628e73e-1ee3-4b29-ba6d-a7e4cbc5e895`). Secondary — reach for it when you specifically want the Matcha-X tier or a professional-services shape; verified end-to-end against `/ops/schedule/editor` on 2026-08-26.
+
+**Dev test account — Espresso (personal Matcha-work)**: `tessu2022+test@gmail.com` / `devpass123`, in the local dev DB.
+- **What it is:** `individual` role, personal Pro workspace "Tessu Alex's Workspace", user `f11d97e0-6d8e-4d62-99a0-598e8dccb0a1`. It has the Espresso assistant, Tasks, Job search and agent cards.
+- **Use it for:** the macOS Espresso dev build (`127.0.0.1:8001/api`) and web `/espresso` on `:5174`.
+- **Limits:** 100k AI tokens per 12-hour window, 60 task units a month and 30 assistant requests a day. A single research task can use more than 100k tokens.
+- **Second account:** `tessu2022+test2@gmail.com` (user `91befe1a-9894-444c-b81c-80b670d07e3a`, personal Pro) has a larger token budget, but its password is unknown.
+- **Gmail:** these accounts' Gmail connections were cloned from prod and don't decrypt on dev. Reconnect Gmail before testing Email or drafts.
+- **The password is set by hand on dev.** `refresh-dev-from-prod.sh` runs with `SKIP_ANONYMIZE=1`, which copies prod's password hash back. Reset it with:
+
+  ```bash
+  cd server && H=$(./venv/bin/python -c "from app.core.services.auth import hash_password; print(hash_password('devpass123'))" | tail -1) && docker exec matcha-postgres psql -U matcha -d matcha -c "UPDATE users SET password_hash='$H' WHERE email='tessu2022+test@gmail.com'"
+  ```
+
+⚠️ Same as above: this is a real Gmail alias. Never point a fan-out send at it.
 
 **Alternative**: `./scripts/dev.sh` — references a discontinued sister product; do not use.
 

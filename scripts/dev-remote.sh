@@ -67,6 +67,65 @@ is_port_in_use() {
     return 1
 }
 
+wait_for_port_free() {
+    local port=$1
+    local tries=$(( $2 * 2 ))
+
+    while is_port_in_use "$port" && [ "$tries" -gt 0 ]; do
+        sleep 0.5
+        tries=$((tries - 1))
+    done
+    ! is_port_in_use "$port"
+}
+
+pid_cwd() {
+    if [ -r "/proc/$1/cwd" ]; then
+        readlink "/proc/$1/cwd"
+    elif command_exists lsof; then
+        lsof -a -p "$1" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1
+    fi
+}
+
+# The backend and frontend always get their own port and never move: the
+# Espresso app, OAuth redirects and the docs all point at 8001/5174, so a
+# silent slide to 8002/5175 leaves them talking to nothing. A leftover dev
+# server from this checkout (its working directory is $3) is stopped; anything
+# else holding the port stops the script with its pid and command.
+claim_port() {
+    local port=$1
+    local label=$2
+    local dir=$3
+    local pid cwd stale="" foreign=""
+
+    is_port_in_use "$port" || return 0
+    if command_exists lsof; then
+        for pid in $(lsof -n -P -t -iTCP:"$port" -sTCP:LISTEN 2>/dev/null | sort -u); do
+            cwd="$(pid_cwd "$pid")"
+            if [ "$cwd" = "$dir" ]; then
+                stale="$stale $pid"
+            else
+                foreign="$foreign $pid"
+            fi
+        done
+    fi
+
+    if [ -z "$foreign" ] && [ -n "$stale" ]; then
+        echo -e "${YELLOW}Port $port is held by a leftover $label from this checkout (pid$stale); stopping it...${NC}"
+        kill $stale 2>/dev/null || true
+        wait_for_port_free "$port" 10 && return 0
+        kill -9 $stale 2>/dev/null || true
+        wait_for_port_free "$port" 5 && return 0
+    fi
+
+    echo -e "${RED}Error: port $port ($label) is in use, and the $label never moves to another port.${NC}"
+    for pid in $foreign $stale; do
+        echo -e "${RED}  pid $pid: $(ps -o command= -p "$pid" 2>/dev/null | sed -E 's#^[^ ]*/##' | cut -c1-100) (in $(pid_cwd "$pid"))${NC}"
+    done
+    [ -n "$foreign$stale" ] || echo -e "${RED}  (could not tell which process holds it)${NC}"
+    echo -e "${RED}Stop it and run this again. To run a second $label on purpose, set ${4}.${NC}"
+    exit 1
+}
+
 pick_available_port() {
     local start=$1
     local end=$2
@@ -134,19 +193,8 @@ else
     REDIS_PORT="$DEFAULT_REDIS_PORT"
 fi
 
-FRONTEND_PORT_SOURCE="default"
-if [ -n "${FRONTEND_PORT:-}" ]; then
-    FRONTEND_PORT_SOURCE="env"
-else
-    FRONTEND_PORT="$DEFAULT_FRONTEND_PORT"
-fi
-
-if [ -n "${BACKEND_PORT:-}" ]; then
-    BACKEND_PORT_SOURCE="env"
-else
-    BACKEND_PORT_SOURCE="default"
-    BACKEND_PORT="$DEFAULT_BACKEND_PORT"
-fi
+FRONTEND_PORT="${FRONTEND_PORT:-$DEFAULT_FRONTEND_PORT}"
+BACKEND_PORT="${BACKEND_PORT:-$DEFAULT_BACKEND_PORT}"
 
 CHAT_PORT_SOURCE="default"
 if [ -n "${CHAT_PORT:-}" ]; then
@@ -225,36 +273,19 @@ if [ "$IS_AGENT_SANDBOX" = true ]; then
 else
     ensure_local_postgres
 
-    if [ "$START_SERVICES_ONLY" = false ] && is_port_in_use "$FRONTEND_PORT"; then
-        if [ "$FRONTEND_PORT_SOURCE" = "env" ]; then
-            echo -e "${RED}Error: FRONTEND_PORT $FRONTEND_PORT is already in use. Set FRONTEND_PORT to a free port.${NC}"
-            exit 1
+    if [ "$START_SERVICES_ONLY" = false ]; then
+        # Stop the running session BEFORE looking at ports. Checked first, the
+        # old session's own backend and frontend still held 8001/5174, so every
+        # restart slid to 8002/5175 and the Espresso app lost its server.
+        if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
+            echo -e "${YELLOW}Stopping the running $SESSION_NAME session...${NC}"
+            tmux kill-session -t "$SESSION_NAME" 2>/dev/null || true
+            wait_for_port_free "$BACKEND_PORT" 15 || true
+            wait_for_port_free "$FRONTEND_PORT" 15 || true
         fi
-
-        ALT_FRONTEND_PORT="$(pick_available_port 5175 5190)"
-        if [ -z "$ALT_FRONTEND_PORT" ]; then
-            echo -e "${RED}Error: No free frontend ports found in 5175-5190.${NC}"
-            exit 1
-        fi
-
-        echo -e "${YELLOW}Port $FRONTEND_PORT is in use; using $ALT_FRONTEND_PORT for the frontend instead.${NC}"
-        FRONTEND_PORT="$ALT_FRONTEND_PORT"
-    fi
-
-    if [ "$START_SERVICES_ONLY" = false ] && is_port_in_use "$BACKEND_PORT"; then
-        if [ "$BACKEND_PORT_SOURCE" = "env" ]; then
-            echo -e "${RED}Error: BACKEND_PORT $BACKEND_PORT is already in use. Set BACKEND_PORT to a free port.${NC}"
-            exit 1
-        fi
-
-        ALT_BACKEND_PORT="$(pick_available_port 8002 8010)"
-        if [ -z "$ALT_BACKEND_PORT" ]; then
-            echo -e "${RED}Error: No free backend ports found in 8002-8010.${NC}"
-            exit 1
-        fi
-
-        echo -e "${YELLOW}Port $BACKEND_PORT is in use; using $ALT_BACKEND_PORT for the backend instead.${NC}"
-        BACKEND_PORT="$ALT_BACKEND_PORT"
+        claim_port "$BACKEND_PORT" backend "$(cd "$PROJECT_ROOT/server" && pwd -P)" \
+            "BACKEND_PORT (and point Espresso at it with MATCHA_API_URL)"
+        claim_port "$FRONTEND_PORT" frontend "$(cd "$PROJECT_ROOT/client" && pwd -P)" "FRONTEND_PORT"
     fi
 
     # Check/Start Redis (Local)
