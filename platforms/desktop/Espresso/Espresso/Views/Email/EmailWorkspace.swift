@@ -15,6 +15,8 @@ struct EmailWorkspace: View {
         case all
         case bucket(EmailTriageBucket)
         case unsorted
+        /// Gmail drafts, edited and sent in `EmailDraftsPane`.
+        case drafts
     }
 
     /// A Send-to-board request; `.sheet(item:)` needs an identity.
@@ -47,6 +49,19 @@ struct EmailWorkspace: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if !vm.connected {
                 connectState
+            } else if filter == .drafts {
+                if pane.isSide {
+                    EmailDraftsPane()
+                } else {
+                    HSplitView {
+                        if railCollapsed || railFoldedForPane {
+                            MWHubRailStrip { railCollapsed = false; railFoldedForPane = false }
+                        } else {
+                            mailboxRail.frame(minWidth: 180, idealWidth: 200, maxWidth: 250)
+                        }
+                        EmailDraftsPane()
+                    }
+                }
             } else if pane.isSide {
                 // Beside another surface: the list, and a message opens over
                 // it with a way back.
@@ -96,6 +111,8 @@ struct EmailWorkspace: View {
             if !picked.isEmpty { openedElsewhere = nil }
         }
         .onAppear(perform: consumePendingEmail)
+        .onAppear(perform: consumePendingDraft)
+        .onChange(of: appState.pendingEmailDrafts) { _, _ in consumePendingDraft() }
         .onChange(of: appState.pendingEmailId) { _, _ in consumePendingEmail() }
         .onChange(of: appState.panePendingEmailId) { _, _ in consumePendingEmail() }
         .sheet(item: $boardRequest) { request in
@@ -134,6 +151,19 @@ struct EmailWorkspace: View {
         }
     }
 
+    /// Drafts another surface asked for (a job's Draft email), on its draft.
+    private func consumePendingDraft() {
+        guard !pane.isSide, appState.pendingEmailDrafts else { return }
+        let id = appState.pendingEmailDraftId
+        appState.pendingEmailDrafts = false
+        appState.pendingEmailDraftId = nil
+        filter = .drafts
+        Task {
+            await EmailDraftsViewModel.shared.load()
+            if let id { await EmailDraftsViewModel.shared.select(id) }
+        }
+    }
+
     private func pruneSelection() {
         let live = selection.filter { vm.message(id: $0) != nil }
         if live != selection { selection = live }
@@ -146,6 +176,7 @@ struct EmailWorkspace: View {
         case .all: base = vm.emails
         case .bucket(let bucket): base = vm.emails.filter { vm.bucket(of: $0.id) == bucket }
         case .unsorted: base = vm.emails.filter { vm.bucket(of: $0.id) == nil }
+        case .drafts: base = []
         }
         let q = search.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !q.isEmpty else { return base }
@@ -179,6 +210,7 @@ struct EmailWorkspace: View {
         case .all: return vm.mailbox.title
         case .bucket(let bucket): return bucket.label
         case .unsorted: return "Unsorted"
+        case .drafts: return "Drafts"
         }
     }
 
@@ -246,6 +278,11 @@ struct EmailWorkspace: View {
                         filter = .all
                         Task { await vm.selectMailbox(mailbox) }
                     }
+                }
+                MWHubRailRow(icon: "doc.text", title: "Drafts", selected: filter == .drafts,
+                             trailing: countLabel(EmailDraftsViewModel.shared.drafts.count)) {
+                    filter = .drafts
+                    Task { await EmailDraftsViewModel.shared.load() }
                 }
                 railHeading("Sorted by AI")
                 sortedRows

@@ -8,6 +8,8 @@ import Observation
 final class JobSearchViewModel {
     enum Filter: String, CaseIterable, Identifiable {
         case all = "All"
+        /// The ones with a drafted approach: where to start.
+        case drafted = "Drafted"
         case postedPay = "Pay posted"
         case saved = "Saved"
         case applied = "Applied"
@@ -35,6 +37,8 @@ final class JobSearchViewModel {
     var planFeature: String?
     /// The search `create` just started, for Tasks to open.
     var createdSearchId: String?
+    /// Draft email was refused because Gmail isn't connected yet.
+    var emailNotConnected = false
 
     private let service = JobSearchService.shared
 
@@ -184,6 +188,34 @@ final class JobSearchViewModel {
         }
     }
 
+    /// Put a job's first message in the person's Gmail drafts. Returns the
+    /// draft's id (the same draft again while it is still in Gmail).
+    func draftEmail(leadId: String) async -> String? {
+        guard let searchId = selectedSearchId, !busy else { return nil }
+        busy = true
+        errorMessage = nil
+        emailNotConnected = false
+        defer { busy = false }
+        do {
+            let result = try await service.draftEmail(searchId, leadId)
+            if let updated = result.lead {
+                if selectedLeadId == leadId { lead = updated }
+                if let i = detail?.leads.firstIndex(where: { $0.id == leadId }) {
+                    detail?.leads[i] = updated.summary
+                }
+            }
+            return result.draftId
+        } catch {
+            // Not connected is shown beside the button, with a way to Email.
+            if (error as? APIError)?.detailCode == "email_not_connected" {
+                emailNotConnected = true
+            } else {
+                report(error)
+            }
+            return nil
+        }
+    }
+
     func cancel() async {
         guard let searchId = selectedSearchId else { return }
         await perform { self.apply(try await self.service.cancel(searchId)) }
@@ -220,13 +252,68 @@ final class JobSearchViewModel {
             || status.leadCount != detail.leads.count
     }
 
+    /// Where a finished search stands, for its Next steps.
+    struct Progress: Equatable {
+        var drafted = 0
+        var saved = 0
+        var emailsWaiting = 0
+        var emailsSent = 0
+        var applied = 0
+
+        var line: String? {
+            let parts = [
+                saved > 0 ? "\(saved) saved" : nil,
+                emailsWaiting > 0 ? (emailsWaiting == 1 ? "1 email in drafts" : "\(emailsWaiting) emails in drafts") : nil,
+                emailsSent > 0 ? "\(emailsSent) sent" : nil,
+                applied > 0 ? "\(applied) applied" : nil,
+            ].compactMap { $0 }
+            return parts.isEmpty ? nil : parts.joined(separator: " \u{00B7} ")
+        }
+    }
+
+    nonisolated static func progress(_ leads: [JobLeadSummary]) -> Progress {
+        var out = Progress()
+        for lead in leads where lead.userState != "dismissed" {
+            if lead.hasApproach && !lead.isIrrelevant { out.drafted += 1 }
+            if lead.userState == "saved" { out.saved += 1 }
+            if lead.userState == "applied" { out.applied += 1 }
+            if lead.emailWaiting { out.emailsWaiting += 1 }
+            if lead.emailSentAt != nil { out.emailsSent += 1 }
+        }
+        return out
+    }
+
+    /// A posting's text as it reads best: each line trimmed (pages indent with
+    /// spaces and non-breaking spaces), runs of spaces collapsed, and at most
+    /// one blank line between paragraphs.
+    nonisolated static func tidyPosting(_ text: String) -> String {
+        let lines = text.replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\u{00A0}", with: " ")
+            .components(separatedBy: "\n")
+            .map { $0.split(separator: " ", omittingEmptySubsequences: true).joined(separator: " ")
+                .trimmingCharacters(in: .whitespaces) }
+        var out: [String] = []
+        for line in lines {
+            if line.isEmpty {
+                if let last = out.last, !last.isEmpty { out.append("") }
+            } else {
+                out.append(line)
+            }
+        }
+        while out.last == "" { out.removeLast() }
+        return out.joined(separator: "\n")
+    }
+
     nonisolated static func filtered(_ leads: [JobLeadSummary], filter: Filter, showIrrelevant: Bool) -> [JobLeadSummary] {
         leads.filter { lead in
             // Screened-out jobs hide from the browsing tabs, never from the
             // person's own lists: a job they saved or applied to stays there.
-            if lead.isIrrelevant && !showIrrelevant && (filter == .all || filter == .postedPay) { return false }
+            if lead.isIrrelevant && !showIrrelevant && (filter == .all || filter == .postedPay || filter == .drafted) {
+                return false
+            }
             switch filter {
             case .all: return lead.userState != "dismissed"
+            case .drafted: return lead.hasApproach && lead.userState != "dismissed"
             case .postedPay: return lead.compStatus == "posted" && lead.userState != "dismissed"
             case .saved: return lead.userState == "saved"
             case .applied: return lead.userState == "applied"
@@ -295,21 +382,6 @@ final class JobSearchViewModel {
         formatter.numberStyle = .decimal
         formatter.maximumFractionDigits = value < 1_000 ? 2 : 0
         return formatter.string(from: NSNumber(value: value)) ?? String(Int(value))
-    }
-
-    /// A `mailto:` for the drafted outreach, only when it has an address.
-    nonisolated static func mailtoURL(_ outreach: JobOutreach?) -> URL? {
-        guard let outreach, let to = outreach.toEmail, !to.isEmpty,
-              to.range(of: #"^[^@\s<>,;]+@[^@\s<>,;]+\.[^@\s<>,;]+$"#, options: .regularExpression) != nil
-        else { return nil }
-        var parts = URLComponents()
-        parts.scheme = "mailto"
-        parts.path = to
-        parts.queryItems = [
-            URLQueryItem(name: "subject", value: outreach.subject ?? ""),
-            URLQueryItem(name: "body", value: outreach.body ?? ""),
-        ]
-        return parts.url
     }
 
     /// Only plain http(s) links are opened.

@@ -429,6 +429,9 @@
 		TASK0000000000000000A003 /* AgentTaskService.swift in Sources */ = {isa = PBXBuildFile; fileRef = TASK0000000000000000A004 /* AgentTaskService.swift */; };
 		TASK0000000000000000A005 /* TasksViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = TASK0000000000000000A006 /* TasksViewModel.swift */; };
 		TASK0000000000000000A007 /* TasksWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = TASK0000000000000000A008 /* TasksWorkspace.swift */; };
+		NEXT0000000000000000A001 /* EmailDraftsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = NEXT0000000000000000A002 /* EmailDraftsViewModel.swift */; };
+		NEXT0000000000000000A003 /* EmailDraftsPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = NEXT0000000000000000A004 /* EmailDraftsPane.swift */; };
+		NEXT0000000000000000A005 /* ResizableTrailingPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = NEXT0000000000000000A006 /* ResizableTrailingPane.swift */; };
 		TASK0000000000000000A009 /* TaskItemDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = TASK0000000000000000A00A /* TaskItemDetailView.swift */; };
 		TASK0000000000000000A00B /* TaskChatCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = TASK0000000000000000A00C /* TaskChatCards.swift */; };
 		TASK0000000000000000BT01 /* TasksLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = TASK0000000000000000BT02 /* TasksLogicTests.swift */; };
@@ -789,6 +792,9 @@
 		TASK0000000000000000A004 /* AgentTaskService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AgentTaskService.swift; path = Espresso/Services/MatchaWork/AgentTaskService.swift; sourceTree = SOURCE_ROOT; };
 		TASK0000000000000000A006 /* TasksViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = TasksViewModel.swift; path = Espresso/ViewModels/TasksViewModel.swift; sourceTree = SOURCE_ROOT; };
 		TASK0000000000000000A008 /* TasksWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = TasksWorkspace.swift; path = Espresso/Views/Tasks/TasksWorkspace.swift; sourceTree = SOURCE_ROOT; };
+		NEXT0000000000000000A002 /* EmailDraftsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = EmailDraftsViewModel.swift; path = Espresso/ViewModels/EmailDraftsViewModel.swift; sourceTree = SOURCE_ROOT; };
+		NEXT0000000000000000A004 /* EmailDraftsPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = EmailDraftsPane.swift; path = Espresso/Views/Email/EmailDraftsPane.swift; sourceTree = SOURCE_ROOT; };
+		NEXT0000000000000000A006 /* ResizableTrailingPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ResizableTrailingPane.swift; path = Espresso/Views/Tasks/ResizableTrailingPane.swift; sourceTree = SOURCE_ROOT; };
 		TASK0000000000000000A00A /* TaskItemDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = TaskItemDetailView.swift; path = Espresso/Views/Tasks/TaskItemDetailView.swift; sourceTree = SOURCE_ROOT; };
 		TASK0000000000000000A00C /* TaskChatCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = TaskChatCards.swift; path = Espresso/Views/Tasks/TaskChatCards.swift; sourceTree = SOURCE_ROOT; };
 		TASK0000000000000000BT02 /* TasksLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TasksLogicTests.swift; sourceTree = "<group>"; };
@@ -1493,6 +1499,9 @@
 				TASK0000000000000000A004 /* AgentTaskService.swift */,
 				TASK0000000000000000A006 /* TasksViewModel.swift */,
 				TASK0000000000000000A008 /* TasksWorkspace.swift */,
+				NEXT0000000000000000A002 /* EmailDraftsViewModel.swift */,
+				NEXT0000000000000000A004 /* EmailDraftsPane.swift */,
+				NEXT0000000000000000A006 /* ResizableTrailingPane.swift */,
 				TASK0000000000000000A00A /* TaskItemDetailView.swift */,
 				TASK0000000000000000A00C /* TaskChatCards.swift */,
 				D495ED9EB731DFE8E7E99AB7 /* Screenplay.swift */,
@@ -2012,6 +2021,9 @@
 				TASK0000000000000000A003 /* AgentTaskService.swift in Sources */,
 				TASK0000000000000000A005 /* TasksViewModel.swift in Sources */,
 				TASK0000000000000000A007 /* TasksWorkspace.swift in Sources */,
+				NEXT0000000000000000A001 /* EmailDraftsViewModel.swift in Sources */,
+				NEXT0000000000000000A003 /* EmailDraftsPane.swift in Sources */,
+				NEXT0000000000000000A005 /* ResizableTrailingPane.swift in Sources */,
 				TASK0000000000000000A009 /* TaskItemDetailView.swift in Sources */,
 				TASK0000000000000000A00B /* TaskChatCards.swift in Sources */,
 				CALV000000000000000000AB /* EmailCalendarSheet.swift in Sources */,

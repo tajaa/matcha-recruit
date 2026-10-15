@@ -18,24 +18,7 @@ struct TasksWorkspace: View {
     @State private var madeJournal: String?
 
     var body: some View {
-        HStack(spacing: 0) {
-            rail.frame(width: 250)
-            Divider().opacity(0.2)
-            if let search = vm.selectedTask, search.isJobSearch, let searchId = search.jobSearchId {
-                JobSearchDetailView(searchId: searchId, focusLeadId: vm.jobLeadFocus)
-                    .id(searchId)
-            } else {
-                // A floor on the middle column: with none, working out the window's
-                // minimum size squeezes it to nothing and any wrapping text in it
-                // becomes a column thousands of points tall.
-                content.frame(minWidth: 380, maxWidth: .infinity, maxHeight: .infinity)
-            }
-            if vm.selectedItemId != nil, !(vm.selectedTask?.isJobSearch ?? false) {
-                Divider().opacity(0.2)
-                TaskItemDetailView(vm: vm, onClose: { Task { await vm.selectItem(nil) } })
-                    .frame(width: 420)
-            }
-        }
+        GeometryReader { geo in panes(width: geo.size.width) }
         .background(ThemeRadialBackground())
         .featureGuideOnFirstVisit(.tasks)
         .task(id: appState.currentUser?.id) {
@@ -74,6 +57,30 @@ struct TasksWorkspace: View {
         }
         .sheet(isPresented: $showNewJobSearch, onDismiss: openCreatedSearch) {
             NewJobSearchSheet(vm: jobs).environment(appState)
+        }
+    }
+
+    private func panes(width: CGFloat) -> some View {
+        HStack(spacing: 0) {
+            rail.frame(width: 250)
+            Divider().opacity(0.2)
+            if let search = vm.selectedTask, search.isJobSearch, let searchId = search.jobSearchId {
+                JobSearchDetailView(searchId: searchId, focusLeadId: vm.jobLeadFocus)
+                    .id(searchId)
+            } else {
+                // A floor on the middle column: with none, working out the window's
+                // minimum size squeezes it to nothing and any wrapping text in it
+                // becomes a column thousands of points tall.
+                content.frame(minWidth: 380, maxWidth: .infinity, maxHeight: .infinity)
+            }
+            if vm.selectedItemId != nil, !(vm.selectedTask?.isJobSearch ?? false) {
+                // Converted up front: left to Swift, Xcode 16 can't choose between
+                // CGFloat and Double arithmetic and fails the build.
+                ResizableTrailingPane(storageKey: "tasks.itemPaneWidth", defaultWidth: 420,
+                                      maxWidth: Double(width) - 250 - 380) {
+                    TaskItemDetailView(vm: vm, onClose: { Task { await vm.selectItem(nil) } })
+                }
+            }
         }
     }
 
@@ -323,6 +330,14 @@ struct TasksWorkspace: View {
                 .padding(10)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(RoundedRectangle(cornerRadius: 8).fill(appState.themeText.opacity(0.04)))
+            }
+            if task.status == "done" && !detail.items.isEmpty {
+                // What to do with what it found, once it has finished.
+                Label("Next: open a finding to see where each fact came from, Save the ones you like, Refine to "
+                      + "narrow it down, or Make document to keep a write-up.", systemImage: "arrow.turn.down.right")
+                    .font(.system(size: 11))
+                    .foregroundColor(appState.themeTextSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             // Their own row, so they never truncate when a finding is open beside.
             actions(detail)

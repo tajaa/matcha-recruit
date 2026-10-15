@@ -72,6 +72,12 @@ final class JobSearchService {
         try await client.request(method: "POST", path: "\(basePath)/\(searchId)/leads/\(leadId)/approach")
     }
 
+    /// Put the job's first message in Gmail drafts; the same draft again
+    /// while it is still there.
+    func draftEmail(_ searchId: String, _ leadId: String) async throws -> JobEmailDraftResult {
+        try await client.request(method: "POST", path: "\(basePath)/\(searchId)/leads/\(leadId)/email-draft")
+    }
+
     func cancel(_ searchId: String) async throws -> JobSearchDetail {
         try await client.request(method: "POST", path: "\(basePath)/\(searchId)/cancel")
     }

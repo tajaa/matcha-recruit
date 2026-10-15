@@ -72,6 +72,82 @@ enum EmailMailbox: String, CaseIterable {
     }
 }
 
+/// A Gmail draft in the Drafts list (no body).
+struct EmailDraftSummary: Decodable, Identifiable, Equatable {
+    let id: String
+    var to: String
+    var subject: String
+    var snippet: String
+    var updatedMs: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case id, to, subject, snippet
+        case updatedMs = "updated_ms"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        to = (try? c.decodeIfPresent(String.self, forKey: .to)) ?? ""
+        subject = (try? c.decodeIfPresent(String.self, forKey: .subject)) ?? ""
+        snippet = (try? c.decodeIfPresent(String.self, forKey: .snippet)) ?? ""
+        updatedMs = try? c.decodeIfPresent(Double.self, forKey: .updatedMs)
+    }
+
+    var updated: Date? { updatedMs.map { Date(timeIntervalSince1970: $0 / 1000) } }
+}
+
+/// One draft, to edit and send.
+struct EmailDraft: Decodable, Equatable {
+    let id: String
+    var to: String
+    var subject: String
+    var body: String
+    /// Who else it goes to: kept as they are when it's saved here.
+    var cc: String
+    var bcc: String
+    var threadId: String?
+    /// The draft's message in Gmail, for opening it there.
+    var messageId: String?
+    /// False when saving it here would lose an attachment or its formatting:
+    /// it's read, sent and deleted here, and edited in Gmail.
+    var editable: Bool
+    var hasAttachments: Bool
+    var formatted: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case id, to, subject, body, cc, bcc, editable, formatted
+        case threadId = "thread_id"
+        case messageId = "message_id"
+        case hasAttachments = "has_attachments"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        to = (try? c.decodeIfPresent(String.self, forKey: .to)) ?? ""
+        subject = (try? c.decodeIfPresent(String.self, forKey: .subject)) ?? ""
+        body = (try? c.decodeIfPresent(String.self, forKey: .body)) ?? ""
+        cc = (try? c.decodeIfPresent(String.self, forKey: .cc)) ?? ""
+        bcc = (try? c.decodeIfPresent(String.self, forKey: .bcc)) ?? ""
+        threadId = try? c.decodeIfPresent(String.self, forKey: .threadId)
+        messageId = try? c.decodeIfPresent(String.self, forKey: .messageId)
+        editable = (try? c.decodeIfPresent(Bool.self, forKey: .editable)) ?? true
+        hasAttachments = (try? c.decodeIfPresent(Bool.self, forKey: .hasAttachments)) ?? false
+        formatted = (try? c.decodeIfPresent(Bool.self, forKey: .formatted)) ?? false
+    }
+}
+
+struct EmailDraftList: Decodable {
+    let drafts: [EmailDraftSummary]
+    var nextPageToken: String? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case drafts
+        case nextPageToken = "next_page_token"
+    }
+}
+
 struct EmailFetchResponse: Decodable {
     let emails: [EmailMessage]
     var nextPageToken: String? = nil
@@ -257,6 +333,38 @@ final class EmailService {
 
     func triage(emailIds: [String]) async throws -> EmailTriageResponse {
         try await client.request(method: "POST", path: "\(basePath)/triage", body: EmailTriageBody(emailIds: emailIds))
+    }
+
+    // MARK: Drafts
+
+    /// A page of drafts, newest first; pass the last page's token for the next.
+    func drafts(pageToken: String? = nil) async throws -> EmailDraftList {
+        let query = pageToken.map { "?page_token=\(Self.pathId($0))" } ?? ""
+        return try await client.request(method: "GET", path: "\(basePath)/drafts\(query)")
+    }
+
+    func draft(id: String) async throws -> EmailDraft {
+        try await client.request(method: "GET", path: "\(basePath)/drafts/\(Self.pathId(id))")
+    }
+
+    func saveDraft(id: String, to: String, subject: String, body: String) async throws -> EmailDraft {
+        struct Body: Encodable { let to: String; let subject: String; let body: String }
+        return try await client.request(method: "PUT", path: "\(basePath)/drafts/\(Self.pathId(id))",
+                                        body: Body(to: to, subject: subject, body: body))
+    }
+
+    func sendDraft(id: String) async throws {
+        let _: EmailSendResponse = try await client.request(method: "POST", path: "\(basePath)/drafts/\(Self.pathId(id))/send")
+    }
+
+    func deleteDraft(id: String) async throws {
+        let _: [String: Bool] = try await client.request(method: "DELETE", path: "\(basePath)/drafts/\(Self.pathId(id))")
+    }
+
+    /// Gmail ids are url-safe already (letters, digits, `-`, `_`); anything
+    /// else is escaped, so it can never reach a different path.
+    nonisolated static func pathId(_ id: String) -> String {
+        id.addingPercentEncoding(withAllowedCharacters: .alphanumerics.union(CharacterSet(charactersIn: "-_"))) ?? ""
     }
 
     func disconnect() async throws {

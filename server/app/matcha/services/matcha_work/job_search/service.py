@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -117,6 +118,10 @@ def lead_summary(row) -> dict:
         "flags": list(explain.get("flags") or []),
         "user_state": row.get("user_state") or "new",
         "approach_status": row.get("approach_status") or "none",
+        # Its first message, put in the person's Gmail drafts (`draft_email`).
+        "email_draft_id": row.get("email_draft_id"),
+        "email_drafted_at": _iso(row.get("email_drafted_at")),
+        "email_sent_at": _iso(row.get("email_sent_at")),
     }
 
 
@@ -246,6 +251,86 @@ async def patch_lead(search_id: UUID, lead_id: UUID, user_id: UUID, body: LeadPa
                 "SELECT * FROM mw_job_leads WHERE id = $1 AND search_id = $2", lead_id, search_id,
             )
     return lead_detail(row)
+
+
+_ADDRESS = re.compile(r"[^@\s,;<>\"]+@[^@\s,;<>\"]+\.[^@\s,;<>\"]+")
+
+
+def _one_line(text: str | None, limit: int) -> str:
+    return " ".join(str(text or "").split())[:limit]
+
+
+async def draft_email(search_id: UUID, lead_id: UUID, user_id: UUID) -> dict:
+    """Put a job's drafted first message in the person's Gmail drafts, where
+    they edit and send it (Espresso's Email ▸ Drafts, or Gmail itself).
+    Nothing is sent. A job keeps one draft: asking again returns it while it
+    is still in Gmail, and makes a new one once it was sent or deleted."""
+    import httpx
+
+    from ..gmail_service import GmailService
+
+    async with connection_or_direct() as conn:
+        await owned_search(conn, search_id, user_id)
+        lead = await conn.fetchrow(
+            "SELECT * FROM mw_job_leads WHERE id = $1 AND search_id = $2", lead_id, search_id,
+        )
+    if lead is None:
+        raise JobSearchError("Job not found.", 404)
+    outreach = (decode_jsonb(lead["approach"], {}) or {}).get("outreach") or {}
+    body = str(outreach.get("body") or "").strip()
+    if not body:
+        raise JobSearchError("This job has no drafted first message yet. Draft its approach first.", 409)
+    gmail = GmailService(user_id)
+    await gmail.load_token()
+    if not gmail.is_configured:
+        raise JobSearchError("Connect Gmail in Email first.", 409, {
+            "code": "email_not_connected", "message": "Connect Gmail in Email first.",
+        })
+    if lead["email_draft_id"] and lead["email_sent_at"] is None:
+        try:
+            existing = await gmail.get_draft(lead["email_draft_id"])
+            return {"draft_id": existing["id"], "to": existing["to"], "subject": existing["subject"],
+                    "created": False, "lead": lead_detail(lead)}
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code not in (400, 404):
+                raise
+        except ValueError:
+            pass  # a stored id Gmail would refuse: make a new draft
+    to = _one_line(outreach.get("to_email"), 320)
+    to = to if _ADDRESS.fullmatch(to) else ""  # the hiring contact, when the approach found one
+    subject = _one_line(outreach.get("subject"), 200) or _one_line(
+        f"{lead['title'] or 'The role'} at {lead['company'] or 'your company'}", 200)
+    created = await gmail.create_draft(to=to, subject=subject, body=body)
+    async with connection_or_direct() as conn:
+        lead = await conn.fetchrow(
+            """UPDATE mw_job_leads
+               SET email_draft_id = $3, email_drafted_at = NOW(), email_sent_at = NULL, updated_at = NOW()
+               WHERE id = $1 AND search_id = $2 RETURNING *""",
+            lead_id, search_id, created.get("id"),
+        )
+    return {"draft_id": created.get("id"), "to": to, "subject": subject, "created": True,
+            "lead": lead_detail(lead)}
+
+
+async def note_email_draft(user_id: UUID, draft_id: str, *, sent: bool) -> None:
+    """A Gmail draft was sent or deleted from Espresso's Email: if a job made
+    it, the job shows it sent, or forgets it. Best effort: the mail action has
+    already happened."""
+    import logging
+
+    try:
+        async with connection_or_direct() as conn:
+            await conn.execute(
+                """UPDATE mw_job_leads
+                   SET email_sent_at = CASE WHEN $3 THEN NOW() ELSE email_sent_at END,
+                       email_draft_id = CASE WHEN $3 THEN email_draft_id ELSE NULL END,
+                       email_drafted_at = CASE WHEN $3 THEN email_drafted_at ELSE NULL END,
+                       updated_at = NOW()
+                   WHERE user_id = $1 AND email_draft_id = $2""",
+                user_id, draft_id, sent,
+            )
+    except Exception:
+        logging.getLogger(__name__).warning("job email draft note failed", exc_info=True)
 
 
 async def update_weights(search_id: UUID, user_id: UUID, weights: JobWeights) -> dict:

@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class GoogleConnectRequest(BaseModel):
@@ -28,6 +28,16 @@ class AssistantConversationRequest(BaseModel):
 
 class AssistantConversationRename(BaseModel):
     title: str = Field(min_length=1, max_length=100)
+
+
+class EmailDraftUpdate(BaseModel):
+    """What changed in a Gmail draft; a field left out stays as it is."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    to: str | None = Field(default=None, max_length=4000)
+    subject: str | None = Field(default=None, max_length=998)
+    body: str | None = Field(default=None, max_length=200_000)
 
 
 class EmailFetchRequest(BaseModel):

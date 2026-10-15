@@ -95,6 +95,16 @@ async def redraft_job_approach(
     return await _call(enqueue.redraft_approach(current_user, search_id, lead_id))
 
 
+@router.post("/{search_id}/leads/{lead_id}/email-draft")
+async def draft_job_email(
+    search_id: UUID, lead_id: UUID, current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Put this job's drafted first message in the caller's Gmail drafts, to
+    edit and send from Email. Nothing is sent. Asking again returns the same
+    draft while it is still in Gmail."""
+    return await _call(service.draft_email(search_id, lead_id, current_user.id))
+
+
 @router.put("/{search_id}/weights")
 async def rerank_job_search(
     search_id: UUID, body: JobWeights,

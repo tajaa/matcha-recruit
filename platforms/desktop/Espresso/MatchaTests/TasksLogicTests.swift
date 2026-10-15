@@ -1,3 +1,4 @@
+import SwiftUI
 import XCTest
 @testable import Matcha
 
@@ -271,6 +272,15 @@ final class TasksLogicTests: XCTestCase {
         XCTAssertNil(focus.taskId)
         XCTAssertEqual(focus.leadId, "l1")
         XCTAssertEqual(TasksFocus(taskId: "t1", itemId: "i1"), TasksFocus(taskId: "t1", itemId: "i1", jobSearchId: nil))
+    }
+
+    func testAResizedPaneStaysWithinWhatTheWindowCanSpare() {
+        typealias Pane = ResizableTrailingPane<EmptyView>
+        XCTAssertEqual(Pane.clamp(500, min: 340, max: 800), 500)
+        XCTAssertEqual(Pane.clamp(1200, min: 340, max: 800), 800)
+        XCTAssertEqual(Pane.clamp(100, min: 340, max: 800), 340)
+        // No room to spare: never below its minimum.
+        XCTAssertEqual(Pane.clamp(500, min: 340, max: 200), 340)
     }
 
     func testTasksIsAFixedRow() {

@@ -113,6 +113,10 @@ class AppState {
     /// A message for the Email hub to open next (`openEmail(id:)`); the hub
     /// consumes and clears it.
     var pendingEmailId: String? = nil
+    /// Email ▸ Drafts to open next (`openEmailDrafts(draftId:)`), on one draft
+    /// when `pendingEmailDraftId` is set.
+    var pendingEmailDrafts = false
+    var pendingEmailDraftId: String? = nil
     /// The same two hand-offs for a Calendar or Email in a side pane
     /// (`openCalendar(at:in:)`, `openEmail(id:in:)`). Kept apart so a link in
     /// a pane never moves the main pane's Calendar or Email.
@@ -206,6 +210,14 @@ class AppState {
     func openEmail(id: String) {
         clearPrimaryNav()
         pendingEmailId = id
+        showEmailHub = true
+    }
+
+    /// Open Email ▸ Drafts, on one Gmail draft when given, to edit and send.
+    func openEmailDrafts(draftId: String? = nil) {
+        clearPrimaryNav()
+        pendingEmailDraftId = draftId
+        pendingEmailDrafts = true
         showEmailHub = true
     }
 
