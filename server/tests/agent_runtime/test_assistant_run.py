@@ -116,7 +116,7 @@ async def test_the_approved_confirmation_reaches_the_run(wired, monkeypatch):
 
     monkeypatch.setattr(runner, "run_agent", fake_run_agent)
     prompt_id = uuid4()
-    wired.conn.on("FROM mw_agent_card_prompts", {"tool": "buy_item", "args": {}, "targets": [], "preview": {}})
+    wired.conn.on("SELECT payload FROM mw_agent_card_prompts", {"tool": "buy_item", "args": {}, "targets": [], "preview": {}})
     await assistant.run_assistant(_run(resume_prompt_id=prompt_id))
     assert seen["prompt"] == prompt_id
 

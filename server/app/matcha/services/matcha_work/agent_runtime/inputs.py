@@ -418,7 +418,9 @@ async def for_run(conn, *, user_id: UUID, channel_id: UUID, trigger_message_id: 
     no run has answered yet. That is one never given to a run (sent on its
     own), one whose last run failed (the person's "try again" is a new run),
     and one whose last run asked the person something (their reply is a new
-    run). Also any already given to this run, when the worker retries it.
+    run), unless that was a form they submitted with its button (a task
+    started; no reply follows). Also any already given to this run, when the
+    worker retries it.
     """
     fresh = await conn.fetch(
         """SELECT i.id, i.filename, i.content_type, i.kind, i.size_bytes, i.storage_path,
@@ -431,7 +433,12 @@ async def for_run(conn, *, user_id: UUID, channel_id: UUID, trigger_message_id: 
                   OR (i.created_at > NOW() - make_interval(hours => $6)
                       AND (i.seen_run_id IS NULL
                            OR r.status = 'failed'
-                           OR (r.status = 'done' AND (r.result ? 'question' OR r.result ? 'held')))))
+                           OR (r.status = 'done' AND (r.result ? 'question' OR r.result ? 'held')
+                               -- A form submitted with its button started a
+                               -- task: that request is answered, no reply run.
+                               AND NOT EXISTS (SELECT 1 FROM mw_agent_card_prompts p
+                                               WHERE p.run_id = r.id AND p.kind = 'ask_form'
+                                                 AND p.answer = 'form')))))
            ORDER BY (i.message_id IS NOT DISTINCT FROM $3) DESC, i.created_at DESC
            LIMIT $4""",
         user_id, channel_id, trigger_message_id, RUN_FILES, run_id, FRESH_HOURS,

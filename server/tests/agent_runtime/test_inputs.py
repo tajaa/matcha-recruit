@@ -362,6 +362,8 @@ async def test_a_run_gets_its_files_and_marks_them_given():
     assert mark[2] == ([UUID(int=2), UUID(int=1)], run_id) and "seen_run_id IS NULL" not in mark[1]
     [query] = conn.ran("LEFT JOIN mw_project_agent_runs r")
     assert query[2] == (USER, CHANNEL, trigger, inputs.RUN_FILES, run_id, inputs.FRESH_HOURS)
+    # A form submitted with its button started a task: nothing follows it.
+    assert "p.kind = 'ask_form' AND p.answer = 'form'" in query[1]
 
     empty = await inputs.for_run(FakeConn(), user_id=USER, channel_id=CHANNEL,
                                  trigger_message_id=None, run_id=run_id)

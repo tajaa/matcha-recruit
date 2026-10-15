@@ -243,7 +243,8 @@ column as `<playbook>.<phase>`).
 - **A run** gets the files on its own message, plus, for 24 h, any no run has
   answered: never given to one (sent on their own), or whose last run failed
   (the person's "try again" is a new run) or ended asking (an `ask_user`/form
-  question or a held action: the reply is a new run). `seen_run_id` is the
+  question or a held action: the reply is a new run). A form submitted with
+  its button (`answer = 'form'`) started a task and counts as answered. `seen_run_id` is the
   last run given the file, re-marked by every run; a worker retry of the same
   run gets them again. Own-message files come first. As one user message: the
   words, then document text as marked data (≤6k a file, ≤12k a run), then ≤3
