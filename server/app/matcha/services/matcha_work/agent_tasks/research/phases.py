@@ -42,6 +42,8 @@ logger = logging.getLogger(__name__)
 BUDGETS = Budgets()
 QUERY_CONCURRENCY = 3
 PROVIDER_QUERIES = 4
+# Shopping products looked up at their stores per round (one provider call each).
+STORE_LOOKUPS = 12
 ENRICH_BATCH = 12
 ENRICH_CONCURRENCY = 4
 PAGE_BYTES = 2_000_000
@@ -149,6 +151,55 @@ def provider_record(item: providers.ProviderItem) -> dict:
     }
 
 
+def interleave(lists: list[list]) -> list:
+    """Every query's first result, then every second one, …: the best of each first."""
+    out = []
+    for n in range(max((len(x) for x in lists), default=0)):
+        out.extend(x[n] for x in lists if n < len(x))
+    return out
+
+
+def store_lookups(found: list[providers.ProviderItem], known: set[tuple[str, str]], limit: int) -> list[int]:
+    """Which findings to ask the stores for, best first: on Google's page, with a
+    token, and new (not a name and seller the task has, or already picked)."""
+    picked, seen = [], set(known)
+    for n, item in enumerate(found):
+        name = (items_mod.title_key(item.title), items_mod.title_key(item.subtitle))
+        if not item.offers_token or not providers.is_google(item.url) or not name[0] or name in seen:
+            continue
+        seen.add(name)
+        picked.append(n)
+        if len(picked) >= limit:
+            break
+    return picked
+
+
+async def with_stores(task: dict, provider: Any, found: list[providers.ProviderItem],
+                      known: set[tuple[str, str]], today: date) -> list[providers.ProviderItem]:
+    """Shopping findings at a store's own page, for as many as the budget allows
+    (`STORE_LOOKUPS` a round); the rest keep Google's link."""
+    picks = store_lookups(found, known, STORE_LOOKUPS)
+    if not picks:
+        return found
+    budget = Budget(left=await chain.grant(_chain(), task["id"], "provider_calls", len(picks),
+                                           BUDGETS.provider_calls))
+    gate = asyncio.Semaphore(QUERY_CONCURRENCY)
+    out = list(found)
+
+    async def one(n: int) -> None:
+        if not budget.take():
+            return
+        async with gate:
+            try:
+                out[n] = providers.with_store(found[n], await provider.stores(found[n].offers_token), today=today)
+            except providers.ProviderError as exc:
+                logger.info("research store lookup failed task=%s: %s", task["id"], exc)
+
+    await asyncio.gather(*(one(n) for n in picks))
+    await chain.refund(_chain(), task["id"], "provider_calls", budget.left)
+    return out
+
+
 async def run_providers(task: dict, deps: Deps, guard: chain.Guard) -> PhaseOutcome:
     """Products and places from their provider, then on to the model's search."""
     plan = plan_of(task)
@@ -164,20 +215,25 @@ async def run_providers(task: dict, deps: Deps, guard: chain.Guard) -> PhaseOutc
         budget = Budget(left=await chain.grant(_chain(), task["id"], "provider_calls", len(queries),
                                                BUDGETS.provider_calls))
         gate = asyncio.Semaphore(QUERY_CONCURRENCY)
-        found: list[providers.ProviderItem] = []
+        per_query: list[list[providers.ProviderItem]] = [[] for _ in queries]
 
-        async def one(query: str) -> None:
+        async def one(n: int, query: str) -> None:
             if not budget.take():
                 return
             async with gate:
                 try:
-                    found.extend(await provider.search(source, query, page=page))
+                    per_query[n] = await provider.search(source, query, page=page)
                 except providers.ProviderError as exc:
                     logger.info("research provider query failed task=%s: %s", task["id"], exc)
 
         await guard.note("Searching Google Shopping…" if source == "shopping" else "Searching Google Maps…")
-        await asyncio.gather(*(one(q) for q in queries))
+        await asyncio.gather(*(one(n, q) for n, q in enumerate(queries)))
         await chain.refund(_chain(), task["id"], "provider_calls", budget.left)
+        found = interleave(per_query)
+        if source == "shopping" and found:
+            async with connection_or_direct() as conn:
+                known = await items_mod.known_names(conn, task["id"])
+            found = await with_stores(task, provider, found, known, deps.today())
         async with connection_or_direct() as conn:
             room = await item_room(conn, task["id"])
             added = await items_mod.insert_items(conn, task, guard.token, int(task["current_round"]),

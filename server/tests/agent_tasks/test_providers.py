@@ -108,3 +108,91 @@ def test_configured_and_choose(monkeypatch):
 
     monkeypatch.setattr(P, "_keys", boom)
     assert P.configured() is False
+
+
+# Shopping results link to Google's product page; the store's own page comes
+# from a second call. Shapes trimmed from a real SerpApi response (2026-10-14)
+# and SearchAPI's documented `google_product_offers` response.
+GOOGLE_PRODUCT = "https://www.google.com/search?ibp=oshop&q=organic lip balm&prds=catalogid:1,productid:2"
+SERP_SHOP = {"shopping_results": [
+    {"title": "Dr Bronner's Organic Lip Balm", "source": "Dr. Bronner's", "price": "$3.99", "extracted_price": 3.99,
+     "product_link": GOOGLE_PRODUCT, "product_id": "8587175971051732824", "immersive_product_page_token": "serp-token"},
+]}
+SEARCHAPI_SHOP = {"shopping_results": [
+    {"title": "Lip Balm", "seller": "Walmart", "price": "$4.97", "extracted_price": 4.97,
+     "product_link": "https://www.google.com/shopping/product/545?gl=us", "offers_link": "https://www.google.com/x",
+     "product_token": "searchapi-token"},
+]}
+SERP_STORES = {"product_results": {"stores": [
+    {"name": "Dr. Bronner's", "price": "$3.99", "extracted_price": 3.99,
+     "link": "https://www.drbronner.com/products/peppermint-organic-lip-balms?variant=3602&utm_source=goog"},
+    {"name": "Target", "price": "$3.89", "extracted_price": 3.89, "link": "https://www.target.com/p/balm/-/A-948"},
+    {"name": "Google", "link": "https://www.google.com/shopping/x"},
+    {"name": "", "link": "https://nameless.test/x"},
+    "junk",
+]}}
+SEARCHAPI_OFFERS = {"offers": [
+    {"merchant": {"name": "Walmart"}, "price": "$4.97", "extracted_price": 4.97,
+     "link": "https://www.google.com/url?q=https://www.walmart.com/ip/balm/154&sa=U"},
+    {"seller": "Dell", "price": "$5.10", "extracted_price": 5.1, "link": "https://www.dell.test/balm"},
+    {"merchant": "not a dict", "link": "https://x.test"},
+]}
+
+
+@pytest.mark.asyncio
+async def test_shopping_results_keep_the_token_for_their_stores():
+    def handler(request):
+        engine = request.url.params["engine"]
+        return httpx.Response(200, json={"google_shopping": SERP_SHOP, "google_immersive_product": SERP_STORES}[engine])
+
+    api = _api(handler, cls=P.SerpApi)
+    [balm] = await api.search("shopping", "organic lip balm")
+    assert balm.url == GOOGLE_PRODUCT and balm.offers_token == "serp-token" and P.is_google(balm.url)
+    stores = await api.stores("serp-token")
+    assert [s.name for s in stores] == ["Dr. Bronner's", "Target"]
+    assert stores[0].link.startswith("https://www.drbronner.com/") and stores[0].price == 3.99
+
+    seen = []
+
+    def searchapi(request):
+        seen.append(dict(request.url.params))
+        return httpx.Response(200, json=SEARCHAPI_SHOP if request.url.params["engine"] == "google_shopping" else SEARCHAPI_OFFERS)
+
+    api = _api(searchapi)
+    [balm] = await api.search("shopping", "lip balm")
+    assert balm.offers_token == "searchapi-token" and balm.subtitle == "Walmart"
+    walmart, dell = await api.stores("searchapi-token")
+    assert seen[-1]["engine"] == "google_product_offers" and seen[-1]["product_token"] == "searchapi-token"
+    # Google's redirect is unwrapped to the store's own page.
+    assert walmart.name == "Walmart" and walmart.link == "https://www.walmart.com/ip/balm/154"
+    assert dell.name == "Dell" and dell.price == 5.1
+    assert P.shopping_item({"title": "x", "product_link": GOOGLE_PRODUCT, "product_token": "t" * 5000}, today=TODAY).offers_token is None
+    assert P.SearchApi("k")._stores({"offers": "nope"}) == [] and P.SerpApi("k")._stores({"product_results": []}) == []
+
+
+def test_a_finding_moves_to_its_sellers_own_page():
+    balm = P.shopping_item({**SERP_SHOP["shopping_results"][0], "delivery": "Free delivery", "rating": 4.7},
+                           today=TODAY)
+    stores = P.SerpApi("k")._stores(SERP_STORES)
+    # The listing's seller sells it: same facts, its own page.
+    moved = P.with_store(balm, stores, today=TODAY)
+    assert moved.url.startswith("https://www.drbronner.com/products/") and moved.subtitle == "Dr. Bronner's"
+    assert moved.fields == balm.fields and moved.offers_token == "serp-token"
+    # The seller isn't among the stores: the first store, its price and name;
+    # the listing's delivery note was the other seller's.
+    other = P.with_store(balm, stores[1:], today=TODAY)
+    assert other.url == "https://www.target.com/p/balm/-/A-948" and other.subtitle == "Target"
+    assert other.fields["price"]["value"] == 3.89 and other.fields["seller"]["value"] == "Target"
+    assert "shipping" not in other.fields and other.fields["rating"]["value"] == 4.7
+    assert other.fields["price"]["evidence"]["origin"] == "provider"
+    no_price = P.with_store(balm, [P.Store(name="Shop", link="https://shop.test/b")], today=TODAY)
+    assert "price" not in no_price.fields and no_price.fields["seller"]["value"] == "Shop"
+    assert P.with_store(balm, [], today=TODAY) is balm
+
+
+def test_google_pages_are_never_a_stores_own():
+    assert P.is_google("https://shopping.google.co.uk/p") and P.is_google(GOOGLE_PRODUCT)
+    assert not P.is_google("https://www.drbronner.com/x") and not P.is_google(None)
+    assert P.store_link("https://www.google.com/url?url=https://shop.test/a") == "https://shop.test/a"
+    assert P.store_link("https://www.google.com/url?q=https://www.google.com/x") is None
+    assert P.store_link("https://www.google.com/aclk?x=1") is None and P.store_link("ftp://x.test") is None

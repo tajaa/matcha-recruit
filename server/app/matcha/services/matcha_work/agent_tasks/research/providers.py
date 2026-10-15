@@ -10,15 +10,23 @@ Through SearchAPI (`SEARCH_API_KEY`) when set, else SerpApi (`SERP_API_KEY`),
 the same keys job search uses: both serve Google's results as JSON with
 nearly the same fields. Only the query text leaves the server. Every call
 counts against the round's provider budget (`chain.grant`).
+
+A Shopping result links to Google's own product page, not a store's: neither
+provider gives the store's link in the results. A second call per product
+(`stores`: SearchAPI `google_product_offers`, SerpApi
+`google_immersive_product`) lists the stores selling it, each with its own
+link and price; `with_store` keeps the listing's seller there, so the finding
+links to a page that is its own (and can be read for availability).
 """
 from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass, field
+import re
+from dataclasses import dataclass, field, replace
 from datetime import date
 from typing import Any, Awaitable, Callable
-from urllib.parse import quote_plus
+from urllib.parse import parse_qsl, quote_plus, urlsplit
 
 import httpx
 
@@ -30,6 +38,7 @@ logger = logging.getLogger(__name__)
 
 TIMEOUT_SECONDS = 20.0
 MAX_RESULTS = 20
+MAX_STORES = 13
 KINDS = {"shopping": "product", "places": "place"}
 
 
@@ -51,10 +60,64 @@ class ProviderItem:
     provider_id: str | None = None
     fields: dict = field(default_factory=dict)
     image_url: str | None = None
+    # Shopping: what `stores` takes to list the stores selling it.
+    offers_token: str | None = None
+
+
+@dataclass(frozen=True)
+class Store:
+    """One store selling a Shopping product: its name, its own page, its price."""
+
+    name: str
+    link: str
+    price_text: str = ""
+    price: float | None = None
 
 
 def _http(url: Any) -> str | None:
     return url.strip() if isinstance(url, str) and normalize_url(url) else None
+
+
+def is_google(url: str | None) -> bool:
+    """A page of Google's (Shopping, Maps, search), never a store's or place's own."""
+    normalized = normalize_url(url)
+    return bool(normalized) and "google" in normalized.split("/")[2].split(".")
+
+
+def store_link(raw: Any) -> str | None:
+    """A store's own page: Google's redirect (`/url?q=`) unwrapped, Google itself refused."""
+    link = _http(raw)
+    if link and is_google(link) and urlsplit(link).path == "/url":
+        params = dict(parse_qsl(urlsplit(link).query))
+        link = _http(params.get("q") or params.get("url"))
+    return link if link and not is_google(link) else None
+
+
+def _name_key(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
+
+
+def _token(value: Any) -> str | None:
+    return value.strip() if isinstance(value, str) and 0 < len(value.strip()) <= 4096 else None
+
+
+def with_store(item: ProviderItem, stores: list[Store], *, today: date) -> ProviderItem:
+    """The finding at a store's own page: the listing's seller when it is among
+    the stores (its facts stand), else the first store, whose price and name
+    replace the listing's (its delivery note was the other seller's)."""
+    if not stores:
+        return item
+    seller = _name_key(item.subtitle)
+    match = next((s for s in stores if seller and _name_key(s.name) == seller), None)
+    if match is not None:
+        return replace(item, url=match.link)
+    store = stores[0]
+    out = {k: v for k, v in item.fields.items() if k not in ("price", "seller", "shipping")}
+    if store.price is not None:
+        _put(out, "price", store.price, url=store.link, today=today,
+             quote=f"Google Shopping: {store.price_text or store.price} at {store.name}")
+    _put(out, "seller", store.name, url=store.link, today=today, quote=f"Google Shopping seller {store.name}")
+    return replace(item, url=store.link, subtitle=store.name, fields=out)
 
 
 def _put(out: dict, key: str, raw: Any, *, quote: str, url: str | None, today: date, **money) -> None:
@@ -91,7 +154,17 @@ def shopping_item(raw: dict, *, today: date) -> ProviderItem | None:
         kind="product", title=title, url=url, subtitle=seller, provider="google_shopping",
         provider_id=F.clean_text(raw.get("product_id"), 80) or None, fields=out,
         image_url=_http(raw.get("thumbnail")),
+        offers_token=_token(raw.get("product_token") or raw.get("immersive_product_page_token")),
     )
+
+
+def _store(name: Any, link: Any, price_text: Any, price: Any) -> Store | None:
+    name = F.clean_text(name, 80)
+    link = store_link(link)
+    if not name or not link:
+        return None
+    number = price if isinstance(price, (int, float)) and not isinstance(price, bool) and price > 0 else None
+    return Store(name=name, link=link, price_text=F.clean_text(price_text, 40), price=number)
 
 
 def place_item(raw: dict, *, today: date) -> ProviderItem | None:
@@ -189,6 +262,16 @@ class _Api:
                     items.append(made)
         return items
 
+    def _stores_params(self, token: str) -> dict:  # pragma: no cover - abstract
+        raise NotImplementedError
+
+    def _stores(self, data: dict) -> list[Store]:  # pragma: no cover - abstract
+        raise NotImplementedError
+
+    async def stores(self, token: str) -> list[Store]:
+        """The stores selling one Shopping product (its `offers_token`), each at its own page."""
+        return self._stores(await self._get(self._stores_params(token)))[:MAX_STORES]
+
 
 class SearchApi(_Api):
     name = "SearchAPI"
@@ -196,6 +279,21 @@ class SearchApi(_Api):
 
     def _params(self, engine: str, query: str, page: int) -> dict:
         return {"engine": engine, "q": query, "page": page}
+
+    def _stores_params(self, token: str) -> dict:
+        return {"engine": "google_product_offers", "product_token": token}
+
+    def _stores(self, data: dict) -> list[Store]:
+        rows = data.get("offers")
+        out = []
+        for row in rows if isinstance(rows, list) else []:
+            if isinstance(row, dict):
+                merchant = row.get("merchant") if isinstance(row.get("merchant"), dict) else {}
+                made = _store(merchant.get("name") or row.get("seller"), row.get("link"),
+                              row.get("price"), row.get("extracted_price"))
+                if made is not None:
+                    out.append(made)
+        return out
 
 
 class SerpApi(_Api):
@@ -209,6 +307,20 @@ class SerpApi(_Api):
         if page > 1:
             params["start"] = (page - 1) * MAX_RESULTS  # SerpApi pages by result offset
         return params
+
+    def _stores_params(self, token: str) -> dict:
+        return {"engine": "google_immersive_product", "page_token": token}
+
+    def _stores(self, data: dict) -> list[Store]:
+        product = data.get("product_results") if isinstance(data.get("product_results"), dict) else {}
+        rows = product.get("stores")
+        out = []
+        for row in rows if isinstance(rows, list) else []:
+            if isinstance(row, dict):
+                made = _store(row.get("name"), row.get("link"), row.get("price"), row.get("extracted_price"))
+                if made is not None:
+                    out.append(made)
+        return out
 
 
 def _keys() -> tuple[str | None, str | None]:

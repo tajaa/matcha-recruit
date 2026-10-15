@@ -289,4 +289,17 @@ final class TasksLogicTests: XCTestCase {
         XCTAssertTrue(AssistantTaskContext(owner: "u", directive: "", taskId: "t1", itemId: nil).prompt
             .contains("my task t1"))
     }
+
+    func testALinkIsNamedForItsSiteOrGooglesPart() throws {
+        func label(_ s: String) throws -> String { TasksViewModel.linkLabel(try XCTUnwrap(URL(string: s))) }
+        XCTAssertEqual(try label("https://www.drbronner.com/products/balm?utm_source=goog"), "drbronner.com")
+        XCTAssertEqual(try label("https://shop.sprouts.com/landing"), "shop.sprouts.com")
+        XCTAssertEqual(try label("https://www.google.com/search?ibp=oshop&q=balm&prds=productid:1"), "Google Shopping")
+        // As stored from the provider: spaces and bars in the query.
+        XCTAssertEqual(try label("https://www.google.com/search?ibp=oshop&q=organic lip balm&prds=rds:PC_1|PROD_PC_1"),
+                       "Google Shopping")
+        XCTAssertEqual(try label("https://www.google.com/shopping/product/545"), "Google Shopping")
+        XCTAssertEqual(try label("https://www.google.com/maps/search/?api=1&query=Ramen"), "Google Maps")
+        XCTAssertEqual(try label("https://www.google.com/search?q=balm"), "google.com")
+    }
 }

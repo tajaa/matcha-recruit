@@ -103,7 +103,7 @@ refine starts at `refine`, "search more" at `providers`.
 | Field library, reading pages, checking claims (pure) | `fields.py` |
 | Hard constraints, bands, scores (pure) | `ranking.py` |
 | Finish contracts and their checks (pure) | `contracts.py` |
-| Google Shopping / Google Maps via SearchAPI (`SEARCH_API_KEY`), else SerpApi (`SERP_API_KEY`) | `providers.py` |
+| Google Shopping / Google Maps via SearchAPI (`SEARCH_API_KEY`), else SerpApi (`SERP_API_KEY`); a Shopping product's stores (`stores`, `with_store`) | `providers.py` |
 | The model's page loader: agent cards' page facts plus the page's same-site links | `fetch.py` |
 | No-model phases, `rerank`, `Deps` | `phases.py` |
 | Model phases | `model_phases.py` |
@@ -122,6 +122,16 @@ refine starts at `refine`, "search more" at `providers`.
 - **The person's own limits win.** A brief's budget and date become
   constraints the plan can't drop; a refine may change one, but one the model
   merely left out stays.
+- **A Shopping finding links to a store, not Google.** Neither provider puts a
+  store's link in its results (only Google's product page), so `run_providers`
+  asks for each new product's stores (SearchAPI `google_product_offers` with
+  `product_token`, SerpApi `google_immersive_product` with
+  `immersive_product_page_token`), at most `STORE_LOOKUPS` (12) a round, best
+  of each query first, and keeps the listing's seller there (else the first
+  store, with its price and name). That page is then the finding's own, so
+  `enrich` reads it (availability, schema.org data) and the dedupe key no
+  longer changes with the query. A product past the lookups, or whose lookup
+  failed, keeps Google's page.
 - **Links are provenance-gated.** A candidate's URL must be one the run saw
   (a search result, a page it loaded, or a link printed on one: `fetch.py`);
   photos only ones a loaded page showed, rehosted on our CDN
@@ -130,7 +140,8 @@ refine starts at `refine`, "search more" at `providers`.
   ask, limits and the counts (`unsupported_numbers`, `context`);
   a reason that doesn't is dropped, a headline that doesn't gets one repair,
   then the ranking-only summary.
-- **Budgets per round** (`Budgets`): 30 provider calls, 60 page loads, 6
+- **Budgets per round** (`Budgets`): 30 provider calls (searches and store
+  lookups), 60 page loads, 6
   browser views, reserved with `chain.grant` before use and refunded after.
   80 findings per task, 120 once it searched more. Counters reset when a
   round starts.
