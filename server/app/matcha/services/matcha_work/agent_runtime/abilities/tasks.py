@@ -220,9 +220,14 @@ _IDS = {"type": "array", "items": {"type": "string"}}
 def _prompt(_ctx: RunContext) -> str:
     from app.matcha.services.matcha_work.agent_tasks import allowance, playbooks
 
+    def field(f) -> str:
+        # A choice field names its choices, so a value is one of them.
+        choices = f": one of {' | '.join(f.options)}" if f.options else ""
+        return f"{f.key} ({f.label}{choices}{', required' if f.required else ''})"
+
     books = "\n".join(
         f"  - {p.key} ({allowance.WEIGHTS[p.key]} units): {p.description} Fields: "
-        + ", ".join(f"{f.key} ({f.label}{', required' if f.required else ''})" for f in p.intake if f.type != "consent")
+        + ", ".join(field(f) for f in p.intake if f.type != "consent")
         for p in playbooks.PLAYBOOKS.values() if playbooks.startable(p)
     )
     return f"""Tasks (background work):
@@ -232,7 +237,8 @@ minutes: a home to rent, a product across stores, places that fit, a service, jo
 fact, and posts here when it is done. Answer quick questions yourself instead.
 - Playbooks:
 {books}
-- Put what they told you in `brief` by field key. If something that would change the results a lot \
+- Put what they told you in `brief` by field key: a list field as an array, a choice field as one of \
+its choices exactly. If something that would change the results a lot \
 is missing (where, the budget, dates), call ask_form first, naming those field keys as missing and \
 the rest as known. Never ask for a task's details in prose. If nothing important is missing, start it.
 - Files they attached (by file id) can go in `input_ids`.
