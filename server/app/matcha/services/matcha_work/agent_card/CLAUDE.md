@@ -56,7 +56,7 @@ Two things follow:
 ## Limits and gating
 
 - **Plan:** Pro/Business (`entitlements_service.features_for_plan()["agent_cards"]`, `require_plan(PLAN_PRO)`). Admins bypass it.
-- **Monthly cap per user:** `AGENT_CARD_MONTHLY_RUNS` (Pro 40 / Business 100), counted on UTC month. Only `queued|running|done` rows count, so a failed run is free. The cap is surfaced in `GET /matcha-work/entitlements` → `quotas.agent_runs`.
+- **Monthly allowance per user:** card runs draw on the shared monthly task allowance (`agent_tasks/allowance.py`, `AGENT_TASK_MONTHLY_UNITS`: Pro 60 / Business 150 units, shared with job searches and Espresso tasks), counted on UTC month. A run costs one unit; a card's send-backs, rounds 2–5, are free (`card_round_cost`), and `preflight(task_id=…)` prices the next round so a free send-back goes through with nothing left. Only `queued|running|done` rows count, so a failed run is free. Every creator counts under one per-person lock (`allowance.lock`, then the card lock). Surfaced in `GET /matcha-work/entitlements` → `quotas.tasks` (units) and `quotas.agent_runs` (the same, in runs).
 - **Other request gates:**
   - workspace token budget checked (non-admin);
   - `check_rate_limit` 20 per hour per user;

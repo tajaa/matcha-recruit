@@ -9,8 +9,10 @@ a cover letter. Nothing is sent, applied for or submitted.
 
 Personal Espresso accounts only (the assistant's rule,
 `agent_runtime.eligibility`), Pro and up (`features_for_plan()["job_search"]`),
-a monthly allowance of whole searches (`JOB_SEARCH_MONTHLY_RUNS`, Pro 4 /
-Business 10), and the `jobs-1` consent (`agent_runtime/consent.py`).
+the shared monthly task allowance (`agent_tasks/allowance.py`: a whole search
+costs 5 units of Pro's 60 / Business's 150, so 12 searches with nothing else;
+`quota.job_search_usage` counts it in searches), and the `jobs-1` consent
+(`agent_runtime/consent.py`).
 
 ## The shape
 

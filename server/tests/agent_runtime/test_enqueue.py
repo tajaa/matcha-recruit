@@ -234,14 +234,14 @@ def test_only_a_run_that_may_open_a_browser_goes_to_the_browser_worker(monkeypat
 async def test_the_card_cap_does_not_count_assistant_runs_and_the_reverse(monkeypatch):
     from datetime import datetime, timezone
 
-    from app.matcha.services.matcha_work.agent_card import quota as card_quota
+    from app.matcha.services.matcha_work.agent_tasks import allowance
 
     conn = FakeConn([("COUNT(*)", 4)])
     assert await quota.used_today(conn, uuid4()) == 4
     assert "kind = 'assistant'" in conn.calls[0][1] and "date_trunc('day'" in conn.calls[0][1]
     card_conn = FakeConn([("COUNT(*)", 9)])
-    await card_quota.used_this_month(card_conn, uuid4())
-    assert "kind = 'card_agent'" in card_conn.calls[0][1]
+    await allowance.used_units(card_conn, uuid4())
+    assert "r.kind = 'card_agent'" in card_conn.calls[0][1] and "'assistant'" not in card_conn.calls[0][1]
 
     assert quota.limit_for_plan("pro") == 30 and quota.limit_for_plan("business") == 60
     assert quota.limit_for_plan("lite") == 0
