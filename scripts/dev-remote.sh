@@ -410,6 +410,28 @@ if [ -n "$OCEANLAB_PORT" ]; then
     OCEANLAB_ENV="VITE_OCEANLAB_TARGET='http://127.0.0.1:$OCEANLAB_PORT' "
 fi
 
+# Browser worker: Espresso's page screenshots, table bookings and the page
+# views research tasks take run a headless Chromium on a worker of their own
+# (prod: the matcha-agent-worker compose service). Those abilities are offered
+# only when AGENT_BROWSER_QUEUE is set, so dev does the same: the backend and
+# worker get the queue, and a third worker (window: browser) serves only it.
+# Skipped when server/venv's Playwright can't start its Chromium (each
+# Playwright release wants its own build), rather than offering a browser
+# whose every view fails.
+BROWSER_QUEUE="${AGENT_BROWSER_QUEUE:-agent_browser}"
+BROWSER_ENV=""
+has_playwright_chromium() {
+    [ -x "$PROJECT_ROOT/server/venv/bin/python" ] || return 1
+    "$PROJECT_ROOT/server/venv/bin/python" -c 'from playwright.sync_api import sync_playwright
+with sync_playwright() as p:
+    p.chromium.launch(headless=True).close()' >/dev/null 2>&1
+}
+if has_playwright_chromium; then
+    BROWSER_ENV="export AGENT_BROWSER_QUEUE='$BROWSER_QUEUE' && "
+else
+    echo -e "${YELLOW}No Playwright Chromium in server/venv, so page screenshots and bookings stay off. To turn them on: cd server && venv/bin/python -m playwright install chromium${NC}"
+fi
+
 # Create new tmux session
 echo -e "${YELLOW}Creating tmux session...${NC}"
 
@@ -450,7 +472,7 @@ fi
 
 # Pane 0: Backend (Server) - Main large pane on the left
 tmux new-session -d -s "$SESSION_NAME" -c "$PROJECT_ROOT/server" \
-    "$GS_OFF cd $SERVER_ROOT_Q && ${DEV_WATCH_ENV} export DATABASE_URL='$DATABASE_URL' && export REDIS_URL='$REDIS_URL' && export PORT='$BACKEND_PORT' && export UVICORN_RELOAD=true && ${CHAT_ENV}${BACKEND_TRUST_ENV}source venv/bin/activate && echo '$WAITING_MESSAGE' && ${SERVICE_WAIT_LOOP} && python run.py; echo -e '\n${RED}Backend exited.${NC}'; read"
+    "$GS_OFF cd $SERVER_ROOT_Q && ${DEV_WATCH_ENV} export DATABASE_URL='$DATABASE_URL' && export REDIS_URL='$REDIS_URL' && export PORT='$BACKEND_PORT' && export UVICORN_RELOAD=true && ${CHAT_ENV}${BROWSER_ENV}${BACKEND_TRUST_ENV}source venv/bin/activate && echo '$WAITING_MESSAGE' && ${SERVICE_WAIT_LOOP} && python run.py; echo -e '\n${RED}Backend exited.${NC}'; read"
 tmux rename-window -t "$SESSION_NAME:0" "dev"
 
 # Enable mouse mode for clicking panes and scrolling
@@ -470,11 +492,11 @@ sleep 1
 WORKER_POOL_ARGS=""
 [ "$(uname -s)" = "Darwin" ] && WORKER_POOL_ARGS=" --pool=solo"
 tmux split-window -t "$SESSION_NAME:dev.1" -v -c "$PROJECT_ROOT/server" \
-    "$GS_OFF cd $SERVER_ROOT_Q && ${DEV_WATCH_ENV} export DATABASE_URL='$DATABASE_URL' && export REDIS_URL='$REDIS_URL' && source venv/bin/activate && echo '$WAITING_MESSAGE' && ${SERVICE_WAIT_LOOP} && celery -A app.workers.celery_app worker --loglevel=info${WORKER_POOL_ARGS}; echo -e '\n${RED}Worker exited.${NC}'; read"
+    "$GS_OFF cd $SERVER_ROOT_Q && ${DEV_WATCH_ENV} export DATABASE_URL='$DATABASE_URL' && export REDIS_URL='$REDIS_URL' && ${BROWSER_ENV}source venv/bin/activate && echo '$WAITING_MESSAGE' && ${SERVICE_WAIT_LOOP} && celery -A app.workers.celery_app worker --loglevel=info${WORKER_POOL_ARGS}; echo -e '\n${RED}Worker exited.${NC}'; read"
 
 # Pane 3: Frontend - Start immediately (proxies will retry until backend is up)
 tmux split-window -t "$SESSION_NAME:dev.2" -v -c "$PROJECT_ROOT/client" \
-    "$GS_OFF cd $CLIENT_ROOT_Q && ${DEV_WATCH_ENV} VITE_PROXY_TARGET='http://127.0.0.1:$BACKEND_PORT' ${TELLUS_ENV}${OCEANLAB_ENV}npm run dev -- $VITE_HOST_ARGS --port $FRONTEND_PORT; echo -e '\n${RED}Frontend exited.${NC}'; read"
+    "$GS_OFF cd $CLIENT_ROOT_Q && ${DEV_WATCH_ENV} VITE_PROXY_TARGET='http://127.0.0.1:$BACKEND_PORT' ${TELLUS_ENV}${OCEANLAB_ENV}npm run dev -- $VITE_HOST_ARGS --port $FRONTEND_PORT --strictPort; echo -e '\n${RED}Frontend exited.${NC}'; read"
 
 # Pane 4 (optional): AI Chat Model Server
 if [ "$ENABLE_CHAT" = true ] && [ "$CHAT_REUSE_EXISTING" = false ]; then
@@ -498,6 +520,13 @@ if [ -n "$OCEANLAB_PORT" ]; then
         "$GS_OFF cd $OCEANLAB_ROOT_Q && ${DEV_WATCH_ENV} VITE_PROXY_TARGET='http://127.0.0.1:$BACKEND_PORT' npm run dev -- $VITE_HOST_ARGS --port $OCEANLAB_PORT --strictPort; echo -e '\n${RED}Oceanlab frontend exited.${NC}'; read"
 fi
 
+# Extra window: the browser worker (see BROWSER_ENV above). Only its own queue,
+# so it never picks up scheduled jobs or ordinary runs.
+if [ -n "$BROWSER_ENV" ]; then
+    tmux new-window -t "$SESSION_NAME" -n "browser" -c "$PROJECT_ROOT/server" \
+        "$GS_OFF cd $SERVER_ROOT_Q && ${DEV_WATCH_ENV} export DATABASE_URL='$DATABASE_URL' && export REDIS_URL='$REDIS_URL' && ${BROWSER_ENV}source venv/bin/activate && echo '$WAITING_MESSAGE' && ${SERVICE_WAIT_LOOP} && celery -A app.workers.celery_app worker --loglevel=info${WORKER_POOL_ARGS} -Q $BROWSER_QUEUE -n browser@%h; echo -e '\n${RED}Browser worker exited.${NC}'; read"
+fi
+
 # Select the server pane as active
 tmux select-window -t "$SESSION_NAME:dev"
 tmux select-pane -t "$SESSION_NAME:dev.0"
@@ -512,6 +541,9 @@ else
 fi
 echo -e "  - Backend:  http://localhost:$BACKEND_PORT"
 echo -e "  - Frontend: http://localhost:$FRONTEND_PORT"
+if [ -n "$BROWSER_ENV" ]; then
+    echo -e "  - Browser:  worker for page screenshots and bookings (queue $BROWSER_QUEUE, window: browser)"
+fi
 if [ -n "$TELLUS_PORT" ]; then
     echo -e "  - Tell-Us:  http://localhost:$FRONTEND_PORT/tellus/ (proxied; direct :$TELLUS_PORT, window: tellus)"
 fi
