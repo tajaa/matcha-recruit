@@ -178,3 +178,13 @@ def test_refine_changes_limits_but_never_loses_one():
     prices = [c for c in raised["plan"]["constraints"] if c["field"] == "price"]
     assert prices == [{"field": "price", "op": "lte", "value": 4000.0, "unit": "month"}]
     assert raised["plan"]["queries"] == plan["queries"]
+
+
+def test_a_query_that_already_says_where_isnt_given_the_place_again():
+    assert C.names_place("1br Mission District San Francisco dogs", "Mission District, San Francisco")
+    assert not C.names_place("1br Mission dogs", "Mission District, San Francisco")
+    plan = C.plan_from_brief("1 bedroom Mission District San Francisco", {"location": "Mission District, San Francisco"},
+                             today=TODAY)
+    assert plan["queries"] == ["1 bedroom Mission District San Francisco"]
+    plan = C.plan_from_brief("1 bedroom dogs", {"location": "Mission District, San Francisco"}, today=TODAY)
+    assert plan["queries"] == ["1 bedroom dogs Mission District, San Francisco"]
