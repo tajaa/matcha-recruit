@@ -32,6 +32,10 @@ from app.matcha.services.billing.entitlements_service import (
 WEIGHTS: dict[str, int] = {
     "agent_card": 1,
     "research": 3,
+    # The kinds of search (`research/kinds.py`): research with their own questions.
+    "products": 3,
+    "apartments": 3,
+    "places": 3,
     "reservation": 2,
     "job_search": 5,
 }

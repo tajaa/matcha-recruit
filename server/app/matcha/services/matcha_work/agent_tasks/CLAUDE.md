@@ -169,7 +169,34 @@ refine starts at `refine`, "search more" at `providers`.
 | The model's page loader: agent cards' page facts plus the page's same-site links | `fetch.py` |
 | No-model phases, `rerank`, `Deps` | `phases.py` |
 | Model phases | `model_phases.py` |
-| Brief + intake fields | `brief.py` |
+| Brief + intake fields (`ResearchBrief`, `ApartmentBrief`, `validator`) | `brief.py` |
+| Kinds of search: products, apartments, places (data) | `kinds.py` |
+
+### Kinds of search (`research/kinds.py`)
+
+A `SearchKind` is data that becomes a playbook of its own
+(`research.kind_playbook`): research's phases, stored under research's
+phase names (`Playbook.phase_prefix`; a phase name runs one function,
+checked by `validate_registry`). The phases read the kind from the task's
+playbook (`kinds.of(task)`). What a kind fixes, in `contracts.finalize_plan`
+(the one place every plan goes through: the model's, the fallback, a
+refine):
+
+| Kind | Finding | Starts at | Its own questions | Its limits | Actions |
+|---|---|---|---|---|---|
+| `products` | product | Google Shopping | budget each, must / nice / avoid, needed by | price | Buy |
+| `apartments` | listing | the web | where (required), rent a month, beds, baths, pets, move-in | rent/month, beds ≥, baths ≥, pets includes, available ≤ move-in | — |
+| `places` | place | Google Maps | near (required), must / nice / avoid | — | — |
+
+A kind's answers become constraints with `source: brief`, like a typed
+budget: the plan can't drop them, a refine may change them (its
+`limit_keys` are left out when the refined plan is finalized). The planner
+is told the kind (`prompts.plan_instructions`) and gets every answer by the
+kind's own labels (refine too). A budget has a unit only when the kind
+says so (`budget_unit`: apartments' rent is a month); generic research's
+has none, so it compares with a price in any unit and a home to buy isn't
+read as a monthly rent. `research` stays the catch-all. A task row's
+`playbook_label` names its kind for the app.
 
 ## Invariants
 
@@ -225,6 +252,5 @@ metadata as `[String: String]`; `task_id` is a kanban card there).
 
 ## Not yet (later PRs)
 
-Agent cards as tasks (`engine` `board`; the columns exist). Kinds of search as
-their own playbooks (products, apartments, places) over the research toolkit;
-Book (places) and Email-about-it (apartments) actions; a travel playbook.
+Agent cards as tasks (`engine` `board`; the columns exist). Book (places) and
+Email-about-it (apartments) actions; a travel playbook.

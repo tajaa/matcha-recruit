@@ -310,6 +310,8 @@ struct AgentTaskRound: Decodable, Identifiable, Hashable {
 struct AgentTask: Decodable, Identifiable, Hashable {
     var id: String
     var playbook: String
+    /// What kind of task it is, in the person's words ("Apartments", "Products").
+    var playbookLabel: String = ""
     /// `chain` (Espresso's own), `job_search` (a job search, shown with its own view).
     var engine: String = "chain"
     var jobSearchId: String?
@@ -330,6 +332,7 @@ struct AgentTask: Decodable, Identifiable, Hashable {
     enum CodingKeys: String, CodingKey {
         case id, playbook, engine, title, directive, status, phase, progress, error, unseen
         case jobSearchId = "job_search_id"
+        case playbookLabel = "playbook_label"
         case currentRound = "current_round"
         case itemCount = "item_count"
         case shownCount = "shown_count"
@@ -348,6 +351,7 @@ struct AgentTask: Decodable, Identifiable, Hashable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
         playbook = c.value(.playbook) ?? "research"
+        playbookLabel = c.value(.playbookLabel) ?? ""
         engine = c.value(.engine) ?? "chain"
         jobSearchId = c.value(.jobSearchId)
         title = c.value(.title) ?? ""

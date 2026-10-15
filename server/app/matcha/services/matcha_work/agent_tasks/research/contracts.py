@@ -32,6 +32,7 @@ from app.matcha.services.matcha_work.agent_card import schema
 from app.matcha.services.matcha_work.agent_runtime import registry
 
 from . import fields as F
+from .kinds import SearchKind
 from .ranking import OPS
 
 MAX_QUERIES = 8
@@ -158,14 +159,17 @@ def _unique(items: list[dict], key) -> list[dict]:
     return out
 
 
-def brief_constraints(brief: dict, *, item_kind: str, today: date) -> list[dict]:
-    """The hard limits the person typed, as constraints. They always win."""
+def brief_constraints(brief: dict, *, item_kind: str, today: date, budget_unit: str | None = None) -> list[dict]:
+    """The hard limits the person typed, as constraints. They always win. A
+    budget has a unit only when the kind of search says so (rent is a month);
+    with none it compares with a price in any unit, so a home to buy isn't
+    read as a monthly rent."""
     out = []
     if brief.get("budget_max"):
         constraint = {"field": "price", "op": "lte", "value": float(brief["budget_max"]),
                       "currency": brief.get("currency") or "USD", "source": "brief"}
-        if item_kind == "listing":
-            constraint["unit"] = "month"
+        if budget_unit:
+            constraint["unit"] = budget_unit
         out.append(constraint)
     if brief.get("needed_by") and item_kind == "listing":
         made = clean_constraint({"field": "available_date", "op": "before", "value": brief["needed_by"]}, today=today)
@@ -174,28 +178,46 @@ def brief_constraints(brief: dict, *, item_kind: str, today: date) -> list[dict]
     return out
 
 
-def finalize_plan(plan: dict, brief: dict, *, today: date) -> dict:
+_WORD = re.compile(r"[a-z0-9]+")
+
+
+def names_place(query: str, location: str) -> bool:
+    """Whether a query already says where: every word of the place is in it,
+    whatever the punctuation ("Mission District San Francisco" names
+    "Mission District, San Francisco")."""
+    words = set(_WORD.findall(query.casefold()))
+    return all(w in words for w in _WORD.findall(location.casefold()))
+
+
+def finalize_plan(plan: dict, brief: dict, *, today: date, kind: SearchKind | None = None) -> dict:
     """The person's own limits merged in (replacing the model's on the same
-    field and op), every constrained or preferred field shown, caps applied."""
-    kind = plan.get("item_kind") if plan.get("item_kind") in ITEM_KINDS else "other"
-    typed = brief_constraints(brief, item_kind=kind, today=today)
+    field and op), every constrained or preferred field shown, caps applied.
+    A kind of search fixes what a finding is, where the search starts, the
+    facts shown first, and adds its own limits from the brief."""
+    item_kind = kind.item_kind if kind else (plan.get("item_kind") if plan.get("item_kind") in ITEM_KINDS else "other")
+    typed = brief_constraints(brief, item_kind=item_kind, today=today,
+                              budget_unit=kind.budget_unit if kind else None)
+    if kind is not None:
+        typed += [{**c, "source": "brief"}
+                  for c in (clean_constraint(raw, today=today) for raw in kind.limits(brief)) if c]
     taken = {(c["field"], c["op"]) for c in typed}
     constraints = typed + [c for c in plan.get("constraints") or [] if (c["field"], c["op"]) not in taken]
     constraints = _unique(constraints, lambda c: (c["field"], c["op"], str(c["value"])))[:MAX_CONSTRAINTS]
     preferences = _unique(plan.get("preferences") or [], lambda p: p["field"])[:MAX_PREFERENCES]
-    shown = list(plan.get("fields") or [])
-    for key in [c["field"] for c in constraints] + [p["field"] for p in preferences]:
+    shown = list(kind.fields) if kind else []
+    for key in list(plan.get("fields") or []) + [c["field"] for c in constraints] + [p["field"] for p in preferences]:
         if key not in shown:
             shown.append(key)
     if not shown:
-        shown = list(DEFAULT_FIELDS[kind])
+        shown = list(DEFAULT_FIELDS[item_kind])
     location = brief.get("location")
     queries = list(plan.get("queries") or [])
     if location:
-        queries = [q if location.casefold() in q.casefold() else f"{q} {location}"[:160] for q in queries]
+        queries = [q if names_place(q, location) else f"{q} {location}"[:160] for q in queries]
     return {
         **plan,
-        "item_kind": kind,
+        "item_kind": item_kind,
+        **({"source": kind.source} if kind else {}),
         "queries": queries[:MAX_QUERIES],
         "fields": shown[:MAX_FIELDS + 2],
         "constraints": constraints,
@@ -231,7 +253,8 @@ PLAN_SCHEMA = {
 PLAN_FINISH = _finish("Planned the task", "Finish with the plan.", PLAN_SCHEMA)
 
 
-def normalize_plan(args: dict, *, brief: dict, today: date) -> tuple[dict, list[str]]:
+def normalize_plan(args: dict, *, brief: dict, today: date,
+                   kind: SearchKind | None = None) -> tuple[dict, list[str]]:
     result = _result(args)
     warnings = []
     queries = []
@@ -263,10 +286,10 @@ def normalize_plan(args: dict, *, brief: dict, today: date) -> tuple[dict, list[
         "summary": _text(result.get("summary"), 400),
         "origin": "model",
     }
-    return finalize_plan(plan, brief, today=today), warnings
+    return finalize_plan(plan, brief, today=today, kind=kind), warnings
 
 
-def plan_from_brief(directive: str, brief: dict, *, today: date) -> dict:
+def plan_from_brief(directive: str, brief: dict, *, today: date, kind: SearchKind | None = None) -> dict:
     """The plan when the model's plan fails: search the directive as written."""
     query = " ".join(directive.split())[:160]
     plan = {
@@ -274,7 +297,7 @@ def plan_from_brief(directive: str, brief: dict, *, today: date) -> dict:
         "fields": [], "constraints": [], "preferences": [], "fit_weight": 0.5,
         "prefer_sources": [], "summary": "", "origin": "fallback",
     }
-    return finalize_plan(plan, brief, today=today)
+    return finalize_plan(plan, brief, today=today, kind=kind)
 
 
 # ── discover ─────────────────────────────────────────────────────────────────
@@ -529,7 +552,8 @@ REFINE_SCHEMA = {
 REFINE_FINISH = _finish("Read the change", "Finish with the changed plan.", REFINE_SCHEMA)
 
 
-def normalize_refine(args: dict, *, plan: dict, brief: dict, today: date) -> tuple[dict, list[str]]:
+def normalize_refine(args: dict, *, plan: dict, brief: dict, today: date,
+                     kind: SearchKind | None = None) -> tuple[dict, list[str]]:
     """The plan after the person's follow-up, plus `search_again` and `note`."""
     result = _result(args)
     constraints = [c for c in (clean_constraint(r, today=today) for r in result.get("constraints") or []) if c]
@@ -547,7 +571,8 @@ def normalize_refine(args: dict, *, plan: dict, brief: dict, today: date) -> tup
     changed = {**plan, "constraints": constraints, "preferences": preferences, "fields": fields,
                "queries": queries or plan.get("queries") or []}
     # The brief's limits are already in `constraints` (kept or changed above).
-    rest = {k: v for k, v in (brief or {}).items() if k not in ("budget_max", "needed_by")}
-    final = finalize_plan(changed, rest, today=today)
+    limits = ("budget_max", "needed_by", *(kind.limit_keys if kind else ()))
+    rest = {k: v for k, v in (brief or {}).items() if k not in limits}
+    final = finalize_plan(changed, rest, today=today, kind=kind)
     return {"plan": final, "search_again": bool(result.get("search_again")),
             "note": _text(result.get("note"), 240)}, []

@@ -8,7 +8,7 @@ place goes into every query.
 from __future__ import annotations
 
 from datetime import date
-from typing import Any
+from typing import Any, Callable, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
@@ -55,15 +55,31 @@ class ResearchBrief(BaseModel):
         return value
 
 
-def validate_brief(raw: dict[str, Any]) -> dict:
-    """The brief as stored, or ValueError with what to fix."""
-    try:
-        brief = ResearchBrief.model_validate(raw or {})
-    except ValidationError as exc:
-        first = exc.errors()[0]
-        where = ".".join(str(p) for p in first.get("loc") or ()) or "brief"
-        raise ValueError(f"{where}: {first.get('msg')}") from exc
-    return brief.model_dump(mode="json", exclude_none=True)
+class ApartmentBrief(ResearchBrief):
+    """A home to rent: what a listing has to have, as limits."""
+
+    beds_min: float | None = Field(default=None, ge=0, le=10)
+    baths_min: float | None = Field(default=None, ge=0, le=10)
+    pets: list[Literal["dogs", "cats"]] = Field(default_factory=list, max_length=2)
+    move_in: date | None = None
+
+
+def validator(model: type[ResearchBrief]) -> Callable[[dict[str, Any]], dict]:
+    """A playbook's `validate_brief` over this brief model."""
+    def validate(raw: dict[str, Any]) -> dict:
+        """The brief as stored, or ValueError with what to fix."""
+        try:
+            brief = model.model_validate(raw or {})
+        except ValidationError as exc:
+            first = exc.errors()[0]
+            where = ".".join(str(p) for p in first.get("loc") or ()) or "brief"
+            raise ValueError(f"{where}: {first.get('msg')}") from exc
+        return brief.model_dump(mode="json", exclude_none=True)
+
+    return validate
+
+
+validate_brief = validator(ResearchBrief)
 
 
 INTAKE = (

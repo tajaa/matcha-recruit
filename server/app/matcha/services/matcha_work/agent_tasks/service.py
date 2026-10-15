@@ -57,12 +57,20 @@ def phase_name(row: dict) -> str | None:
     return phase.split(".", 1)[1] if isinstance(phase, str) and "." in phase else phase
 
 
+def _playbook_label(key: str | None) -> str:
+    from . import playbooks  # the registry imports the playbooks, which import this
+
+    playbook = playbooks.get(key)
+    return playbook.label if playbook else ""
+
+
 def task_view(row) -> dict:
     row = job_tasks.overlay(dict(row))
     completed, seen = row.get("completed_at"), row.get("seen_at")
     return {
         "id": str(row["id"]),
         "playbook": row.get("playbook"),
+        "playbook_label": _playbook_label(row.get("playbook")),
         "source": row.get("source") or "espresso",
         "engine": row.get("engine") or "chain",
         "title": row.get("title") or "",

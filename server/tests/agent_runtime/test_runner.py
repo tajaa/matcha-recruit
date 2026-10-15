@@ -188,6 +188,20 @@ async def test_an_invalid_finish_gets_one_repair_then_fails(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_two_finishes_in_one_turn_keep_the_first(monkeypatch):
+    """Seen on dev: a model sent its real result and then a stub ("x") in the
+    same turn, and the stub replaced it."""
+    record, _, _ = wire_store(monkeypatch)
+    client = FakeClient([response(call("finish", {"answer": "the real one"}), call("finish", {"answer": "x"}))])
+    out = await run(client, [])
+    assert out.result == {"answer": "the real one"} and len(client.calls) == 1
+    # A rejected first one doesn't count: the next valid one is the result.
+    client = FakeClient([response(call("finish", {}), call("finish", {"answer": "fixed"}))])
+    assert (await run(client, [])).result == {"answer": "fixed"}
+    assert runner.FINISH_TWICE.startswith("Not accepted")
+
+
+@pytest.mark.asyncio
 async def test_hosted_calls_are_observed_counted_and_budgeted(monkeypatch):
     record, _, _ = wire_store(monkeypatch)
     hosted = AgentTool(

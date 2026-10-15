@@ -217,6 +217,9 @@ struct TasksWorkspace: View {
                             Image(systemName: "briefcase").help("Job search")
                         }
                         if task.isLive { ProgressView().controlSize(.mini) }
+                        if !task.isJobSearch && !task.playbookLabel.isEmpty {
+                            Text("\(task.playbookLabel) \u{00B7}")
+                        }
                         Text(task.statusLabel)
                         if task.shownCount > 0 {
                             Text("\u{00B7} \(task.shownCount) \(task.isJobSearch ? "jobs" : "found")")

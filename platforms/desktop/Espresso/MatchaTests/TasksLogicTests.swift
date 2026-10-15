@@ -372,6 +372,12 @@ final class TasksLogicTests: XCTestCase {
         XCTAssertEqual(String(data: request, encoding: .utf8), #"{"params":{"quantity":"2"}}"#)
     }
 
+    func testATaskSaysWhatKindItIs() throws {
+        let task = try decode(AgentTask.self, #"{"id": "t1", "playbook": "apartments", "playbook_label": "Apartments"}"#)
+        XCTAssertEqual(task.playbookLabel, "Apartments")
+        XCTAssertEqual(try decode(AgentTask.self, #"{"id": "t2"}"#).playbookLabel, "")
+    }
+
     @MainActor
     func testAnActionsSwitchStartsAsTheServerSays() throws {
         let action = try decode(AgentTaskAction.self, """
@@ -383,5 +389,20 @@ final class TasksLogicTests: XCTestCase {
         XCTAssertEqual(flow.values["fill_in"], "yes")
         XCTAssertNil(flow.values["quantity"])
         XCTAssertEqual(TaskActionFlow.params(flow.values, fields: action.params), ["fill_in": "yes"])
+    }
+
+    func testTheServersOwnWordsReachThePerson() {
+        // APIClient unwraps a string `detail`: the error then carries the text itself.
+        XCTAssertEqual(AssistantText.message(for: .httpError(409, "Espresso only has Google's page for this one.")),
+                       "Espresso only has Google's page for this one.")
+        XCTAssertEqual(AssistantText.message(for: .httpError(409, #"{"detail": {"code": "x", "message": "Out of stock."}}"#)),
+                       "Out of stock.")
+        XCTAssertEqual(AssistantText.message(for: .httpError(400, #"{"detail": "Bad input."}"#)), "Bad input.")
+        // Not words for a person: the fallback.
+        XCTAssertEqual(AssistantText.message(for: .httpError(502, "<html><body>Bad gateway</body></html>"), fallback: "F"), "F")
+        XCTAssertEqual(AssistantText.message(for: .httpError(500, "Unknown error"), fallback: "F"), "F")
+        XCTAssertEqual(AssistantText.message(for: .httpError(500, String(repeating: "x", count: 500)), fallback: "F"), "F")
+        XCTAssertEqual(AssistantText.message(for: .httpError(500, #"{"other": 1}"#), fallback: "F"), "F")
+        XCTAssertEqual(AssistantText.message(for: .unauthorized, fallback: "F"), "F")
     }
 }

@@ -30,7 +30,7 @@ async def test_routes_pass_the_caller(monkeypatch):
     assert await routes.tasks_summary(USER) == {"ok": "summary"}
     assert routes.service.summary.await_args.kwargs == {"engines": ("chain", "job_search")}
     books = await routes.list_playbooks(USER)
-    assert [p["key"] for p in books["playbooks"]] == ["research", "job_search"]
+    assert [p["key"] for p in books["playbooks"]] == ["products", "apartments", "places", "research", "job_search"]
     assert books["units"]["rounds"]["more"] == 1
     body = AgentTaskCreate(request_id=uuid4(), directive="find me a lamp")
     assert await routes.create_agent_task(body, USER) == {"id": "new"}

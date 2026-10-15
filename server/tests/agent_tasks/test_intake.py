@@ -90,7 +90,8 @@ def test_views_show_fields_known_values_and_consent():
 
 def test_the_ask_form_tool_checks_what_the_model_sent():
     tool = intake.ask_form_tool()
-    assert tool.effect == "ask" and tool.parameters["properties"]["playbook"]["enum"] == ["job_search", "research"]
+    assert tool.effect == "ask" and tool.parameters["properties"]["playbook"]["enum"] == [
+        "apartments", "job_search", "places", "products", "research"]
     ctx = SimpleNamespace(grants={})
     with pytest.raises(ValueError):
         tool.parse_ask(ctx, None, {"playbook": "nope", "directive": "find it"})

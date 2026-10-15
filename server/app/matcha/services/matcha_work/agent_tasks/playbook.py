@@ -139,9 +139,12 @@ class Playbook:
     model_surface: str = ""
     personal_only: bool = True
     max_rounds: int = 12
+    # Playbooks built on another's phases (the kinds of search on research's)
+    # store them under its name, so one phase function has one name.
+    phase_prefix: str = ""
 
     def phase_key(self, name: str) -> str:
-        return f"{self.key}.{name}"
+        return f"{self.phase_prefix or self.key}.{name}"
 
     def view(self) -> dict:
         return {
@@ -200,6 +203,8 @@ class Playbook:
             for name in self.phases:
                 if not _KEY.fullmatch(name):
                     fail(f"bad phase name {name!r}")
+            if self.phase_prefix and not _KEY.fullmatch(self.phase_prefix):
+                fail("bad phase prefix")
         if self.actions:
             from .actions import ACTIONS
 

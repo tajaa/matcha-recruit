@@ -274,6 +274,7 @@ extension FeatureGuide {
              title: "Start one",
              points: [
                 "Ask Espresso in its chat, or type what you want in the box at the top of Tasks and click Ask Espresso.",
+                "Espresso picks the kind of task from what you ask: Products, Apartments, Places, or Research for anything else. Each asks its own questions, like beds and a move-in date for an apartment.",
                 "If it needs more, like a move-in date, it posts a short form in the chat. Fill it in, add files if it asks for them, and start it. Typing your answer works too.",
                 "Job searches live here too: click New job search, or ask Espresso for one.",
                 "Running tasks show as a count next to Tasks in the sidebar, with a dot when one needs you.",

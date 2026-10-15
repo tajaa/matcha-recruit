@@ -9,11 +9,13 @@ See `../CLAUDE.md` for the evidence rules and budgets.
 """
 from __future__ import annotations
 
+from dataclasses import replace
+
 from app.core.services import agent_surfaces
 
 from ..playbook import Playbook
-from . import model_phases, phases, ranking
-from .brief import INTAKE, validate_brief
+from . import kinds, model_phases, phases, ranking
+from .brief import INTAKE, validate_brief, validator
 from .fields import LIBRARY
 
 PHASES = {
@@ -32,8 +34,9 @@ PLAYBOOK = Playbook(
     label="Research",
     description=(
         "Go and find specific things that fit what the person wants, and keep them as a ranked "
-        "list with the evidence for each fact: a home to rent or buy, a product to buy, a "
-        "restaurant or other place, an event, a service. Not for job searches or bookings."
+        "list with the evidence for each fact: an event, a service, a home to buy, anything the "
+        "other kinds don't cover. Products, homes to rent and places to go have their own "
+        "playbooks (products, apartments, places); job searches too."
     ),
     engine="chain",
     item_kinds=("listing", "product", "place", "offer", "other"),
@@ -51,3 +54,23 @@ PLAYBOOK = Playbook(
     model_surface=agent_surfaces.ESPRESSO_TASKS,
     personal_only=True,
 )
+
+
+def kind_playbook(kind: kinds.SearchKind) -> Playbook:
+    """A kind of search as a playbook: research's, under research's phase
+    names, with the kind's own questions, check, facts and actions. Built
+    from research's playbook, so whatever research gains, the kinds have."""
+    return replace(
+        PLAYBOOK,
+        key=kind.key,
+        label=kind.label,
+        description=kind.description,
+        item_kinds=(kind.item_kind,),
+        intake=kind.intake,
+        validate_brief=validator(kind.brief_model),
+        actions=kind.actions,
+        phase_prefix=PLAYBOOK.key,
+    )
+
+
+KIND_PLAYBOOKS = tuple(kind_playbook(kind) for kind in kinds.KINDS.values())
