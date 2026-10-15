@@ -28,6 +28,7 @@ struct TasksWorkspace: View {
             }
         }
         .background(ThemeRadialBackground())
+        .featureGuideOnFirstVisit(.tasks)
         .task(id: appState.currentUser?.id) {
             vm.reset()
             await openFocus()
@@ -73,10 +74,14 @@ struct TasksWorkspace: View {
 
     private var rail: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Tasks")
-                .font(.system(size: 15, weight: .bold))
-                .foregroundColor(appState.themeText)
-                .padding(.horizontal, 14).padding(.top, 14).padding(.bottom, 8)
+            HStack {
+                Text("Tasks")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundColor(appState.themeText)
+                Spacer()
+                FeatureGuideButton(id: .tasks)
+            }
+            .padding(.horizontal, 14).padding(.top, 14).padding(.bottom, 8)
             newTaskBox
                 .padding(.horizontal, 10).padding(.bottom, 8)
             ScrollView {

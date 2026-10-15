@@ -9,6 +9,7 @@ import Foundation
 /// that every guide explains both how to use it and what to expect.
 enum FeatureGuideID: String, CaseIterable, Identifiable {
     case assistant
+    case tasks
     case jobSearch = "job_search"
     case channels
     case workspaces
@@ -79,6 +80,7 @@ extension SidebarSectionOrderStore.Section {
         case .threads: return .threads
         case .email: return .email
         case .assistant: return .assistant
+        case .tasks: return .tasks
         case .jobs: return .jobSearch
         }
     }
@@ -113,7 +115,7 @@ enum FeatureGuideSeen {
 
 extension FeatureGuide {
     static let all: [FeatureGuide] = [
-        assistant, jobSearch, channels, workspaces, reviewBoard, agentCards, sales,
+        assistant, tasks, jobSearch, channels, workspaces, reviewBoard, agentCards, sales,
         threads, journals, productivity, calendar, email,
     ]
 
@@ -265,6 +267,44 @@ extension FeatureGuide {
                 "Only you see a campaign's contacts.",
              ]),
     ])
+
+    static let tasks = FeatureGuide(id: .tasks, name: "Tasks", pages: [
+        Page(stage: .overview, icon: "checklist",
+             title: "Send Espresso off to do the legwork",
+             body: "Ask for something that takes real searching, like “find me a one-bedroom in SF under $3,500 that takes dogs.” Espresso works on it in the background and keeps what it finds here, with where each fact came from."),
+        Page(stage: .howTo, icon: "plus.bubble.fill",
+             title: "Start one",
+             points: [
+                "Ask Espresso in its chat, or type what you want in the box at the top of Tasks and click Ask Espresso.",
+                "If it needs more, like a move-in date, it posts a short form in the chat. Fill it in, add files if it asks for them, and start it. Typing your answer works too.",
+                "Running tasks show as a count next to Tasks in the sidebar, with a dot when one needs you.",
+             ]),
+        Page(stage: .howTo, icon: "slider.horizontal.3",
+             title: "Work with what it found",
+             points: [
+                "Open a finding to see its facts. Verified ones show the quote and the page they came from.",
+                "Save, Choose or Dismiss findings, add notes, or Ask Espresso about one.",
+                "Refine changes what it's looking for. Search more looks for more like these. Make document writes it all into a note in Journals.",
+             ]),
+        Page(stage: .expect, icon: "clock.fill",
+             title: "What to expect",
+             points: [
+                "A task takes a few minutes. You can leave: you'll get a notification when it's done or needs you.",
+                "It only researches. It doesn't buy, book, sign up or contact anyone.",
+                "Only a fact it verified can rule a finding out. One it couldn't check is marked Unconfirmed and ranked after the confirmed ones.",
+                "Up to \(tasksRunningAtOnce) tasks run at once.",
+             ]),
+        Page(stage: .expect, icon: "lock.fill",
+             title: "Units and privacy",
+             points: [
+                "A new task uses units from your monthly allowance, shown at the bottom of Tasks. Search more uses 1; Refine and Make document are free. A task that fails doesn't count.",
+                "Deleting a task removes what it found, but it still counts for the month.",
+                "Files you give it are kept privately: only you can open them, and only Espresso's AI models read them.",
+             ]),
+    ])
+
+    /// Tasks one person can have running (`MAX_LIVE` in agent_tasks/enqueue.py).
+    static let tasksRunningAtOnce = 2
 
     static let agentCards = FeatureGuide(id: .agentCards, name: "Agent cards", pages: [
         Page(stage: .overview, icon: "wand.and.stars",
