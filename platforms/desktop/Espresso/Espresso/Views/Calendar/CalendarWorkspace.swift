@@ -46,6 +46,7 @@ struct CalendarWorkspace: View {
             }
         }
         .background(ThemeRadialBackground())
+        .featureGuideOnFirstVisit(.calendar)
         .task {
             vm.mode = CalendarViewModel.Mode(rawValue: storedMode) ?? .month
             if let date = takeFocusDate() {
@@ -271,6 +272,7 @@ private struct CalendarHeader: View {
             Button(action: onConnections) {
                 Label("Calendars", systemImage: "calendar.badge.clock").font(.system(size: 11))
             }.buttonStyle(.plain).help("Connect Google or Apple Calendar and manage Espresso access")
+            FeatureGuideButton(id: .calendar, size: 11)
             if !compact { appleStatus; googleStatus }
             if appState.assistantEnabled {
                 Button(action: onAsk) {

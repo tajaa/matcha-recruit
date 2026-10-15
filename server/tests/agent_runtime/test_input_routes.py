@@ -100,3 +100,29 @@ async def test_file_links_and_deletes(monkeypatch):
     with pytest.raises(HTTPException) as exc:
         await routes.delete_input(file_id, user)
     assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_deleting_a_message_deletes_the_files_it_gave_espresso(monkeypatch):
+    from datetime import datetime, timezone
+
+    from app.werk.routes import channels_ws
+
+    user, channel_id, message_id = _user(), uuid4(), uuid4()
+    conn = FakeConn([
+        ("FROM channel_messages m", {"id": message_id, "sender_id": user.id, "deleted_at": None,
+                                     "created_at": datetime.now(timezone.utc), "message_type": "user",
+                                     "reply_metadata": None}),
+        ("SELECT role FROM channel_members", "owner"),
+        ("DELETE FROM mw_agent_inputs WHERE message_id", [{"storage_path": "s3://p/cv.pdf"}]),
+    ])
+    monkeypatch.setattr(channels, "get_connection", connection(conn))
+    monkeypatch.setattr(channels, "_require_channel_capability", AsyncMock())
+    monkeypatch.setattr(channels_ws, "broadcast_message_deleted", AsyncMock())
+    removed = AsyncMock()
+    monkeypatch.setattr(inputs, "remove_stored", removed)
+
+    assert (await channels.delete_channel_message(channel_id, message_id, user))["ok"] is True
+    assert conn.ran("SET deleted_at = NOW()")
+    assert conn.ran("DELETE FROM mw_agent_inputs")[0][2] == (message_id,)
+    removed.assert_awaited_once_with(["s3://p/cv.pdf"])

@@ -26,6 +26,8 @@ final class EspressoFilesTests: XCTestCase {
         let rules = AttachmentRules.espresso
         XCTAssertNil(rules.refusal(filename: "cv.PDF", size: 1_000, pending: []))
         XCTAssertNil(rules.refusal(filename: "IMG_1.heic", size: 1_000, pending: []))
+        XCTAssertEqual(rules.refusal(filename: "old.doc", size: 10, pending: []),
+                       "Save older Word files as .docx or PDF first")
         XCTAssertEqual(rules.refusal(filename: "setup.zip", size: 10, pending: []),
                        "Espresso reads PDF, Word, text, Markdown, CSV and JSON files, and images")
         let five = (0..<5).map { pending("f\($0).txt", bytes: 10) }

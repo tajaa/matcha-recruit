@@ -38,6 +38,7 @@ Stripe headcount + jurisdiction-count pricing; grants only `compliance`. Reuses 
 
 ### Matcha-work — collaborative AI workspace
 Web `/work/*` (business) + `/espresso/*` (personal) and macOS **Espresso** (`platforms/desktop/Espresso/`) share one backend (`routes/matcha_work/`) and `mw_*` tables — confirm which surface before editing. Personal ($20/mo Stripe) or business (token-pack) mode.
+**Every Espresso (macOS) feature ships with a how-it-works guide** (what it is, how to use it, what to expect), added to `Models/MatchaWork/FeatureGuides.swift` with its "?" button and first-visit trigger. A new sidebar section won't compile without one. → `platforms/desktop/Espresso/OVERVIEW.md` §Navigation & Layout
 
 ### Custom products — the admin product builder (`/admin/products`)
 Data-driven alternative to the ~10-touchpoint hardcoded products above — composed at `/admin/products`, live at `/p/<slug>/signup`. Materialized (not overlaid) grants, `product:<slug>` signup_source namespacing, per-seat/block/flat/free/contact-sales pricing.
