@@ -31,7 +31,7 @@ def _keys(situation):
 
 def test_reading_the_web_and_shopping_need_nothing_switched_on():
     assert _keys(catalog.Situation(private=False)) == ["web", "shopping"]
-    assert _keys(catalog.Situation(private=True)) == ["web", "shopping"]
+    assert _keys(catalog.Situation(private=True)) == ["web", "shopping", "files"]
 
 
 def test_a_private_only_ability_is_not_available_in_a_project_chat():
@@ -67,7 +67,7 @@ def test_calendar_is_available_without_google_for_reminders():
     calendar = next(a for a in _catalog() if a.key == "calendar")
     state = catalog.availability(calendar, catalog.Situation(private=True, grants={"calendar": {}}))
     assert state.available and state.missing_scopes == (SCOPE_CALENDAR_EVENTS,)
-    assert _keys(catalog.Situation(private=True, grants={"calendar": {}})) == ["web", "shopping", "calendar"]
+    assert _keys(catalog.Situation(private=True, grants={"calendar": {}})) == ["web", "shopping", "files", "calendar"]
 
 
 def test_reservations_are_not_offered_without_the_browser_queue(monkeypatch):

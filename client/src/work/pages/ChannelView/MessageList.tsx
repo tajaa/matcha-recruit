@@ -3,6 +3,8 @@ import type { ChannelMessage, ChannelMember } from '../../api/channels'
 import { HuumeAvatar } from '../../components/channels/HuumeAvatar'
 import ChannelActionCard from '../../components/channels/actions/ChannelActionCard'
 import AgentCardMessage from '../../components/channels/AgentCardMessage'
+import PrivateAttachment from '../../components/channels/PrivateAttachment'
+import { privateInputId } from '../../api/matchaWork/assistant'
 import { isAgentCardMessage, splitTicketToken } from '../../components/channels/agentCardMessageHelpers'
 import { renderMessageContent } from './mentions'
 import { isUrgentSystemContent, renderSystemContent, stripEmphasis } from './systemContent'
@@ -199,7 +201,9 @@ export default function MessageList({
             {!isDeleted && msg.attachments && msg.attachments.length > 0 && (
               <div className="flex flex-wrap gap-2 mt-1">
                 {msg.attachments.map((att, ai) =>
-                  att.content_type.startsWith('image/') ? (
+                  privateInputId(att.url) ? (
+                    <PrivateAttachment key={ai} att={att} inputId={privateInputId(att.url) as string} />
+                  ) : att.content_type.startsWith('image/') ? (
                     <a key={ai} href={att.url} target="_blank" rel="noopener noreferrer">
                       <img src={att.url} alt={att.filename} className="max-w-xs max-h-48 rounded-md border border-w-line" />
                     </a>

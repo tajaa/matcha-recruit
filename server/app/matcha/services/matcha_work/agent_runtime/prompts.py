@@ -203,6 +203,19 @@ async def open_confirmation(conn, *, channel_id: UUID, owner_user_id: UUID) -> d
     return prompt
 
 
+async def open_question(conn, *, channel_id: UUID, owner_user_id: UUID) -> dict | None:
+    """The person's newest live question here: a file sent on its own may be
+    the answer to it."""
+    row = await conn.fetchrow(
+        """SELECT id FROM mw_agent_card_prompts
+           WHERE channel_id = $1 AND owner_user_id = $2 AND kind = 'ask_user'
+             AND status = 'open' AND expires_at > NOW()
+           ORDER BY created_at DESC LIMIT 1""",
+        channel_id, owner_user_id,
+    )
+    return dict(row) if row else None
+
+
 async def claim(conn, prompt: dict, user_id: UUID, answer: str) -> bool:
     """Answered once: the first claim wins, a second finds it closed."""
     return bool(await conn.fetchval(

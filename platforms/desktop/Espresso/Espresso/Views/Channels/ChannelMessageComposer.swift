@@ -13,7 +13,7 @@ struct ChannelMessageComposer: View {
     /// Project discussions expose a virtual @espresso mention even though the
     /// inactive service identity is intentionally not a channel member.
     let supportsEspressoAgent: Bool
-    let maxAttachments: Int
+    let attachmentRules: AttachmentRules
     let typingPing: () -> Void
     /// Send the current draft. Text is passed up because the composer now owns
     /// it locally (see `text`) — keeping it off the parent's @State is what
@@ -202,8 +202,8 @@ struct ChannelMessageComposer: View {
                         .foregroundColor(appState.themeText.opacity(0.55))
                 }
                 .buttonStyle(.plain)
-                .help("Attach files (max \(maxAttachments), 50 MB each)")
-                .disabled(pendingAttachments.count >= maxAttachments || isUploading)
+                .help("Attach files (max \(attachmentRules.maxFiles), \(attachmentRules.maxFileBytes / (1024 * 1024)) MB each)")
+                .disabled(pendingAttachments.count >= attachmentRules.maxFiles || isUploading)
 
                 Button(action: onPasteImage) {
                     Image(systemName: "photo.on.rectangle")
@@ -212,7 +212,7 @@ struct ChannelMessageComposer: View {
                 }
                 .buttonStyle(.plain)
                 .help("Paste image from clipboard (⌃⌘⇧4 to screenshot)")
-                .disabled(pendingAttachments.count >= maxAttachments || isUploading)
+                .disabled(pendingAttachments.count >= attachmentRules.maxFiles || isUploading)
 
                 ComposerTextView(
                     text: $text,

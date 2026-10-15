@@ -268,7 +268,9 @@ struct ChannelMessageRowView: View {
                     if !rp.attachments.isEmpty {
                         HStack(spacing: 4) {
                             ForEach(rp.attachments.prefix(3), id: \.self) { att in
-                                if att.contentType.hasPrefix("image/"), let url = URL(string: att.url) {
+                                // A private Espresso photo has no public URL: named, not drawn.
+                                if att.contentType.hasPrefix("image/"), att.privateInputId == nil,
+                                   let url = URL(string: att.url) {
                                     AsyncImage(url: url) { phase in
                                         switch phase {
                                         case .success(let image):
@@ -385,7 +387,16 @@ struct ChannelMessageRowView: View {
 
     @ViewBuilder
     private func attachmentView(_ att: ChannelAttachment) -> some View {
-        if att.contentType.hasPrefix("image/"), let url = URL(string: att.url) {
+        if att.contentType.hasPrefix("image/"), let inputId = att.privateInputId {
+            // A photo given to Espresso: private, shown through a short link.
+            Button {
+                onOpenAttachment(att)
+            } label: {
+                PrivateInputImage(inputId: inputId)
+            }
+            .buttonStyle(.plain)
+            .help("Only you can open this file")
+        } else if att.contentType.hasPrefix("image/"), let url = URL(string: att.url) {
             // Button (not .onTapGesture) so the tap reliably wins over the
             // row's hover / contextMenu gestures.
             Button {
@@ -433,6 +444,7 @@ struct ChannelMessageRowView: View {
                 .cornerRadius(6)
             }
             .buttonStyle(.plain)
+            .help(att.privateInputId != nil ? "Only you can open this file" : "")
         }
     }
 
@@ -709,5 +721,57 @@ struct ChannelAvatarView: View {
         } catch {
             // Leave initials up; a later appearance retries the fetch.
         }
+    }
+}
+
+
+/// A photo given to Espresso. It has no public URL: the link is fetched (and
+/// reused while it lasts) before the image loads.
+private struct PrivateInputImage: View {
+    @Environment(AppState.self) private var appState
+    let inputId: String
+    @State private var link: URL?
+    @State private var failed = false
+
+    var body: some View {
+        Group {
+            if let link {
+                AsyncImage(url: link) { phase in
+                    if case .success(let image) = phase {
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(maxWidth: 320, maxHeight: 240)
+                            .cornerRadius(6)
+                    } else {
+                        placeholder
+                    }
+                }
+            } else {
+                placeholder
+            }
+        }
+        .task(id: inputId) {
+            do {
+                link = try await MatchaWorkService.shared.assistantInputLink(inputId)
+            } catch {
+                failed = true
+            }
+        }
+    }
+
+    private var placeholder: some View {
+        RoundedRectangle(cornerRadius: 6)
+            .fill(appState.themeText.opacity(0.05))
+            .frame(width: 200, height: 120)
+            .overlay {
+                if failed {
+                    Label("Photo unavailable", systemImage: "photo")
+                        .font(.system(size: 11))
+                        .foregroundColor(appState.themeText.opacity(0.45))
+                } else {
+                    ProgressView().controlSize(.small)
+                }
+            }
     }
 }

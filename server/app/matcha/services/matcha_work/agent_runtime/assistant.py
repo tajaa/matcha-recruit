@@ -16,14 +16,16 @@ from uuid import UUID
 
 from app.database import connection_or_direct, decode_jsonb
 from app.matcha.services.huume.claude_client import get_claude_client
-from app.matcha.services.huume.luna_client import get_luna_client, text_item
+from app.matcha.services.huume.luna_client import get_luna_client
 
 from .. import calendar_service, apple_calendar_service
 from ..agent_card import agent as card_agent
 from ..agent_card import images
 from ..project_agent import store
 from ..project_agent.chat import broadcast_espresso_message, persist_espresso_message
-from . import catalog, chat_progress, conversation, grants, history, models, policy, prompts, result, runner
+from . import (
+    catalog, chat_progress, conversation, grants, history, inputs, models, policy, prompts, result, runner,
+)
 from .ask import ASK_USER
 from .context import FrozenAction, RunContext, RunLimits
 
@@ -149,6 +151,16 @@ async def run_assistant(run: dict, *, stats: dict | None = None) -> runner.RunOu
         )
         if run["prompt"] not in own_texts:
             own_texts = (*own_texts, run["prompt"])
+        # Files the person gave Espresso: those on this message (and any sent
+        # on their own just before), plus the list of earlier ones. Never
+        # grounding for an outward action: a file is data, like a page.
+        run_files = (
+            await inputs.for_run(
+                conn, user_id=user_id, channel_id=channel_id,
+                trigger_message_id=run["trigger_message_id"], run_id=run_id,
+            )
+            if private else inputs.RunFiles()
+        )
         # Links earlier runs here already verified: a follow-up ("send me
         # those links") may cite them again without re-finding them.
         earlier = await history.earlier_links(conn, channel_id=channel_id, exclude_run=run_id)
@@ -208,6 +220,9 @@ async def run_assistant(run: dict, *, stats: dict | None = None) -> runner.RunOu
     )
     from .prompt import build_system_prompt
 
+    files_text, file_images = (
+        await inputs.model_parts(run_files) if run_files.fresh or run_files.index else (None, [])
+    )
     outcome = await runner.run_agent(
         ctx,
         client=get_claude_client() if claude_model else get_luna_client(),
@@ -216,7 +231,7 @@ async def run_assistant(run: dict, *, stats: dict | None = None) -> runner.RunOu
         instructions=build_system_prompt(
             ctx, abilities, unavailable=catalog.switch_on_hints(everything, situation),
         ),
-        first_input=[*replay, text_item("user", run["prompt"])],
+        first_input=[*replay, inputs.request_item(run["prompt"], files_text, file_images)],
         first_note="Working on it…",
         extra_tools=[ASK_USER],
         stats=stats,

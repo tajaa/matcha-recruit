@@ -36,6 +36,19 @@ CANCELLED = "Okay, I won't."
 ON_IT = "On it."
 
 
+def files_received(count: int) -> str:
+    """The reply to files sent with no words and no question waiting: kept,
+    and no run (so no request) spent guessing what they're for."""
+    if count == 1:
+        return "Got your file. What would you like me to do with it?"
+    return f"Got your {count} files. What would you like me to do with them?"
+
+
+def files_answer(count: int) -> str:
+    """The request files sent on their own stand for when they answer a question."""
+    return "Here's the file." if count == 1 else "Here are the files."
+
+
 def assistant_request(text: str, *, repo_connected: bool) -> str | None:
     """The request when this `@espresso` mention in a project chat is for the
     assistant; None to leave it to the repository agent.
@@ -241,11 +254,22 @@ async def handle_prompt_reply(*, channel_id: UUID, user, content: str, prompt_id
 async def handle_message(
     *, channel_id: UUID, company_id: UUID, user, content: str, message_id: UUID,
     surface: str, reply_prompt_id: UUID | None = None, project_id: UUID | None = None,
-    model: str | None = None,
+    model: str | None = None, files: int = 0,
 ) -> bool:
     """One message addressed to Espresso. Returns whether it was handled.
-    `model`: the app menu's pick, for the run this message starts."""
+    `model`: the app menu's pick, for the run this message starts. `files`:
+    how many files the message carries (`inputs.py`)."""
     try:
+        if files and not " ".join(strip_espresso_mention(content).split()):
+            # Files with no words: the answer to a question Espresso asked,
+            # else kept for whatever the person asks next.
+            if reply_prompt_id is None:
+                async with get_connection() as conn:
+                    asked = await prompts.open_question(conn, channel_id=channel_id, owner_user_id=user.id)
+                if asked is None:
+                    await post_as_espresso(company_id, channel_id, files_received(files))
+                    return True
+            content = files_answer(files)
         if reply_prompt_id is not None:
             handled = await handle_prompt_reply(
                 channel_id=channel_id, user=user, content=content,

@@ -339,10 +339,12 @@ async def _bg_assistant_message(
     prompt_id: Optional[UUID],
     card_number_removed: bool,
     model: Optional[str] = None,
+    file_count: int = 0,
 ) -> None:
     """One message in a private conversation with Espresso: a reply to one of
     its questions, or a new request. `model` is the app menu's pick; the
-    runtime keeps it only if this server offers it."""
+    runtime keeps it only if this server offers it. `file_count`: the
+    private files the message carries (`agent_runtime/inputs.py`)."""
     try:
         from app.matcha.services.matcha_work.agent_runtime import chat_entry
         from app.matcha.services.matcha_work.project_agent.chat import post_as_espresso
@@ -360,7 +362,7 @@ async def _bg_assistant_message(
         await chat_entry.handle_message(
             channel_id=channel_id, company_id=company_id, user=user, content=content,
             message_id=message_id, surface="assistant", reply_prompt_id=prompt_id,
-            model=model,
+            model=model, files=file_count,
         )
     except Exception:
         logger.warning("Espresso assistant message failed", exc_info=True)
@@ -4188,6 +4190,28 @@ async def channel_websocket(
                                 content, card_number_removed = await _agent_card_redaction(
                                     conn, ch_uuid, user.id, content, agent_prompt_id,
                                 )
+                            input_ids: list = []
+                            if is_assistant and attachments:
+                                # Only the sender's own private uploads to this
+                                # conversation ride along (agent_runtime/inputs.py),
+                                # described from our rows: never a public URL, never
+                                # someone else's file.
+                                from app.matcha.services.matcha_work.agent_runtime import (
+                                    inputs as agent_inputs,
+                                )
+                                attachments, input_ids = await agent_inputs.claim_for_message(
+                                    conn, user_id=user.id, channel_id=ch_uuid,
+                                    attachments=attachments, client_message_id=cmid_uuid,
+                                )
+                                attachments_json = _json.dumps(attachments) if attachments else "[]"
+                                if not attachments and not content:
+                                    await websocket.send_json({
+                                        "type": "error",
+                                        "message": "Those files couldn't be sent. Attach them again.",
+                                        "channel_id": channel_id,
+                                        "client_message_id": client_message_id,
+                                    })
+                                    continue
                             # ON CONFLICT path makes the INSERT idempotent on
                             # (sender_id, client_message_id) so a retried send
                             # returns the original row instead of inserting a
@@ -4216,6 +4240,8 @@ async def channel_websocket(
                                 ch_uuid, user.id, content or "", attachments_json, reply_uuid, cmid_uuid,
                             )
                             is_new_message = bool(row["inserted"])
+                            if is_new_message and input_ids:
+                                await agent_inputs.link_to_message(conn, input_ids, row["id"])
                             # Everything between the committed INSERT and the
                             # broadcast below is best-effort: a failure here
                             # must degrade the payload (no preview / no
@@ -4341,7 +4367,7 @@ async def channel_websocket(
                                     _spawn_bg(_bg_assistant_message(
                                         str(ch_uuid), user, row["content"], row["id"],
                                         agent_prompt_id, card_number_removed,
-                                        assistant_model,
+                                        assistant_model, len(input_ids),
                                     ))
                                 dispatch_new = False
                             else:

@@ -35,7 +35,7 @@ async def test_a_plain_message_starts_a_run_without_a_mention(wired):
     kwargs = wired.handled.await_args.kwargs
     assert kwargs == dict(channel_id=channel, company_id=wired.company, user=user,
                           content="find a standing desk", message_id=message, surface="assistant",
-                          reply_prompt_id=None, model=None)
+                          reply_prompt_id=None, model=None, files=0)
     wired.posted.assert_not_awaited()
     # The channel is looked up as THIS person's conversation, not just by id.
     lookup = wired.conn.ran("FROM channels")[0]
@@ -133,3 +133,26 @@ def test_the_mention_dispatcher_tries_the_card_then_the_assistant_then_the_repo_
     assert card < ours < repo
     assert "assistant_available(" in source[card:ours]
     assert 'surface="project_chat"' in source[ours:repo]
+
+
+@pytest.mark.asyncio
+async def test_the_file_count_reaches_the_assistant(wired):
+    await channels_ws._bg_assistant_message(str(uuid4()), _user(), "", uuid4(), None, False, None, 2)
+    assert wired.handled.await_args.kwargs["files"] == 2
+
+
+def test_only_the_senders_own_private_files_ride_along():
+    """In a private conversation the attachments are claimed from the
+    sender's own uploads before the row is stored, linked to it after, and
+    counted for the assistant."""
+    path = _send_path()
+    claim = path.index("agent_inputs.claim_for_message(")
+    insert = path.index("INSERT INTO channel_messages")
+    assert claim < insert
+    assert "if is_assistant and attachments:" in path[:claim]
+    assert "client_message_id=cmid_uuid" in path[claim:insert]
+    assert 'attachments_json = _json.dumps(attachments) if attachments else "[]"' in path[claim:insert]
+    link = path.index("agent_inputs.link_to_message(conn, input_ids, row[\"id\"])")
+    assert link > insert and "if is_new_message and input_ids:" in path[insert:link]
+    call = path[path.index("_spawn_bg(_bg_assistant_message("):]
+    assert "len(input_ids)" in call[:call.index("))")]
