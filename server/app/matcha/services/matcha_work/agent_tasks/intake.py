@@ -116,7 +116,12 @@ def _list_parts(raw: Any) -> list[str]:
 
 def clean_values(playbook: Playbook, raw: dict) -> tuple[dict, dict[str, str]]:
     """(the values it could read, field key -> what is wrong)."""
-    fields = {f.key: f for f in playbook.intake}
+    return clean_fields(playbook.intake, raw)
+
+
+def clean_fields(specs: tuple[IntakeField, ...], raw: dict) -> tuple[dict, dict[str, str]]:
+    """`clean_values` over any fields (a playbook's intake, an action's params)."""
+    fields = {f.key: f for f in specs}
     clean, errors = {}, {}
     for key, value in (raw or {}).items():
         spec = fields.get(key)

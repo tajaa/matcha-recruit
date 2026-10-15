@@ -46,6 +46,7 @@ PLAYBOOK = Playbook(
     rerank=phases.rerank,
     describe_constraint=ranking.describe,
     item_actions=("save", "dismiss", "note", "more_like_this"),
+    actions=("buy",),
     budgets=phases.BUDGETS,
     model_surface=agent_surfaces.ESPRESSO_TASKS,
     personal_only=True,

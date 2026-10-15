@@ -312,4 +312,76 @@ final class TasksLogicTests: XCTestCase {
         XCTAssertEqual(try label("https://www.google.com/maps/search/?api=1&query=Ramen"), "Google Maps")
         XCTAssertEqual(try label("https://www.google.com/search?q=balm"), "google.com")
     }
+
+    func testAFindingCarriesItsActionsAndWhatWasDone() throws {
+        let json = """
+        {"id": "i1", "kind": "product", "title": "Lip balm",
+         "actions": [
+           {"key": "buy", "label": "Buy", "icon": "cart", "description": "Opens checkout.",
+            "confirm_label": "Go to checkout", "available": true, "reason": null,
+            "params": [{"key": "quantity", "label": "Quantity", "type": "number", "required": false, "help": "1 to 10"}]},
+           {"key": "book", "label": "Book", "icon": "calendar", "available": false,
+            "reason": "Booking needs the browser."}
+         ],
+         "action_history": [
+           {"id": "a1", "action": "buy", "label": "Buy", "status": "done", "confirm_label": "Go to checkout",
+            "preview": {"title": "Buy Lip balm", "lines": [{"label": "Store", "value": "shop.test"}], "note": "You pay there."},
+            "result": {"headline": "Checkout opened at shop.test", "lines": [], "url": "https://shop.test/cart/1:1"},
+            "finished_at": "2026-10-14T21:00:00+00:00"},
+           {"id": "a2", "action": "buy", "label": "Buy", "status": "failed", "error": "Out of stock."},
+           {"id": "a3", "action": "buy", "label": "Buy", "status": "proposed"}
+         ]}
+        """
+        let item = try decode(AgentTaskItem.self, json)
+        XCTAssertEqual(item.actions.map(\.key), ["buy", "book"])
+        let buy = item.actions[0]
+        XCTAssertTrue(buy.available)
+        XCTAssertEqual(buy.confirmLabel, "Go to checkout")
+        XCTAssertEqual(buy.params.first?.key, "quantity")
+        XCTAssertEqual(buy.systemImage, "cart")
+        XCTAssertFalse(item.actions[1].available)
+        XCTAssertEqual(item.actions[1].reason, "Booking needs the browser.")
+        XCTAssertEqual(item.actions[1].confirmLabel, "Go ahead")
+        XCTAssertEqual(AgentTaskAction.systemImage("calendar"), "calendar.badge.plus")
+        XCTAssertEqual(AgentTaskAction.systemImage("rocket"), "arrow.up.right.square")
+
+        let done = item.actionHistory[0]
+        XCTAssertTrue(done.isFinished)
+        XCTAssertNotNil(done.finishedAt)
+        XCTAssertEqual(done.preview?.lines.first?.value, "shop.test")
+        XCTAssertEqual(done.result?.url, "https://shop.test/cart/1:1")
+        XCTAssertEqual(TaskItemDetailView.doneLine(done), "Checkout opened at shop.test")
+        XCTAssertEqual(TaskItemDetailView.doneLine(item.actionHistory[1]), "Buy didn't go through: Out of stock.")
+        XCTAssertFalse(item.actionHistory[2].isFinished)
+        XCTAssertTrue(item.actionHistory[2].isProposed)
+        // Older servers send neither.
+        XCTAssertTrue(try decode(AgentTaskItem.self, #"{"id": "i2"}"#).actions.isEmpty)
+    }
+
+    func testAnActionGoesFromItsFieldsToReviewToDone() throws {
+        let quantity = IntakeFormField(key: "quantity", label: "Quantity", type: "number")
+        let note = IntakeFormField(key: "note", label: "Note", type: "text")
+        XCTAssertEqual(TaskActionFlow.params(["quantity": " 2 ", "note": "  ", "other": "x"], fields: [quantity, note]),
+                       ["quantity": "2"])
+        XCTAssertEqual(TaskActionFlow.stageFor(nil), .details)
+        let proposed = try decode(AgentTaskActionRun.self, #"{"id": "a", "status": "proposed"}"#)
+        XCTAssertEqual(TaskActionFlow.stageFor(proposed), .review)
+        let done = try decode(AgentTaskActionRun.self, #"{"id": "a", "status": "done"}"#)
+        XCTAssertEqual(TaskActionFlow.stageFor(done), .finished)
+        let request = try JSONEncoder().encode(AgentTaskActionRequest(params: ["quantity": "2"]))
+        XCTAssertEqual(String(data: request, encoding: .utf8), #"{"params":{"quantity":"2"}}"#)
+    }
+
+    @MainActor
+    func testAnActionsSwitchStartsAsTheServerSays() throws {
+        let action = try decode(AgentTaskAction.self, """
+        {"key": "buy", "label": "Buy", "icon": "cart", "available": true,
+         "params": [{"key": "quantity", "label": "Quantity", "type": "number"},
+                    {"key": "fill_in", "label": "Fill in my email and saved address", "type": "boolean", "value": "yes"}]}
+        """)
+        let flow = TaskActionFlow(taskId: "t", itemId: "i", itemTitle: "Balm", action: action)
+        XCTAssertEqual(flow.values["fill_in"], "yes")
+        XCTAssertNil(flow.values["quantity"])
+        XCTAssertEqual(TaskActionFlow.params(flow.values, fields: action.params), ["fill_in": "yes"])
+    }
 }

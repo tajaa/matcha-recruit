@@ -284,7 +284,9 @@ async def status_view(task_id: UUID, user_id: UUID) -> dict:
 _JOB_ITEMS = "A job search's jobs are opened and marked on the search itself."
 
 
-async def get_item(task_id: UUID, item_id: UUID, user_id: UUID) -> dict:
+async def get_item(task_id: UUID, item_id: UUID, user_id: UUID, *, user=None) -> dict:
+    """A finding with its evidence, what it can do (`actions`, checked for
+    `user`) and what was done with it (`action_history`)."""
     async with connection_or_direct() as conn:
         task = await owned_task(conn, task_id, user_id)
         if _search_id(task) is not None:
@@ -292,9 +294,17 @@ async def get_item(task_id: UUID, item_id: UUID, user_id: UUID) -> dict:
         row = await conn.fetchrow(
             "SELECT * FROM mw_agent_task_items WHERE id = $1 AND task_id = $2", item_id, task_id,
         )
-    if row is None:
-        raise AgentTaskError("Finding not found.", 404)
-    return items_mod.item_detail(row)
+        if row is None:
+            raise AgentTaskError("Finding not found.", 404)
+        return await _detail(conn, task, row, user_id, user)
+
+
+async def _detail(conn, task, row, user_id: UUID, user) -> dict:
+    """A finding as the app shows it: with its actions and what was done."""
+    from .actions import service as actions
+
+    done = await actions.history(conn, row["id"], user_id)
+    return {**items_mod.item_detail(row), "actions": actions.views(user, task, row), "action_history": done}
 
 
 async def _rerank(conn, task) -> None:
@@ -304,7 +314,7 @@ async def _rerank(conn, task) -> None:
 
 
 async def patch_item(task_id: UUID, item_id: UUID, user_id: UUID, *, user_state: str | None,
-                     notes: str | None) -> dict:
+                     notes: str | None, user=None) -> dict:
     async with connection_or_direct() as conn, conn.transaction():
         task = await owned_task(conn, task_id, user_id, lock=True)
         if _search_id(task) is not None:
@@ -327,7 +337,7 @@ async def patch_item(task_id: UUID, item_id: UUID, user_id: UUID, *, user_state:
             row = await conn.fetchrow(
                 "SELECT * FROM mw_agent_task_items WHERE id = $1 AND task_id = $2", item_id, task_id,
             )
-    return items_mod.item_detail(row)
+        return await _detail(conn, task, row, user_id, user)
 
 
 async def close_round(conn, task_id: UUID) -> None:

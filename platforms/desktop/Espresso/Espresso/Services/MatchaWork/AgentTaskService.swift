@@ -54,6 +54,23 @@ final class AgentTaskService {
         let _: [String: Bool] = try await client.request(method: "DELETE", path: "\(basePath)/\(taskId)")
     }
 
+    /// What an action (buy, book...) would do for this finding. Nothing
+    /// happens until `confirmAction`.
+    func proposeAction(_ taskId: String, _ itemId: String, action: String,
+                       params: [String: String]) async throws -> AgentTaskActionRun {
+        try await client.request(method: "POST", path: "\(basePath)/\(taskId)/items/\(itemId)/actions/\(action)",
+                                 body: AgentTaskActionRequest(params: params))
+    }
+
+    /// Carry out a proposal, once; a retry returns what came of it.
+    func confirmAction(_ runId: String) async throws -> AgentTaskActionRun {
+        try await client.request(method: "POST", path: "\(basePath)/actions/\(runId)/confirm")
+    }
+
+    func cancelAction(_ runId: String) async throws -> AgentTaskActionRun {
+        try await client.request(method: "POST", path: "\(basePath)/actions/\(runId)/cancel")
+    }
+
     /// Submit a form Espresso asked in chat: the task starts with no model
     /// run. A retry gets the same task.
     func answerForm(promptId: String, answer: IntakeFormAnswer) async throws -> AgentTask {

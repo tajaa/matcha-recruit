@@ -15,6 +15,9 @@ Tasks. Everything a playbook declares is checked once, at import
 * `phases`: name -> phase function, run by the task chain
   (`orchestrator.TASK_CHAIN`) as `<playbook>.<name>`.
 * `round_phases`: where each kind of follow-up round starts.
+* `actions`: what its findings can do in the world (buy, book, write):
+  keys into `actions.ACTIONS`, each proposed, confirmed, then carried out
+  once. (`item_actions` are the person's own marks: save, dismiss, a note.)
 
 What a task costs is `allowance.WEIGHTS[playbook.key]` (and
 `allowance.ROUND_UNITS` per follow-up), so every price lives in one table.
@@ -53,12 +56,16 @@ class IntakeField:
     accept: tuple[FileKind, ...] = ()
     max_count: int = 1
     max_bytes: int = 0
+    # What the field starts as in a form ("yes" for a switch that starts on).
+    default: str = ""
 
     def view(self) -> dict:
         out: dict[str, Any] = {
             "key": self.key, "label": self.label, "type": self.type,
             "required": self.required, "ask": self.ask, "help": self.help,
         }
+        if self.default:
+            out["value"] = self.default
         if self.options:
             out["options"] = list(self.options)
         if self.type == "file":
@@ -122,6 +129,8 @@ class Playbook:
     # A plan constraint as the person reads it ("Price at most $3,500").
     describe_constraint: Callable[[dict], str] | None = None
     item_actions: tuple[str, ...] = ()
+    # Keys into `actions.ACTIONS`: buy, book, ... for the kinds they fit.
+    actions: tuple[str, ...] = ()
     # The disclosure (`agent_runtime/consent.py`) a person agrees to first, if any.
     consent: str | None = None
     # Whether this server can run it (a provider key, the browser worker).
@@ -143,6 +152,7 @@ class Playbook:
             "intake": [f.view() for f in self.intake],
             "rounds": sorted(k for k in self.round_phases),
             "item_actions": list(self.item_actions),
+            "actions": list(self.actions),
             "consent": self.consent,
             "available": bool(self.env_ready()),
         }
@@ -190,6 +200,15 @@ class Playbook:
             for name in self.phases:
                 if not _KEY.fullmatch(name):
                     fail(f"bad phase name {name!r}")
+        if self.actions:
+            from .actions import ACTIONS
+
+            for key in self.actions:
+                action = ACTIONS.get(key)
+                if action is None:
+                    fail(f"unknown action {key!r}")
+                if not set(action.item_kinds) & set(self.item_kinds):
+                    fail(f"action {key!r} fits none of its item kinds")
         if self.consent is not None:
             from app.matcha.services.matcha_work.agent_runtime.consent import DISCLOSURES
 

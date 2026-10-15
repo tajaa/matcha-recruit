@@ -191,26 +191,10 @@ struct IntakeFormCard: View {
 
     @ViewBuilder
     private func input(_ field: IntakeFormField) -> some View {
-        let binding = Binding(get: { text[field.key] ?? "" }, set: { text[field.key] = $0 })
-        switch field.type {
-        case "select":
-            Picker("", selection: binding) {
-                Text("Choose…").tag("")
-                ForEach(field.options, id: \.self) { Text($0).tag($0) }
-            }
-            .labelsHidden()
-            .frame(maxWidth: 260)
-        case "boolean":
-            Toggle(isOn: Binding(get: { binding.wrappedValue == "yes" },
-                                 set: { binding.wrappedValue = $0 ? "yes" : "no" })) { EmptyView() }
-                .toggleStyle(.switch).controlSize(.small)
-        case "file":
+        if field.type == "file" {
             fileInput(field)
-        default:
-            TextField(IntakeFormCard.placeholder(field), text: binding)
-                .textFieldStyle(.roundedBorder)
-                .font(.system(size: 12))
-                .frame(maxWidth: 320)
+        } else {
+            IntakeFieldInput(field: field, value: Binding(get: { text[field.key] ?? "" }, set: { text[field.key] = $0 }))
         }
     }
 
@@ -350,5 +334,32 @@ struct IntakeFormCard: View {
             return errors.keys.sorted().compactMap { errors[$0] }.joined(separator: " ")
         }
         return AssistantText.message(for: error, fallback: "Couldn't start it. Try again in a moment.")
+    }
+}
+
+/// One typed field (not a file): a picker, a switch, or a text box with a hint.
+/// Shared by intake forms and an action's own fields.
+struct IntakeFieldInput: View {
+    let field: IntakeFormField
+    @Binding var value: String
+
+    var body: some View {
+        switch field.type {
+        case "select":
+            Picker("", selection: $value) {
+                Text("Choose…").tag("")
+                ForEach(field.options, id: \.self) { Text($0).tag($0) }
+            }
+            .labelsHidden()
+            .frame(maxWidth: 260)
+        case "boolean":
+            Toggle(isOn: Binding(get: { value == "yes" }, set: { value = $0 ? "yes" : "no" })) { EmptyView() }
+                .toggleStyle(.switch).controlSize(.small)
+        default:
+            TextField(IntakeFormCard.placeholder(field), text: $value)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 12))
+                .frame(maxWidth: 320)
+        }
     }
 }
