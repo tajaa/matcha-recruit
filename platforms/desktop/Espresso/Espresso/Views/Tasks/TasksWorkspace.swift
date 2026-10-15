@@ -18,8 +18,6 @@ struct TasksWorkspace: View {
     @State private var madeJournal: String?
 
     var body: some View {
-        // The panes are their own function: inline here, Xcode 16's type checker
-        // gives up on the modifier chain below ("ambiguous use of init(priority:operation:)").
         GeometryReader { geo in panes(width: geo.size.width) }
         .background(ThemeRadialBackground())
         .featureGuideOnFirstVisit(.tasks)
@@ -76,8 +74,10 @@ struct TasksWorkspace: View {
                 content.frame(minWidth: 380, maxWidth: .infinity, maxHeight: .infinity)
             }
             if vm.selectedItemId != nil, !(vm.selectedTask?.isJobSearch ?? false) {
+                // Converted up front: left to Swift, Xcode 16 can't choose between
+                // CGFloat and Double arithmetic and fails the build.
                 ResizableTrailingPane(storageKey: "tasks.itemPaneWidth", defaultWidth: 420,
-                                      maxWidth: width - 250 - 380) {
+                                      maxWidth: Double(width) - 250 - 380) {
                     TaskItemDetailView(vm: vm, onClose: { Task { await vm.selectItem(nil) } })
                 }
             }
