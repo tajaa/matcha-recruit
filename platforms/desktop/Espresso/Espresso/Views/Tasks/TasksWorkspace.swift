@@ -4,9 +4,13 @@ import AppKit
 /// The Tasks section: the person's background tasks on the left (needs you,
 /// running, done), the open task's findings in the middle, and the open
 /// finding (each fact with the words and page it came from) on the right.
+/// A job search is a task too; it opens in the search's own view.
 struct TasksWorkspace: View {
     @Environment(AppState.self) private var appState
     @State private var vm = TasksViewModel()
+    /// Starting a job search (its sheet needs the allowance and consent).
+    @State private var jobs = JobSearchViewModel()
+    @State private var showNewJobSearch = false
     @State private var newDirective = ""
     @State private var showRefine = false
     @State private var refineText = ""
@@ -17,11 +21,16 @@ struct TasksWorkspace: View {
         HStack(spacing: 0) {
             rail.frame(width: 250)
             Divider().opacity(0.2)
-            // A floor on the middle column: with none, working out the window's
-            // minimum size squeezes it to nothing and any wrapping text in it
-            // becomes a column thousands of points tall.
-            content.frame(minWidth: 380, maxWidth: .infinity, maxHeight: .infinity)
-            if vm.selectedItemId != nil {
+            if let search = vm.selectedTask, search.isJobSearch, let searchId = search.jobSearchId {
+                JobSearchDetailView(searchId: searchId, focusLeadId: vm.jobLeadFocus)
+                    .id(searchId)
+            } else {
+                // A floor on the middle column: with none, working out the window's
+                // minimum size squeezes it to nothing and any wrapping text in it
+                // becomes a column thousands of points tall.
+                content.frame(minWidth: 380, maxWidth: .infinity, maxHeight: .infinity)
+            }
+            if vm.selectedItemId != nil, !(vm.selectedTask?.isJobSearch ?? false) {
                 Divider().opacity(0.2)
                 TaskItemDetailView(vm: vm, onClose: { Task { await vm.selectItem(nil) } })
                     .frame(width: 420)
@@ -58,8 +67,13 @@ struct TasksWorkspace: View {
             presenting: deleting
         ) { task in
             Button("Delete", role: .destructive) { Task { await vm.delete(task.id) } }
-        } message: { _ in
-            Text("What it found is removed. It still counts toward this month's units.")
+        } message: { task in
+            Text(task.isJobSearch
+                 ? "Its jobs and drafts are removed. It still counts toward this month's units."
+                 : "What it found is removed. It still counts toward this month's units.")
+        }
+        .sheet(isPresented: $showNewJobSearch, onDismiss: openCreatedSearch) {
+            NewJobSearchSheet(vm: jobs).environment(appState)
         }
     }
 
@@ -67,7 +81,24 @@ struct TasksWorkspace: View {
     private func openFocus() async {
         guard let focus = appState.tasksFocus else { return }
         appState.tasksFocus = nil
-        await vm.select(focus.taskId, itemId: focus.itemId)
+        await vm.open(focus)
+    }
+
+    private func startJobSearch() {
+        Task {
+            await jobs.prepareNew()
+            showNewJobSearch = true
+        }
+    }
+
+    /// The sheet closed: open the search it started, if it started one.
+    private func openCreatedSearch() {
+        guard let searchId = jobs.createdSearchId else { return }
+        jobs.createdSearchId = nil
+        Task {
+            await vm.open(TasksFocus(taskId: nil, jobSearchId: searchId))
+            await appState.refreshTasksSummary()
+        }
     }
 
     // MARK: Rail
@@ -82,8 +113,14 @@ struct TasksWorkspace: View {
                 FeatureGuideButton(id: .tasks)
             }
             .padding(.horizontal, 14).padding(.top, 14).padding(.bottom, 8)
-            newTaskBox
-                .padding(.horizontal, 10).padding(.bottom, 8)
+            if appState.tasksEnabled {
+                newTaskBox
+                    .padding(.horizontal, 10).padding(.bottom, appState.jobSearchEnabled ? 2 : 8)
+            }
+            if appState.jobSearchEnabled {
+                newJobSearchButton
+                    .padding(.horizontal, 10).padding(.bottom, 8)
+            }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2, pinnedViews: []) {
                     ForEach(vm.groups, id: \.0) { group, tasks in
@@ -128,6 +165,24 @@ struct TasksWorkspace: View {
         }
     }
 
+    /// Job searches start here too (or from chat, as a task).
+    @ViewBuilder
+    private var newJobSearchButton: some View {
+        if appState.tasksEnabled {
+            Button(action: startJobSearch) {
+                Label("New job search…", systemImage: "briefcase").font(.system(size: 10))
+            }
+            .buttonStyle(.plain)
+            .foregroundColor(appState.themeAccent)
+        } else {
+            Button(action: startJobSearch) {
+                Label("New job search", systemImage: "briefcase")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+        }
+    }
+
     private func startTask() {
         let directive = newDirective.trimmingCharacters(in: .whitespacesAndNewlines)
         guard directive.count >= 3 else { return }
@@ -151,9 +206,14 @@ struct TasksWorkspace: View {
                         .foregroundColor(appState.themeText)
                         .lineLimit(2)
                     HStack(spacing: 5) {
+                        if task.isJobSearch {
+                            Image(systemName: "briefcase").help("Job search")
+                        }
                         if task.isLive { ProgressView().controlSize(.mini) }
                         Text(task.statusLabel)
-                        if task.shownCount > 0 { Text("\u{00B7} \(task.shownCount) found") }
+                        if task.shownCount > 0 {
+                            Text("\u{00B7} \(task.shownCount) \(task.isJobSearch ? "jobs" : "found")")
+                        }
                     }
                     .font(.system(size: 10))
                     .foregroundColor(task.isWaiting ? .orange : appState.themeTextSecondary)
@@ -180,6 +240,15 @@ struct TasksWorkspace: View {
         } else if !vm.hasLoaded, let error = vm.errorMessage {
             // Never the empty state: someone with tasks would think they were gone.
             emptyState(icon: "exclamationmark.triangle", title: "Couldn't load your tasks", text: error)
+        } else if vm.tasks.isEmpty && !appState.tasksEnabled {
+            emptyState(
+                icon: "briefcase",
+                title: "Start a job search",
+                text: "Say what you're after (\u{201C}COO roles across the US, mostly about salary, bonus "
+                    + "and equity\u{201D}). Espresso finds the postings, reads each one for pay and what the "
+                    + "application asks, ranks them by what you care about, and drafts how to approach the best "
+                    + "ones. Nothing is sent or submitted for you."
+            )
         } else if vm.tasks.isEmpty {
             emptyState(
                 icon: "list.bullet.clipboard",

@@ -95,12 +95,6 @@ class AppState {
     var pendingAssistantEmailContext: AssistantEmailContext?
     var pendingAssistantSalesContext: AssistantSalesContext?
     var pendingAssistantJobContext: AssistantJobContext?
-    /// Full-pane Job search (the person's searches, ranked jobs and drafted
-    /// approaches). Same nav-only model.
-    var showJobSearchHub: Bool = false
-    /// A search or job for Job search to open next (`openJobSearch`); the
-    /// section consumes and clears it.
-    var jobSearchFocus: JobSearchFocus? = nil
     /// Full-pane Tasks (the person's background tasks and what each found).
     /// Same nav-only model.
     var showTasksHub: Bool = false
@@ -156,7 +150,6 @@ class AppState {
         showEmailHub = false
         showAssistantHub = false
         showCalendarHub = false
-        showJobSearchHub = false
         showTasksHub = false
     }
 
@@ -181,15 +174,16 @@ class AppState {
 
     /// The sidebar row's counts. Quiet on failure: the row just shows none.
     func refreshTasksSummary() async {
-        guard tasksEnabled else { tasksSummary = nil; return }
+        guard tasksSectionEnabled else { tasksSummary = nil; return }
         tasksSummary = try? await AgentTaskService.shared.summary()
     }
 
-    /// Open Job search, on one search (and one of its jobs) when given.
+    /// Open a job search (and one of its jobs) when given: job searches are
+    /// tasks, so this opens Tasks on it.
     func openJobSearch(searchId: String? = nil, leadId: String? = nil) {
         clearPrimaryNav()
-        jobSearchFocus = searchId.map { JobSearchFocus(searchId: $0, leadId: leadId) }
-        showJobSearchHub = true
+        tasksFocus = searchId.map { TasksFocus(taskId: nil, jobSearchId: $0, leadId: leadId) }
+        showTasksHub = true
     }
 
     /// Open the Calendar, on `date`'s month or week when given.
@@ -286,8 +280,12 @@ class AppState {
     /// with a listings provider. Defaults CLOSED while unknown, like the
     /// assistant's row.
     var jobSearchEnabled: Bool { entitlements?.workspace?.jobSearch == true }
-    /// Whether this account has Tasks. Defaults CLOSED while unknown.
+    /// Whether this account has Tasks: starting them, from chat or the Tasks
+    /// box. Defaults CLOSED while unknown.
     var tasksEnabled: Bool { entitlements?.workspace?.agentTasks == true }
+    /// Whether the Tasks section shows: Tasks, or job search (job searches
+    /// live there; job search isn't behind the Tasks switch).
+    var tasksSectionEnabled: Bool { tasksEnabled || jobSearchEnabled }
     /// Whether the WORKSPACE has the assistant switched on. Unlike the plan
     /// gates above this defaults CLOSED while unknown: the row is a whole
     /// surface, and one that appears and then vanishes is worse than one that

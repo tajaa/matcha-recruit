@@ -275,7 +275,7 @@ struct ContentView: View {
             && !appState.showThreadsHub && !appState.showChannelsHub
             && !appState.showProductivityHub && !appState.showEmailHub
             && !appState.showAssistantHub && !appState.showCalendarHub
-            && !appState.showJobSearchHub && !appState.showTasksHub && (appState.showHome || (
+            && !appState.showTasksHub && (appState.showHome || (
             appState.selectedThreadId == nil &&
             appState.selectedProjectId == nil &&
             appState.selectedChannelId == nil &&
@@ -380,7 +380,6 @@ struct ContentView: View {
         case .threads:  threadsSidebarSection
         case .email:    emailSidebarSection
         case .assistant: assistantSidebarSection
-        case .jobs: jobSearchSidebarSection
         case .tasks: tasksSidebarSection
         }
     }
@@ -570,25 +569,12 @@ struct ContentView: View {
         }
     }
 
-    /// Nav-only row — opens Job search. Shown only when the workspace has it
-    /// (a personal account on a server with a listings provider); on a plan
-    /// without it the row opens the paywall instead.
-    @ViewBuilder
-    private var jobSearchSidebarSection: some View {
-        if appState.jobSearchEnabled {
-            sidebarNavRow(title: "Job search", icon: "briefcase",
-                          isActive: appState.showJobSearchHub,
-                          lockedFeature: appState.canJobSearch ? nil : "job_search",
-                          onOpen: { appState.openJobSearch() })
-        }
-    }
-
     /// Nav-only row — opens Tasks, with how many are running and a dot when
-    /// one waits for the person or finished unseen. Shown only when the
-    /// account has Tasks.
+    /// one waits for the person or finished unseen. Shown when the account has
+    /// Tasks or job search (job searches live in Tasks).
     @ViewBuilder
     private var tasksSidebarSection: some View {
-        if appState.tasksEnabled {
+        if appState.tasksSectionEnabled {
             let badge = TasksViewModel.badge(appState.tasksSummary)
             sidebarNavRow(title: "Tasks", icon: "list.bullet.clipboard",
                           isActive: appState.showTasksHub,

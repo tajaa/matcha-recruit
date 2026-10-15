@@ -1,9 +1,9 @@
 import Foundation
 import Observation
 
-/// The Job search section: the person's searches, the open one's ranked jobs,
-/// and the open job. Polls a live search's cheap status every few seconds and
-/// reloads the jobs only when its fingerprint changes.
+/// One job search as Tasks shows it (its ranked jobs and the open job), and
+/// starting a new one. Polls a live search's cheap status every few seconds
+/// and reloads the jobs only when its fingerprint changes.
 @Observable @MainActor
 final class JobSearchViewModel {
     enum Filter: String, CaseIterable, Identifiable {
@@ -33,6 +33,8 @@ final class JobSearchViewModel {
     var errorMessage: String?
     /// A 403 that names a plan: the view raises the paywall for it.
     var planFeature: String?
+    /// The search `create` just started, for Tasks to open.
+    var createdSearchId: String?
 
     private let service = JobSearchService.shared
 
@@ -43,25 +45,23 @@ final class JobSearchViewModel {
 
     // MARK: Loading
 
-    func load() async {
+    /// One search on its own, as Tasks shows it: no list.
+    func open(_ searchId: String, leadId: String? = nil) async {
+        if selectedSearchId != searchId { reset() }
+        errorMessage = nil
+        await select(searchId, leadId: leadId)
+        hasLoaded = detail != nil
+    }
+
+    /// What starting a search needs (the allowance, consent, whether this
+    /// server has a listings provider), without loading any search.
+    func prepareNew() async {
         do {
             let list = try await service.list()
             try Task.checkCancellation()
-            searches = list.searches
             usage = list.usage
             consent = list.consent
             available = list.available
-            // A first load that failed left its error up; this one worked.
-            if !hasLoaded { errorMessage = nil }
-            hasLoaded = true
-            if let id = selectedSearchId, !searches.contains(where: { $0.id == id }) {
-                selectedSearchId = nil; detail = nil; selectedLeadId = nil; lead = nil
-            }
-            if selectedSearchId == nil, let first = searches.first {
-                await select(first.id)
-            } else if let id = selectedSearchId, detail == nil {
-                await loadDetail(id)
-            }
         } catch is CancellationError {
         } catch { report(error) }
     }
@@ -143,13 +143,10 @@ final class JobSearchViewModel {
 
     // MARK: Actions
 
+    /// Start a search; Tasks opens it (`createdSearchId`).
     func create(_ body: JobSearchService.CreateBody) async throws {
         let created = try await service.create(body)
-        selectedSearchId = created.id
-        detail = nil
-        selectedLeadId = nil
-        lead = nil
-        await load()
+        createdSearchId = created.id
     }
 
     /// Saved / Applied / Dismissed for the job on screen. `leadId` is the job
@@ -190,16 +187,6 @@ final class JobSearchViewModel {
     func cancel() async {
         guard let searchId = selectedSearchId else { return }
         await perform { self.apply(try await self.service.cancel(searchId)) }
-    }
-
-    func delete(_ searchId: String) async {
-        await perform {
-            try await self.service.delete(searchId)
-            if self.selectedSearchId == searchId {
-                self.selectedSearchId = nil; self.detail = nil; self.selectedLeadId = nil; self.lead = nil
-            }
-            await self.load()
-        }
     }
 
     private func perform(_ action: @escaping () async throws -> Void) async {

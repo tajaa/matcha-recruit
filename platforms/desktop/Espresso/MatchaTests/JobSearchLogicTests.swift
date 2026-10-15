@@ -250,9 +250,11 @@ final class JobSearchLogicTests: XCTestCase {
         XCTAssertEqual(again.blocks, result.blocks)
     }
 
-    func testSidebarAppendsJobSearchToASavedOrder() {
-        XCTAssertTrue(SidebarSectionOrderStore.Section.allCases.contains(.jobs))
-        XCTAssertEqual(SidebarSectionOrderStore.Section.jobs.displayName, "Job search")
-        XCTAssertEqual(SidebarSectionOrderStore.Section(rawValue: "jobs"), .jobs)
+    func testJobSearchLivesInTasksNow() {
+        // A saved sidebar order that still names the old section just drops it.
+        XCTAssertNil(SidebarSectionOrderStore.Section(rawValue: "jobs"))
+        XCTAssertFalse(SidebarSectionOrderStore.Section.allCases.map(\.rawValue).contains("jobs"))
+        // Its guide stays, opened from the search itself.
+        XCTAssertEqual(FeatureGuide.guide(for: .jobSearch).name, "Job search")
     }
 }

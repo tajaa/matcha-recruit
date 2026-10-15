@@ -567,8 +567,3 @@ struct AssistantJobContext: AssistantHandoff {
     }
 }
 
-/// A search (and optionally one of its jobs) for the Job search section to open.
-struct JobSearchFocus: Equatable {
-    let searchId: String
-    let leadId: String?
-}

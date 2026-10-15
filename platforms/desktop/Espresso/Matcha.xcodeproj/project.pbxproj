@@ -421,7 +421,7 @@
 		GUIDE000000000000000A001 /* FeatureGuides.swift in Sources */ = {isa = PBXBuildFile; fileRef = GUIDE000000000000000A002 /* FeatureGuides.swift */; };
 		JOBS0000000000000000A003 /* JobSearchService.swift in Sources */ = {isa = PBXBuildFile; fileRef = JOBS0000000000000000A004 /* JobSearchService.swift */; };
 		JOBS0000000000000000A005 /* JobSearchViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = JOBS0000000000000000A006 /* JobSearchViewModel.swift */; };
-		JOBS0000000000000000A007 /* JobSearchWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = JOBS0000000000000000A008 /* JobSearchWorkspace.swift */; };
+		JOBS0000000000000000A007 /* JobSearchDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = JOBS0000000000000000A008 /* JobSearchDetailView.swift */; };
 		JOBS0000000000000000A009 /* JobLeadDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = JOBS0000000000000000A00A /* JobLeadDetailView.swift */; };
 		JOBS0000000000000000A00B /* NewJobSearchSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = JOBS0000000000000000A00C /* NewJobSearchSheet.swift */; };
 		JOBS0000000000000000BT01 /* JobSearchLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = JOBS0000000000000000BT02 /* JobSearchLogicTests.swift */; };
@@ -780,7 +780,7 @@
 		GUIDE000000000000000A002 /* FeatureGuides.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = FeatureGuides.swift; path = Espresso/Models/MatchaWork/FeatureGuides.swift; sourceTree = SOURCE_ROOT; };
 		JOBS0000000000000000A004 /* JobSearchService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = JobSearchService.swift; path = Espresso/Services/MatchaWork/JobSearchService.swift; sourceTree = SOURCE_ROOT; };
 		JOBS0000000000000000A006 /* JobSearchViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = JobSearchViewModel.swift; path = Espresso/ViewModels/JobSearchViewModel.swift; sourceTree = SOURCE_ROOT; };
-		JOBS0000000000000000A008 /* JobSearchWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = JobSearchWorkspace.swift; path = Espresso/Views/JobSearch/JobSearchWorkspace.swift; sourceTree = SOURCE_ROOT; };
+		JOBS0000000000000000A008 /* JobSearchDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = JobSearchDetailView.swift; path = Espresso/Views/JobSearch/JobSearchDetailView.swift; sourceTree = SOURCE_ROOT; };
 		JOBS0000000000000000A00A /* JobLeadDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = JobLeadDetailView.swift; path = Espresso/Views/JobSearch/JobLeadDetailView.swift; sourceTree = SOURCE_ROOT; };
 		JOBS0000000000000000A00C /* NewJobSearchSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NewJobSearchSheet.swift; path = Espresso/Views/JobSearch/NewJobSearchSheet.swift; sourceTree = SOURCE_ROOT; };
 		JOBS0000000000000000BT02 /* JobSearchLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JobSearchLogicTests.swift; sourceTree = "<group>"; };
@@ -1483,7 +1483,7 @@
 				GUIDE000000000000000A002 /* FeatureGuides.swift */,
 				JOBS0000000000000000A004 /* JobSearchService.swift */,
 				JOBS0000000000000000A006 /* JobSearchViewModel.swift */,
-				JOBS0000000000000000A008 /* JobSearchWorkspace.swift */,
+				JOBS0000000000000000A008 /* JobSearchDetailView.swift */,
 				JOBS0000000000000000A00A /* JobLeadDetailView.swift */,
 				JOBS0000000000000000A00C /* NewJobSearchSheet.swift */,
 				TASK0000000000000000A002 /* AgentTaskModels.swift */,
@@ -2001,7 +2001,7 @@
 				GUIDE000000000000000A001 /* FeatureGuides.swift in Sources */,
 				JOBS0000000000000000A003 /* JobSearchService.swift in Sources */,
 				JOBS0000000000000000A005 /* JobSearchViewModel.swift in Sources */,
-				JOBS0000000000000000A007 /* JobSearchWorkspace.swift in Sources */,
+				JOBS0000000000000000A007 /* JobSearchDetailView.swift in Sources */,
 				JOBS0000000000000000A009 /* JobLeadDetailView.swift in Sources */,
 				JOBS0000000000000000A00B /* NewJobSearchSheet.swift in Sources */,
 				TASK0000000000000000A001 /* AgentTaskModels.swift in Sources */,

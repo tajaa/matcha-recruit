@@ -213,7 +213,7 @@ def _parse(ctx, state, args: dict) -> dict:
     """`ask_form`'s arguments as the run's question. Raises ValueError (told
     to the model) for a playbook or ask it can't use."""
     playbook = playbooks.get(str(args.get("playbook") or ""))
-    if playbook is None or playbook.engine != "chain" or not playbook.env_ready():
+    if not playbooks.startable(playbook):
         raise ValueError("Use one of the playbooks start_task accepts.")
     directive = " ".join(str(args.get("directive") or "").split())
     if len(directive) < 3:
@@ -240,8 +240,7 @@ def ask_form_tool():
         parameters={
             "type": "object",
             "properties": {
-                "playbook": {"type": "string", "enum": sorted(k for k, p in playbooks.PLAYBOOKS.items()
-                                                              if p.engine == "chain")},
+                "playbook": {"type": "string", "enum": playbooks.startable_keys()},
                 "directive": {"type": "string", "description": "What they asked for, in their words"},
                 "title": {"type": "string", "description": "A short name for the task"},
                 "known": {"type": "object", "description": "Field key -> what they already said"},

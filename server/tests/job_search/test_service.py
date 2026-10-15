@@ -127,8 +127,10 @@ async def test_delete_leaves_a_tombstone(conn):
     conn.on("FOR UPDATE", search_row(status="discovering"))
     assert await service.delete_search(SEARCH, USER) == {"deleted": True}
     assert conn.ran("DELETE FROM mw_job_leads") and conn.ran("DELETE FROM mw_project_agent_runs")
-    [tomb] = conn.ran("SET deleted_at = NOW()")
+    tomb, pointer = conn.ran("SET deleted_at = NOW()")
     assert "ask = ''" in tomb[1] and "THEN 'cancelled'" in tomb[1]
+    # Its row in Tasks goes with it.
+    assert "UPDATE mw_agent_tasks" in pointer[1] and pointer[2] == (SEARCH,)
 
 
 @pytest.mark.asyncio
