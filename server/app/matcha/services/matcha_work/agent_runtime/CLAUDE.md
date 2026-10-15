@@ -228,9 +228,13 @@ it otherwise), and should declare `resolve`.
   all or none (a failure deletes the private copies made for it). Backfilled
   rows keep the message's date and are marked given to the conversation's
   latest run after it. A deleted message's public files are deleted, not
-  kept. A public copy counts as removed only when the delete succeeds (an
-  older CloudFront distribution's URL is deleted from our bucket under the
-  same key); anything left is listed and the script exits 1.
+  kept. A URL only ever becomes a key in our public bucket (our CloudFront
+  host or an earlier `*.cloudfront.net` one, parsed, never fetched), and a
+  chat file moves only if its key is under `channels/<that conversation>/`:
+  the old socket stored client-sent attachments verbatim, so anything else
+  isn't the sender's and is skipped. A public copy counts as removed only
+  when it was in our bucket and the delete went through; anything left is
+  listed and the script exits 1.
 
 ## Photos and screenshots
 
