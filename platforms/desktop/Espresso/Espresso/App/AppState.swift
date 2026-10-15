@@ -57,10 +57,13 @@ class AppState {
 
     // MARK: - Workspace tabs
     static let maxPinnedTabs = 4
-    static let tabsKey = "mw-open-tabs-v1"
-    /// Open tabs; Home is always element 0. Persisted across launches.
-    var openTabs: [WorkTab] = AppState.loadTabs() {
-        didSet { AppState.saveTabs(openTabs) }
+    /// Open tabs; Home is always element 0. Saved per person and loaded at
+    /// sign-in (`didLogin`), so nobody gets the last account's tabs.
+    var openTabs: [WorkTab] = [.home] {
+        didSet {
+            guard let userId = currentUser?.id else { return }
+            AppState.saveTabs(openTabs, userId: userId)
+        }
     }
     /// The currently-displayed destination (drives tab highlight + what "+" pins).
     var activeTab: WorkTab = .home

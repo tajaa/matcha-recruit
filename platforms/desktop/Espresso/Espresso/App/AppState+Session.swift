@@ -47,6 +47,10 @@ extension AppState {
         // global key, which could hold a file's signed URL. It is per person
         // now (`lastSideTargetKey`); drop the old one wherever it was written.
         UserDefaults.standard.removeObject(forKey: "mw-last-side-target-v1")
+        // Tabs too: the shared key held whoever signed in last, so it is
+        // dropped rather than handed to this account.
+        UserDefaults.standard.removeObject(forKey: AppState.sharedTabsKey)
+        openTabs = AppState.loadTabs(userId: user.id)
         UsageBeaconService.shared.start()
         CallService.shared.currentUserId = user.id
         MatchaWorkService.shared.updateCacheScope(user.id)
@@ -100,6 +104,10 @@ extension AppState {
         selectedProjectId = nil
         selectedChannelId = nil
         selectedJournalId = nil
+        // Already saved under the person's own key; currentUser is nil now,
+        // so this doesn't overwrite them.
+        openTabs = [.home]
+        activeTab = .home
         showEmailHub = false
         showAssistantHub = false
         showCalendarHub = false

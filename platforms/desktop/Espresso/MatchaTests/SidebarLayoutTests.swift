@@ -33,6 +33,19 @@ final class SidebarLayoutTests: XCTestCase {
         XCTAssertEqual(Store.orders(from: [:])[.personal], Store.Group.personal.sections)
     }
 
+    func testTabsAreSavedPerPerson() {
+        let defaults = UserDefaults(suiteName: "SidebarLayoutTests-\(UUID().uuidString)")!
+        let mine = [WorkTab.home, WorkTab(kind: .project, entityId: "p1", title: "Launch")]
+        AppState.saveTabs(mine, userId: "u1", defaults: defaults)
+
+        XCTAssertEqual(AppState.loadTabs(userId: "u1", defaults: defaults), mine)
+        // Someone else signing in on this Mac gets only Home, not u1's workspaces.
+        XCTAssertEqual(AppState.loadTabs(userId: "u2", defaults: defaults), [.home])
+        // A saved list without Home still leads with it.
+        AppState.saveTabs([WorkTab(kind: .thread, entityId: "t1", title: "Notes")], userId: "u2", defaults: defaults)
+        XCTAssertEqual(AppState.loadTabs(userId: "u2", defaults: defaults).map(\.id), ["home", "thread:t1"])
+    }
+
     func testPinnedMergesTabsAndStarsOnce() {
         let tabs = [WorkTab.home,
                     WorkTab(kind: .project, entityId: "p1", title: "Launch"),
