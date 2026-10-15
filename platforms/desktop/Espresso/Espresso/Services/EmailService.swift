@@ -103,11 +103,23 @@ struct EmailDraft: Decodable, Equatable {
     var to: String
     var subject: String
     var body: String
+    /// Who else it goes to: kept as they are when it's saved here.
+    var cc: String
+    var bcc: String
     var threadId: String?
+    /// The draft's message in Gmail, for opening it there.
+    var messageId: String?
+    /// False when saving it here would lose an attachment or its formatting:
+    /// it's read, sent and deleted here, and edited in Gmail.
+    var editable: Bool
+    var hasAttachments: Bool
+    var formatted: Bool
 
     enum CodingKeys: String, CodingKey {
-        case id, to, subject, body
+        case id, to, subject, body, cc, bcc, editable, formatted
         case threadId = "thread_id"
+        case messageId = "message_id"
+        case hasAttachments = "has_attachments"
     }
 
     init(from decoder: Decoder) throws {
@@ -116,12 +128,24 @@ struct EmailDraft: Decodable, Equatable {
         to = (try? c.decodeIfPresent(String.self, forKey: .to)) ?? ""
         subject = (try? c.decodeIfPresent(String.self, forKey: .subject)) ?? ""
         body = (try? c.decodeIfPresent(String.self, forKey: .body)) ?? ""
+        cc = (try? c.decodeIfPresent(String.self, forKey: .cc)) ?? ""
+        bcc = (try? c.decodeIfPresent(String.self, forKey: .bcc)) ?? ""
         threadId = try? c.decodeIfPresent(String.self, forKey: .threadId)
+        messageId = try? c.decodeIfPresent(String.self, forKey: .messageId)
+        editable = (try? c.decodeIfPresent(Bool.self, forKey: .editable)) ?? true
+        hasAttachments = (try? c.decodeIfPresent(Bool.self, forKey: .hasAttachments)) ?? false
+        formatted = (try? c.decodeIfPresent(Bool.self, forKey: .formatted)) ?? false
     }
 }
 
 struct EmailDraftList: Decodable {
     let drafts: [EmailDraftSummary]
+    var nextPageToken: String? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case drafts
+        case nextPageToken = "next_page_token"
+    }
 }
 
 struct EmailFetchResponse: Decodable {
@@ -313,9 +337,10 @@ final class EmailService {
 
     // MARK: Drafts
 
-    func drafts() async throws -> [EmailDraftSummary] {
-        let list: EmailDraftList = try await client.request(method: "GET", path: "\(basePath)/drafts")
-        return list.drafts
+    /// A page of drafts, newest first; pass the last page's token for the next.
+    func drafts(pageToken: String? = nil) async throws -> EmailDraftList {
+        let query = pageToken.map { "?page_token=\(Self.pathId($0))" } ?? ""
+        return try await client.request(method: "GET", path: "\(basePath)/drafts\(query)")
     }
 
     func draft(id: String) async throws -> EmailDraft {

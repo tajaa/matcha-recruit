@@ -120,6 +120,10 @@ SEND_RATE_LIMITS = ((5, 60, "5 emails per minute"), (50, 3600, "50 emails per ho
 RECIPIENT_RATE_LIMITS = ((100, 3600), (200, 86400))
 
 
+class DraftNotEditable(ValueError):
+    """Saving this draft as plain text would lose its attachment or formatting."""
+
+
 class GmailSendRateLimited(RuntimeError):
     """The per-user send ceiling tripped. Nothing was sent."""
 
@@ -482,14 +486,17 @@ class GmailService:
             f"/users/me/messages/{msg_id}/modify", {"removeLabelIds": ["UNREAD"]}
         )
 
-    def _build_raw(self, to: str, subject: str, body: str, in_reply_to: str | None, *, bcc: str | None = None) -> str:
+    def _build_raw(self, to: str, subject: str, body: str, in_reply_to: str | None, *, bcc: str | None = None,
+                   cc: str | None = None, references: str | None = None) -> str:
         """RFC 822 message, base64url-encoded the way Gmail's `raw` field wants.
 
         `in_reply_to` is the ORIGINAL message's `Message-ID` header value (angle
         brackets included), never Gmail's hex message id — that one only goes in
-        the API-level `threadId`.
+        the API-level `threadId`. `references` is the thread's chain when known;
+        it defaults to `in_reply_to`.
         """
-        for field_name, value in [("to", to), ("subject", subject), ("bcc", bcc or "")]:
+        for field_name, value in [("to", to), ("subject", subject), ("bcc", bcc or ""), ("cc", cc or ""),
+                                  ("references", references or "")]:
             if "\r" in value or "\n" in value:
                 raise ValueError(f"Email {field_name} contains newline characters")
         if in_reply_to and ("\r" in in_reply_to or "\n" in in_reply_to):
@@ -502,11 +509,14 @@ class GmailService:
             message["To"] = to
         message["Subject"] = subject
         message["Content-Type"] = "text/plain; charset=utf-8"
+        if cc:
+            message["Cc"] = cc
         if bcc:
             message["Bcc"] = bcc
         if in_reply_to:
             message["In-Reply-To"] = in_reply_to
-            message["References"] = in_reply_to
+        if references or in_reply_to:
+            message["References"] = references or in_reply_to
         return base64.urlsafe_b64encode(message.as_bytes() + body.encode("utf-8")).decode()
 
     async def create_draft(
@@ -564,29 +574,55 @@ class GmailService:
         return draft_id
 
     def _draft_view(self, data: dict, *, with_body: bool) -> dict:
+        """A draft as Espresso shows it. `editable` is False when saving it
+        from Espresso would lose something: an attachment, or formatting (an
+        HTML part); Espresso writes plain text. Such a draft is still read,
+        sent and deleted here, and edited in Gmail."""
         message = data.get("message") or {}
         payload = message.get("payload") or {}
         headers = {h["name"].lower(): h["value"] for h in payload.get("headers", [])}
+        attachments = bool(self._extract_attachments(payload))
+        formatted = self._find_part(payload, "text/html") is not None
         out = {
             "id": data.get("id"),
             "message_id": message.get("id"),
             "thread_id": message.get("threadId"),
             "to": _decode_header(headers.get("to", "")),
+            "cc": _decode_header(headers.get("cc", "")),
+            "bcc": _decode_header(headers.get("bcc", "")),
             "subject": _decode_header(headers.get("subject", "")),
             "date": headers.get("date", ""),
             "snippet": html.unescape(message.get("snippet") or ""),
             "updated_ms": int(message["internalDate"]) if str(message.get("internalDate") or "").isdigit() else None,
+            "in_reply_to": headers.get("in-reply-to", ""),
+            "references": headers.get("references", ""),
+            "has_attachments": attachments,
+            "formatted": formatted,
+            "editable": not attachments and not formatted,
         }
         if with_body:
-            out["body"] = self._extract_body(payload)
+            # Espresso's own drafts are plain text, which can be empty; the
+            # rest read as text for show only.
+            out["body"] = (self._find_part(payload, "text/plain") or "") if out["editable"] else self._extract_body(payload)
         return out
 
-    async def list_drafts(self, max_results: int = 25) -> list[dict]:
-        """The person's drafts, newest first: who to, subject, a preview."""
+    @staticmethod
+    def draft_recipients(draft: dict) -> int:
+        """Everyone a draft goes to (To, Cc and Bcc), for the recipient ceiling."""
+        return len(addresses_in(draft.get("to")) | addresses_in(draft.get("cc")) | addresses_in(draft.get("bcc")))
+
+    async def list_drafts(self, max_results: int = 25, page_token: str | None = None) -> dict:
+        """A page of the person's drafts, newest first: who to, subject, a
+        preview; `next_page_token` reads the next page."""
         import asyncio
 
         await self.load_token()
-        data = await self._gmail_get("/users/me/drafts", params={"maxResults": str(max_results)})
+        params = {"maxResults": str(max_results)}
+        if page_token:
+            if not re.fullmatch(r"[A-Za-z0-9_-]{1,256}", page_token):
+                raise ValueError("Invalid page token")
+            params["pageToken"] = page_token
+        data = await self._gmail_get("/users/me/drafts", params=params)
 
         async def one(stub: dict) -> dict | None:
             try:
@@ -599,7 +635,8 @@ class GmailService:
                 raise
 
         drafts = [d for d in await asyncio.gather(*(one(s) for s in data.get("drafts", []))) if d]
-        return sorted(drafts, key=lambda d: d.get("updated_ms") or 0, reverse=True)
+        return {"drafts": sorted(drafts, key=lambda d: d.get("updated_ms") or 0, reverse=True),
+                "next_page_token": data.get("nextPageToken")}
 
     async def get_draft(self, draft_id: str) -> dict:
         """One draft with its body. Raises httpx.HTTPStatusError (404) when it
@@ -609,14 +646,30 @@ class GmailService:
             f"/users/me/drafts/{self._draft_id(draft_id)}", params={"format": "full"},
         ), with_body=True)
 
-    async def update_draft(self, draft_id: str, *, to: str, subject: str, body: str,
-                           thread_id: str | None = None) -> dict:
-        """Replace a draft's recipients, subject and text, keeping its thread."""
-        raw = self._build_raw(to, subject, body, None)
-        message: dict = {"raw": raw}
-        if thread_id:
-            message["threadId"] = thread_id
+    async def update_draft(self, draft_id: str, *, to: str | None = None, subject: str | None = None,
+                           body: str | None = None) -> dict:
+        """Change a plain-text draft's To, subject or text (what's left out
+        stays). Its Cc, Bcc and reply headers are carried over, so it stays a
+        reply in its thread. Raises DraftNotEditable for a draft with an
+        attachment or formatting, which rewriting as plain text would lose,
+        and httpx.HTTPStatusError (404) when it was sent or deleted."""
         draft_id = self._draft_id(draft_id)
+        await self.load_token()
+        current = self._draft_view(await self._gmail_get(
+            f"/users/me/drafts/{draft_id}", params={"format": "full"},
+        ), with_body=True)
+        if not current["editable"]:
+            raise DraftNotEditable(
+                "This draft has an attachment or formatting that Espresso can't keep. Edit it in Gmail."
+            )
+        raw = self._build_raw(
+            current["to"] if to is None else to, current["subject"] if subject is None else subject,
+            current["body"] if body is None else body, current["in_reply_to"] or None,
+            cc=current["cc"] or None, bcc=current["bcc"] or None, references=current["references"] or None,
+        )
+        message: dict = {"raw": raw}
+        if current.get("thread_id"):
+            message["threadId"] = current["thread_id"]
         return await self._gmail_put(f"/users/me/drafts/{draft_id}", {"id": draft_id, "message": message})
 
     async def send_draft(self, draft_id: str, *, recipients: int) -> dict:

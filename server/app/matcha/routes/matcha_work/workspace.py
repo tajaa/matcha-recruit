@@ -23,7 +23,7 @@ from app.core.models.auth import CurrentUser
 from app.core.services.redis_cache import get_redis_cache
 from app.database import get_connection
 from app.matcha.dependencies import require_admin_or_client, get_client_company_id
-from app.matcha.models.matcha_work.assistant import GoogleConnectRequest, EmailFetchRequest
+from app.matcha.models.matcha_work.assistant import EmailDraftUpdate, EmailFetchRequest, GoogleConnectRequest
 from app.matcha.models.matcha_work.calendar import EmailCalendarSuggest
 from app.matcha.models.matcha_work.matcha_work import UsageSummaryResponse
 from app.matcha.services.matcha_work import matcha_work_document as doc_svc
@@ -764,47 +764,63 @@ def _require_draft_id(value: str) -> str:
     return value
 
 
-async def _get_draft_or_404(gmail, draft_id: str) -> dict:
+async def _get_draft_or_404(gmail, draft_id: str, user_id=None) -> dict:
+    """The draft, or 404. A draft that is gone (sent or deleted in Gmail
+    itself) is let go of by the job that drafted it, if one did."""
     try:
         return await gmail.get_draft(draft_id)
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code in (400, 404):
+            if user_id is not None:
+                from app.matcha.services.matcha_work.job_search import service as job_service
+
+                await job_service.note_email_draft(user_id, draft_id, sent=False)
             raise HTTPException(status_code=404, detail="That draft was sent or deleted.") from exc
         raise
 
 
 @router.get("/agent/email/drafts")
-async def agent_email_drafts(current_user: CurrentUser = Depends(require_admin_or_client)):
-    """The caller's Gmail drafts, newest first (no bodies)."""
+async def agent_email_drafts(
+    page_token: str | None = Query(default=None, max_length=256, pattern=r"^[A-Za-z0-9_-]+$"),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """A page of the caller's Gmail drafts, newest first (no bodies), and the
+    token for the next page."""
     gmail = await _connected_gmail(current_user)
-    return {"drafts": await gmail.list_drafts()}
+    return await gmail.list_drafts(page_token=page_token)
 
 
 @router.get("/agent/email/drafts/{draft_id}")
 async def agent_email_draft_get(draft_id: str, current_user: CurrentUser = Depends(require_admin_or_client)):
     _require_draft_id(draft_id)
     gmail = await _connected_gmail(current_user)
-    return await _get_draft_or_404(gmail, draft_id)
+    return await _get_draft_or_404(gmail, draft_id, current_user.id)
 
 
 @router.put("/agent/email/drafts/{draft_id}")
 async def agent_email_draft_update(
-    draft_id: str, body: dict, current_user: CurrentUser = Depends(require_admin_or_client),
+    draft_id: str, body: EmailDraftUpdate, current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    """Save an edited draft: `to` (may be empty), `subject`, `body`. It stays
-    in its thread."""
+    """Save an edited plain-text draft (`to` may be empty). Its Cc, Bcc and
+    reply headers are kept, so a reply stays in its thread. 409 for a draft
+    with an attachment or formatting: edit that one in Gmail."""
+    from app.matcha.services.matcha_work.gmail_service import DraftNotEditable
+
     _require_draft_id(draft_id)
-    values = {key: body.get(key) if body.get(key) is not None else "" for key in ("to", "subject", "body")}
-    if not all(isinstance(v, str) for v in values.values()):
-        raise HTTPException(status_code=400, detail="to, subject and body must be text")
     gmail = await _connected_gmail(current_user)
-    current = await _get_draft_or_404(gmail, draft_id)
     try:
-        await gmail.update_draft(draft_id, to=values["to"].strip(), subject=values["subject"].strip(),
-                                 body=values["body"], thread_id=current.get("thread_id"))
+        await gmail.update_draft(draft_id, to=body.to.strip() if body.to is not None else None,
+                                 subject=body.subject.strip() if body.subject is not None else None,
+                                 body=body.body)
+    except DraftNotEditable as exc:
+        raise HTTPException(status_code=409, detail={"code": "draft_not_editable", "message": str(exc)}) from exc
     except ValueError as exc:  # a header carrying CR/LF
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return await _get_draft_or_404(gmail, draft_id)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code in (400, 404):
+            raise HTTPException(status_code=404, detail="That draft was sent or deleted.") from exc
+        raise
+    return await _get_draft_or_404(gmail, draft_id, current_user.id)
 
 
 @router.post("/agent/email/drafts/{draft_id}/send")
@@ -815,12 +831,12 @@ async def agent_email_draft_send(draft_id: str, current_user: CurrentUser = Depe
 
     _require_draft_id(draft_id)
     gmail = await _connected_gmail(current_user)
-    draft = await _get_draft_or_404(gmail, draft_id)
-    recipients = len(addresses_in(draft.get("to")))
-    if not recipients:
+    draft = await _get_draft_or_404(gmail, draft_id, current_user.id)
+    if not addresses_in(draft.get("to")):
         raise HTTPException(status_code=422, detail="Add who it goes to before sending.")
     try:
-        result = await gmail.send_draft(draft_id, recipients=recipients)
+        # Everyone it goes to counts, Cc and Bcc too.
+        result = await gmail.send_draft(draft_id, recipients=gmail.draft_recipients(draft))
     except GmailSendRateLimited as exc:
         raise HTTPException(status_code=429, detail=str(exc)) from exc
     await job_service.note_email_draft(current_user.id, draft_id, sent=True)

@@ -3,13 +3,22 @@
 Espresso never pays or places the order: the person reviews and pays at the
 store. What it does is the walk there.
 
-* A Shopify store (most brand stores): the product's own data
-  (`/products/<handle>.js`) gives the variant, its price now and whether it
-  is in stock; a cart permalink (`/cart/<variant>:<qty>`) opens checkout with
-  it in the cart, and with the person's saved shipping address and email
-  filled in when they have one (Settings → Shipping addresses). The preview
-  shows exactly what is filled in before they go.
-* Any other store: the product's page, to add it to the cart there.
+* A Shopify store (most brand stores), confirmed by Shopify itself: the
+  store's `/meta.json` names its `*.myshopify.com` shop, and that shop's
+  product (`https://<shop>/products/<handle>.js`) must come back from the
+  finding's own host (Shopify redirects a shop to its own domain only). A
+  site that merely looks like Shopify fails that, and gets the product page.
+  The product data gives the variant, its price now (in the shop's currency,
+  from `/meta.json`) and whether it is in stock; a cart permalink
+  (`/cart/<variant>:<qty>`) opens checkout with it in the cart.
+* With "Fill in my email and saved address" on (the default), the checkout
+  link also carries the person's email and default saved shipping address
+  (Shopify's `checkout[...]` parameters), so they reach that confirmed shop
+  in the link. The preview lists exactly what is filled in. The link kept
+  in the action's result afterwards carries none of it (`stored_url`); the
+  frozen proposal and its preview keep it, as the person's own record of
+  what they agreed to (like their saved addresses).
+* Any other store: the product's page.
 
 The link is built here from the finding's store page (provenance-gated when
 it was found) and the store's own data, never from a model.
@@ -36,8 +45,13 @@ PRODUCT_BYTES = 1_000_000
 PRODUCT_SECONDS = 15.0
 MAX_QUANTITY = 10
 _HANDLE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._~%-]{0,200}$")
+_SHOP = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}\.myshopify\.com$")
+_CURRENCY = re.compile(r"^[A-Z]{3}$")
+BAD_QUANTITY = f"Quantity must be 1 to {MAX_QUANTITY}."
 
 QUANTITY = IntakeField(key="quantity", label="Quantity", type="number", help=f"1 to {MAX_QUANTITY}")
+FILL_IN = IntakeField(key="fill_in", label="Fill in my email and saved address", type="boolean", default="yes",
+                      help="Shopify stores only: they go to the store in the checkout link.")
 
 
 def store_page(item: dict) -> str | None:
@@ -69,30 +83,49 @@ def wanted_variant(url: str) -> int | None:
     return int(value) if value.isdigit() else None
 
 
-async def shopify_product(url: str, *, fetch=fetch_public) -> dict | None:
-    """The store's own product data when it is a Shopify store, else None."""
-    handle = product_handle(url)
-    if handle is None:
-        return None
-    host = urlsplit(url).hostname
+def _bare(host: str | None) -> str:
+    return (host or "").lower().removeprefix("www.")
+
+
+async def _json(url: str, fetch) -> tuple[dict | None, str]:
+    """A small JSON document from a public page, and the URL it came from."""
     try:
-        fetched = await fetch(f"https://{host}/products/{handle}.js", max_bytes=PRODUCT_BYTES,
-                              accept="application/json", total_timeout=PRODUCT_SECONDS)
+        fetched = await fetch(url, max_bytes=PRODUCT_BYTES, accept="application/json",
+                              total_timeout=PRODUCT_SECONDS)
     except (UnsafeURL, TimeoutError, OSError):
-        return None
+        return None, ""
     except Exception:
-        logger.info("buy: product data fetch failed", exc_info=True)
-        return None
+        logger.info("buy: store data fetch failed", exc_info=True)
+        return None, ""
     if fetched.status != 200 or fetched.truncated:
-        return None
+        return None, ""
     try:
         data = json.loads(fetched.body)
     except (ValueError, UnicodeDecodeError):
+        return None, ""
+    return (data if isinstance(data, dict) else None), fetched.final_url or url
+
+
+async def shopify_store(url: str, *, fetch=fetch_public) -> dict | None:
+    """`{"product", "currency", "shop"}` when Shopify confirms the finding's
+    host is a Shopify shop's own, else None."""
+    handle = product_handle(url)
+    host = urlsplit(url).hostname
+    if handle is None or not host:
         return None
-    variants = data.get("variants") if isinstance(data, dict) else None
+    meta, _ = await _json(f"https://{host}/meta.json", fetch)
+    shop = str((meta or {}).get("myshopify_domain") or "").lower()
+    if not _SHOP.match(shop):
+        return None
+    product, came_from = await _json(f"https://{shop}/products/{handle}.js", fetch)
+    # Shopify sends a shop to its own domain: this host, or the shop itself.
+    if product is None or _bare(urlsplit(came_from).hostname) not in (_bare(host), shop):
+        return None
+    variants = product.get("variants")
     if not isinstance(variants, list) or not any(isinstance(v, dict) and isinstance(v.get("id"), int) for v in variants):
         return None
-    return data
+    currency = str(meta.get("currency") or "").upper()
+    return {"product": product, "currency": currency if _CURRENCY.match(currency) else None, "shop": shop}
 
 
 def pick_variant(product: dict, wanted: int | None) -> dict | None:
@@ -126,6 +159,25 @@ def checkout_link(host: str, variant_id: int, quantity: int, *, address: dict | 
     return f"https://{host}/cart/{variant_id}:{quantity}{query}"
 
 
+def quantity_of(params: dict) -> int:
+    """A whole number from 1 to MAX_QUANTITY; 1 when not given."""
+    raw = params.get("quantity")
+    if raw is None:
+        return 1
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)) or raw != int(raw):
+        raise ActionError(BAD_QUANTITY, 422)
+    if not 1 <= int(raw) <= MAX_QUANTITY:
+        raise ActionError(BAD_QUANTITY, 422)
+    return int(raw)
+
+
+def money(value: float | None, currency: str | None) -> str:
+    """With its currency's sign when known; a bare amount when not."""
+    if value is None:
+        return ""
+    return format_money(value, currency) or "" if currency else f"{value:,.2f}"
+
+
 async def _saved_address(user_id) -> dict | None:
     async with connection_or_direct() as conn:
         addresses = await shipping_addresses.list_addresses(conn, user_id)
@@ -145,18 +197,17 @@ async def prepare(ctx: ActionContext, params: dict, *, fetch=fetch_public) -> Pr
         raise ActionError(available(ctx) or "There's no store page to buy from.")
     title = ctx.item.get("title") or "this"
     host = urlsplit(url).hostname or ""
-    store = host.removeprefix("www.")
-    found, currency = _found_price(ctx.item)
-    quantity = int(params.get("quantity") or 1)
-    if not 1 <= quantity <= MAX_QUANTITY:
-        raise ActionError(f"Quantity must be 1 to {MAX_QUANTITY}.", 422)
+    store = _bare(host)
+    found, found_currency = _found_price(ctx.item)
+    quantity = quantity_of(params)
+    fill_in = params.get("fill_in", True) is not False
 
-    product = await shopify_product(url, fetch=fetch)
-    variant = pick_variant(product, wanted_variant(url)) if product else None
+    shop = await shopify_store(url, fetch=fetch)
+    variant = pick_variant(shop["product"], wanted_variant(url)) if shop else None
     if variant is None:
         lines = [Line("Item", title), Line("Store", store)]
         if found is not None:
-            lines.append(Line("Price when found", format_money(found, currency) or ""))
+            lines.append(Line("Price when found", money(found, found_currency)))
         return Proposal(
             frozen={"kind": "product_page", "url": url, "store": store, "title": title},
             title=f"Buy {title}",
@@ -168,27 +219,32 @@ async def prepare(ctx: ActionContext, params: dict, *, fetch=fetch_public) -> Pr
     if not variant.get("available"):
         raise ActionError(f"{title} is out of stock at {store} right now.")
 
+    currency = shop["currency"]
     price = variant["price"] / 100 if isinstance(variant.get("price"), int) else None
-    address = await _saved_address(ctx.user.id)
-    email = (getattr(ctx.user, "email", "") or "").strip()
+    address = await _saved_address(ctx.user.id) if fill_in else None
+    email = (getattr(ctx.user, "email", "") or "").strip() if fill_in else ""
     link = checkout_link(host, variant["id"], quantity, address=address, email=email)
     option = variant.get("title") if variant.get("title") not in (None, "", "Default Title") else None
     lines = [Line("Item", f"{title} ({option})" if option else title), Line("Store", store),
              Line("Quantity", str(quantity))]
     if price is not None:
-        lines.append(Line("Price now", format_money(price, currency) or ""))
+        lines.append(Line("Price now", money(price, currency)))
     if address:
         lines.append(Line("Ship to", shipping_addresses.one_line(address)))
     if email:
         lines.append(Line("Email", email))
     note = f"Opens checkout at {store} with this in the cart"
-    note += ", your address and email filled in. " if address else (", your email filled in. " if email else ". ")
+    filled = [w for w, on in (("your address", bool(address)), ("email", bool(email))) if on]
+    note += f", {' and '.join(filled)} filled in. " if filled else ". "
     note += "You review and pay there; Espresso doesn't pay or place the order."
-    if price is not None and found is not None and abs(price - found) >= 0.01:
-        note += f" It was {format_money(found, currency)} when found."
+    # Only the same money compares: a found price in another currency doesn't.
+    if (price is not None and found is not None and currency and (found_currency or currency) == currency
+            and abs(price - found) >= 0.01):
+        note += f" It was {money(found, currency)} when found."
     return Proposal(
-        frozen={"kind": "checkout", "url": link, "store": store, "title": title,
-                "variant_id": variant["id"], "quantity": quantity, "price": price, "currency": currency},
+        frozen={"kind": "checkout", "url": link, "store": store, "title": title, "variant_id": variant["id"],
+                "quantity": quantity, "price": price, "currency": currency,
+                "plain_url": checkout_link(host, variant["id"], quantity, address=None, email="")},
         title=f"Buy {title}",
         lines=tuple(lines),
         note=note,
@@ -196,12 +252,14 @@ async def prepare(ctx: ActionContext, params: dict, *, fetch=fetch_public) -> Pr
 
 
 async def perform(ctx: ActionContext, frozen: dict) -> dict:
-    """Nothing to do on the server: the link is the hand-off."""
+    """Nothing to do on the server: the link is the hand-off. The link kept
+    afterwards (`stored_url`) carries none of the person's details."""
     store = frozen.get("store") or "the store"
     if frozen.get("kind") == "checkout":
-        return outcome(f"Checkout opened at {store}", (Line("Item", frozen.get("title") or ""),
-                                                        Line("Quantity", str(frozen.get("quantity") or 1))),
-                       url=frozen.get("url"))
+        out = outcome(f"Checkout opened at {store}", (Line("Item", frozen.get("title") or ""),
+                                                       Line("Quantity", str(frozen.get("quantity") or 1))),
+                      url=frozen.get("url"))
+        return {**out, "stored_url": frozen.get("plain_url") or frozen.get("url")}
     return outcome(f"Opened the product at {store}", (Line("Item", frozen.get("title") or ""),), url=frozen.get("url"))
 
 
@@ -212,7 +270,7 @@ ACTION = ItemAction(
     description="Opens the store's checkout with this in the cart (or its page, for stores that can't). "
                 "You pay at the store; Espresso never pays or orders.",
     item_kinds=("product",),
-    params=(QUANTITY,),
+    params=(QUANTITY, FILL_IN),
     confirm_label="Go to checkout",
     available=available,
     prepare=prepare,

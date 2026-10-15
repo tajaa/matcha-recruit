@@ -108,13 +108,27 @@ returns what came of it; a deleted task's proposal is cancelled, not run.
 Actions are deterministic: no model run and no assistant hold/resume (that
 machinery is bound to a chat run).
 
-**Buy** (`buy.py`, products): Espresso never pays or orders. A Shopify store
-(its `/products/<handle>.js` answers) gets a cart permalink
-`https://<store>/cart/<variant>:<qty>` that opens checkout with it in the
-cart, the person's email and default saved shipping address filled in
-(`checkout[email]`, `checkout[shipping_address][...]`), the store's price now,
-and refused when the variant is out of stock. Any other store: its product
-page. A finding with only Google's page can't be bought.
+**Buy** (`buy.py`, products): Espresso never pays or orders.
+- A store counts as Shopify only when Shopify vouches for it: the host's
+  `/meta.json` names a `*.myshopify.com` shop, and that shop's
+  `/products/<handle>.js` must come back from the finding's own host (Shopify
+  redirects a shop to its own domain only). Then a cart permalink
+  `https://<store>/cart/<variant>:<qty>` opens checkout with it in the cart,
+  at the store's price now in the shop's currency (`/meta.json`; a bare
+  amount when unknown, and "when found" only compared in the same currency),
+  refused when the variant is sold out.
+- "Fill in my email and saved address" (an action field, on by default)
+  adds `checkout[email]` and `checkout[shipping_address][...]` to that link;
+  the preview lists them. The result keeps the link without them
+  (`stored_url`); the frozen proposal and preview keep them as the person's
+  own record of what they agreed to.
+- Any other store: its product page. A finding with only Google's page can't
+  be bought. Quantity is a whole number 1–10.
+
+Guards (`service.py`): 10 proposals a minute a person (each may read the
+store's pages); an advisory lock per finding and action around expire +
+insert; a `running` row older than 10 minutes is settled as failed; the
+daily limit counts by `decided_at`.
 
 ## Adding a kind of task, or an action
 

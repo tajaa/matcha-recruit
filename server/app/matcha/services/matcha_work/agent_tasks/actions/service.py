@@ -8,6 +8,16 @@
   its result back. `perform` gets the frozen proposal and nothing else.
 * `cancel`: the person said no.
 
+Guards: at most `PROPOSALS_PER_MINUTE` proposals a minute per person (each
+may read the store's pages); proposing for one finding and action is
+serialized (an advisory lock), so two at once leave one live proposal; an
+action left `running` (its process died) is settled as failed after
+`STALE_RUNNING`, so it neither counts nor reads as running forever. The daily
+limit counts what the person said yes to (`decided_at`).
+
+`perform` may return `stored_url`: the link kept in the result afterwards
+(without the person's details); the caller gets `url` once.
+
 Every read and write is scoped to the person (another person's ids are 404).
 """
 from __future__ import annotations
@@ -28,6 +38,9 @@ logger = logging.getLogger(__name__)
 
 HISTORY = 5
 FAILED = "It didn't go through. Nothing was done."
+PROPOSALS_PER_MINUTE = 10
+STALE_RUNNING = "10 minutes"
+UNFINISHED = "It didn't finish. Nothing more will happen."
 
 
 def _iso(value):
@@ -68,8 +81,18 @@ def action_view(row) -> dict:
     }
 
 
+async def settle_stale(conn, user_id: UUID) -> None:
+    """An action still `running` long after its yes died with its process."""
+    await conn.execute(
+        f"""UPDATE mw_agent_task_actions SET status = 'failed', error = $2, finished_at = NOW()
+            WHERE user_id = $1 AND status = 'running' AND decided_at < NOW() - INTERVAL '{STALE_RUNNING}'""",
+        user_id, UNFINISHED,
+    )
+
+
 async def history(conn, item_id: UUID, user_id: UUID) -> list[dict]:
     """What was done (or is waiting) for this finding, newest first."""
+    await settle_stale(conn, user_id)
     rows = await conn.fetch(
         f"""SELECT * FROM mw_agent_task_actions
             WHERE item_id = $1 AND user_id = $2 AND status NOT IN ('cancelled', 'expired')
@@ -105,12 +128,20 @@ async def propose(user, task_id: UUID, item_id: UUID, key: str, params: dict) ->
         raise AgentTaskError("Check the details.", 422,
                              {"code": "invalid", "message": "Check the details.", "errors": errors})
     async with connection_or_direct() as conn:
+        await settle_stale(conn, user.id)
+        recent = int(await conn.fetchval(
+            """SELECT COUNT(*) FROM mw_agent_task_actions
+               WHERE user_id = $1 AND created_at > NOW() - INTERVAL '1 minute'""",
+            user.id,
+        ) or 0)
         done_today = int(await conn.fetchval(
             """SELECT COUNT(*) FROM mw_agent_task_actions
                WHERE user_id = $1 AND action = $2 AND status IN ('running', 'done')
-                 AND created_at > NOW() - INTERVAL '1 day'""",
+                 AND decided_at > NOW() - INTERVAL '1 day'""",
             user.id, action.key,
         ) or 0)
+    if recent >= PROPOSALS_PER_MINUTE:
+        raise AgentTaskError("That's a lot at once. Try again in a minute.", 429)
     if done_today >= action.per_day:
         raise AgentTaskError(f"That's {action.per_day} today, the most for a day. Try again tomorrow.", 429)
     try:
@@ -119,6 +150,8 @@ async def propose(user, task_id: UUID, item_id: UUID, key: str, params: dict) ->
         raise AgentTaskError(str(exc), exc.code) from exc
     async with connection_or_direct() as conn:
         async with conn.transaction():
+            # One live proposal per finding and action, even when two arrive at once.
+            await conn.execute("SELECT pg_advisory_xact_lock(hashtext($1))", f"task_action:{item_id}:{action.key}")
             await conn.execute(
                 """UPDATE mw_agent_task_actions SET status = 'expired'
                    WHERE item_id = $1 AND user_id = $2 AND action = $3 AND status = 'proposed'""",
@@ -179,14 +212,23 @@ async def confirm(user, action_id: UUID) -> dict:
         error = str(exc)
     except Exception:
         logger.warning("task action failed action=%s id=%s", row["action"], action_id, exc_info=True)
+    stored = None
+    if result is not None:
+        # The link kept for later carries none of the person's details.
+        stored = {k: v for k, v in result.items() if k != "stored_url"}
+        if result.get("stored_url"):
+            stored["url"] = result["stored_url"]
     async with connection_or_direct() as conn:
         done = await conn.fetchrow(
             """UPDATE mw_agent_task_actions
                SET status = $2, result = $3::jsonb, error = $4, finished_at = NOW()
                WHERE id = $1 RETURNING *""",
-            action_id, status, json.dumps(result, default=str) if result is not None else None, error,
+            action_id, status, json.dumps(stored, default=str) if stored is not None else None, error,
         )
-    return action_view(done)
+    view = action_view(done)
+    if result is not None and view["result"] is not None:
+        view["result"] = {**view["result"], "url": result.get("url")}  # this once, the link to open
+    return view
 
 
 async def cancel(user, action_id: UUID) -> dict:
