@@ -235,7 +235,8 @@ column as `<playbook>.<phase>`).
   a message deletes its files (`delete_for_message`, in the soft delete's
   transaction; stored copies after). Uploads never sent with a message, and
   files whose conversation was deleted, are removed at the person's next
-  upload once a day old.
+  upload once a day old, unless a task holds them (`mw_agent_tasks.input_ids`:
+  a form's files have no message).
 - **Sending:** the socket keeps only `espresso-input:` attachments the sender
   uploaded to this conversation and hasn't sent yet, described from our rows
   (`claim_for_message`), then links them to the message.
