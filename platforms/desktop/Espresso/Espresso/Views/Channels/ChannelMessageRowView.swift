@@ -91,7 +91,8 @@ struct ChannelMessageRowView: View {
                                 meta: meta,
                                 text: displayBody,
                                 currentUserId: currentUserId,
-                                onQuickReply: onQuickReply.map { send in { reply in send(msg, reply) } }
+                                onQuickReply: onQuickReply.map { send in { reply in send(msg, reply) } },
+                                channelId: msg.channelId
                             )
                         } else if msg.metadata?.action?.kind == "event_assignment" {
                             VStack(alignment: .leading, spacing: 5) {

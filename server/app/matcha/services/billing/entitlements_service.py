@@ -213,8 +213,10 @@ def features_for_plan(plan: str) -> dict[str, bool]:
     }
 
 
-async def resolve_entitlements(user_id: UUID | str, company_id: Optional[UUID] = None) -> dict:
-    """Full entitlement payload for GET /matcha-work/entitlements."""
+async def resolve_entitlements(user_id: UUID | str, company_id: Optional[UUID] = None, *,
+                               role: str | None = None) -> dict:
+    """Full entitlement payload for GET /matcha-work/entitlements. `role`:
+    the caller's, for what only some roles see (Tasks for admins)."""
     plan = await resolve_plan_for_user(user_id)
     token_limit, window_hours = PLAN_QUOTAS[plan]
 
@@ -275,6 +277,8 @@ async def resolve_entitlements(user_id: UUID | str, company_id: Optional[UUID] =
     workspace = {
         "espresso_assistant": False,
         "job_search": False,
+        # Espresso Tasks: the Tasks section and starting tasks from chat.
+        "agent_tasks": False,
         "claude_models": anthropic_configured(),
         "chat_models": chat_models,
         "default_chat_model": default_chat_model,
@@ -294,6 +298,14 @@ async def resolve_entitlements(user_id: UUID | str, company_id: Optional[UUID] =
             from ..matcha_work.job_search import providers as job_providers
 
             workspace["job_search"] = job_providers.configured()
+        except Exception:
+            pass
+        try:
+            from types import SimpleNamespace
+
+            from ..matcha_work.agent_tasks.enqueue import tasks_enabled
+
+            workspace["agent_tasks"] = tasks_enabled(SimpleNamespace(role=role))
         except Exception:
             pass
         # The assistant's model menu (`[{"id", "label"}]`) and where it starts,

@@ -345,6 +345,7 @@ async def summarize(task: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
                     normalize=lambda args, _state: contracts.normalize_summary(
                         args, batch=batch, item_texts={i["id"]: _item_text(i) for i in shown},
                         citable={u for u in urls if u}, context=context,
+                        titles={short: item["title"] for short, item in zip(batch, shown)},
                     ),
                 ),
                 instructions=prompts.SUMMARIZE,

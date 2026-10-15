@@ -275,7 +275,7 @@ struct ContentView: View {
             && !appState.showThreadsHub && !appState.showChannelsHub
             && !appState.showProductivityHub && !appState.showEmailHub
             && !appState.showAssistantHub && !appState.showCalendarHub
-            && !appState.showJobSearchHub && (appState.showHome || (
+            && !appState.showJobSearchHub && !appState.showTasksHub && (appState.showHome || (
             appState.selectedThreadId == nil &&
             appState.selectedProjectId == nil &&
             appState.selectedChannelId == nil &&
@@ -381,6 +381,7 @@ struct ContentView: View {
         case .email:    emailSidebarSection
         case .assistant: assistantSidebarSection
         case .jobs: jobSearchSidebarSection
+        case .tasks: tasksSidebarSection
         }
     }
 
@@ -410,6 +411,10 @@ struct ContentView: View {
         // The surface as a pane target: ⌥-click and the context menu open it
         // beside / below whatever the main pane shows.
         paneTarget: AuxWindowTarget? = nil,
+        // A count on the right (Tasks running), and a dot for something
+        // that wants the person (a task waiting, or finished and unseen).
+        badge: Int? = nil,
+        attention: Bool = false,
         onOpen: @escaping () -> Void
     ) -> some View {
         Button(action: {
@@ -435,6 +440,14 @@ struct ContentView: View {
                         .foregroundColor(appState.themeSidebarTextSecondary.opacity(0.7))
                 }
                 Spacer(minLength: 0)
+                if let badge, badge > 0 {
+                    Text("\(badge)")
+                        .font(.espresso(size: 10))
+                        .foregroundColor(appState.themeSidebarTextSecondary)
+                }
+                if attention {
+                    Circle().fill(appState.themeSidebarAccent).frame(width: 6, height: 6)
+                }
                 if let isExpanded {
                     Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                         .font(.espresso(size: 9))
@@ -567,6 +580,20 @@ struct ContentView: View {
                           isActive: appState.showJobSearchHub,
                           lockedFeature: appState.canJobSearch ? nil : "job_search",
                           onOpen: { appState.openJobSearch() })
+        }
+    }
+
+    /// Nav-only row — opens Tasks, with how many are running and a dot when
+    /// one waits for the person or finished unseen. Shown only when the
+    /// account has Tasks.
+    @ViewBuilder
+    private var tasksSidebarSection: some View {
+        if appState.tasksEnabled {
+            let badge = TasksViewModel.badge(appState.tasksSummary)
+            sidebarNavRow(title: "Tasks", icon: "list.bullet.clipboard",
+                          isActive: appState.showTasksHub,
+                          badge: badge.count, attention: badge.attention,
+                          onOpen: { appState.openTasks() })
         }
     }
 

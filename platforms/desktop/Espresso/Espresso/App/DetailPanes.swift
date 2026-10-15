@@ -22,7 +22,7 @@ struct PrimaryDetailPane: View {
     // rail never unmounts. Context is whichever item is selected, else whichever
     // hub flag is set. selected*Id wins so a cross-link (e.g. project → channel)
     // switches rails to the active item.
-    private enum WorkCategory { case threads, projects, journals, channels, productivity, calendar, jobs, email, assistant }
+    private enum WorkCategory { case threads, projects, journals, channels, productivity, calendar, jobs, tasks, email, assistant }
     private var workCategory: WorkCategory? {
         if appState.selectedThreadId != nil  { return .threads }
         if appState.selectedProjectId != nil { return .projects }
@@ -37,6 +37,7 @@ struct PrimaryDetailPane: View {
         if appState.showProductivityHub { return .productivity }
         if appState.showCalendarHub { return .calendar }
         if appState.showJobSearchHub { return .jobs }
+        if appState.showTasksHub { return .tasks }
         // Last: a stale Email flag must never mask a journal selection.
         if appState.showEmailHub { return .email }
         if appState.showAssistantHub { return .assistant }
@@ -54,6 +55,7 @@ struct PrimaryDetailPane: View {
                 case .productivity: ProductivityWorkspace()
                 case .calendar: CalendarWorkspace()
                 case .jobs: JobSearchWorkspace()
+                case .tasks: TasksWorkspace()
                 case .email: EmailWorkspace()
                 case .assistant: AssistantView(acceptsEmailHandoff: true)
                 }

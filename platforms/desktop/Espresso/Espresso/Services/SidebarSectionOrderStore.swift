@@ -27,6 +27,8 @@ final class SidebarSectionOrderStore {
         case assistant
         /// Job search: ranked postings and drafted approaches.
         case jobs
+        /// Espresso Tasks: background work and what it found.
+        case tasks
 
         var id: String { rawValue }
 
@@ -42,6 +44,7 @@ final class SidebarSectionOrderStore {
             case .email:    return "envelope"
             case .assistant: return "sparkles"
             case .jobs: return "briefcase"
+            case .tasks: return "list.bullet.clipboard"
             }
         }
 
@@ -58,6 +61,7 @@ final class SidebarSectionOrderStore {
             case .email:    return "Email"
             case .assistant: return "Espresso"
             case .jobs: return "Job search"
+            case .tasks: return "Tasks"
             }
         }
     }

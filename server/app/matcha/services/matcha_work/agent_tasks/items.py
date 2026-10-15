@@ -40,17 +40,22 @@ async def insert_items(conn, task: dict, token: UUID, round_n: int, records: lis
     if room <= 0 or not records:
         return 0
     existing = await conn.fetch(
-        "SELECT dedupe_key, title FROM mw_agent_task_items WHERE task_id = $1", task["id"],
+        "SELECT dedupe_key, title, subtitle FROM mw_agent_task_items WHERE task_id = $1", task["id"],
     )
     keys = {row["dedupe_key"] for row in existing}
     titles = {title_key(row["title"]) for row in existing if title_key(row["title"])}
+    # Same name and same seller or place: the same thing, whatever its link.
+    pairs = {(title_key(row["title"]), title_key(row.get("subtitle"))) for row in existing}
     rows, seen = [], set()
     for record in records:
         key = dedupe_key(record)
         name = title_key(record.get("title"))
-        if key in keys or key in seen or (name and name in titles and record.get("origin") != "provider"):
+        pair = (name, title_key(record.get("subtitle")))
+        if (key in keys or key in seen or (name and pair in pairs)
+                or (name and name in titles and record.get("origin") != "provider")):
             continue
         seen.add(key)
+        pairs.add(pair)
         rows.append({
             "dedupe_key": key,
             "kind": record.get("kind") or "other",

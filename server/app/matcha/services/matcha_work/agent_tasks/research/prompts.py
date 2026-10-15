@@ -53,7 +53,7 @@ finding. {_DATA}"""
 SUMMARIZE = f"""You write the result of a research task: a headline, a short summary, up to four \
 short sections, and the top picks (up to five) with one sentence each on why. Use only the facts \
 shown for each finding; never state a number a finding doesn't show. Say plainly when a fact is \
-unconfirmed. No links except the findings' own pages. Call finish once. {_DATA}"""
+unconfirmed. Name findings by their title; their short ids are only for the `top` list. No links except the findings' own pages. Call finish once. {_DATA}"""
 
 REFINE = f"""The person looked at what a research task found and asked for a change. Rewrite the \
 plan's hard constraints and preferences to match: keep what still holds, change or add what they \

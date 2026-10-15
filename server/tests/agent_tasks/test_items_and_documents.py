@@ -20,12 +20,14 @@ def test_dedupe_keys():
 
 @pytest.mark.asyncio
 async def test_insert_skips_repeats_and_counts_the_round():
-    conn = FakeConn().on("SELECT dedupe_key, title", [{"dedupe_key": "u:https://apts.test/1", "title": "Old one"}])
+    conn = FakeConn().on("SELECT dedupe_key, title", [
+        {"dedupe_key": "u:https://apts.test/1", "title": "Old one", "subtitle": "Mission"}])
     conn.on("WITH ins AS", 2)
     records = [
         {"url": "https://apts.test/1", "title": "Again"},                      # same page
         {"url": "https://apts.test/2", "title": "Old one"},                    # same name
-        {"url": "https://apts.test/2", "title": "Old one", "origin": "provider"},  # a provider's is kept
+        {"url": "https://apts.test/2", "title": "Old one", "subtitle": "Acme", "origin": "provider"},  # another seller
+        {"url": "https://shop.test/9", "title": "Old one", "subtitle": "Mission", "origin": "provider"},  # same name and seller
         {"url": "https://apts.test/3", "title": "New"},
         {"url": "https://apts.test/3", "title": "New"},                        # repeat in the batch
         {"url": "https://apts.test/4", "title": "Over the room"},
@@ -116,7 +118,9 @@ async def test_task_stopped_notifies_on_the_callers_connection(monkeypatch):
     conn = FakeConn().on("FROM mw_agent_tasks WHERE id = $1", task_row())
     await notify.task_stopped(conn, TASK)
     kwargs = create.await_args.kwargs
-    assert kwargs["conn"] is conn and kwargs["type"] == "agent_task_done" and kwargs["metadata"]["task_id"] == str(TASK)
+    assert kwargs["conn"] is conn and kwargs["type"] == "agent_task_done"
+    assert kwargs["metadata"]["agent_task_id"] == str(TASK)
+    assert all(isinstance(v, str) for v in kwargs["metadata"].values())
     conn.on("FROM mw_agent_tasks WHERE id = $1", task_row(status="cancelled"))
     await notify.task_stopped(conn, TASK)
     conn.on("FROM mw_agent_tasks WHERE id = $1", None)

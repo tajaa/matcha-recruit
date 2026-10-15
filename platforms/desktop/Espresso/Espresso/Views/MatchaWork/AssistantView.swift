@@ -52,6 +52,9 @@ struct AssistantView: View {
         .onChange(of: appState.pendingAssistantJobContext?.id) { _, _ in
             if acceptsEmailHandoff { Task { await takeJob() } }
         }
+        .onChange(of: appState.pendingAssistantTaskContext?.id) { _, _ in
+            if acceptsEmailHandoff { Task { await takeTask() } }
+        }
         .sheet(isPresented: $showAbilities) {
             AssistantAbilitiesSheet().environment(appState)
         }
@@ -206,7 +209,7 @@ struct AssistantView: View {
                 }
             } catch { report(error) }
             // Queued while loading, then drained when opening finishes.
-            if acceptsEmailHandoff { await takeEmails(); await takeSales(); await takeJob() }
+            if acceptsEmailHandoff { await takeEmails(); await takeSales(); await takeJob(); await takeTask() }
         }
     }
 
@@ -299,6 +302,25 @@ struct AssistantView: View {
             select: { select($0, draft: $1) },
             consume: { id in
                 if appState.pendingAssistantJobContext?.id == id { appState.pendingAssistantJobContext = nil }
+            }, report: report)
+    }
+
+    private func takeTask() async {
+        await operations.take(
+            pending: { () -> AssistantTaskContext? in
+                guard let request = appState.pendingAssistantTaskContext,
+                      request.owner == appState.currentUser?.id else { return nil }
+                return request
+            },
+            create: { (request: AssistantTaskContext) in
+                let id = try await MatchaWorkService.shared.createAssistantConversation(
+                    title: request.conversationTitle, requestId: request.id)
+                try await reload()
+                return id
+            },
+            select: { select($0, draft: $1) },
+            consume: { id in
+                if appState.pendingAssistantTaskContext?.id == id { appState.pendingAssistantTaskContext = nil }
             }, report: report)
     }
 

@@ -101,6 +101,15 @@ class AppState {
     /// A search or job for Job search to open next (`openJobSearch`); the
     /// section consumes and clears it.
     var jobSearchFocus: JobSearchFocus? = nil
+    /// Full-pane Tasks (the person's background tasks and what each found).
+    /// Same nav-only model.
+    var showTasksHub: Bool = false
+    /// A task (and finding) for Tasks to open next (`openTasks`); the section
+    /// consumes and clears it.
+    var tasksFocus: TasksFocus? = nil
+    /// The sidebar row's counts (`refreshTasksSummary`).
+    var tasksSummary: AgentTasksSummary? = nil
+    var pendingAssistantTaskContext: AssistantTaskContext?
     /// Full-pane Calendar (the person's Espresso calendar, dated to-dos and
     /// Google Calendar). Same nav-only model.
     var showCalendarHub: Bool = false
@@ -148,6 +157,32 @@ class AppState {
         showAssistantHub = false
         showCalendarHub = false
         showJobSearchHub = false
+        showTasksHub = false
+    }
+
+    /// Open Tasks, on one task (and one of its findings) when given.
+    func openTasks(taskId: String? = nil, itemId: String? = nil) {
+        clearPrimaryNav()
+        tasksFocus = taskId.map { TasksFocus(taskId: $0, itemId: itemId) }
+        showTasksHub = true
+    }
+
+    /// A new Espresso conversation: a directive to start a task with (Espresso
+    /// asks for anything missing), or a question about an existing task.
+    func workOnTask(directive: String, taskId: String? = nil, itemId: String? = nil) {
+        guard let owner = currentUser?.id else { return }
+        guard canAssistant else { presentPaywall(for: "assistant"); return }
+        clearPrimaryNav()
+        clearAssistantHandoffs()
+        pendingAssistantTaskContext = AssistantTaskContext(owner: owner, directive: directive,
+                                                           taskId: taskId, itemId: itemId)
+        showAssistantHub = true
+    }
+
+    /// The sidebar row's counts. Quiet on failure: the row just shows none.
+    func refreshTasksSummary() async {
+        guard tasksEnabled else { tasksSummary = nil; return }
+        tasksSummary = try? await AgentTaskService.shared.summary()
     }
 
     /// Open Job search, on one search (and one of its jobs) when given.
@@ -206,6 +241,7 @@ class AppState {
         pendingAssistantEmailContext = nil
         pendingAssistantSalesContext = nil
         pendingAssistantJobContext = nil
+        pendingAssistantTaskContext = nil
     }
 
     var onlineUsers: [MWOnlineUser] = []
@@ -250,6 +286,8 @@ class AppState {
     /// with a listings provider. Defaults CLOSED while unknown, like the
     /// assistant's row.
     var jobSearchEnabled: Bool { entitlements?.workspace?.jobSearch == true }
+    /// Whether this account has Tasks. Defaults CLOSED while unknown.
+    var tasksEnabled: Bool { entitlements?.workspace?.agentTasks == true }
     /// Whether the WORKSPACE has the assistant switched on. Unlike the plan
     /// gates above this defaults CLOSED while unknown: the row is a whole
     /// surface, and one that appears and then vanishes is worse than one that

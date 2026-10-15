@@ -212,6 +212,23 @@ extension AgentCardMessageView {
                 .buttonStyle(.plain)
                 .help("Open in Job search")
             }
+        case .task(let task):
+            // A task the answer is about: its findings open in Tasks.
+            ForEach(task.items) { item in
+                Button { appState.openTasks(taskId: task.taskId, itemId: item.id) } label: {
+                    itemRow(icon: "list.bullet.clipboard", title: item.title,
+                            subtitle: item.subtitle,
+                            detail: item.fields.values.sorted().prefix(3).joined(separator: " \u{00B7} "),
+                            trailing: "chevron.right")
+                }
+                .buttonStyle(.plain)
+                .help("Open in Tasks")
+            }
+            Button { appState.openTasks(taskId: task.taskId) } label: {
+                Label("Open \(task.title.isEmpty ? "the task" : task.title) in Tasks", systemImage: "list.bullet.clipboard")
+                    .font(.system(size: 11, weight: .medium))
+            }
+            .buttonStyle(.link)
         case .unknown:
             EmptyView()
         }
