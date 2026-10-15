@@ -371,6 +371,41 @@ async def create_journal(
         return journal
 
 
+async def create_note_direct(
+    conn, creator_id: UUID, company_id: UUID, *, title: str, content: str,
+    description: Optional[str] = None,
+) -> dict:
+    """A `note` journal with one entry holding `content`, filed in the
+    creator's default notebook, on the caller's connection.
+
+    For code that also runs in a worker (no pool, so no per-request user
+    binding): it sets `app.current_user_id` for its own transaction, so the
+    journal RLS policies see the creator either way."""
+    async with conn.transaction():
+        await conn.execute("SELECT set_config('app.current_user_id', $1, true)", str(creator_id))
+        folder_id = await _ensure_default_folder(conn, company_id, creator_id)
+        row = await conn.fetchrow(
+            """
+            INSERT INTO mw_journals (company_id, created_by, title, description, icon, kind, folder_id)
+            VALUES ($1, $2, COALESCE(NULLIF($3, ''), 'Untitled note'), $4, $5, 'note', $6)
+            RETURNING id, title, description, color, icon, status, kind, folder_id,
+                      created_by, created_at, updated_at
+            """,
+            company_id, creator_id, title[:200], description,
+            JOURNAL_KIND_DEFAULTS["note"]["icon"], folder_id,
+        )
+        journal = _parse_journal(row)
+        entry_id = await conn.fetchval(
+            """
+            INSERT INTO mw_journal_entries (journal_id, author_id, title, content)
+            VALUES ($1, $2, $3, $4)
+            RETURNING id
+            """,
+            UUID(journal["id"]), creator_id, title[:200], content,
+        )
+    return {**journal, "entry_id": str(entry_id)}
+
+
 async def update_journal(journal_id: UUID, viewer_id: UUID, patch: dict) -> dict:
     """Owner-only edit: title/description/color/icon/kind + folder placement.
 

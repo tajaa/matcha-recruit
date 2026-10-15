@@ -80,6 +80,7 @@ celery_app = Celery(
         "app.workers.tasks.assistant",
         "app.workers.tasks.sales_campaign",
         "app.workers.tasks.job_search",
+        "app.workers.tasks.agent_tasks",
         "app.workers.tasks.sales_intake_poll",
         "app.workers.tasks.pos_sales_sync",
         "app.workers.tasks.schedule_eligibility",
@@ -319,6 +320,13 @@ def on_worker_ready(sender=None, **kwargs):
         reconcile_job_searches.delay()
     except Exception:
         logger.exception("[Worker] Failed to enqueue job-search reconciliation")
+    try:
+        # Espresso tasks are chains too; this also cancels tasks left waiting
+        # for the person past their week.
+        from app.workers.tasks.agent_tasks import reconcile_agent_tasks
+        reconcile_agent_tasks.delay()
+    except Exception:
+        logger.exception("[Worker] Failed to enqueue agent-task reconciliation")
     try:
         from app.workers.tasks.schedule_break_refresh import recover_stale_employee_schedule_breaks
         recover_stale_employee_schedule_breaks.delay()

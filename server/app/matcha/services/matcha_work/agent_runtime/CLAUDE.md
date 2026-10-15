@@ -6,7 +6,8 @@ four on Friday at 7"); each message is one run.
 
 Agent cards (`../agent_card/`) are a caller of this same loop, and so are Job
 search's model phases (`../job_search/agent_phase.py` over `phase_run.py`, run
-kind `job_search`).
+kind `job_search`) and Espresso Tasks' (`../agent_tasks/model_run.py`, run
+kind `agent_task`, surface `agent_task`).
 There is one loop in this package and no other: do not add a second.
 
 ## The shape
@@ -68,7 +69,9 @@ it otherwise), and should declare `resolve`.
 
 A job too long for one worker task (prod's main worker has one slot) runs as
 a chain of short tasks, one phase each. Job search is the first owner
-(`../job_search/orchestrator.py`, `JOB_CHAIN`).
+(`../job_search/orchestrator.py`, `JOB_CHAIN`); Espresso Tasks is the second
+(`../agent_tasks/orchestrator.py`, `TASK_CHAIN`, phases stored in its `phase`
+column as `<playbook>.<phase>`).
 
 - **`chain.ChainSpec`** describes one kind of row: its table (a whitelist,
   `ChainTable`: `mw_job_searches`, `mw_agent_tasks`), its live statuses and
@@ -232,7 +235,8 @@ a chain of short tasks, one phase each. Job search is the first owner
   a message deletes its files (`delete_for_message`, in the soft delete's
   transaction; stored copies after). Uploads never sent with a message, and
   files whose conversation was deleted, are removed at the person's next
-  upload once a day old.
+  upload once a day old, unless a task holds them (`mw_agent_tasks.input_ids`:
+  a form's files have no message).
 - **Sending:** the socket keeps only `espresso-input:` attachments the sender
   uploaded to this conversation and hasn't sent yet, described from our rows
   (`claim_for_message`), then links them to the message.

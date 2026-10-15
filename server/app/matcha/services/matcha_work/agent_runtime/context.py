@@ -10,7 +10,7 @@ from .registry import Target
 if TYPE_CHECKING:
     from .policy import PolicyContext
 
-Surface = Literal["card", "assistant", "project_chat", "job_search"]
+Surface = Literal["card", "assistant", "project_chat", "job_search", "agent_task"]
 CommitMode = Literal["dry_run", "live"]
 
 

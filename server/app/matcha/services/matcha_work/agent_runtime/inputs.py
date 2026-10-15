@@ -21,7 +21,8 @@ in as data, at most 3 images as images. The run is also told which earlier
 files exist, and can read one with the `files` ability's `read_file`.
 
 The 200 MB a person may keep is freed by deleting the message a file came
-with (`delete_for_message`); uploads never sent are removed after a day.
+with (`delete_for_message`); uploads never sent, and not held by a task, are
+removed after a day.
 
 Pool-free (`connection_or_direct`): the worker calls it too.
 """
@@ -289,12 +290,16 @@ async def save(*, user_id: UUID, company_id: UUID, channel_id: UUID | None,
     incoming = sum(len(item[3]) for item in prepared)
     async with connection_or_direct() as conn:
         # Uploads never sent with a message (and files whose conversation was
-        # deleted) stop counting against the space.
+        # deleted) stop counting against the space. A file given to a task
+        # through its form has no message; the task keeps it until it's
+        # deleted (which empties its `input_ids`).
         unsent = await conn.fetch(
-            """DELETE FROM mw_agent_inputs
-               WHERE user_id = $1 AND message_id IS NULL
-                 AND created_at < NOW() - make_interval(hours => $2)
-               RETURNING storage_path""",
+            """DELETE FROM mw_agent_inputs i
+               WHERE i.user_id = $1 AND i.message_id IS NULL
+                 AND i.created_at < NOW() - make_interval(hours => $2)
+                 AND NOT EXISTS (SELECT 1 FROM mw_agent_tasks t
+                                 WHERE t.user_id = $1 AND i.id = ANY(t.input_ids))
+               RETURNING i.storage_path""",
             user_id, UNSENT_HOURS,
         )
         stored = await _stored_bytes(conn, user_id)

@@ -51,6 +51,10 @@ from .job_search import router as _job_search_router
 
 router.include_router(_job_search_router)
 
+from .agent_tasks import router as _agent_tasks_router
+
+router.include_router(_agent_tasks_router)
+
 from .tasks import router as _tasks_router
 
 router.include_router(_tasks_router)

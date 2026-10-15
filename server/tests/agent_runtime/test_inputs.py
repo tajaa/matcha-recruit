@@ -243,13 +243,14 @@ async def test_two_uploads_at_once_cant_both_pass_the_space_check(conn):
 
 @pytest.mark.asyncio
 async def test_unsent_uploads_stop_counting_after_a_day(conn):
-    conn.on("WHERE user_id = $1 AND message_id IS NULL", [{"storage_path": "s3://p/old.txt"}])
+    conn.on("WHERE i.user_id = $1 AND i.message_id IS NULL", [{"storage_path": "s3://p/old.txt"}])
     conn.on("SUM(size_bytes)", 0).on("INSERT INTO mw_agent_inputs", _row(1))
     storage = FakeStorage()
     await inputs.save(user_id=USER, company_id=COMPANY, channel_id=CHANNEL, storage=storage,
                       uploads=[inputs.Upload("a.txt", None, b"one")])
     [purge] = conn.ran("DELETE FROM mw_agent_inputs")
     assert purge[2] == (USER, inputs.UNSENT_HOURS)
+    assert "NOT EXISTS (SELECT 1 FROM mw_agent_tasks t" in purge[1]  # a task's form files stay
     assert storage.deleted == ["s3://p/old.txt"]
     # Only after the purge is the space counted.
     assert conn.calls.index(purge) < conn.calls.index(conn.ran("SUM(size_bytes)")[0])

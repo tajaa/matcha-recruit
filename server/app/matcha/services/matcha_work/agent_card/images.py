@@ -145,3 +145,36 @@ async def rehost_images(
     if photos is not None:
         photos[:] = rehosted[-1]
     return warnings
+
+
+async def rehost_urls(
+    images: list[dict], *, prefix: str, limit: int, total_seconds: float = 60.0,
+) -> tuple[list[dict], list[str]]:
+    """Rehost loose images (`{source_url, page_url, alt}`) on our CDN, in
+    order, at most `limit`, within `total_seconds`. Returns the ones that made
+    it (`{url, page_url, alt}`) and warnings for the rest. Used for Espresso
+    task findings; an image that fails any step is dropped, never shown raw."""
+    deadline = time.monotonic() + total_seconds
+    kept: list[dict] = []
+    warnings: list[str] = []
+    for image in images:
+        remaining = deadline - time.monotonic()
+        if len(kept) >= limit or remaining <= 1:
+            break
+        source = image.get("source_url") if isinstance(image, dict) else None
+        if not isinstance(source, str) or not source.startswith(("https://", "http://")):
+            continue
+        try:
+            url = await asyncio.wait_for(_rehost_one(source, prefix),
+                                         timeout=min(_PER_IMAGE_SECONDS * 2, remaining))
+        except StorageHasNoPublicUrl:
+            logger.warning("task photos dropped: storage returns no public URL (CLOUDFRONT_DOMAIN unset?)")
+            warnings.append("Photos are unavailable: image storage has no public URL configured")
+            break
+        except TimeoutError:
+            url = None
+        if url:
+            kept.append({"url": url, "page_url": image.get("page_url"), "alt": image.get("alt") or ""})
+        else:
+            warnings.append("Dropped a photo: could not load it safely")
+    return kept, warnings

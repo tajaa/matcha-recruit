@@ -33,12 +33,14 @@ def test_as_count():
 
 
 @pytest.mark.asyncio
-async def test_used_units_sums_both_sources_in_one_query():
+async def test_used_units_sums_every_source_in_one_query():
     user = uuid4()
     conn = FakeConn().on("FROM mw_project_agent_runs r, month", 17)
     assert await allowance.used_units(conn, user) == 17
     [(_method, query, args)] = conn.calls
     assert "r.kind = 'card_agent'" in query and "s.status <> 'failed'" in query
+    # Task rounds count their own units, unless the round failed.
+    assert "SUM(r.units), 0) FROM mw_agent_task_rounds r" in query and "r.status <> 'failed'" in query
     assert args == (user, allowance.FREE_CARD_SENDBACKS, 1, 5)
     assert await allowance.used_units(FakeConn(), user) == 0
 

@@ -75,6 +75,10 @@ TYPES = {
     "hr_case_delivered": "Write-up Delivered",
     "hr_case_signed_filed": "Signed Copy Filed",
     "hr_case_signed_attention": "Signed Copy Needs Attention",
+    # Espresso Tasks (services/matcha_work/agent_tasks/notify.py): a round
+    # finished (or stopped), or a task is waiting for the person.
+    "agent_task_done": "Task Finished",
+    "agent_task_needs_you": "Task Needs You",
 }
 
 
@@ -89,18 +93,24 @@ async def create_notification(
     metadata: Optional[dict] = None,
     send_email: bool = False,
     email_subject: Optional[str] = None,
+    conn=None,
 ) -> dict:
-    """Create a notification for a user. Optionally send an email."""
-    async with get_connection() as conn:
-        row = await conn.fetchrow(
-            """
+    """Create a notification for a user. Optionally send an email.
+
+    `conn`: insert on the caller's connection. A worker has no pool, so code
+    that runs there passes one from `connection_or_direct`; the live push goes
+    through Redis either way."""
+    insert = """
             INSERT INTO mw_notifications (user_id, company_id, type, title, body, link, metadata)
             VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
             RETURNING id, user_id, company_id, type, title, body, link, metadata, is_read, created_at
-            """,
-            user_id, company_id, type, title, body, link,
-            __import__("json").dumps(metadata or {}),
-        )
+            """
+    values = (user_id, company_id, type, title, body, link, __import__("json").dumps(metadata or {}))
+    if conn is not None:
+        row = await conn.fetchrow(insert, *values)
+    else:
+        async with get_connection() as pooled:
+            row = await pooled.fetchrow(insert, *values)
 
     # Push to live WS connections — sub-second bell update for connected
     # desktop / web clients. Best-effort: a WS hiccup must never fail the

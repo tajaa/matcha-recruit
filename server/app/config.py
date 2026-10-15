@@ -295,6 +295,9 @@ class Settings:
     # docs/ops/CAPPE_CUSTOM_DOMAINS.md is done — search/purchase/connect 503
     # while this is false.
     cappe_custom_domains_enabled: bool = False
+    # Espresso Tasks (`services/matcha_work/agent_tasks/`). Off until the Mac
+    # Tasks tab ships; admins can use it either way.
+    espresso_tasks_enabled: bool = False
     # Tenant-only distribution that carries the shared origin/WAF/secret config.
     cappe_cf_tenant_distribution_id: Optional[str] = None
     # Connection group the tenants route through.
@@ -493,6 +496,8 @@ def load_settings() -> Settings:
         cappe_domain_markup_cents=int(os.getenv("CAPPE_DOMAIN_MARKUP_CENTS", "800")),
         cappe_platform_webhook_secret=os.getenv("CAPPE_PLATFORM_WEBHOOK_SECRET"),
         cappe_custom_domains_enabled=os.getenv("CAPPE_CUSTOM_DOMAINS_ENABLED", "").strip().lower()
+        in ("1", "true", "yes"),
+        espresso_tasks_enabled=os.getenv("ESPRESSO_TASKS_ENABLED", "").strip().lower()
         in ("1", "true", "yes"),
         cappe_cf_tenant_distribution_id=os.getenv("CAPPE_CF_TENANT_DISTRIBUTION_ID"),
         cappe_cf_connection_group_id=os.getenv("CAPPE_CF_CONNECTION_GROUP_ID"),

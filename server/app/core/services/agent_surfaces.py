@@ -79,6 +79,7 @@ ESPRESSO_AGENT_CARDS = "espresso.agent_cards"
 ESPRESSO_ASSISTANT = "espresso.assistant"
 ESPRESSO_PROJECTS = "espresso.projects"
 ESPRESSO_JOB_SEARCH = "espresso.job_search"
+ESPRESSO_TASKS = "espresso.tasks"
 
 # ── Gummfit (Cappe) ──
 GUMMFIT_MERLIN = "gummfit.merlin"
@@ -145,6 +146,9 @@ SURFACES: tuple[SurfaceDef, ...] = (
     SurfaceDef(ESPRESSO_JOB_SEARCH, ESPRESSO, "Job search",
                "Planning the search, screening jobs and drafting how to approach each one. "
                "Applies to searches started after the change.", _LUNA),
+    SurfaceDef(ESPRESSO_TASKS, ESPRESSO, "Tasks",
+               "Background tasks: planning the research, finding and screening what fits, and the "
+               "summary. Applies to tasks started after the change.", _LUNA),
     SurfaceDef(
         GUMMFIT_MERLIN, GUMMFIT, "Merlin (single-step edits)",
         "Every Lite turn and other one-shot edits. The tier still sets how hard it thinks "
