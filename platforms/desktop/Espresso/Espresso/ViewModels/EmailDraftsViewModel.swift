@@ -11,6 +11,9 @@ final class EmailDraftsViewModel {
     var drafts: [EmailDraftSummary] = []
     var loaded = false
     var loading = false
+    /// More drafts in Gmail than shown: the next page's token.
+    var nextPageToken: String?
+    var loadingMore = false
 
     var selectedId: String?
     /// The draft as Gmail has it.
@@ -27,9 +30,12 @@ final class EmailDraftsViewModel {
     private let service = EmailService.shared
 
     var isDirty: Bool {
-        guard let saved else { return false }
+        guard let saved, saved.editable else { return false }
         return saved.to != to || saved.subject != subject || saved.body != body
     }
+
+    /// False for a draft with an attachment or formatting: edit it in Gmail.
+    var editable: Bool { saved?.editable ?? true }
 
     /// Bracketed parts a drafted message left for the person ("[Your name]").
     var placeholders: [String] { Self.placeholders(in: subject + "\n" + body) }
@@ -40,15 +46,30 @@ final class EmailDraftsViewModel {
         loading = true
         defer { loading = false }
         do {
-            drafts = try await service.drafts()
+            let page = try await service.drafts()
+            drafts = page.drafts
+            nextPageToken = page.nextPageToken
             loaded = true
             errorMessage = nil
         } catch is CancellationError {
         } catch { report(error) }
     }
 
+    func loadMore() async {
+        guard let token = nextPageToken, !loadingMore else { return }
+        loadingMore = true
+        defer { loadingMore = false }
+        do {
+            let page = try await service.drafts(pageToken: token)
+            drafts = EmailDraftsViewModel.appended(drafts, page.drafts)
+            nextPageToken = page.nextPageToken
+        } catch is CancellationError {
+        } catch { report(error) }
+    }
+
     func select(_ id: String?) async {
-        if isDirty { _ = await save() }
+        // Unsaved edits that don't save stay here, to try again.
+        if isDirty, !(await save()) { return }
         selectedId = id
         saved = nil
         notice = nil
@@ -95,6 +116,11 @@ final class EmailDraftsViewModel {
             return true
         } catch {
             report(error)
+            // Changed in Gmail since (an attachment added): read it as it is now.
+            if (error as? APIError)?.detailCode == "draft_not_editable",
+               let fresh = try? await service.draft(id: id), selectedId == id {
+                apply(fresh)
+            }
             return false
         }
     }
@@ -140,11 +166,27 @@ final class EmailDraftsViewModel {
 
     /// The person signed out, or another account signed in.
     func reset() {
-        drafts = []; loaded = false; selectedId = nil; saved = nil
+        drafts = []; loaded = false; nextPageToken = nil; selectedId = nil; saved = nil
         to = ""; subject = ""; body = ""; errorMessage = nil; notice = nil
     }
 
     // MARK: Pure helpers (tested)
+
+    /// The next page added on, without one Gmail moved between pages twice.
+    nonisolated static func appended(_ shown: [EmailDraftSummary], _ more: [EmailDraftSummary]) -> [EmailDraftSummary] {
+        let ids = Set(shown.map(\.id))
+        return shown + more.filter { !ids.contains($0.id) }
+    }
+
+    /// The draft open in Gmail, in the connected account.
+    nonisolated static func gmailURL(messageId: String?, account: String?) -> URL? {
+        guard let messageId, !messageId.isEmpty,
+              messageId.allSatisfy({ $0.isLetter || $0.isNumber }) else { return nil }
+        var parts = URLComponents(string: "https://mail.google.com/mail/")
+        if let account, !account.isEmpty { parts?.queryItems = [URLQueryItem(name: "authuser", value: account)] }
+        parts?.fragment = "drafts?compose=\(messageId)"
+        return parts?.url
+    }
 
     /// Every `[…]` the text still holds, once each, in order.
     nonisolated static func placeholders(in text: String) -> [String] {

@@ -141,11 +141,18 @@ struct JobLeadDetailView: View {
     private func emailButton(_ lead: JobLeadDetail) -> some View {
         let job = lead.summary
         if !(lead.approach?.outreach?.body ?? "").isEmpty {
-            if let draftId = job.emailDraftId, job.emailSentAt == nil {
-                Button { appState.openEmailDrafts(draftId: draftId) } label: {
+            if job.emailDraftId != nil, job.emailSentAt == nil {
+                // Asked again, the server returns the same draft while it's in
+                // Gmail, or makes a new one if it was sent or deleted there.
+                Button {
+                    Task {
+                        if let id = await vm.draftEmail(leadId: job.id) { appState.openEmailDrafts(draftId: id) }
+                    }
+                } label: {
                     Label("Edit draft in Email", systemImage: "envelope.open")
                 }
                 .buttonStyle(.bordered)
+                .disabled(vm.busy)
                 .help("It's in your Gmail drafts: edit it and send it from Email")
             } else if job.emailSentAt != nil {
                 Label("Email sent", systemImage: "checkmark.circle")
