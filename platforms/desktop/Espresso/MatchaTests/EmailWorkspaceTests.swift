@@ -109,6 +109,34 @@ final class EmailWorkspaceTests: XCTestCase {
         XCTAssertEqual(EmailDraftsViewModel.placeholders(in: "No brackets [x] here, or []"), [])
         XCTAssertEqual(EmailService.pathId("r-1_A"), "r-1_A")
         XCTAssertEqual(EmailService.pathId("../x"), "%2E%2E%2Fx")
+        // Older servers send no `editable`: a draft reads as one Espresso can edit.
+        XCTAssertTrue(draft.editable)
+        XCTAssertEqual(draft.cc, "")
+        XCTAssertNil(list.nextPageToken)
+    }
+
+    func testARichDraftIsEditedInGmailAndTheListPages() throws {
+        let draft = try JSONDecoder().decode(EmailDraft.self, from: Data("""
+        {"id": "r-2", "message_id": "18f2a9c0d1e2", "to": "a@example.com", "cc": "b@example.com",
+         "bcc": "c@example.com", "subject": "Re: Offer", "body": "See attached", "editable": false,
+         "has_attachments": true, "formatted": true}
+        """.utf8))
+        XCTAssertFalse(draft.editable)
+        XCTAssertTrue(draft.hasAttachments)
+        XCTAssertEqual(draft.cc, "b@example.com")
+        XCTAssertEqual(draft.bcc, "c@example.com")
+        XCTAssertEqual(EmailDraftsViewModel.gmailURL(messageId: draft.messageId, account: "me@example.com")?.absoluteString,
+                       "https://mail.google.com/mail/?authuser=me@example.com#drafts?compose=18f2a9c0d1e2")
+        XCTAssertEqual(EmailDraftsViewModel.gmailURL(messageId: "18f2", account: nil)?.absoluteString,
+                       "https://mail.google.com/mail/#drafts?compose=18f2")
+        XCTAssertNil(EmailDraftsViewModel.gmailURL(messageId: "../x", account: nil))
+        XCTAssertNil(EmailDraftsViewModel.gmailURL(messageId: nil, account: "me@example.com"))
+
+        let page = try JSONDecoder().decode(EmailDraftList.self, from: Data(
+            #"{"drafts": [{"id": "r-3"}, {"id": "r-1"}], "next_page_token": "p2"}"#.utf8))
+        XCTAssertEqual(page.nextPageToken, "p2")
+        let shown = try JSONDecoder().decode(EmailDraftList.self, from: Data(#"{"drafts": [{"id": "r-1"}, {"id": "r-2"}]}"#.utf8))
+        XCTAssertEqual(EmailDraftsViewModel.appended(shown.drafts, page.drafts).map(\.id), ["r-1", "r-2", "r-3"])
     }
 
     func testMailboxDecodingSupportsLegacyAndPaginatedResponses() throws {

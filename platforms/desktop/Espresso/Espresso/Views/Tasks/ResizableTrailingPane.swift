@@ -13,6 +13,8 @@ struct ResizableTrailingPane<Content: View>: View {
     private let content: () -> Content
     @State private var dragStart: Double?
     @State private var hovering = false
+    /// The resize cursor is pushed: popped when the pointer leaves or the pane goes.
+    @State private var cursorPushed = false
 
     init(storageKey: String, defaultWidth: Double, minWidth: Double = 340, maxWidth: Double,
          @ViewBuilder content: @escaping () -> Content) {
@@ -38,20 +40,38 @@ struct ResizableTrailingPane<Content: View>: View {
             .contentShape(Rectangle())
             .onHover { inside in
                 hovering = inside
-                if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+                setCursor(inside || dragStart != nil)
             }
+            .onDisappear { setCursor(false) }
             .gesture(
                 DragGesture(minimumDistance: 1, coordinateSpace: .global)
                     .onChanged { value in
                         let start = dragStart ?? Self.clamp(width, min: minWidth, max: maxWidth)
                         if dragStart == nil { dragStart = start }
+                        // Mid-drag the pointer runs off the thin edge: keep the arrows.
+                        NSCursor.resizeLeftRight.set()
                         // Dragging the edge left makes the pane wider.
                         width = Self.clamp(start - value.translation.width, min: minWidth, max: maxWidth)
                     }
-                    .onEnded { _ in dragStart = nil }
+                    .onEnded { _ in
+                        dragStart = nil
+                        if !hovering { setCursor(false); NSCursor.arrow.set() }
+                    }
             )
             .onTapGesture(count: 2) { width = defaultWidth }
             .help("Drag to resize. Double-click to reset.")
+    }
+
+    /// Push the resize cursor once, pop it once: an unbalanced pop would take
+    /// someone else's cursor, a missed one leaves the arrows on for good.
+    private func setCursor(_ on: Bool) {
+        if on && !cursorPushed {
+            NSCursor.resizeLeftRight.push()
+            cursorPushed = true
+        } else if !on && cursorPushed {
+            NSCursor.pop()
+            cursorPushed = false
+        }
     }
 
     /// `value` kept between `min` and `max`; `min` wins when there's no room.

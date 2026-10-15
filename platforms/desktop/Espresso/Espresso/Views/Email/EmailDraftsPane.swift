@@ -84,6 +84,16 @@ struct EmailDraftsPane: View {
                 ScrollView {
                     LazyVStack(spacing: 2) {
                         ForEach(vm.drafts) { draft in row(draft) }
+                        if vm.nextPageToken != nil {
+                            Button { Task { await vm.loadMore() } } label: {
+                                if vm.loadingMore { ProgressView().controlSize(.mini) } else { Text("Load more") }
+                            }
+                            .buttonStyle(.plain)
+                            .font(.system(size: 11))
+                            .foregroundColor(appState.themeAccent)
+                            .padding(.vertical, 8)
+                            .disabled(vm.loadingMore)
+                        }
                     }
                     .padding(6)
                 }
@@ -148,19 +158,83 @@ struct EmailDraftsPane: View {
         } else {
             @Bindable var vm = vm
             VStack(alignment: .leading, spacing: 0) {
-                field("To", text: $vm.to, prompt: "name@example.com")
+                if !vm.editable { gmailOnly }
+                if vm.editable {
+                    field("To", text: $vm.to, prompt: "name@example.com")
+                } else {
+                    shown("To", vm.to)
+                }
+                if let saved = vm.saved {
+                    if !saved.cc.isEmpty { Divider().opacity(0.2); shown("Cc", saved.cc) }
+                    if !saved.bcc.isEmpty { Divider().opacity(0.2); shown("Bcc", saved.bcc) }
+                }
                 Divider().opacity(0.2)
-                field("Subject", text: $vm.subject, prompt: "Subject")
+                if vm.editable {
+                    field("Subject", text: $vm.subject, prompt: "Subject")
+                } else {
+                    shown("Subject", vm.subject)
+                }
                 Divider().opacity(0.2)
-                TextEditor(text: $vm.body)
-                    .font(.system(size: 13))
-                    .scrollContentBackground(.hidden)
-                    .padding(10)
+                if vm.editable {
+                    TextEditor(text: $vm.body)
+                        .font(.system(size: 13))
+                        .scrollContentBackground(.hidden)
+                        .padding(10)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ScrollView {
+                        Text(vm.body)
+                            .font(.system(size: 13))
+                            .foregroundColor(appState.themeText)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(14)
+                    }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
                 Divider().opacity(0.2)
                 footer
             }
         }
+    }
+
+    /// A draft with an attachment or formatting: saving it here (as plain
+    /// text) would lose them, so it's edited in Gmail. Sending is fine: it
+    /// goes exactly as Gmail has it.
+    private var gmailOnly: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "paperclip").foregroundColor(appState.themeTextSecondary)
+            Text(vm.saved?.hasAttachments == true
+                 ? "This draft has an attachment. Edit it in Gmail so nothing is lost; you can still send it from here."
+                 : "This draft has formatting. Edit it in Gmail so nothing is lost; you can still send it from here.")
+                .font(.system(size: 11))
+                .foregroundColor(appState.themeTextSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
+            if let url = EmailDraftsViewModel.gmailURL(messageId: vm.saved?.messageId,
+                                                       account: EmailViewModel.shared.email) {
+                Button("Open in Gmail") { NSWorkspace.shared.open(url) }
+                    .controlSize(.small)
+            }
+        }
+        .padding(.horizontal, 14).padding(.vertical, 9)
+        .background(appState.themeAccent.opacity(0.06))
+    }
+
+    private func shown(_ label: String, _ value: String) -> some View {
+        HStack(spacing: 8) {
+            Text(label)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(appState.themeTextSecondary)
+                .frame(width: 54, alignment: .leading)
+            Text(value)
+                .font(.system(size: 12))
+                .foregroundColor(appState.themeText)
+                .lineLimit(2)
+                .textSelection(.enabled)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 9)
     }
 
     private func field(_ label: String, text: Binding<String>, prompt: String) -> some View {
@@ -199,9 +273,11 @@ struct EmailDraftsPane: View {
                     Text(notice).font(.system(size: 11)).foregroundColor(appState.themeTextSecondary)
                 }
                 Spacer()
-                Button("Save") { Task { await vm.save() } }
-                    .keyboardShortcut("s", modifiers: .command)
-                    .disabled(!vm.isDirty || vm.busy)
+                if vm.editable {
+                    Button("Save") { Task { await vm.save() } }
+                        .keyboardShortcut("s", modifiers: .command)
+                        .disabled(!vm.isDirty || vm.busy)
+                }
                 Button {
                     if vm.placeholders.isEmpty { Task { await vm.send() } } else { confirmSend = true }
                 } label: {
