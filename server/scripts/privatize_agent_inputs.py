@@ -6,8 +6,8 @@ Before agentin01 two kinds of personal file were uploaded publicly:
   * files dropped into a private conversation with Espresso
     (`channel_messages.attachments` in channels whose scope is 'assistant').
 
-For each one this downloads the public copy, stores a private one, rewrites
-the reference, and only then deletes the public object:
+For each one this reads the public object from our bucket, stores a private
+copy, rewrites the reference, and only then deletes the public object:
 
   * a résumé keeps its row; `resume_url` becomes the private `s3://` path;
   * a chat file becomes an `mw_agent_inputs` row like a new upload (an image
@@ -22,15 +22,22 @@ the reference, and only then deletes the public object:
   * a deleted message gets no private copy: its public files are deleted and
     dropped from its attachments.
 
-A public copy counts as removed only when the delete succeeds. One from an
-earlier CloudFront distribution is deleted from our bucket under the same key
-when it is there. Anything not removed is listed ("public copy NOT removed")
-and the run exits 1, as it does when anything failed.
+What it trusts: a URL is only ever turned into a key in our public bucket
+(our CloudFront domain, or an earlier CloudFront distribution's, same key),
+by parsing it; nothing is fetched from the URL itself. Before agentin01 the
+socket stored whatever attachments the client sent, so a chat file moves only
+when its key is one the upload route wrote for that same conversation
+(`channels/<channel id>/`). Anything else is listed as skipped and left alone:
+it isn't the sender's to move, or to delete.
+
+A public copy counts as removed only when it was in our bucket and the delete
+went through. Anything not removed is listed ("public copy NOT removed") and
+the run exits 1, as it does when anything failed.
 
 Dry run by default: it lists what it would move. `--apply` moves. Running it
 again skips everything already private, so a run that failed part-way can be
-run again. CloudFront may serve a cached copy of a deleted object until its
-cache entry expires.
+run again. Each URL is printed before its object is deleted. CloudFront may
+serve a cached copy of a deleted object until its cache entry expires.
 
     cd server && ./venv/bin/python -m scripts.privatize_agent_inputs
     cd server && ./venv/bin/python -m scripts.privatize_agent_inputs --apply
@@ -43,6 +50,8 @@ import json
 import mimetypes
 import os
 import sys
+from dataclasses import dataclass, field
+from urllib.parse import urlsplit
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -50,7 +59,16 @@ from app.config import load_settings
 from app.core.services.storage import get_storage
 from app.database import close_pool, get_connection, init_pool
 from app.matcha.services.matcha_work.agent_runtime import inputs
-from botocore.exceptions import ClientError
+from botocore.exceptions import BotoCoreError, ClientError
+
+
+@dataclass
+class Tally:
+    scanned: int = 0
+    moved: int = 0
+    failed: int = 0
+    skipped: int = 0
+    left: list[str] = field(default_factory=list)
 
 
 def _attachments(raw) -> list:
@@ -62,48 +80,61 @@ def _attachments(raw) -> list:
     return raw if isinstance(raw, list) else []
 
 
-async def remove_public(storage, url: str) -> bool:
-    """Delete one public copy. True only when it is gone from our bucket."""
+def public_key(storage, url) -> str | None:
+    """The key in our public bucket a public URL names, or None. Our
+    CloudFront domain, or an earlier CloudFront distribution's (same bucket,
+    same key). The host is parsed, never matched as a substring."""
+    if not isinstance(url, str):
+        return None
     try:
-        if await storage.delete_file(url):
-            return True
-    except Exception as exc:
-        print(f"  delete error: url={url} error={exc}")
-        return False
-    # `delete_file` doesn't know which bucket an earlier CloudFront
-    # distribution served; ours, under the same key, if the object is there.
-    if not (url.startswith("https://") and ".cloudfront.net/" in url):
-        return False
-    key = url.split(".cloudfront.net/", 1)[1].split("?", 1)[0]
-    if not key or not storage.s3_client or not storage.bucket:
-        return False
+        parsed = urlsplit(url)
+    except ValueError:
+        return None
+    host = (parsed.hostname or "").lower()
+    ours = (storage.cloudfront_domain or "").lower()
+    if parsed.scheme != "https" or not host or not (host == ours or host.endswith(".cloudfront.net")):
+        return None
+    return parsed.path.lstrip("/") or None
+
+
+async def _download(storage, key: str) -> bytes:
+    return await storage.download_file(f"s3://{storage.bucket}/{key}")
+
+
+def remove_public(storage, key: str) -> bool:
+    """Delete one public object. True only when it was in our bucket and the
+    delete went through."""
     try:
         storage.s3_client.head_object(Bucket=storage.bucket, Key=key)
         storage.s3_client.delete_object(Bucket=storage.bucket, Key=key)
-    except ClientError:
+    except (ClientError, BotoCoreError) as exc:
+        print(f"  could not delete public key={key}: {exc}")
         return False
     return True
 
 
-async def privatize_resumes(storage, apply: bool) -> tuple[int, int, int, list[str]]:
+async def privatize_resumes(storage, apply: bool) -> Tally:
     async with get_connection() as conn:
         rows = await conn.fetch(
             """SELECT user_id, filename, resume_url FROM user_resumes
                WHERE COALESCE(resume_url, '') <> '' AND resume_url NOT LIKE 's3://%'"""
         )
-    moved = failed = 0
-    left: list[str] = []
+    tally = Tally(scanned=len(rows))
     for row in rows:
         url, user_id = row["resume_url"], row["user_id"]
-        if not storage.is_supported_storage_path(url):
-            print(f"resume skipped (not ours): user={user_id} url={url}")
+        # The server wrote this URL, so the file is the person's own; only
+        # where it lives is checked.
+        key = public_key(storage, url)
+        if key is None:
+            tally.skipped += 1
+            print(f"resume skipped (not in our public bucket): user={user_id} url={url}")
             continue
         if not apply:
             print(f"resume would move: user={user_id} file={row['filename']}")
             continue
         path = None
         try:
-            data = await storage.download_file(url)
+            data = await _download(storage, key)
             content_type = mimetypes.guess_type(row["filename"] or "")[0] or "application/octet-stream"
             path = await storage.upload_private_file(
                 data, row["filename"] or "resume", prefix=f"profile_resumes/{user_id}",
@@ -115,7 +146,7 @@ async def privatize_resumes(storage, apply: bool) -> tuple[int, int, int, list[s
                     user_id, path, url,
                 )
         except Exception as exc:
-            failed += 1
+            tally.failed += 1
             print(f"resume FAILED: user={user_id} error={exc}")
             if path:
                 await storage.delete_private_file(path)
@@ -124,21 +155,21 @@ async def privatize_resumes(storage, apply: bool) -> tuple[int, int, int, list[s
             # Replaced meanwhile: the new upload is private already.
             await storage.delete_private_file(path)
             continue
-        moved += 1
+        tally.moved += 1
         print(f"resume moving: user={user_id} public={url}")
-        if await remove_public(storage, url):
+        if remove_public(storage, key):
             print(f"resume moved: user={user_id}")
         else:
-            left.append(url)
+            tally.left.append(url)
             print(f"resume public copy NOT removed: user={user_id} url={url}")
-    return len(rows), moved, failed, left
+    return tally
 
 
-async def _private_copy(storage, message, att: dict) -> dict:
+async def _private_copy(storage, message, att: dict, key: str) -> dict:
     """Store one public attachment privately. Returns the input row's values;
     nothing is recorded yet."""
     filename = os.path.basename(str(att.get("filename") or "file")) or "file"
-    data = await storage.download_file(att["url"])
+    data = await _download(storage, key)
     ext = os.path.splitext(filename)[1].lower()
     text, status = None, "skipped"
     kind = "document"
@@ -160,13 +191,12 @@ async def _private_copy(storage, message, att: dict) -> dict:
             "sha256": hashlib.sha256(data).hexdigest(), "path": path, "text": text, "status": status}
 
 
-async def _move_message(storage, message, current: list, public: list) -> list[str]:
-    """Move one live message's public files, all or none. Returns the public
-    URLs now replaced, for deleting."""
+async def _move_message(storage, message, current: list, public: list[tuple[dict, str]]) -> None:
+    """Move one live message's public files, all or none."""
     copies: list[dict] = []
     try:
-        for att in public:
-            copies.append(await _private_copy(storage, message, att))
+        for att, key in public:
+            copies.append(await _private_copy(storage, message, att, key))
         async with get_connection() as conn, conn.transaction():
             # Given to the conversation's latest run after the message, if
             # any: a file that predates this script never reached a run, and
@@ -178,7 +208,7 @@ async def _move_message(storage, message, current: list, public: list) -> list[s
                 message["channel_id"], message["created_at"],
             )
             by_url: dict[str, dict] = {}
-            for att, copy in zip(public, copies):
+            for (att, _key), copy in zip(public, copies):
                 row = await conn.fetchrow(
                     """INSERT INTO mw_agent_inputs
                            (user_id, company_id, channel_id, message_id, filename, content_type, kind,
@@ -202,10 +232,9 @@ async def _move_message(storage, message, current: list, public: list) -> list[s
         for copy in copies:
             await storage.delete_private_file(copy["path"])
         raise
-    return [att["url"] for att in public]
 
 
-async def privatize_chat_files(storage, apply: bool) -> tuple[int, int, int, list[str]]:
+async def privatize_chat_files(storage, apply: bool) -> Tally:
     async with get_connection() as conn:
         messages = await conn.fetch(
             """SELECT m.id, m.channel_id, m.sender_id, m.attachments, m.created_at, m.deleted_at,
@@ -217,15 +246,26 @@ async def privatize_chat_files(storage, apply: bool) -> tuple[int, int, int, lis
                  AND jsonb_array_length(m.attachments) > 0
                ORDER BY m.created_at"""
         )
-    moved = failed = 0
-    left: list[str] = []
+    tally = Tally(scanned=len(messages))
     for message in messages:
         current = _attachments(message["attachments"])
-        public = list({
-            a["url"]: a for a in current
-            if isinstance(a, dict) and inputs.input_id(a.get("url")) is None
-            and storage.is_supported_storage_path(a.get("url"))
-        }.values())
+        own = f"channels/{message['channel_id']}/"
+        public: dict[str, tuple[dict, str]] = {}
+        foreign: list[str] = []
+        for att in current:
+            if not isinstance(att, dict) or inputs.input_id(att.get("url")) is not None:
+                continue
+            key = public_key(storage, att.get("url"))
+            if key is None:
+                continue
+            if key.startswith(own):
+                public[att["url"]] = (att, key)
+            elif att["url"] not in foreign:
+                foreign.append(att["url"])
+        if foreign:
+            tally.skipped += len(foreign)
+            print(f"chat files skipped (not uploaded to this conversation): message={message['id']} "
+                  f"urls={' '.join(foreign)}")
         if not public:
             continue
         deleted = message.get("deleted_at") is not None
@@ -235,30 +275,32 @@ async def privatize_chat_files(storage, apply: bool) -> tuple[int, int, int, lis
             continue
         if deleted:
             # The person deleted the message: nothing to keep, only to remove.
-            gone = [a["url"] for a in public if await remove_public(storage, a["url"])]
-            left.extend(a["url"] for a in public if a["url"] not in gone)
+            print(f"chat files of a deleted message removing: message={message['id']} public={' '.join(public)}")
+            gone = {url for url, (_att, key) in public.items() if remove_public(storage, key)}
+            tally.left.extend(url for url in public if url not in gone)
             if gone:
                 async with get_connection() as conn:
                     await conn.execute(
                         "UPDATE channel_messages SET attachments = $2::jsonb WHERE id = $1",
-                        message["id"], json.dumps([a for a in current if not (isinstance(a, dict) and a.get("url") in gone)]),
+                        message["id"],
+                        json.dumps([a for a in current if not (isinstance(a, dict) and a.get("url") in gone)]),
                     )
             print(f"chat files of a deleted message removed: message={message['id']} files={len(gone)}")
             continue
         try:
-            replaced_urls = await _move_message(storage, message, current, public)
+            await _move_message(storage, message, current, list(public.values()))
         except Exception as exc:
-            failed += 1
+            tally.failed += 1
             print(f"chat files FAILED: message={message['id']} error={exc}")
             continue
-        moved += len(replaced_urls)
-        print(f"chat files moving: message={message['id']} public={' '.join(replaced_urls)}")
-        for url in replaced_urls:
-            if not await remove_public(storage, url):
-                left.append(url)
+        tally.moved += len(public)
+        print(f"chat files moving: message={message['id']} public={' '.join(public)}")
+        for url, (_att, key) in public.items():
+            if not remove_public(storage, key):
+                tally.left.append(url)
                 print(f"chat file public copy NOT removed: message={message['id']} url={url}")
-        print(f"chat files moved: message={message['id']} files={len(replaced_urls)}")
-    return len(messages), moved, failed, left
+        print(f"chat files moved: message={message['id']} files={len(public)}")
+    return tally
 
 
 async def main() -> None:
@@ -269,22 +311,23 @@ async def main() -> None:
     await init_pool(settings.database_url)
     try:
         storage = get_storage()
-        if not storage.s3_client or not (storage.private_bucket or storage.bucket):
+        if not storage.s3_client or not storage.bucket:
             raise RuntimeError("S3 isn't configured here; nothing to move.")
         resumes = await privatize_resumes(storage, args.apply)
         chats = await privatize_chat_files(storage, args.apply)
         mode = "applied" if args.apply else "dry run"
-        left = resumes[3] + chats[3]
+        left = resumes.left + chats.left
         print(
-            f"done ({mode}): resumes scanned={resumes[0]} moved={resumes[1]} failed={resumes[2]}; "
-            f"chat messages scanned={chats[0]} files moved={chats[1]} failed={chats[2]}; "
+            f"done ({mode}): resumes scanned={resumes.scanned} moved={resumes.moved} "
+            f"failed={resumes.failed} skipped={resumes.skipped}; chat messages scanned={chats.scanned} "
+            f"files moved={chats.moved} failed={chats.failed} skipped={chats.skipped}; "
             f"public copies NOT removed={len(left)}"
         )
         for url in left:
             print(f"  still public: {url}")
     finally:
         await close_pool()
-    if resumes[2] or chats[2] or left:
+    if resumes.failed or chats.failed or left:
         sys.exit(1)
 
 
