@@ -8,9 +8,13 @@ Werk is the macOS desktop client for the Matcha collaborative AI workspace. It b
 
 The app is organized around a persistent left sidebar and a detail pane on the right.
 
-**Sidebar** contains four sections — Channels, Projects, Journals, and Threads — each draggable to reorder. Starred items surface at the top for quick access. Inbox and People buttons anchor the footer.
-
-**Tab bar** sits above the detail pane. Pin up to four items (channels, projects, threads, or journals) as persistent tabs for fast switching without losing your place.
+**Sidebar**, from the top:
+- **Ask Espresso**: a card that opens your private conversation with Espresso (⌘J), with how many requests you have left today. Personal accounts only.
+- **Tasks**: background work and job searches, with how many are running and a dot when one needs you.
+- **Home**, and **Find anything** (⌘F).
+- **Pinned**: one list of what you pinned. Tabs (up to four, pinned with "+", closed with "×") and starred items (pinned workspaces and threads, starred channels, journals and files) are merged, so something that is both shows once. Each row is a coloured letter tile.
+- **WORK** (Workspaces, Channels, Threads) and **PERSONAL** (Calendar, Productivity, Journals, Email). A section drags, or moves from its context menu, within its own group; the order is saved per account.
+- Inbox, People and Archive anchor the footer.
 
 **Side pane** keeps a second surface open beside whatever you're working in, such as a thread with your calendar next to it. Open one with ⌘\\ (it brings back the last one), the split button in the toolbar, ⌥-click on a sidebar row, View ▸ Open Beside (⌥⌘1–8), or "Open Beside" on any row's context menu. ⌘F can send any result to the side or bottom pane.
 - The pane's dock flips it between Calendar, Journals, Kanban, Espresso, Channels, Threads, Email and Workspaces. Lists open the item in the pane, and Back returns.

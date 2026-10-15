@@ -5,7 +5,8 @@ import Foundation
 ///
 /// A new feature adds a case here and a guide in `FeatureGuide.catalog`; a new
 /// sidebar section must also map to one in `Section.guide` (the switch is
-/// exhaustive, so it won't compile until it does). `FeatureGuideTests` checks
+/// exhaustive, so it won't compile until it does). The fixed rows above the
+/// sections (the Espresso card, Tasks) open theirs from their context menus. `FeatureGuideTests` checks
 /// that every guide explains both how to use it and what to expect.
 enum FeatureGuideID: String, CaseIterable, Identifiable {
     case assistant
@@ -79,8 +80,6 @@ extension SidebarSectionOrderStore.Section {
         case .calendar: return .calendar
         case .threads: return .threads
         case .email: return .email
-        case .assistant: return .assistant
-        case .tasks: return .tasks
         }
     }
 }

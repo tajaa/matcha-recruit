@@ -432,6 +432,7 @@
 		TASK0000000000000000A009 /* TaskItemDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = TASK0000000000000000A00A /* TaskItemDetailView.swift */; };
 		TASK0000000000000000A00B /* TaskChatCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = TASK0000000000000000A00C /* TaskChatCards.swift */; };
 		TASK0000000000000000BT01 /* TasksLogicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = TASK0000000000000000BT02 /* TasksLogicTests.swift */; };
+		SIDE0000000000000000BT01 /* SidebarLayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = SIDE0000000000000000BT02 /* SidebarLayoutTests.swift */; };
 		FILES00000000000000000T1 /* EspressoFilesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FILES00000000000000000T2 /* EspressoFilesTests.swift */; };
 		GUIDE000000000000000BT01 /* FeatureGuideTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = GUIDE000000000000000BT02 /* FeatureGuideTests.swift */; };
 		CALV000000000000000000A3 /* CalendarService.swift in Sources */ = {isa = PBXBuildFile; fileRef = CALV000000000000000000A4 /* CalendarService.swift */; };
@@ -791,6 +792,7 @@
 		TASK0000000000000000A00A /* TaskItemDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = TaskItemDetailView.swift; path = Espresso/Views/Tasks/TaskItemDetailView.swift; sourceTree = SOURCE_ROOT; };
 		TASK0000000000000000A00C /* TaskChatCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = TaskChatCards.swift; path = Espresso/Views/Tasks/TaskChatCards.swift; sourceTree = SOURCE_ROOT; };
 		TASK0000000000000000BT02 /* TasksLogicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TasksLogicTests.swift; sourceTree = "<group>"; };
+		SIDE0000000000000000BT02 /* SidebarLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarLayoutTests.swift; sourceTree = "<group>"; };
 		FILES00000000000000000T2 /* EspressoFilesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EspressoFilesTests.swift; sourceTree = "<group>"; };
 		GUIDE000000000000000BT02 /* FeatureGuideTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeatureGuideTests.swift; sourceTree = "<group>"; };
 		CALV000000000000000000A4 /* CalendarService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CalendarService.swift; path = Espresso/Services/MatchaWork/CalendarService.swift; sourceTree = SOURCE_ROOT; };
@@ -1285,6 +1287,7 @@
 				CALV00000000000000000BT2 /* CalendarLogicTests.swift */,
 				JOBS0000000000000000BT02 /* JobSearchLogicTests.swift */,
 				TASK0000000000000000BT02 /* TasksLogicTests.swift */,
+				SIDE0000000000000000BT02 /* SidebarLayoutTests.swift */,
 				FILES00000000000000000T2 /* EspressoFilesTests.swift */,
 				GUIDE000000000000000BT02 /* FeatureGuideTests.swift */,
 				FA11D0010000000000000002 /* JournalNavigationTests.swift */,
@@ -1798,6 +1801,7 @@
 				CALV00000000000000000BT1 /* CalendarLogicTests.swift in Sources */,
 				JOBS0000000000000000BT01 /* JobSearchLogicTests.swift in Sources */,
 				TASK0000000000000000BT01 /* TasksLogicTests.swift in Sources */,
+				SIDE0000000000000000BT01 /* SidebarLayoutTests.swift in Sources */,
 				FILES00000000000000000T1 /* EspressoFilesTests.swift in Sources */,
 				GUIDE000000000000000BT01 /* FeatureGuideTests.swift in Sources */,
 				FA11D0010000000000000001 /* JournalNavigationTests.swift in Sources */,

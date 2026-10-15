@@ -1,36 +1,56 @@
 import Foundation
 
-/// Per-user order of the top-level sidebar sections in ContentView.
-/// Persists in UserDefaults under a per-user key so signing in as a
-/// different user on the same Mac doesn't surface the previous user's
-/// layout. Local-only for v1 — no backend, no cross-device sync.
+/// Per-user order of the sidebar's sections inside each group (WORK,
+/// PERSONAL). Persists in UserDefaults under a per-user key so signing in as a
+/// different user on the same Mac doesn't surface the previous user's layout.
+/// Local-only: no backend, no cross-device sync.
 ///
-/// The four sections — Channels / Projects / Journals / Threads — are
-/// always all present; reordering shuffles which one renders first.
-/// Default order matches the historical ContentView layout.
+/// Everything above the groups is fixed: the Espresso card, Tasks, Home,
+/// Find anything and the Pinned list. A section moves only within its group.
 @MainActor
 @Observable
 final class SidebarSectionOrderStore {
     static let shared = SidebarSectionOrderStore()
 
-    /// Stable identifiers for each top-level sidebar section. String values
-    /// are the persistence keys — don't rename without a migration.
-    enum Section: String, CaseIterable, Identifiable {
-        case channels
-        case projects
-        case journals
-        case productivity
-        case calendar
-        case threads
-        case email
-        /// The person's private conversation with Espresso (the assistant).
-        case assistant
-        /// Espresso Tasks: background work and what it found, job searches
-        /// included. (Job search had its own section, `jobs`, until it moved
-        /// here; a saved order that still names it just drops it.)
-        case tasks
+    /// The sidebar's groups of sections, in the order they show.
+    enum Group: String, CaseIterable, Identifiable {
+        case work
+        case personal
 
         var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .work: return "WORK"
+            case .personal: return "PERSONAL"
+            }
+        }
+
+        /// The default order of its sections.
+        var sections: [Section] { Section.allCases.filter { $0.group == self } }
+    }
+
+    /// Stable identifiers for each sidebar section. String values are the
+    /// persistence keys: don't rename without a migration. (Espresso, Tasks
+    /// and Job search were sections until the sidebar's redesign; a saved
+    /// order that still names them just drops them.)
+    enum Section: String, CaseIterable, Identifiable {
+        case projects
+        case channels
+        case threads
+        case calendar
+        case productivity
+        case journals
+        case email
+
+        var id: String { rawValue }
+
+        var group: Group {
+            switch self {
+            case .projects, .channels, .threads: return .work
+            case .calendar, .productivity, .journals, .email: return .personal
+            }
+        }
 
         /// SF Symbol used in the drag preview / context menu.
         var iconName: String {
@@ -42,8 +62,6 @@ final class SidebarSectionOrderStore {
             case .calendar: return "calendar"
             case .threads:  return "bubble.left.and.bubble.right"
             case .email:    return "envelope"
-            case .assistant: return "sparkles"
-            case .tasks: return "list.bullet.clipboard"
             }
         }
 
@@ -58,15 +76,13 @@ final class SidebarSectionOrderStore {
             case .calendar: return "Calendar"
             case .threads:  return "Threads"
             case .email:    return "Email"
-            case .assistant: return "Espresso"
-            case .tasks: return "Tasks"
             }
         }
     }
 
-    /// The user's preferred section order. Always contains every Section
-    /// case exactly once; missing entries fall back to the default tail.
-    private(set) var order: [Section] = Section.allCases
+    /// Each group's sections in the person's order. Always every section of
+    /// the group exactly once.
+    private(set) var orders: [Group: [Section]] = SidebarSectionOrderStore.defaults
     /// Bumped on every change so SwiftUI views observing the store
     /// re-render. Same pattern as ChannelStarStore.
     private(set) var generation: Int = 0
@@ -75,88 +91,110 @@ final class SidebarSectionOrderStore {
 
     private init() {}
 
-    private func key(for userId: String) -> String {
+    static let defaults: [Group: [Section]] = Dictionary(uniqueKeysWithValues: Group.allCases.map { ($0, $0.sections) })
+
+    private static func key(for userId: String) -> String {
+        "mw-sidebar-group-order-v1:\(userId)"
+    }
+
+    /// The flat order saved before groups existed: read once to carry a
+    /// person's arrangement over, never written again.
+    private static func legacyKey(for userId: String) -> String {
         "mw-sidebar-section-order:\(userId)"
     }
 
+    func order(_ group: Group) -> [Section] {
+        orders[group] ?? group.sections
+    }
+
     /// Bind to the currently logged-in user. Call from AppState.didLogin /
-    /// didLogout. Reads persisted order or resets to default.
+    /// didLogout. Reads the saved order (or the old flat one) or resets.
     func bind(userId: String?) {
         guard self.userId != userId else { return }
         self.userId = userId
-        if let userId,
-           let raw = UserDefaults.standard.array(forKey: key(for: userId)) as? [String] {
-            // Map saved strings to enum cases, dropping unknown values.
-            // Append any Section cases that weren't in the saved list so
-            // future-added sections still render even with stale prefs.
-            let saved = raw.compactMap { Section(rawValue: $0) }
-            var seen = Set(saved)
-            var merged = saved
-            for s in Section.allCases where !seen.contains(s) {
-                merged.append(s)
-                seen.insert(s)
-            }
-            order = merged
+        let defaults = UserDefaults.standard
+        if let userId, let saved = defaults.dictionary(forKey: Self.key(for: userId)) as? [String: [String]] {
+            orders = Self.orders(from: saved)
+        } else if let userId, let flat = defaults.array(forKey: Self.legacyKey(for: userId)) as? [String] {
+            orders = Self.orders(fromFlat: flat)
+            persist()
         } else {
-            order = Section.allCases
+            orders = Self.defaults
         }
         generation &+= 1
     }
 
-    /// Move the section at `source` to `destination`, mirroring the
-    /// signature of `Array.move(fromOffsets:toOffset:)`. Used by drag-
-    /// drop callbacks (where destination is the desired final index,
-    /// possibly past `source`).
-    func move(fromOffsets source: IndexSet, toOffset destination: Int) {
-        guard let from = source.first, from < order.count else { return }
-        let dest = min(max(0, destination), order.count)
-        let item = order[from]
-        order.remove(at: from)
-        let insertAt = (from < dest) ? dest - 1 : dest
-        order.insert(item, at: insertAt)
-        persist()
-        generation &+= 1
+    /// Saved per-group orders, each completed with any section it lacks (a
+    /// newer section, or one that moved groups) and cleared of strangers.
+    static func orders(from saved: [String: [String]]) -> [Group: [Section]] {
+        Dictionary(uniqueKeysWithValues: Group.allCases.map { group in
+            (group, merged(saved[group.rawValue] ?? [], into: group))
+        })
     }
 
-    /// Move a section before another. Used by the .draggable +
-    /// .dropDestination flow which works in section-id terms.
+    /// The old flat order split into groups, keeping each group's relative order.
+    static func orders(fromFlat flat: [String]) -> [Group: [Section]] {
+        Dictionary(uniqueKeysWithValues: Group.allCases.map { ($0, merged(flat, into: $0)) })
+    }
+
+    static func merged(_ raw: [String], into group: Group) -> [Section] {
+        var out: [Section] = []
+        for value in raw {
+            if let section = Section(rawValue: value), section.group == group, !out.contains(section) {
+                out.append(section)
+            }
+        }
+        for section in group.sections where !out.contains(section) {
+            out.append(section)
+        }
+        return out
+    }
+
+    /// Move a section before another in the same group (drag and drop).
+    /// Across groups it does nothing.
     func move(_ section: Section, before target: Section) {
-        guard section != target,
-              let from = order.firstIndex(of: section),
-              var to = order.firstIndex(of: target) else { return }
-        order.remove(at: from)
+        guard section != target, section.group == target.group else { return }
+        var list = order(section.group)
+        guard let from = list.firstIndex(of: section), var to = list.firstIndex(of: target) else { return }
+        list.remove(at: from)
         if from < to { to -= 1 }
-        order.insert(section, at: to)
-        persist()
-        generation &+= 1
+        list.insert(section, at: to)
+        set(list, for: section.group)
     }
 
-    /// Context-menu helpers — bump the section up or down one slot.
+    /// Context-menu helpers — bump the section up or down one slot in its group.
     func moveUp(_ section: Section) {
-        guard let idx = order.firstIndex(of: section), idx > 0 else { return }
-        order.swapAt(idx, idx - 1)
-        persist()
-        generation &+= 1
+        var list = order(section.group)
+        guard let idx = list.firstIndex(of: section), idx > 0 else { return }
+        list.swapAt(idx, idx - 1)
+        set(list, for: section.group)
     }
 
     func moveDown(_ section: Section) {
-        guard let idx = order.firstIndex(of: section), idx < order.count - 1 else { return }
-        order.swapAt(idx, idx + 1)
-        persist()
-        generation &+= 1
+        var list = order(section.group)
+        guard let idx = list.firstIndex(of: section), idx < list.count - 1 else { return }
+        list.swapAt(idx, idx + 1)
+        set(list, for: section.group)
     }
 
     /// Restore the default order. Surfaced as a "Reset" option in the
     /// section context menu so a user who scrambles the layout can recover
     /// without quitting the app.
     func resetToDefault() {
-        order = Section.allCases
+        orders = Self.defaults
+        persist()
+        generation &+= 1
+    }
+
+    private func set(_ list: [Section], for group: Group) {
+        orders[group] = list
         persist()
         generation &+= 1
     }
 
     private func persist() {
         guard let userId else { return }
-        UserDefaults.standard.set(order.map { $0.rawValue }, forKey: key(for: userId))
+        let saved = Dictionary(uniqueKeysWithValues: orders.map { ($0.key.rawValue, $0.value.map(\.rawValue)) })
+        UserDefaults.standard.set(saved, forKey: Self.key(for: userId))
     }
 }
