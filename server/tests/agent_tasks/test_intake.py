@@ -34,6 +34,11 @@ def test_clean_value_by_type():
     assert c(F("a", "list"), ["VP of Operations; COO"]) == ["VP of Operations", "COO"]
     assert c(F("a", "list"), ["New York, NY", "Remote"]) == ["New York, NY", "Remote"]
     assert c(F("a", "list"), "Austin\nDenver") == ["Austin", "Denver"]
+    # A wrong choice names the right ones, so the model can fix it.
+    with pytest.raises(ValueError, match="should be one of: Any, Remote only"):
+        c(F("a", "select", options=("Any", "Remote only")), "Either")
+    with pytest.raises(ValueError, match="takes only: x"):
+        c(F("a", "multi_select", options=("x",)), ["z"])
     for spec, bad in ((F("a", "text"), {"x": 1}), (F("a", "money"), True), (F("a", "money"), "lots"),
                       (F("a", "money"), -1), (F("a", "date"), "soon"), (F("a", "time"), "25:00"),
                       (F("a", "select", options=("x",)), "z"), (F("a", "multi_select", options=("x",)), ["z"]),

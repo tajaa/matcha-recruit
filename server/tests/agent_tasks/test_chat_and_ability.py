@@ -96,7 +96,11 @@ def test_the_ability_is_offered_to_tasks_accounts_in_private():
     assert "tasks" not in [a.key for a in catalog.abilities_for(everything, catalog.Situation(private=True))]
     assert "tasks" not in [a.key for a in catalog.abilities_for(
         everything, catalog.Situation(private=False, allowed=frozenset({ability.ALLOWANCE})))]
-    assert "research (3 units)" in ability._prompt(context())
+    prompt = ability._prompt(context())
+    assert "research (3 units)" in prompt
+    # A choice field names its choices.
+    if "job_search (5 units)" in prompt:
+        assert "remote (Remote or on-site: one of Any | Remote only | On-site only)" in prompt
 
 
 def _state():

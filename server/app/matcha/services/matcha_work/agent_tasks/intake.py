@@ -76,12 +76,12 @@ def clean_value(spec: IntakeField, raw: Any) -> Any:
         return f"{int(match.group(1)):02d}:{match.group(2)}"
     if kind == "select":
         if raw not in spec.options:
-            raise ValueError("isn't one of the choices")
+            raise ValueError(f"should be one of: {', '.join(spec.options)}")
         return raw
     if kind == "multi_select":
         values = raw if isinstance(raw, list) else [raw]
         if any(v not in spec.options for v in values):
-            raise ValueError("has a choice that isn't offered")
+            raise ValueError(f"takes only: {', '.join(spec.options)}")
         return list(dict.fromkeys(values))
     if kind == "boolean":
         if isinstance(raw, bool):
