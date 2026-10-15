@@ -42,8 +42,9 @@ logger = logging.getLogger(__name__)
 BUDGETS = Budgets()
 QUERY_CONCURRENCY = 3
 PROVIDER_QUERIES = 4
-# Shopping products looked up at their stores per round (one provider call each).
-STORE_LOOKUPS = 12
+# Shopping products looked up at their stores per round (one provider call
+# each, within the round's provider budget alongside its searches).
+STORE_LOOKUPS = 20
 ENRICH_BATCH = 12
 ENRICH_CONCURRENCY = 4
 PAGE_BYTES = 2_000_000
@@ -151,6 +152,18 @@ def provider_record(item: providers.ProviderItem) -> dict:
     }
 
 
+def prerank(found: list[providers.ProviderItem], plan: dict) -> list[providers.ProviderItem]:
+    """Provider results in the order the task will likely rank them (their own
+    price, rating and reviews against the plan's limits and preferences), so
+    the store lookups and the room go to the ones the person sees first, not
+    to whatever the search happened to list first. Ties keep their order."""
+    if len(found) < 2:
+        return found
+    ranked = ranking.rank([{"id": str(n), "fields": item.fields, "status": "candidate", "fit_score": None,
+                            "user_state": "new"} for n, item in enumerate(found)], plan)
+    return [found[int(r.item_id)] for r in sorted(ranked, key=lambda r: r.rank)]
+
+
 def interleave(lists: list[list]) -> list:
     """Every query's first result, then every second one, …: the best of each first."""
     out = []
@@ -231,7 +244,7 @@ async def run_providers(task: dict, deps: Deps, guard: chain.Guard) -> PhaseOutc
         await guard.note("Searching Google Shopping…" if source == "shopping" else "Searching Google Maps…")
         await asyncio.gather(*(one(n, q) for n, q in enumerate(queries)))
         await chain.refund(_chain(), task["id"], "provider_calls", budget.left)
-        found = interleave(per_query)
+        found = prerank(interleave(per_query), plan)
         async with connection_or_direct() as conn:
             room = await item_room(conn, task["id"])
             # Paid lookups only for findings the task still has room to keep.
