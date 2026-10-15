@@ -206,8 +206,12 @@ final class JobSearchViewModel {
             }
             return result.draftId
         } catch {
-            if (error as? APIError)?.detailCode == "email_not_connected" { emailNotConnected = true }
-            report(error)
+            // Not connected is shown beside the button, with a way to Email.
+            if (error as? APIError)?.detailCode == "email_not_connected" {
+                emailNotConnected = true
+            } else {
+                report(error)
+            }
             return nil
         }
     }

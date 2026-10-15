@@ -113,6 +113,28 @@ final class JobSearchLogicTests: XCTestCase {
         XCTAssertNil(result.lead)
     }
 
+    func testTheListGoesCompactBesideAJobOrWhenNarrow() throws {
+        let wide = JobSearchDetailView.fullTableWidth + 200
+        XCTAssertFalse(JobSearchDetailView.usesCompactList(leadOpen: false, width: wide))
+        XCTAssertTrue(JobSearchDetailView.usesCompactList(leadOpen: true, width: wide))
+        XCTAssertTrue(JobSearchDetailView.usesCompactList(leadOpen: false, width: JobSearchDetailView.fullTableWidth - 1))
+        XCTAssertLessThan(JobSearchDetailView.minContentWidth, JobSearchDetailView.fullTableWidth)
+
+        let json = """
+        {"id": "s1", "status": "done", "fingerprint": "f", "leads": [
+          {"id": "a", "company": "Flex", "location": "New York, NY", "remote": true},
+          {"id": "b", "company": "Acme", "location": "Remote (US)", "remote": true},
+          {"id": "c", "company": "Initech", "location": ""}
+        ]}
+        """
+        let leads = try decode(JobSearchDetail.self, json).leads
+        XCTAssertEqual(JobSearchDetailView.companyLine(leads[0]), "Flex · New York, NY · Remote")
+        XCTAssertEqual(JobSearchDetailView.companyLine(leads[1]), "Acme · Remote (US)")
+        XCTAssertEqual(JobSearchDetailView.companyLine(leads[2]), "Initech")
+        XCTAssertTrue(JobSearchDetailView.showsRemoteBadge(leads[0]))
+        XCTAssertFalse(JobSearchDetailView.showsRemoteBadge(leads[1]))
+    }
+
     func testAPostingReadsCleanly() {
         let raw = "Chief Operating Officer (COFO)\n  Backpack Healthcare | Hybrid\n\n\n\u{00A0} Build the  engine\r\n\n\n  We are   growing.\n\n"
         XCTAssertEqual(JobSearchViewModel.tidyPosting(raw),
