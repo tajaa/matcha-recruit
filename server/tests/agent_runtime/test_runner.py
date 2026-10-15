@@ -328,3 +328,29 @@ async def test_a_session_that_keeps_its_own_history_is_sent_only_what_is_new(mon
     assert all("chain" not in c and "store" not in c for c in client.calls)
     assert [item.get("type") for item in client.calls[1]["input"]] == ["function_call_output"]
     assert "reasoning.encrypted_content" not in (client.calls[0]["include"] or [])
+
+
+@pytest.mark.asyncio
+async def test_an_ask_tool_can_parse_its_own_question(monkeypatch):
+    from dataclasses import replace
+
+    from app.matcha.services.matcha_work.agent_runtime.registry import CatalogError, validate_tool
+
+    wire_store(monkeypatch)
+    seen = []
+
+    def parse(ctx, state, args):
+        seen.append(ctx.run_id)
+        if not args.get("fields"):
+            raise ValueError("Name the fields to ask.")
+        return {"kind": "form", "question": "A few details", "fields": args["fields"]}
+
+    form = replace(ASK, name="ask_form", parse_ask=parse)
+    validate_tool(form)
+    client = FakeClient([response(call("ask_form", {})), response(call("ask_form", {"fields": ["where"]}))])
+    ctx = context()
+    out = await run(client, [], ctx=ctx, extra_tools=[ASK, form])
+    assert out.kind == "question" and out.question == {"kind": "form", "question": "A few details", "fields": ["where"]}
+    assert "Name the fields to ask." in client.calls[1]["input"][0]["output"] and seen == [ctx.run_id] * 2
+    with pytest.raises(CatalogError):
+        validate_tool(replace(read_tool(), parse_ask=parse))

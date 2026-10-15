@@ -28,6 +28,7 @@ def wired(monkeypatch):
     conn = FakeConn([("FROM companies", _features()), ("COUNT(*)", 0),
                      ("INSERT INTO mw_project_agent_runs", uuid4())])
     monkeypatch.setattr(enqueue, "get_connection", connection(conn))
+    monkeypatch.setattr(enqueue, "connection_or_direct", connection(conn))
     monkeypatch.setattr(entitlements_service, "resolve_plan_for_user", AsyncMock(return_value="pro"))
     monkeypatch.setattr(token_budget_service, "check_token_budget", AsyncMock())
     monkeypatch.setattr(redis_cache, "check_rate_limit", AsyncMock())

@@ -37,3 +37,11 @@ class RoundCreate(Body):
 class ItemPatch(Body):
     user_state: ItemState | None = None
     notes: str | None = Field(default=None, max_length=4000)
+
+
+class FormAnswer(Body):
+    """A submitted `ask_form`: field key -> value, and the files for its file fields."""
+
+    values: dict[str, Any] = Field(default_factory=dict)
+    input_ids: list[UUID] = Field(default_factory=list, max_length=5)
+    consent_version: str | None = Field(default=None, max_length=40)

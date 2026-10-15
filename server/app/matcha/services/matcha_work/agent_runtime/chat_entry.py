@@ -156,7 +156,7 @@ async def _answer_prompt(*, prompt: dict, channel_id: UUID, company_id: UUID, us
     events: list[dict] = []
     resume: UUID | None = None
     next_request: str | None = None
-    if (prompt["kind"] != prompts.ASK_USER and prompt["owner_user_id"] == user.id and prompt["live"]
+    if (prompt["kind"] == prompts.CONFIRM_ACTION and prompt["owner_user_id"] == user.id and prompt["live"]
             and prompts.parse_confirmation(content) == "yes"):
         # Refuse before the yes is recorded: a yes that cannot run must leave
         # the question open, not flip the card to "Went ahead".
@@ -174,7 +174,7 @@ async def _answer_prompt(*, prompt: dict, channel_id: UUID, company_id: UUID, us
             await say(NOT_YOURS)
         elif not prompt["live"]:
             await say(CLOSED)
-        elif prompt["kind"] == prompts.ASK_USER:
+        elif prompt["kind"] in prompts.OPEN_ENDED:
             if await prompts.claim(conn, prompt, user.id, "text"):
                 events.append(prompts.update_event(prompt, "answered", "text"))
                 # In a project chat the answer may carry the mention it was sent with.

@@ -72,3 +72,14 @@ def test_the_router_is_mounted_behind_the_gates():
     assert "/agent-tasks/{task_id}/rounds" in paths and "/agent-tasks/playbooks" in paths
     assert routes.router.dependencies[0].dependency is routes.require_tasks
     assert "router.include_router(_agent_tasks_router)" in inspect.getsource(matcha_work)
+
+
+@pytest.mark.asyncio
+async def test_a_form_is_submitted_through_intake(monkeypatch):
+    from app.matcha.models.matcha_work.agent_tasks import FormAnswer
+
+    answer = AsyncMock(return_value={"id": "task"})
+    monkeypatch.setattr(routes.intake, "answer_form", answer)
+    body = FormAnswer(values={"location": "SF"})
+    assert await routes.answer_agent_task_form(TID, body, USER) == {"id": "task"}
+    assert answer.await_args.args == (USER, TID, body)

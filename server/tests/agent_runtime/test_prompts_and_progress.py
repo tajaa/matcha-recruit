@@ -109,7 +109,7 @@ async def test_loading_and_claiming():
     conn = FakeConn([("FROM mw_agent_card_prompts", row), ("SET status = 'answered'", True)])
     loaded = await prompts.load(conn, prompt_id=prompt_id, channel_id=channel)
     assert loaded["payload"] == {"tool": "send_email"}
-    assert "kind IN ('ask_user', 'confirm_action')" in conn.calls[0][1]
+    assert "kind IN ('ask_user', 'confirm_action', 'ask_form')" in conn.calls[0][1]
     pending = await prompts.open_confirmation(conn, channel_id=channel, owner_user_id=owner)
     assert pending["id"] == prompt_id and "expires_at > NOW()" in conn.calls[1][1]
     assert await prompts.claim(conn, loaded, owner, "yes") is True

@@ -102,6 +102,10 @@ class AgentTool:
     # Commit tools: hold every call for the person's yes, grounded or not
     # (spending money is never done on the default allow).
     always_confirm: bool = False
+    # Ask tools: (ctx, state, args) -> the question the run ends with. Raises
+    # ValueError (told to the model) for arguments it can't ask with. Without
+    # one, the question is `ask_user`'s: one line and up to four buttons.
+    parse_ask: Callable[["RunContext", "RunState", dict], dict] | None = None
 
 
 @dataclass(frozen=True)
@@ -146,6 +150,8 @@ def validate_tool(tool: AgentTool) -> None:
         raise CatalogError(f"{tool.name}: unknown effect {tool.effect!r}")
     if tool.step_kind not in STEP_KINDS:
         raise CatalogError(f"{tool.name}: unknown step kind {tool.step_kind!r}")
+    if tool.parse_ask is not None and tool.effect != "ask":
+        raise CatalogError(f"{tool.name}: only an ask tool parses a question")
     if tool.effect in ("finish", "ask"):
         if tool.handler is not None or tool.hosted is not None:
             raise CatalogError(f"{tool.name}: a {tool.effect} tool is handled by the runner")

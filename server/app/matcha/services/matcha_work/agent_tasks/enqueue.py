@@ -152,8 +152,11 @@ def _brief(playbook: Playbook, raw: dict) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-async def create_task(user, company_id: UUID, body) -> dict:
-    """Start a task. `body`: `AgentTaskCreate`."""
+async def create_task(user, company_id: UUID, body, *,
+                      origin: tuple[UUID | None, UUID | None] | None = None) -> dict:
+    """Start a task. `body`: `AgentTaskCreate`. `origin`: the conversation (and
+    message) it was started from, where its cards are posted; only server
+    code passes one."""
     # A retried create (the first answer was lost) gets the task it already
     # started, before any limit could refuse it.
     existing = await service.find_by_request(user.id, body.request_id)
@@ -195,7 +198,7 @@ async def create_task(user, company_id: UUID, body) -> dict:
                    RETURNING *""",
                 body.request_id, user.id, company_id, playbook.key, (body.title or "")[:120],
                 body.directive, json.dumps(brief), input_ids, playbook.phase_key(playbook.first_phase),
-                token, model, getattr(body, "origin_channel_id", None), getattr(body, "origin_message_id", None),
+                token, model, *(origin or (None, None)),
             )
             await conn.execute(
                 """INSERT INTO mw_agent_task_rounds (task_id, user_id, n, kind, directive, units, status)

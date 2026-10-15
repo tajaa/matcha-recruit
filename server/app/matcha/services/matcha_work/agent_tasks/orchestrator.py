@@ -9,15 +9,18 @@ cannot go on ends (`_ending`), what happens once it stops (`_stopped`), and
 """
 from __future__ import annotations
 
+import logging
 from uuid import UUID
 
 from app.database import connection_or_direct
 from app.matcha.services.matcha_work.agent_runtime import chain
 from app.matcha.services.matcha_work.agent_runtime.chain import PhaseOutcome
 
-from . import notify, playbooks, service
+from . import chat, notify, playbooks, service
 from .enqueue import dispatch
 from .research.phases import Deps
+
+logger = logging.getLogger(__name__)
 
 # Under the task's 500s soft limit (`workers/tasks/agent_tasks.py`), with room
 # to write the outcome.
@@ -50,9 +53,18 @@ async def _ending(task: dict, message: str) -> PhaseOutcome:
 
 
 async def _stopped(conn, task_id: UUID) -> None:
-    """Once a task stops (done, failed, waiting): settle its round, tell the person."""
+    """Once a task stops (done, failed, waiting): settle its round, tell the
+    person, and post the card in the conversation it came from."""
     await service.close_round(conn, task_id)
     await notify.task_stopped(conn, task_id)
+    try:
+        message = await chat.post_stopped(conn, task_id)
+        if message is not None:
+            from app.matcha.services.matcha_work.project_agent.chat import broadcast_espresso_message
+
+            await broadcast_espresso_message(message)
+    except Exception:
+        logger.warning("task card could not be posted task=%s", task_id, exc_info=True)
 
 
 TASK_CHAIN = chain.ChainSpec(

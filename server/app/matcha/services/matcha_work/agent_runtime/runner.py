@@ -476,7 +476,15 @@ async def run_agent(
                 outputs.append(tool_output_item(call["call_id"], {"accepted": True}))
                 continue
             if name in runner_tools and runner_tools[name].effect == "ask":
-                question = _question(args)
+                asker = runner_tools[name]
+                if asker.parse_ask is not None:
+                    try:
+                        question = asker.parse_ask(ctx, state, args)
+                    except ValueError as exc:
+                        outputs.append(tool_output_item(call["call_id"], {"error": str(exc)[:300]}))
+                        continue
+                else:
+                    question = _question(args)
                 if question is None:
                     outputs.append(tool_output_item(call["call_id"], {"error": "Ask one clear question."}))
                     continue

@@ -114,6 +114,24 @@ def receipt_view(receipt: dict) -> dict:
     }
 
 
+def ask_tools(abilities) -> list:
+    """`ask_user` always; `ask_form` when the run can start tasks."""
+    if any(a.key == "tasks" for a in abilities):
+        from ..agent_tasks.intake import ask_form_tool
+
+        return [ASK_USER, ask_form_tool()]
+    return [ASK_USER]
+
+
+def question_message(question: dict) -> tuple[str, dict, str]:
+    """(prompt kind, the card's view, the message text) for a run's question."""
+    if question.get("kind") == prompts.ASK_FORM:
+        from ..agent_tasks.intake import form_text, form_view
+
+        return prompts.ASK_FORM, form_view(question), form_text(question)
+    return prompts.ASK_USER, prompts.ask_view(question), question.get("question") or ""
+
+
 async def run_assistant(run: dict, *, stats: dict | None = None) -> runner.RunOutcome:
     """Run one claimed `assistant` row and post what came of it."""
     stats = stats if stats is not None else {}
@@ -233,7 +251,7 @@ async def run_assistant(run: dict, *, stats: dict | None = None) -> runner.RunOu
         ),
         first_input=[*replay, inputs.request_item(run["prompt"], files_text, file_images)],
         first_note="Working on it…",
-        extra_tools=[ASK_USER],
+        extra_tools=ask_tools(abilities),
         stats=stats,
         earlier_links=earlier,
     )
@@ -278,10 +296,10 @@ async def _deliver(run: dict, ctx: RunContext, outcome: runner.RunOutcome,
             "schema": result.SCHEMA_VERSION, "question": question,
         }, **usage)
         await progress.finish("done", "Waiting for your answer")
+        kind, view, content = question_message(question)
         async with connection_or_direct() as conn, conn.transaction():
             message = await prompts.ask(
-                conn, run=run, kind=prompts.ASK_USER, payload=question,
-                view=prompts.ask_view(question), content=question.get("question") or "",
+                conn, run=run, kind=kind, payload=question, view=view, content=content,
             )
         await broadcast_espresso_message(message)
         return

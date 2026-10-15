@@ -437,7 +437,8 @@ def test_buying_needs_the_allowance_the_switch_and_the_private_conversation():
 def test_the_allowance_is_the_purchase_allowlist(monkeypatch):
     monkeypatch.setenv("AGENT_PURCHASE_ALLOWED_EMAILS", "haley@example.com")
     assert catalog.allowances_for(SimpleNamespace(role="individual", email="haley@example.com")) == {"purchases"}
-    assert catalog.allowances_for(SimpleNamespace(role="admin", email="a@example.com")) == {"purchases"}
+    # Admins also have Tasks (`agent_tasks.enqueue.tasks_enabled`).
+    assert catalog.allowances_for(SimpleNamespace(role="admin", email="a@example.com")) == {"purchases", "agent_tasks"}
     assert catalog.allowances_for(SimpleNamespace(role="individual", email="x@example.com")) == frozenset()
 
 

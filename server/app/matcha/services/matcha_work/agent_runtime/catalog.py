@@ -20,7 +20,8 @@ from dataclasses import dataclass, field
 from typing import Callable, Sequence
 
 from .abilities import (
-    calendar, domains, email, files, flights, jobs, purchase, reservations, sales, screenshots, shopping, web,
+    calendar, domains, email, files, flights, jobs, purchase, reservations, sales, screenshots, shopping, tasks,
+    web,
 )
 from .registry import Ability, validate_catalog
 
@@ -80,6 +81,8 @@ def build_catalog(*, fetch_page, max_fetches: int = 10, fetch_seconds: float = 2
         sales.build(),
         # The person's saved job searches (started from the Job search section).
         jobs.build(),
+        # Background tasks (`agent_tasks/`): started, asked about and followed up from chat.
+        tasks.build(),
         reservations.build(),
         purchase.build(),
         # Needs PORKBUN_API_KEY/PORKBUN_SECRET_KEY; not offered without them.
@@ -93,7 +96,20 @@ def allowances_for(user) -> frozenset[str]:
     """The per-person allowances `user` (anything with `role` and `email`) has."""
     from ..agent_card.chat_flow import purchases_allowed
 
-    return frozenset({purchase.ALLOWANCE}) if purchases_allowed(user) else frozenset()
+    allowed = {purchase.ALLOWANCE} if purchases_allowed(user) else set()
+    if _tasks_enabled(user):
+        allowed.add(tasks.ALLOWANCE)
+    return frozenset(allowed)
+
+
+def _tasks_enabled(user) -> bool:
+    """Tasks is switched on for this person (`agent_tasks.enqueue.tasks_enabled`)."""
+    try:
+        from ..agent_tasks.enqueue import tasks_enabled
+
+        return tasks_enabled(user)
+    except Exception:  # settings not loaded (a bare script): off
+        return False
 
 
 def offered(ability: Ability, situation: Situation) -> bool:

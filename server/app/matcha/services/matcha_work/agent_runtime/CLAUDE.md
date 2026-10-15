@@ -19,13 +19,13 @@ There is one loop in this package and no other: do not add a second.
 | Policy | `policy.py` | `evaluate_commit`: allow / confirm / deny. Pure: no I/O, no clock, no model |
 | Result | `result.py` | `agent_result.v2` (headline, summary, typed blocks); reads v1 as v2 |
 | Catalog | `catalog.py` | Every ability, and `abilities_for`: the only filter on what a run gets |
-| Abilities | `abilities/*.py` | `web`, `screenshots`, `shopping`, `files`, `flights`, `email`, `calendar`, `reservations`, `purchase`, `domains`, `sales`, `jobs` |
+| Abilities | `abilities/*.py` | `web`, `screenshots`, `shopping`, `files`, `flights`, `email`, `calendar`, `reservations`, `purchase`, `domains`, `sales`, `jobs`, `tasks` |
 | Files | `inputs.py` | Files the person gives Espresso: private storage, extracted text, what a run sees |
 | Chat entry | `chat_entry.py` | A chat message on its way to a run; answers to questions |
 | Enqueue | `enqueue.py`, `quota.py` | Gates, the daily allowance, one live run per person per conversation |
 | Models | `models.py` | The model menu and which model a run uses |
 | The run | `assistant.py` | Builds the context, runs the loop, posts what came of it |
-| Questions | `prompts.py`, `ask.py` | `ask_user` and `confirm_action`, in `mw_agent_card_prompts` |
+| Questions | `prompts.py`, `ask.py` | `ask_user`, `confirm_action` and `ask_form` (a task's details, `../agent_tasks/intake.py`), in `mw_agent_card_prompts` |
 | Progress | `chat_progress.py` | One progress message per run + `agent_run_progress` events |
 | Grants | `grants.py`, `consent.py` | Which abilities a person switched on, and what they agreed to |
 | Conversation | `conversation.py` | The private conversation (`channel_scope='assistant'`) |
@@ -243,7 +243,8 @@ column as `<playbook>.<phase>`).
 - **A run** gets the files on its own message, plus, for 24 h, any no run has
   answered: never given to one (sent on their own), or whose last run failed
   (the person's "try again" is a new run) or ended asking (an `ask_user`/form
-  question or a held action: the reply is a new run). `seen_run_id` is the
+  question or a held action: the reply is a new run). A form submitted with
+  its button (`answer = 'form'`) started a task and counts as answered. `seen_run_id` is the
   last run given the file, re-marked by every run; a worker retry of the same
   run gets them again. Own-message files come first. As one user message: the
   words, then document text as marked data (≤6k a file, ≤12k a run), then ≤3
@@ -375,7 +376,11 @@ price.
 Each message is one durable run (`mw_project_agent_runs.kind='assistant'`).
 There is no long-lived model session: the last 20 channel messages are replayed
 as context. `ask_user` ends a run with a question card; the reply is the next
-message and starts the next run.
+message and starts the next run. `ask_form` (offered when the run has the
+`tasks` ability) ends it with a form built from a playbook's intake fields:
+submitting it starts the task with no run (`POST /agent-tasks/prompts/{id}/answer`),
+and a typed reply answers it like `ask_user`. An ask tool may parse its own
+question (`AgentTool.parse_ask`); without one it is `ask_user`'s.
 
 What carries over from earlier runs, besides their words (`history.py`):
 
@@ -491,7 +496,8 @@ idempotent; channel + sole-owner membership are written in one transaction.
 | `agent_progress` | `run_id`; history adds `progress` (`status`, `steps[]`) from the run's rows |
 | `agent_result` | `run_id`, `result_v2`: `result.chat_view()` |
 | `agent_receipt` | `run_id`, `action_receipt`: `assistant.receipt_view()` |
-| `agent_card_prompt` | `prompt_kind` `ask_user` / `confirm_action`, `run_id`, `owner_user_id`, `view` (with `view.action` on a confirmation) |
+| `agent_card_prompt` | `prompt_kind` `ask_user` / `confirm_action` / `ask_form`, `run_id`, `owner_user_id`, `view` (with `view.action` on a confirmation, `view.form` on a form) |
+| `agent_task` | `task_id`, `task`: `agent_tasks.chat.card_view()` (a task started from this conversation, or how it ended) |
 
 Questions reuse the agent-card prompt message and its socket event
 (`agent_card_prompt_updated`), so a button press is a threaded reply through
