@@ -10,7 +10,8 @@ Bands first, then a weighted score inside each band, then fit:
 
 The score is the plan's preferences (`{field, weight, higher_is_better}`),
 each scaled 0..1 across the task's findings, plus fit (0-5) at the plan's
-`fit_weight`. A fact that is not verified or claimed scores as the worst.
+`fit_weight`. A fact that is not verified or claimed scores as the worst; a
+text fact (move-in specials) scores for being there at all.
 """
 from __future__ import annotations
 
@@ -20,7 +21,7 @@ from typing import Any
 
 from . import fields as F
 
-OPS = ("lte", "gte", "eq", "includes", "excludes", "is_true", "is_false", "before", "after")
+OPS = ("lte", "gte", "eq", "between", "includes", "excludes", "any_of", "is_true", "is_false", "before", "after")
 HIDDEN = 9
 UNCONFIRMED = 1
 OK = 0
@@ -43,12 +44,20 @@ def describe(constraint: dict) -> str:
         return ""
     op, value = constraint.get("op"), constraint.get("value")
     shown = value
+    if op == "between" and isinstance(value, list) and len(value) == 2 and spec.type in ("money", "number"):
+        low, high = sorted(float(v) for v in value)
+        if spec.type == "money":
+            currency = constraint.get("currency")
+            return (f"{spec.label} between {F.display(spec, low, currency=currency)} and "
+                    f"{F.display(spec, high, currency=currency, unit=constraint.get('unit'))}")
+        return f"{spec.label} between {F.display(spec, low)} and {F.display(spec, high)}"
     if spec.type == "money" and isinstance(value, (int, float)):
         shown = F.display(spec, float(value), currency=constraint.get("currency"), unit=constraint.get("unit"))
     elif spec.type in ("number", "rating") and isinstance(value, (int, float)):
-        shown = F.display(spec, float(value))
+        shown = F.display(spec, float(value)) + (" mi" if spec.key == "distance" else "")
     elif spec.type == "tags":
-        shown = ", ".join(spec.tags.get(t, t) for t in (value if isinstance(value, list) else [value]))
+        joiner = " or " if op == "any_of" else ", "
+        shown = joiner.join(spec.tags.get(t, t) for t in (value if isinstance(value, list) else [value]))
     elif spec.type == "date" and isinstance(value, str):
         try:
             shown = F.display(spec, value)
@@ -56,6 +65,7 @@ def describe(constraint: dict) -> str:
             pass
     words = {
         "lte": "at most", "gte": "at least", "eq": "is", "includes": "includes", "excludes": "excludes",
+        "any_of": "is", "between": "between",
         "before": "by", "after": "after",
     }
     if op == "is_true":
@@ -74,19 +84,19 @@ def check(constraint: dict, entry: dict | None) -> str:
         return "unknown"
     op, want, have = constraint.get("op"), constraint.get("value"), entry.get("value")
     try:
-        if op in ("lte", "gte", "eq") and spec.type in ("money", "number", "rating"):
+        if op in ("lte", "gte", "eq", "between") and spec.type in ("money", "number", "rating"):
             if spec.type == "money":
                 want_unit = constraint.get("unit")
                 if want_unit and entry.get("unit") and entry["unit"] != want_unit:
                     return "unknown"  # a nightly price says nothing about a monthly budget
                 if constraint.get("currency") and entry.get("currency") != constraint["currency"]:
                     return "unknown"
-            a, b = float(have), float(want)
-            ok = a <= b if op == "lte" else a >= b if op == "gte" else abs(a - b) < 1e-9
-            return "ok" if ok else "violates"
-        if op in ("includes", "excludes") and spec.type == "tags":
+            return _in_range(op, want, entry.get("spans") or [[have, have]])
+        if op in ("includes", "excludes", "any_of") and spec.type == "tags":
             wanted = set(want if isinstance(want, list) else [want])
             present = set(have or [])
+            if op == "any_of":  # north or south: one of them will do
+                return "ok" if wanted & present else "violates" if present else "unknown"
             if op == "excludes":
                 return "violates" if wanted & present else "ok"
             if wanted <= present:
@@ -107,6 +117,30 @@ def check(constraint: dict, entry: dict | None) -> str:
     return "unknown"
 
 
+def _in_range(op: str, want: Any, spans: list) -> str:
+    """`ok` when any of a finding's figures meets the limit. `spans` are
+    [low, high]: one figure is [x, x]; a building's floor plans are many; a
+    "starting at x" is [x, None], some homes at x and the rest dearer."""
+    if op == "between":
+        low, high = sorted(float(v) for v in want)
+    elif op == "eq":
+        if len(spans) != 1 or spans[0][1] is None or float(spans[0][0]) != float(spans[0][1]):
+            return "unknown"  # many figures, or only a floor: no one value to compare
+        return "ok" if abs(float(spans[0][0]) - float(want)) < 1e-9 else "violates"
+    else:
+        low, high = (float("-inf"), float(want)) if op == "lte" else (float(want), float("inf"))
+    maybe = False
+    for start, end in spans:
+        start = float(start)
+        if end is None:
+            if low <= start <= high:
+                return "ok"
+            maybe = maybe or start < low  # dearer homes may reach it
+        elif start <= high and float(end) >= low:
+            return "ok"
+    return "unknown" if maybe else "violates"
+
+
 def _sortable(spec_type: str, value: Any) -> float | None:
     if value is None:
         return None
@@ -121,6 +155,8 @@ def _sortable(spec_type: str, value: Any) -> float | None:
             return None
     if spec_type == "tags":
         return float(len(value or []))
+    if spec_type == "text":
+        return 1.0 if value else None  # having it at all (move-in specials)
     return None
 
 

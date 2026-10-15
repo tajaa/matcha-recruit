@@ -45,13 +45,20 @@ candidate's own page. Don't stop at the first good one, and don't spend many pag
 {goal}"""
 
 SCREEN = f"""You screen research findings for a person. For each finding shown, decide whether it \
-is relevant to what they asked for (a different kind of thing, or one that plainly ignores a must \
-have, is not), and how well it fits, 0-5. Give up to three short reasons from the facts shown. \
-Don't judge a hard limit: that is checked separately. Call finish once with a verdict for every \
-finding. {_DATA}"""
+is relevant to what they asked for (a different kind of thing is not, nor one whose facts plainly \
+break a must have), and how well it fits, 0-5. Give up to three short reasons from the facts shown. \
+Don't judge a hard limit: that is checked separately, and so is a must have that only restates one \
+(a price, a distance, a direction, a date). A fact the findings don't show is unknown, not missing: \
+it never makes a finding irrelevant and is not a reason to score lower. Something they asked to \
+find out (what specials are offered, the fees) is a fact to report, and a finding that doesn't show \
+it isn't failing. Call finish once with a verdict for every finding. {_DATA}"""
 
 SUMMARIZE = f"""You write the result of a research task: a headline, a short summary, up to four \
-short sections, and the top picks (up to five) with one sentence each on why. Use only the facts \
+short sections, and the top picks with one sentence each on why: five, best first, or every \
+finding when there are fewer. The headline says what was found. Only the limits and must haves \
+are requirements: something they asked to find out (what specials are offered) is reported where \
+it was found, and a finding without it doesn't fail. A price shown as a range fits a budget when \
+any part of it is inside: some of its homes are in budget. Use only the facts \
 shown for each finding; never state a number a finding doesn't show. Say plainly when a fact is \
 unconfirmed. Name findings by their title; their short ids are only for the `top` list. No links except the findings' own pages. Call finish once. {_DATA}"""
 
@@ -62,7 +69,7 @@ when what was already found can't satisfy the change (a new area, a different ki
 give new queries then. Call finish once. Today is {{today}}. {_DATA}"""
 
 
-BRIEF_LABELS = {"location": "Where", "budget_max": "Budget (max)", "currency": "Currency",
+BRIEF_LABELS = {"location": "Where", "budget_max": "Budget (max)", "budget_min": "Budget (min)", "currency": "Currency",
                 "must_haves": "Must have", "nice_to_haves": "Nice to have", "avoid": "Avoid",
                 "needed_by": "Needed by"}
 
@@ -120,6 +127,10 @@ def plan_lines(plan: dict) -> list[str]:
     rules = [describe(c) for c in plan.get("constraints") or []]
     if rules:
         lines.append("Hard limits: " + "; ".join(r for r in rules if r))
+    anchor = plan.get("anchor")
+    if isinstance(anchor, dict):
+        lines.append(f"Distances are measured from {anchor.get('name')}" if "lat" in anchor
+                     else f"Distances: unknown. {anchor.get('error') or ''}".strip())
     for key, label in (("must_haves", "Must have"), ("nice_to_haves", "Nice to have"), ("avoid", "Avoid")):
         if plan.get(key):
             lines.append(f"{label}: {', '.join(plan[key])}")
@@ -130,9 +141,11 @@ def discover_instructions(plan: dict, *, browser: bool) -> str:
     goal = "\n".join(["", "The task:", *plan_lines(plan)])
     if plan.get("prefer_sources"):
         goal += "\nRead first: " + "; ".join(plan["prefer_sources"])
-    wanted = [F.LIBRARY[k].label for k in plan.get("fields") or [] if k in F.LIBRARY]
+    wanted = [F.LIBRARY[k].label for k in plan.get("fields") or [] if k in F.LIBRARY and k not in F.COMPUTED]
     if wanted:
         goal += "\nFacts to collect: " + ", ".join(wanted)
+    if any(k in F.COMPUTED for k in plan.get("fields") or []):
+        goal += "\nDistances are worked out from each one's street address: give the address when a page shows it."
     return DISCOVER.format(
         browser=(", and view_page for a page that only shows its listings with JavaScript" if browser else ""),
         goal=goal,

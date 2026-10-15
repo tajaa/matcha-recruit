@@ -33,6 +33,7 @@ import httpx
 from app.matcha.services.matcha_work.agent_card.schema import normalize_url
 
 from . import fields as F
+from .geo import point_of
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +63,8 @@ class ProviderItem:
     image_url: str | None = None
     # Shopping: what `stores` takes to list the stores selling it.
     offers_token: str | None = None
+    # Google Maps: where it is, (lat, lng).
+    point: tuple[float, float] | None = None
 
 
 @dataclass(frozen=True)
@@ -203,6 +206,7 @@ def place_item(raw: dict, *, today: date) -> ProviderItem | None:
     return ProviderItem(
         kind="place", title=title, url=url, subtitle=address, provider="google_maps",
         provider_id=place_id, fields=out, image_url=_http(raw.get("thumbnail")),
+        point=point_of(raw.get("gps_coordinates")),
     )
 
 
@@ -222,6 +226,11 @@ class _Api:
 
     def _params(self, engine: str, query: str, page: int) -> dict:  # pragma: no cover - abstract
         raise NotImplementedError
+
+    @staticmethod
+    def _near(params: dict, ll: str | None) -> dict:
+        """A map search centred on `ll` (`@lat,lng,zoom`), the way both APIs take it."""
+        return {**params, "ll": ll} if ll and params.get("engine") == "google_maps" else params
 
     async def _get(self, params: dict) -> dict:
         last: Exception | None = None
@@ -253,14 +262,15 @@ class _Api:
                 await self._sleep(2.0)
         raise ProviderError(f"{self.name} did not answer: {type(last).__name__}")
 
-    async def search(self, source: str, query: str, *, page: int = 1) -> list[ProviderItem]:
-        """One page of `shopping` or `places` results for the query text."""
+    async def search(self, source: str, query: str, *, page: int = 1, ll: str | None = None) -> list[ProviderItem]:
+        """One page of `shopping` or `places` results for the query text; a
+        places search centred on `ll` when given."""
         today = self._today()
         if source == "shopping":
             data = await self._get(self._params("google_shopping", query, page))
             rows, build = data.get("shopping_results"), shopping_item
         elif source == "places":
-            data = await self._get(self._params("google_maps", query, page))
+            data = await self._get(self._near(self._params("google_maps", query, page), ll))
             rows, build = data.get("local_results"), place_item
         else:
             raise ValueError(f"unknown source {source!r}")
@@ -271,6 +281,16 @@ class _Api:
                 if made is not None:
                     items.append(made)
         return items
+
+    async def locate(self, query: str) -> tuple[str, tuple[float, float]] | None:
+        """One place on the map, `(its name, (lat, lng))`: the place Google Maps
+        answers with, else its first result."""
+        data = await self._get(self._params("google_maps", query, 1))
+        locals_ = data.get("local_results") if isinstance(data.get("local_results"), list) else []
+        for row in (data.get("place_result"), data.get("place_results"), *locals_[:1]):
+            if isinstance(row, dict) and point_of(row.get("gps_coordinates")):
+                return F.clean_text(row.get("title"), 120) or query, point_of(row["gps_coordinates"])
+        return None
 
     def _stores_params(self, token: str) -> dict:  # pragma: no cover - abstract
         raise NotImplementedError

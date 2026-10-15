@@ -3,8 +3,10 @@
   providers  Google Shopping or Google Maps for products and places: findings
              with price, rating and link as provider data
   enrich     each finding's own page: its schema.org data, then (for a home) a
-             conservative scan of its text; a page that is gone marks the
-             finding unavailable; photos rehosted on our CDN
+             conservative scan of its text (an apartment building's floor
+             plans page too, for its rents); a page that is gone marks the
+             finding unavailable; where it is, from the place the person
+             named; photos rehosted on our CDN
   rank       every finding ordered from stored facts (`ranking.py`)
 
 The model phases (plan, discover, screen, summarize, refine) are in
@@ -20,10 +22,13 @@ import asyncio
 import json
 import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 from typing import Any, Awaitable, Callable
+from urllib.parse import urljoin, urlsplit
 from uuid import UUID
+
+from bs4 import BeautifulSoup
 
 from app.core.services.safe_fetch import UnsafeURL, fetch_public
 from app.database import connection_or_direct, decode_jsonb
@@ -35,13 +40,18 @@ from app.matcha.services.matcha_work.agent_runtime.chain import Budget, PhaseOut
 from .. import items as items_mod
 from ..playbook import Budgets
 from . import fields as F
-from . import providers, ranking
+from . import geo, kinds, providers, ranking
 
 logger = logging.getLogger(__name__)
 
 BUDGETS = Budgets()
 QUERY_CONCURRENCY = 3
-PROVIDER_QUERIES = 4
+# Queries sent to the provider a round: Shopping also looks each product up at
+# its stores, so fewer; Maps has an area per query (north and south both).
+PROVIDER_QUERIES = {"shopping": 4, "places": 6}
+# Apartment buildings kept from Google Maps a round: each may take two page
+# loads (its site, then its floor plans), within the round's page loads.
+PROVIDER_BUILDINGS = 30
 # Shopping products looked up at their stores per round (one provider call
 # each, within the round's provider budget alongside its searches).
 STORE_LOOKUPS = 20
@@ -108,6 +118,7 @@ class Deps:
     view: Callable[[str, str], Awaitable[dict]] = _default_view
     browser_ready: Callable[[], bool] = _default_browser_ready
     rehost: Callable[..., Awaitable[tuple[list[dict], list[str]]]] = _default_rehost
+    geocode: geo.Geocode = geo.census_point
     today: Callable[[], date] = field(default=date.today)
 
 
@@ -132,6 +143,38 @@ async def count_items(conn, task_id: UUID, where: str = "") -> int:
     ) or 0)
 
 
+def brief_of(task: dict) -> dict:
+    brief = decode_jsonb(task.get("brief"), {}) or {}
+    return brief if isinstance(brief, dict) else {}
+
+
+async def ensure_anchor(task: dict, deps: Deps, guard: chain.Guard) -> dict | None:
+    """The place distances are measured from (the brief's `near`) on the map,
+    found once per task and kept in the plan; None when there is none or it
+    can't be found. Finding it may spend one provider call."""
+    near = brief_of(task).get("near")
+    if not near:
+        return None
+    plan = plan_of(task)
+    anchor = plan.get("anchor")
+    if not (isinstance(anchor, dict) and anchor.get("name") == near):
+        provider = deps.provider()
+        budget = Budget(left=await chain.grant(_chain(), task["id"], "provider_calls", 1, BUDGETS.provider_calls)
+                        if provider is not None else 0)
+        anchor = await geo.resolve_anchor(near, brief_of(task).get("location"),
+                                          provider=provider if budget.take() else None, geocode=deps.geocode)
+        await chain.refund(_chain(), task["id"], "provider_calls", budget.left)
+        async with connection_or_direct() as conn:
+            await conn.execute(
+                """UPDATE mw_agent_tasks SET plan = COALESCE(plan, '{}'::jsonb) || jsonb_build_object('anchor', $3::jsonb),
+                       updated_at = NOW()
+                   WHERE id = $1 AND dispatch_token = $2""",
+                task["id"], guard.token, json.dumps(anchor),
+            )
+        task["plan"] = {**plan, "anchor": anchor}
+    return anchor if "lat" in anchor else None
+
+
 async def item_room(conn, task_id: UUID) -> int:
     """How many more findings this task may keep: more once it was asked to search more."""
     searched_more = await conn.fetchval(
@@ -143,6 +186,11 @@ async def item_room(conn, task_id: UUID) -> int:
 
 # ── providers ────────────────────────────────────────────────────────────────
 
+# A Google Maps result's facts that say nothing about a home (its "cuisine" is
+# "Apartment complex").
+NOT_A_HOME = ("cuisine", "price_level")
+
+
 def provider_record(item: providers.ProviderItem) -> dict:
     return {
         "kind": item.kind, "title": item.title, "subtitle": item.subtitle, "url": item.url,
@@ -152,6 +200,20 @@ def provider_record(item: providers.ProviderItem) -> dict:
     }
 
 
+def as_kind(item: providers.ProviderItem, plan: dict, anchor: dict | None) -> providers.ProviderItem:
+    """A provider result as the task's own kind of finding (an apartment
+    building on Google Maps is a listing), with its distance from the anchor."""
+    fields = dict(item.fields)
+    kind = item.kind
+    if plan.get("item_kind") == "listing" and kind == "place":
+        kind = "listing"
+        fields = {k: v for k, v in fields.items() if k not in NOT_A_HOME}
+    if anchor is not None and item.point is not None:
+        fields.update(geo.distance_fields(item.point, anchor, status="verified", origin="provider", url=item.url,
+                                          how="where Google Maps puts it"))
+    return replace(item, kind=kind, fields=fields)
+
+
 def prerank(found: list[providers.ProviderItem], plan: dict) -> list[providers.ProviderItem]:
     """Provider results in the order the task will likely rank them (their own
     price, rating and reviews against the plan's limits and preferences), so
@@ -159,9 +221,33 @@ def prerank(found: list[providers.ProviderItem], plan: dict) -> list[providers.P
     to whatever the search happened to list first. Ties keep their order."""
     if len(found) < 2:
         return found
-    ranked = ranking.rank([{"id": str(n), "fields": item.fields, "status": "candidate", "fit_score": None,
-                            "user_state": "new"} for n, item in enumerate(found)], plan)
-    return [found[int(r.item_id)] for r in sorted(ranked, key=lambda r: r.rank)]
+    ranked = sorted(ranking.rank([{"id": str(n), "fields": item.fields, "status": "candidate", "fit_score": None,
+                                   "user_state": "new"} for n, item in enumerate(found)], plan),
+                    key=lambda r: r.rank)
+    ways = asked_directions(plan)
+    if len(ways) < 2:
+        return [found[int(r.item_id)] for r in ranked]
+    kept = [found[int(r.item_id)] for r in ranked if r.band != ranking.HIDDEN]
+    return by_direction(kept, ways) + [found[int(r.item_id)] for r in ranked if r.band == ranking.HIDDEN]
+
+
+def asked_directions(plan: dict) -> list[str]:
+    for c in plan.get("constraints") or []:
+        if isinstance(c, dict) and c.get("field") == "direction" and c.get("op") == "any_of":
+            return [w for w in c.get("value") or [] if isinstance(w, str)]
+    return []
+
+
+def by_direction(found: list[providers.ProviderItem], ways: list[str]) -> list[providers.ProviderItem]:
+    """North's best, south's best, north's second, …: room for every direction
+    asked, however many of the searches leaned one way. One with no direction
+    yet comes after."""
+    groups: dict[str, list] = {way: [] for way in ways}
+    rest = []
+    for item in found:
+        way = ((item.fields.get("direction") or {}).get("value") or [None])[0]
+        (groups[way] if way in groups else rest).append(item)
+    return interleave(list(groups.values())) + rest
 
 
 def interleave(lists: list[list]) -> list:
@@ -220,33 +306,41 @@ async def run_providers(task: dict, deps: Deps, guard: chain.Guard) -> PhaseOutc
     plan = plan_of(task)
     cursor = cursor_of(task)
     source = plan.get("source")
+    anchor = await ensure_anchor(task, deps, guard)
     provider = deps.provider() if source in ("shopping", "places") else None
     if source in ("shopping", "places") and provider is None:
         logger.info("research task=%s wanted %s but no listings provider is configured", task["id"], source)
     added = 0
     if provider is not None:
-        queries = [q for q in plan.get("queries") or [] if q][:PROVIDER_QUERIES]
+        kind = kinds.of(task)
+        # Each area a distance limit covers first (north and south both), then the plan's own.
+        around = (geo.areas(anchor, brief_of(task)) if source == "places" and anchor is not None
+                  and kind is not None and kind.area_query else [])
+        searches = [(kind.area_query, ll) for ll in around] + [
+            (q, None) for q in [q for q in plan.get("queries") or [] if q][:PROVIDER_QUERIES[source]]]
         page = int(cursor.get("provider_page") or 1)
-        budget = Budget(left=await chain.grant(_chain(), task["id"], "provider_calls", len(queries),
+        budget = Budget(left=await chain.grant(_chain(), task["id"], "provider_calls", len(searches),
                                                BUDGETS.provider_calls))
         gate = asyncio.Semaphore(QUERY_CONCURRENCY)
-        per_query: list[list[providers.ProviderItem]] = [[] for _ in queries]
+        per_query: list[list[providers.ProviderItem]] = [[] for _ in searches]
 
-        async def one(n: int, query: str) -> None:
+        async def one(n: int, query: str, ll: str | None) -> None:
             if not budget.take():
                 return
             async with gate:
                 try:
-                    per_query[n] = await provider.search(source, query, page=page)
+                    per_query[n] = await provider.search(source, query, page=page, **({"ll": ll} if ll else {}))
                 except providers.ProviderError as exc:
                     logger.info("research provider query failed task=%s: %s", task["id"], exc)
 
         await guard.note("Searching Google Shopping…" if source == "shopping" else "Searching Google Maps…")
-        await asyncio.gather(*(one(n, q) for n, q in enumerate(queries)))
+        await asyncio.gather(*(one(n, q, ll) for n, (q, ll) in enumerate(searches)))
         await chain.refund(_chain(), task["id"], "provider_calls", budget.left)
-        found = prerank(interleave(per_query), plan)
+        found = prerank([as_kind(i, plan, anchor) for i in interleave(per_query)], plan)
         async with connection_or_direct() as conn:
             room = await item_room(conn, task["id"])
+            if plan.get("item_kind") == "listing":
+                room = min(room, PROVIDER_BUILDINGS)
             # Paid lookups only for findings the task still has room to keep.
             known = await items_mod.known_names(conn, task["id"]) if source == "shopping" and found and room else set()
         if source == "shopping" and found and room:
@@ -286,6 +380,57 @@ def page_images(page: dict, title: str, url: str) -> list[dict]:
             seen.add(image)
             out.append({"source_url": image, "page_url": url, "alt": title})
     return out[:4]
+
+
+_PLANS = re.compile(r"floor\s*-?\s*plans?|floorplans|pricing|availability|plans?-and-pricing", re.I)
+
+
+def plans_link(html: bytes, base: str) -> str | None:
+    """A building's floor plans page on its own site (where its rents are),
+    from any link on the page, its menu included."""
+    soup = BeautifulSoup(html, "lxml")
+    site = (urlsplit(base).hostname or "").lower().removeprefix("www.")
+    for anchor in soup.find_all("a", href=True)[:400]:
+        href = urljoin(base, str(anchor["href"]).strip()).split("#")[0]
+        parts = urlsplit(href)
+        if parts.scheme not in ("http", "https") or (parts.hostname or "").lower().removeprefix("www.") != site:
+            continue
+        if href.rstrip("/") != base.split("#")[0].rstrip("/") and (
+                _PLANS.search(anchor.get_text(" ", strip=True)) or _PLANS.search(parts.path)):
+            return href
+    return None
+
+
+def _no_rent(fields: dict) -> bool:
+    """No rent yet, or only a "starting at" one."""
+    price = fields.get("price") or {}
+    return not price or any(end is None for _, end in price.get("spans") or [])
+
+
+async def floor_plans(html: bytes, base: str, deps: Deps, fetches: Budget, views: Budget, *, prefix: str,
+                      today: date) -> dict:
+    """A building's rents and specials from its floor plans page: loaded, or
+    viewed in the browser when its prices are drawn by JavaScript."""
+    url = plans_link(html, base)
+    if url is None or not fetches.take():
+        return {}
+    try:
+        fetched = await deps.page_fetch(url, max_bytes=PAGE_BYTES, accept="text/html,application/xhtml+xml",
+                                        total_timeout=PAGE_SECONDS)
+        if fetched.status != 200 or "html" not in (fetched.content_type or ""):
+            return {}
+        page = await asyncio.to_thread(extract_page, fetched.body, fetched.final_url)
+    except Exception:
+        logger.info("research floor plans fetch failed", exc_info=True)
+        return {}
+    found = F.scan_listing_text(str(page.get("text") or ""), url=fetched.final_url, today=today, building=True)
+    if "price" not in found and deps.browser_ready() and views.take():
+        viewed = await deps.view(fetched.final_url, f"{prefix}/views")
+        if isinstance(viewed, dict) and not viewed.get("error"):
+            found = {k: {**v, "evidence": {**v["evidence"], "origin": "browser"}}
+                     for k, v in F.scan_listing_text(str(viewed.get("text") or ""), url=fetched.final_url,
+                                                      today=today, building=True).items()}
+    return found
 
 
 class _NotTried:
@@ -330,21 +475,49 @@ async def enrich_one(row: dict, deps: Deps, fetches: Budget, views: Budget, *, p
         return update
     found = F.from_page(page, url=fetched.final_url, title=row.get("title") or "", today=today)
     structured = any(page.get(k) for k in ("products", "listings", "places", "events", "offers"))
+    # An apartment building from Google Maps: many homes, rents on its floor plans.
+    building = row.get("kind") == "listing" and row.get("origin") == "provider"
     if row.get("kind") == "listing":
-        found = F.merge(F.scan_listing_text(text, url=fetched.final_url, today=today), found)
+        found = F.merge(F.scan_listing_text(text, url=fetched.final_url, today=today, building=building), found)
         if not structured and len(text) < THIN_PAGE_CHARS and deps.browser_ready() and views.take():
             viewed = await deps.view(fetched.final_url, f"{prefix}/views")
             if isinstance(viewed, dict) and not viewed.get("error"):
                 found = F.merge(found, {k: {**v, "evidence": {**v["evidence"], "origin": "browser"}}
                                         for k, v in F.scan_listing_text(str(viewed.get("text") or ""),
                                                                         url=fetched.final_url, today=today).items()})
+    if building and "price" in found and not found["price"].get("spans"):
+        found["price"] = F.starting_at(found["price"])  # a building's one price is its cheapest home
+    if building and _no_rent(found):
+        plans = await floor_plans(fetched.body, fetched.final_url, deps, fetches, views, prefix=prefix, today=today)
+        if "price" in plans:
+            found["price"] = plans.pop("price")  # its floor plans' rents beat a "starting at"
+        found = F.merge(found, plans)
     update["fields"] = F.merge(fields, found)
     update["status"] = "verified"
+    point = geo.page_point(page, row.get("title") or "")
+    if point is not None:
+        update["point"] = (point, fetched.final_url)
     known = {c.get("source_url") for c in candidates}
     update["image_candidates"] = candidates + [
         c for c in page_images(page, row.get("title") or "", fetched.final_url) if c["source_url"] not in known
     ]
     return update
+
+
+async def locate(update: dict, anchor: dict, deps: Deps) -> None:
+    """Distance and direction for a finding that has none verified yet: from
+    its page's schema.org `geo`, else its address."""
+    found = update.pop("point", None)
+    have = (update["fields"] or {}).get("distance") or {}
+    if have.get("status") == "verified" and found is None:
+        return
+    if found is not None:
+        point, url = found
+        made = geo.distance_fields(point, anchor, status="verified", origin="jsonld", url=url,
+                                   how="where its page's map data puts it")
+    else:
+        made = await geo.from_address(update["fields"], anchor, geocode=deps.geocode)
+    update["fields"] = F.merge(update["fields"], made)
 
 
 async def enrich(task: dict, deps: Deps, guard: chain.Guard) -> PhaseOutcome:
@@ -361,19 +534,27 @@ async def enrich(task: dict, deps: Deps, guard: chain.Guard) -> PhaseOutcome:
             task["id"],
         ) or 0)
     own = [r for r in rows if own_page(r["url"])]
-    fetches = Budget(left=await chain.grant(_chain(), task["id"], "fetch_calls", len(own), BUDGETS.fetch_calls))
+    # A building may also load its floor plans page.
+    buildings = sum(1 for r in own if r["kind"] == "listing" and r["origin"] == "provider")
+    fetches = Budget(left=await chain.grant(_chain(), task["id"], "fetch_calls", len(own) + buildings,
+                                            BUDGETS.fetch_calls))
     if own and fetches.left <= 0:
         fetches.exhausted = True
-    views = Budget(left=await chain.grant(_chain(), task["id"], "browser_views", 1, BUDGETS.browser_views)
+    views = Budget(left=await chain.grant(_chain(), task["id"], "browser_views", max(1, buildings),
+                                          BUDGETS.browser_views)
                    if any(r["kind"] == "listing" for r in own) and deps.browser_ready() else 0)
     gate = asyncio.Semaphore(ENRICH_CONCURRENCY)
     updates: dict = {}
     prefix = f"matcha-work/{task['company_id']}/agent-tasks/{task['id']}"
+    anchor = await ensure_anchor(task, deps, guard)
 
     async def one(row) -> None:
         async with gate:
             try:
-                updates[row["id"]] = await enrich_one(dict(row), deps, fetches, views, prefix=prefix)
+                update = await enrich_one(dict(row), deps, fetches, views, prefix=prefix)
+                if anchor is not None and isinstance(update, dict) and update["status"] != "unavailable":
+                    await locate(update, anchor, deps)
+                updates[row["id"]] = update
             except Exception:
                 logger.warning("research enrichment failed item=%s", row["id"], exc_info=True)
                 updates[row["id"]] = None

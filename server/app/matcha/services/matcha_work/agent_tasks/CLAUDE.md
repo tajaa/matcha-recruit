@@ -6,8 +6,11 @@ late"). It runs in the background, keeps what it found with the evidence for
 each fact, and takes follow-ups: refine ("only the Mission"), search more, make
 a document.
 
-**Off until the Mac Tasks tab ships**: `ESPRESSO_TASKS_ENABLED` (settings
-`espresso_tasks_enabled`), admins either way (`enqueue.tasks_enabled`).
+**Off on prod until its migrations and deploy land**: `ESPRESSO_TASKS_ENABLED`
+(settings `espresso_tasks_enabled`), admins either way (`enqueue.tasks_enabled`).
+`scripts/dev-remote.sh` turns it on in dev (`ESPRESSO_TASKS_ENABLED=0` runs dev
+like prod). Without it Espresso has no `tasks` ability, so "find me apartments"
+gets a chat answer, not a task.
 Personal Espresso accounts (`agent_runtime.eligibility`), Pro and up
 (`features_for_plan()["agent_tasks"]`), the shared monthly allowance
 (`allowance.py`).
@@ -34,7 +37,7 @@ routes are `/matcha-work/agent-tasks`.
 | Intake | `intake.py` | Field values, the `ask_form` form (built from the playbook only), submitting it (`answer_form`) |
 | Chat cards | `chat.py` | The `agent_task` card posted where a task started, and when it ends |
 | From chat | `../agent_runtime/abilities/tasks.py` | The `tasks` ability: list, read, start, follow up, cancel, mark findings; the `task` block |
-| Actions on findings | `actions/` | `ItemAction` (`base.py`), `ACTIONS` + `validate` (`__init__.py`), propose / confirm / cancel / history (`service.py`); Buy (`buy.py`) |
+| Actions on findings | `actions/` | `ItemAction` (`base.py`), `ACTIONS` + `validate` (`__init__.py`), propose / confirm / cancel / history (`service.py`); Buy (`buy.py`), Apply (`apply.py`) |
 | Research | `research/` | The first playbook: see below |
 | Job searches | `job_tasks.py` | Job search as a task: pointer rows, `overlay` (the search's state), `lead_item`, the `job_search` playbook, `start`, `search_stopped` |
 
@@ -54,7 +57,12 @@ checks the values and files against the same fields and starts the task with
 no model run, so no daily request; the prompt id is the task's request id. A
 typed reply answers the form like any question and the next run carries on.
 A task started from a conversation posts a card there (`chat.py`) when it
-starts and when it ends. `create_task`'s `origin` is server-only.
+starts and when it ends; the finished card shows the summary's five picks in
+its order (`chat.picks`). `create_task`'s `origin` is server-only. The day's
+caps (10 tasks started, 30 follow-ups) refuse with `code: daily_limit` and a
+sentence saying so (`enqueue._daily`): a bare "Too many requests" had
+Espresso retrying three times and telling the person the search service was
+busy.
 
 `start_task` runs in the worker, so the gates it goes through are pool-free
 (`workspace_enabled`, `resolve_plan_for_user`, `get_token_budget`).
@@ -125,6 +133,15 @@ machinery is bound to a chat run).
 - Any other store: its product page. A finding with only Google's page can't
   be bought. Quantity is a whole number 1–10.
 
+**Apply** (`apply.py`, listings): Espresso never applies, pays a fee, signs or
+fills anything in. It loads the listing's own page now and reads its links for
+an application: words ("Apply now", "application") beat a path
+(`/apply`), the listing's own site beats a leasing portal (`PORTALS`: RentCafe,
+Entrata, AppFolio, ...) beats anything else; job and career links are skipped;
+https only (the listing's own site as served). None found, or the page can't
+be read: the listing's page. A 404/410 is refused (off the market). The
+preview shows the rent, specials, address and leasing office phone as found.
+
 Guards (`service.py`): 10 proposals a minute a person (each may read the
 store's pages); an advisory lock per finding and action around expire +
 insert; a `running` row older than 10 minutes is settled as failed; the
@@ -170,6 +187,7 @@ refine starts at `refine`, "search more" at `providers`.
 | No-model phases, `rerank`, `Deps` | `phases.py` |
 | Model phases | `model_phases.py` |
 | Brief + intake fields (`ResearchBrief`, `ApartmentBrief`, `validator`) | `brief.py` |
+| Where a finding is: the anchor, distance and direction (`resolve_anchor`, `distance_fields`, `from_address`) | `geo.py` |
 | Kinds of search: products, apartments, places (data) | `kinds.py` |
 
 ### Kinds of search (`research/kinds.py`)
@@ -185,7 +203,7 @@ refine):
 | Kind | Finding | Starts at | Its own questions | Its limits | Actions |
 |---|---|---|---|---|---|
 | `products` | product | Google Shopping | budget each, must / nice / avoid, needed by | price | Buy |
-| `apartments` | listing | the web | where (required), rent a month, beds, baths, pets, move-in | rent/month, beds ≥, baths ≥, pets includes, available ≤ move-in | — |
+| `apartments` | listing | Google Maps (buildings), then the web | where (required), rent up to / from a month, beds, baths, pets, move-in, a place to measure from + miles at least / at most + directions | rent/month ≤ and ≥, beds ≥, baths ≥, pets includes, available ≤ move-in, distance ≥ / ≤, direction any of | Apply |
 | `places` | place | Google Maps | near (required), must / nice / avoid | — | — |
 
 A kind's answers become constraints with `source: brief`, like a typed
@@ -197,6 +215,58 @@ says so (`budget_unit`: apartments' rent is a month); generic research's
 has none, so it compares with a price in any unit and a home to buy isn't
 read as a monthly rent. `research` stays the catch-all. A task row's
 `playbook_label` names its kind for the app.
+
+### Distance from a named place (`research/geo.py`)
+
+An apartments brief's `near` ("Lady Bird Lake") is the anchor: found once per
+task by `phases.ensure_anchor` (Google Maps through the provider, one provider
+call; else the US Census geocoder for a street address) and kept in the plan
+as `anchor` (`{name, lat, lng, source, label}`, or `{name, error}`, so a place
+that can't be found isn't looked up again). A finding's point: a Google Maps
+result's `gps_coordinates` (`ProviderItem.point`), its page's schema.org `geo`
+(`page_extract` adds `geo` to a listing or place only when the page has one),
+else its stored address through the Census geocoder (a street number needed).
+`distance` (miles, straight line, shown "12.4 mi north") and `direction` (the
+quarter of the compass it lies in: north is within 45° of due north) are
+`fields.COMPUTED`: arithmetic, never a model's claim (not in the discover
+contract's fact enum; `_fact` drops them), as verified as the point they came
+from. `min_miles` / `max_miles` / `directions` become `distance gte` /
+`distance lte` / `direction any_of` limits; without a `near`, a plan carries
+no distance limits, preferences or columns. `near` itself isn't refinable (a
+new place is a new task); the miles and directions are.
+
+Where the map is searched follows the limits, not the planner's queries:
+`geo.areas` puts a map centre (`@lat,lng,12z`, the providers' `ll`) out in
+each direction asked (between the miles, or 5 past "at least", or
+`DIRECTION_MILES` with none), or on the anchor for "within", and
+`run_providers` searches the kind's `area_query` ("apartments") around each
+before the plan's own queries, at 13z (at 12z Google drifted to the city's
+dense middle: a centre 15 mi south came back 4-9 mi out). A planner that
+writes four northern suburbs and one southern one still gets the south
+searched, and with two or more directions `prerank` takes the room (30
+buildings) from each in turn (`by_direction`), not whichever way most
+queries leaned. A distance preference always ranks nearer first: the model
+can't flip `higher_is_better` on a computed field ("at least 10 miles" is a
+limit, not a wish to be far away; a run where it did ranked Georgetown at 33
+mi over Kyle at 18 and cut the south).
+
+Google Maps results in an apartments task are listings (`phases.as_kind`),
+without Maps' "cuisine" and price level. Move-in specials (`specials`) are read
+from a listing page's text by `scan_listing_text` (time free, then money off,
+then deposit, then fees and Look & Lease; the biggest kind wins) or claimed by
+the model with a quote. A preference on `specials` ranks a finding that has
+any above one that doesn't (`fields.PRESENCE`: the only text fields a
+preference may name).
+
+A building's rent is every figure its floor plans state, not one number.
+`enrich_one` treats a Google Maps listing as a building: its page and then its
+floor plans page (`plans_link`, same site; viewed in the browser when the
+figures are drawn by JavaScript) are read by `building_rent`, which keeps each
+plan's `[low, high]` in `price.spans` (`high` None for "starting at") and shows
+"$1,123–$1,939+/mo". A building that only gives one figure is "From" it
+(`fields.starting_at`). A rent limit is met when any span overlaps it
+(`ranking._in_range`): a "starting at" below the range is Unconfirmed (dearer
+homes may fit), above it a violation.
 
 ## Invariants
 
@@ -228,16 +298,24 @@ read as a monthly rent. `research` stays the catch-all. A task row's
 - **A summary states only numbers its findings show**, or the person's own
   ask, limits and the counts (`unsupported_numbers`, `context`);
   a reason that doesn't is dropped, a headline that doesn't gets one repair,
-  then the ranking-only summary.
+  then the ranking-only summary. Its top picks are always five (or every
+  finding shown): the model's, then the ranking's best it left out
+  (`fill_top`).
 - **Budgets per round** (`Budgets`): 30 provider calls (searches and store
-  lookups), 60 page loads, 6
-  browser views, reserved with `chain.grant` before use and refunded after.
+  lookups), 100 page loads (a building costs two: its page and its floor
+  plans), 6 browser views, reserved with `chain.grant` before use and refunded after.
   80 findings per task, 120 once it searched more. Counters reset when a
   round starts.
 - A page drawn by JavaScript is viewed in the browser only when the browser
   worker exists (`AGENT_BROWSER_QUEUE`) and the view budget allows.
 - The model never writes: phases store what the contracts let through, under
   the chain's token.
+- **A research finish tool's arguments are the answer's own fields**, not one
+  `result` object (`contracts._finish`). Wrapped, Claude Haiku sent the
+  object as JSON text now and then, sometimes broken, and every summary of
+  the run fell back to the ranking's. `_result` still reads `{"result": ...}`
+  and an object or list sent as JSON text (`_unquoted`); a summary gets two
+  repairs.
 
 ## The Mac app
 
@@ -253,4 +331,5 @@ metadata as `[String: String]`; `task_id` is a kanban card there).
 ## Not yet (later PRs)
 
 Agent cards as tasks (`engine` `board`; the columns exist). Book (places) and
-Email-about-it (apartments) actions; a travel playbook.
+Email-about-it (apartments) actions; a travel playbook. Distance for places
+(the same `near` on the places kind).

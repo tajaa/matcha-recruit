@@ -35,6 +35,7 @@ AMENITIES = {
     "air_conditioning": "Air conditioning", "gym": "Gym", "doorman": "Doorman",
     "elevator": "Elevator", "outdoor_space": "Outdoor space", "furnished": "Furnished",
 }
+DIRECTIONS = {"north": "North", "east": "East", "south": "South", "west": "West"}
 
 
 def _f(key: str, label: str, type_: str, **kw) -> ItemField:
@@ -63,11 +64,19 @@ LIBRARY: dict[str, ItemField] = {f.key: f for f in (
     _f("phone", "Phone", "text"),
     _f("when", "When", "text"),
     _f("venue", "Venue", "text"),
+    _f("specials", "Specials", "text", help="Move-in specials and concessions: weeks free, money off"),
+    _f("distance", "Distance", "number", higher_is_better=False,
+       help="Miles in a straight line from the place the person named"),
+    _f("direction", "Direction", "tags", tags=DIRECTIONS),
 )}
+# Worked out by code from where a finding is (`geo.py`), never a model's claim.
+COMPUTED = frozenset({"distance", "direction"})
+# Text fields where having one at all is better (a preference scores it present or not).
+PRESENCE = frozenset({"specials"})
 
 STATUS_RANK = {"verified": 2, "claimed": 1}
 # Among entries of the same status, structured data beats text, text beats a model.
-ORIGIN_RANK = {"provider": 3, "jsonld": 3, "page_text": 2, "browser": 2, "model": 1}
+ORIGIN_RANK = {"provider": 3, "jsonld": 3, "page_text": 2, "browser": 2, "geocode": 2, "model": 1}
 
 _TAG_WORDS: dict[str, dict[str, tuple[str, ...]]] = {
     "pets": {
@@ -87,6 +96,7 @@ _TAG_WORDS: dict[str, dict[str, tuple[str, ...]]] = {
         "outdoor_space": ("balcony", "patio", "yard", "deck", "outdoor space", "roof deck"),
         "furnished": ("furnished",),
     },
+    "direction": {d: (d,) for d in DIRECTIONS},
 }
 _CURRENCY_SYMBOL = {"USD": "$", "EUR": "€", "GBP": "£", "CAD": "CA$", "AUD": "A$"}
 _UNIT_SUFFIX = {"month": "/mo", "night": "/night", "week": "/wk", "year": "/yr", "day": "/day"}
@@ -338,6 +348,9 @@ def _the_one(nodes: list[dict], title: str) -> dict | None:
     return named[0] if len(named) == 1 else None
 
 
+the_one = _the_one
+
+
 def _same_node(a: dict, b: dict) -> bool:
     """Two nodes about one item: one name, and one's offers all among the
     other's (a theme prints every variant's offer once and the current
@@ -451,7 +464,14 @@ def _rating(out: dict, rating: Any, *, url: str, today: date) -> None:
 
 # ── scanning a home listing's own text (conservative) ────────────────────────
 
-_RENT = re.compile(r"\$\s?(\d{1,2},?\d{3})(?:\.\d{2})?\s*(?:/\s*|per\s+|a\s+)(?:mo\b|mon\b|month\b)", re.I)
+_DOLLARS_MO = r"\$\s?(\d{1,2},?\d{3})(?:\.\d{2})?"
+_PER_MONTH = r"\s*(?:/\s*|per\s+|a\s+)(?:mo\b|mon\b|month\b)"
+_RENT = re.compile(_DOLLARS_MO + _PER_MONTH, re.I)
+# A building's floor plans: "$1,449 - $1,464 /mo", "Starting at $1,125".
+_RENT_SPAN = re.compile(_DOLLARS_MO + r"\s*[-–—]\s*" + _DOLLARS_MO + _PER_MONTH, re.I)
+_RENT_FROM = re.compile(r"\b(?:starting|starts)\s+(?:at\s+)?(?:just\s+)?" + _DOLLARS_MO + rf"(?:{_PER_MONTH})?"
+                        r"|\b(?:rents?\s+)?from\s+" + _DOLLARS_MO + _PER_MONTH, re.I)
+MAX_SPANS = 24
 _BEDS = re.compile(r"\b(\d)\s*(?:bd|bds|bed|beds|bedrooms?|br)\b|\b(studio)\b", re.I)
 _BATHS = re.compile(r"\b(\d(?:\.5)?)\s*(?:ba|bath|baths|bathrooms?)\b", re.I)
 _SQFT = re.compile(r"\b(\d{1,2},?\d{3}|\d{3})\s*(?:sq\.?\s*ft\.?|sqft|square\s+feet|ft²)", re.I)
@@ -462,6 +482,17 @@ _AVAILABLE = re.compile(
     r"\bavailable\s+(?:on\s+|from\s+)?(now|immediately|"
     r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s+\d{4})?|"
     r"\d{1,2}/\d{1,2}(?:/\d{2,4})?)", re.I)
+_FEW = r"(?:\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|twelve)"
+_DOLLARS = r"\$\s?(?:\d{1,2},\d{3}|\d{3,4})"
+# Move-in specials, the biggest kind first: time free, money off, deposit, fees.
+_SPECIALS = (
+    re.compile(rf"\b(?:up\s+to\s+)?{_FEW}\s+(?:weeks?|months?)(?:\s+of)?\s+(?:free\s+rent|rent\s+free|free)\b"
+               r"|\b(?:first|1st)\s+month(?:'s)?\s+(?:rent\s+)?free\b|\bfree\s+(?:first\s+)?month(?:'s)?\s+rent\b", re.I),
+    re.compile(rf"(?:\bup\s+to\s+|(?<![\w$])){_DOLLARS}\s+off\b(?:\s+(?:your\s+)?(?:first\s+month(?:'s)?\s+rent|move[- ]in|rent))?", re.I),
+    re.compile(r"(?<![\w$])\$0\s+(?:security\s+)?deposit\b|\breduced\s+(?:security\s+)?deposits?\b", re.I),
+    re.compile(r"(?:\b(?:waived|no)|(?<![\w$])\$0)\s+(?:application|admin(?:istration)?|app)\s+fees?\b"
+               r"|\b(?:application|admin(?:istration)?)\s+fees?\s+waived\b|\blook\s+(?:and|&|n)\s+lease\b", re.I),
+)
 QUOTE_SIDE = 80
 
 
@@ -486,9 +517,68 @@ def _single(matches: list[tuple[Any, re.Match]]) -> tuple[Any, re.Match] | None:
     return matches[0] if len(values) == 1 else None
 
 
-def scan_listing_text(text: str, *, url: str, today: date) -> dict:
+def _dollars(raw: str | None) -> float | None:
+    return float(raw.replace(",", "")) if raw else None
+
+
+def rent_spans(text: str) -> list[tuple[float, float | None, re.Match]]:
+    """Every monthly rent a building's page states, as (low, high, match):
+    a figure is (x, x), a range (low, high), "starting at x" (x, None)."""
+    found: list[tuple[float, float | None, re.Match]] = []
+    taken: list[tuple[int, int]] = []
+    for match in _RENT_SPAN.finditer(text):
+        low, high = sorted((_dollars(match.group(1)), _dollars(match.group(2))))
+        found.append((low, high, match))
+        taken.append(match.span())
+    for match in _RENT.finditer(text):
+        if not any(a <= match.start() < b for a, b in taken):
+            found.append((_dollars(match.group(1)), _dollars(match.group(1)), match))
+            taken.append(match.span())
+    for match in _RENT_FROM.finditer(text):
+        if not any(a <= match.start() < b or a < match.end() <= b for a, b in taken):
+            found.append((_dollars(match.group(1) or match.group(2)), None, match))
+    return [f for f in found if 100 <= f[0] <= 50_000]
+
+
+def building_rent(text: str, *, url: str, today: date) -> dict | None:
+    """The price entry for a building: its lowest rent, with every span its
+    floor plans state (`spans`, [low, high], high None for "starting at"),
+    so a budget is met when any of them overlaps it (`ranking.check`)."""
+    found = rent_spans(text)
+    if not found:
+        return None
+    lowest = min(found, key=lambda f: f[0])
+    made = entry(LIBRARY["price"], lowest[0], status="verified", origin="page_text", today=today, url=url,
+                 quote=_window(text, lowest[2]), unit="month")
+    if made is None:
+        return None
+    spans = sorted({(low, high) for low, high, _ in found}, key=lambda s: (s[0], s[1] or 0))[:MAX_SPANS]
+    made["spans"] = [[low, high] for low, high in spans]
+    # Shown as lowest to highest figure, "+" when a plan only says where it
+    # starts: "$1,123–$1,939+/mo" reads as reaching a $1,600 budget, "From
+    # $1,123/mo" would not.
+    top = max(high if high is not None else low for low, high in spans)
+    more = any(high is None for _, high in spans)
+    if top <= lowest[0]:
+        if more:
+            made["display"] = "From " + made["display"]
+        return made
+    spec, currency = LIBRARY["price"], made["currency"]
+    made["high"] = top
+    made["display"] = (f"{display(spec, lowest[0], currency=currency)}–"
+                       f"{display(spec, top, currency=currency)}{'+' if more else ''}/mo")
+    return made
+
+
+def starting_at(price: dict) -> dict:
+    """A price as the cheapest of many (a building's one listed price)."""
+    return {**price, "spans": [[price["value"], None]], "display": "From " + str(price.get("display") or "")}
+
+
+def scan_listing_text(text: str, *, url: str, today: date, building: bool = False) -> dict:
     """Fields a home listing's own page states in words: verified, origin
-    `page_text`, each with the sentence it came from."""
+    `page_text`, each with the sentence it came from. A building's page
+    (`building`) lists many homes, so its rent is a range, not one figure."""
     text = " ".join(str(text or "").split())
     out: dict[str, dict] = {}
 
@@ -497,6 +587,12 @@ def scan_listing_text(text: str, *, url: str, today: date) -> dict:
         if one is not None:
             _set(out, key, one[0], url=url, today=today, quote=_window(text, one[1]), origin="page_text", **money)
 
+    if building:
+        rent = building_rent(text, url=url, today=today)
+        if rent is not None:
+            out["price"] = rent
+        _scan_specials(out, text, url=url, today=today)
+        return out
     put("price", [(float(m.group(1).replace(",", "")), m) for m in _RENT.finditer(text)], unit="month")
     put("beds", [(0.0 if m.group(2) else float(m.group(1)), m) for m in _BEDS.finditer(text)])
     put("baths", [(float(m.group(1)), m) for m in _BATHS.finditer(text)])
@@ -515,7 +611,16 @@ def scan_listing_text(text: str, *, url: str, today: date) -> dict:
             _set(out, "pets", allowed, url=url, today=today, quote=quote, origin="page_text")
     put("available_date", [(_date(m.group(1), today), m) for m in _AVAILABLE.finditer(text)
                            if _date(m.group(1), today) is not None])
+    _scan_specials(out, text, url=url, today=today)
     return out
+
+
+def _scan_specials(out: dict, text: str, *, url: str, today: date) -> None:
+    special = next((m for pattern in _SPECIALS for m in [pattern.search(text)] if m), None)
+    if special is not None:
+        phrase = " ".join(special.group(0).split())
+        _set(out, "specials", phrase[:1].upper() + phrase[1:], url=url, today=today,
+             quote=_window(text, special), origin="page_text")
 
 
 def check_text(fields: dict) -> str:

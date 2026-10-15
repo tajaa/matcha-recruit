@@ -432,6 +432,12 @@ else
     echo -e "${YELLOW}No Playwright Chromium in server/venv, so page screenshots and bookings stay off. To turn them on: cd server && venv/bin/python -m playwright install chromium${NC}"
 fi
 
+# Espresso Tasks: on in dev (the Mac Tasks tab has shipped), so asking Espresso
+# for an apartment hunt starts a structured task instead of a chat answer.
+# Prod stays off until its migrations and deploy land. ESPRESSO_TASKS_ENABLED=0
+# in the environment runs dev the way prod is.
+TASKS_ENV="export ESPRESSO_TASKS_ENABLED='${ESPRESSO_TASKS_ENABLED:-1}' && "
+
 # Create new tmux session
 echo -e "${YELLOW}Creating tmux session...${NC}"
 
@@ -472,7 +478,7 @@ fi
 
 # Pane 0: Backend (Server) - Main large pane on the left
 tmux new-session -d -s "$SESSION_NAME" -c "$PROJECT_ROOT/server" \
-    "$GS_OFF cd $SERVER_ROOT_Q && ${DEV_WATCH_ENV} export DATABASE_URL='$DATABASE_URL' && export REDIS_URL='$REDIS_URL' && export PORT='$BACKEND_PORT' && export UVICORN_RELOAD=true && ${CHAT_ENV}${BROWSER_ENV}${BACKEND_TRUST_ENV}source venv/bin/activate && echo '$WAITING_MESSAGE' && ${SERVICE_WAIT_LOOP} && python run.py; echo -e '\n${RED}Backend exited.${NC}'; read"
+    "$GS_OFF cd $SERVER_ROOT_Q && ${DEV_WATCH_ENV} export DATABASE_URL='$DATABASE_URL' && export REDIS_URL='$REDIS_URL' && export PORT='$BACKEND_PORT' && export UVICORN_RELOAD=true && ${CHAT_ENV}${BROWSER_ENV}${TASKS_ENV}${BACKEND_TRUST_ENV}source venv/bin/activate && echo '$WAITING_MESSAGE' && ${SERVICE_WAIT_LOOP} && python run.py; echo -e '\n${RED}Backend exited.${NC}'; read"
 tmux rename-window -t "$SESSION_NAME:0" "dev"
 
 # Enable mouse mode for clicking panes and scrolling
@@ -492,7 +498,7 @@ sleep 1
 WORKER_POOL_ARGS=""
 [ "$(uname -s)" = "Darwin" ] && WORKER_POOL_ARGS=" --pool=solo"
 tmux split-window -t "$SESSION_NAME:dev.1" -v -c "$PROJECT_ROOT/server" \
-    "$GS_OFF cd $SERVER_ROOT_Q && ${DEV_WATCH_ENV} export DATABASE_URL='$DATABASE_URL' && export REDIS_URL='$REDIS_URL' && ${BROWSER_ENV}source venv/bin/activate && echo '$WAITING_MESSAGE' && ${SERVICE_WAIT_LOOP} && celery -A app.workers.celery_app worker --loglevel=info${WORKER_POOL_ARGS}; echo -e '\n${RED}Worker exited.${NC}'; read"
+    "$GS_OFF cd $SERVER_ROOT_Q && ${DEV_WATCH_ENV} export DATABASE_URL='$DATABASE_URL' && export REDIS_URL='$REDIS_URL' && ${BROWSER_ENV}${TASKS_ENV}source venv/bin/activate && echo '$WAITING_MESSAGE' && ${SERVICE_WAIT_LOOP} && celery -A app.workers.celery_app worker --loglevel=info${WORKER_POOL_ARGS}; echo -e '\n${RED}Worker exited.${NC}'; read"
 
 # Pane 3: Frontend - Start immediately (proxies will retry until backend is up)
 tmux split-window -t "$SESSION_NAME:dev.2" -v -c "$PROJECT_ROOT/client" \
@@ -524,7 +530,7 @@ fi
 # so it never picks up scheduled jobs or ordinary runs.
 if [ -n "$BROWSER_ENV" ]; then
     tmux new-window -t "$SESSION_NAME" -n "browser" -c "$PROJECT_ROOT/server" \
-        "$GS_OFF cd $SERVER_ROOT_Q && ${DEV_WATCH_ENV} export DATABASE_URL='$DATABASE_URL' && export REDIS_URL='$REDIS_URL' && ${BROWSER_ENV}source venv/bin/activate && echo '$WAITING_MESSAGE' && ${SERVICE_WAIT_LOOP} && celery -A app.workers.celery_app worker --loglevel=info${WORKER_POOL_ARGS} -Q $BROWSER_QUEUE -n browser@%h; echo -e '\n${RED}Browser worker exited.${NC}'; read"
+        "$GS_OFF cd $SERVER_ROOT_Q && ${DEV_WATCH_ENV} export DATABASE_URL='$DATABASE_URL' && export REDIS_URL='$REDIS_URL' && ${BROWSER_ENV}${TASKS_ENV}source venv/bin/activate && echo '$WAITING_MESSAGE' && ${SERVICE_WAIT_LOOP} && celery -A app.workers.celery_app worker --loglevel=info${WORKER_POOL_ARGS} -Q $BROWSER_QUEUE -n browser@%h; echo -e '\n${RED}Browser worker exited.${NC}'; read"
 fi
 
 # Select the server pane as active

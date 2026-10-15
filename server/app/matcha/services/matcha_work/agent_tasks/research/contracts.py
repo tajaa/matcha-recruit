@@ -24,6 +24,7 @@ Checks that matter:
 """
 from __future__ import annotations
 
+import json
 import re
 from datetime import date
 from typing import Any
@@ -37,6 +38,8 @@ from .ranking import OPS
 
 MAX_QUERIES = 8
 MAX_FIELDS = 8
+# A kind's own facts plus the ones its limits and preferences need.
+MAX_SHOWN = 12
 MAX_CONSTRAINTS = 8
 MAX_PREFERENCES = 6
 MAX_CANDIDATES = 20
@@ -51,8 +54,9 @@ DEFAULT_FIELDS = {
     "other": ("price",),
 }
 _OPS_FOR = {
-    "money": ("lte", "gte", "eq"), "number": ("lte", "gte", "eq"), "rating": ("lte", "gte", "eq"),
-    "tags": ("includes", "excludes"), "text": ("includes", "excludes"),
+    "money": ("lte", "gte", "eq", "between"), "number": ("lte", "gte", "eq", "between"),
+    "rating": ("lte", "gte", "eq"),
+    "tags": ("includes", "excludes", "any_of"), "text": ("includes", "excludes"),
     "bool": ("is_true", "is_false"), "date": ("before", "after"),
 }
 _CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
@@ -67,21 +71,50 @@ def _text(value: Any, limit: int) -> str:
 def _finish(label: str, description: str, schema_: dict) -> registry.AgentTool:
     return registry.AgentTool(
         name="finish", effect="finish", description=description,
-        parameters={"type": "object", "properties": {"result": schema_}, "required": ["result"]},
+        # The answer's fields are the tool's own: wrapped in one `result`
+        # object, Claude Haiku now and then sent that object as (broken) JSON text.
+        parameters=schema_,
         step_kind="finish", describe=lambda _args: label,
     )
 
 
 def _result(args: dict) -> dict:
-    result = args.get("result") if isinstance(args, dict) else None
+    """The answer: the finish call's own fields, or (as before they were
+    flattened) its `result` object."""
+    if not isinstance(args, dict):
+        raise ValueError("`result` must be an object")
+    result = args.get("result", args)
+    if isinstance(result, str):
+        # A model that sends the object as JSON text (Claude Haiku does, now
+        # and then, on a long summary): the same object when the text parses.
+        try:
+            result = json.loads(result)
+        except ValueError:
+            raise ValueError("`result` was text, and not valid JSON: send it as an object, "
+                             "its fields directly inside, not as a string") from None
     if not isinstance(result, dict):
         raise ValueError("`result` must be an object")
-    return result
+    return {key: _unquoted(value) for key, value in result.items()}
+
+
+def _unquoted(value: Any) -> Any:
+    """A list or object a model sent as JSON text ("[{...}]"), as itself; any
+    other text as it is (no contract field's text starts that way)."""
+    if isinstance(value, str) and value.lstrip()[:1] in ("[", "{"):
+        try:
+            parsed = json.loads(value)
+        except ValueError:
+            return value
+        if isinstance(parsed, (list, dict)):
+            return parsed
+    return value
 
 
 # ── constraints and preferences ──────────────────────────────────────────────
 
 _FIELD_ENUM = sorted(F.LIBRARY)
+# What a model may state about a finding: not what code works out (distance).
+_FACT_ENUM = sorted(set(F.LIBRARY) - F.COMPUTED)
 CONSTRAINT_SCHEMA = {
     "type": "object",
     "properties": {
@@ -112,7 +145,10 @@ def clean_constraint(raw: Any, *, today: date) -> dict | None:
     if spec is None or op not in _OPS_FOR[spec.type]:
         return None
     value = raw.get("value")
-    if spec.type in ("money", "number", "rating"):
+    if op == "between":
+        both = [F.coerce(spec, v, today=today) for v in value] if isinstance(value, list) and len(value) == 2 else []
+        value = sorted(both) if len(both) == 2 and None not in both else None
+    elif spec.type in ("money", "number", "rating"):
         value = F.coerce(spec, value, today=today)
     elif spec.type == "tags":
         value = F.tags_in(spec.key, value) or None
@@ -141,10 +177,14 @@ def clean_preference(raw: Any) -> dict | None:
         return None
     spec = F.LIBRARY.get(str(raw.get("field") or ""))
     weight = raw.get("weight")
-    if spec is None or spec.type == "text" or isinstance(weight, bool) or not isinstance(weight, (int, float)):
+    if spec is None or isinstance(weight, bool) or not isinstance(weight, (int, float)):
         return None
+    if spec.type == "text" and spec.key not in F.PRESENCE:
+        return None  # a neighborhood's name has no better or worse
     out = {"field": spec.key, "weight": round(max(0.0, min(1.0, float(weight))), 3)}
-    if isinstance(raw.get("higher_is_better"), bool):
+    # Code works out a distance, so code says which way it ranks: nearer. "At
+    # least 10 miles" is a limit, not a wish to be as far away as possible.
+    if isinstance(raw.get("higher_is_better"), bool) and spec.key not in F.COMPUTED:
         out["higher_is_better"] = raw["higher_is_better"]
     return out if out["weight"] > 0 else None
 
@@ -165,8 +205,11 @@ def brief_constraints(brief: dict, *, item_kind: str, today: date, budget_unit: 
     with none it compares with a price in any unit, so a home to buy isn't
     read as a monthly rent."""
     out = []
-    if brief.get("budget_max"):
-        constraint = {"field": "price", "op": "lte", "value": float(brief["budget_max"]),
+    low, high = brief.get("budget_min"), brief.get("budget_max")
+    if low or high:
+        op, value = (("between", [float(low), float(high)]) if low and high
+                     else ("lte", float(high)) if high else ("gte", float(low)))
+        constraint = {"field": "price", "op": op, "value": value,
                       "currency": brief.get("currency") or "USD", "source": "brief"}
         if budget_unit:
             constraint["unit"] = budget_unit
@@ -201,12 +244,16 @@ def finalize_plan(plan: dict, brief: dict, *, today: date, kind: SearchKind | No
         typed += [{**c, "source": "brief"}
                   for c in (clean_constraint(raw, today=today) for raw in kind.limits(brief)) if c]
     taken = {(c["field"], c["op"]) for c in typed}
-    constraints = typed + [c for c in plan.get("constraints") or [] if (c["field"], c["op"]) not in taken]
+    # Distance needs a place it is measured from, and only the person names one.
+    measured = bool(brief.get("near"))
+    constraints = typed + [c for c in plan.get("constraints") or []
+                           if (c["field"], c["op"]) not in taken and (measured or c["field"] not in F.COMPUTED)]
     constraints = _unique(constraints, lambda c: (c["field"], c["op"], str(c["value"])))[:MAX_CONSTRAINTS]
-    preferences = _unique(plan.get("preferences") or [], lambda p: p["field"])[:MAX_PREFERENCES]
-    shown = list(kind.fields) if kind else []
+    preferences = _unique([p for p in plan.get("preferences") or [] if measured or p["field"] not in F.COMPUTED],
+                          lambda p: p["field"])[:MAX_PREFERENCES]
+    shown = [k for k in kind.fields if measured or k not in F.COMPUTED] if kind else []
     for key in list(plan.get("fields") or []) + [c["field"] for c in constraints] + [p["field"] for p in preferences]:
-        if key not in shown:
+        if key not in shown and (measured or key not in F.COMPUTED):
             shown.append(key)
     if not shown:
         shown = list(DEFAULT_FIELDS[item_kind])
@@ -219,7 +266,7 @@ def finalize_plan(plan: dict, brief: dict, *, today: date, kind: SearchKind | No
         "item_kind": item_kind,
         **({"source": kind.source} if kind else {}),
         "queries": queries[:MAX_QUERIES],
-        "fields": shown[:MAX_FIELDS + 2],
+        "fields": shown[:MAX_SHOWN],
         "constraints": constraints,
         "preferences": preferences,
         "must_haves": list(brief.get("must_haves") or []),
@@ -305,7 +352,7 @@ def plan_from_brief(directive: str, brief: dict, *, today: date, kind: SearchKin
 FACT_SCHEMA = {
     "type": "object",
     "properties": {
-        "field": {"type": "string", "enum": _FIELD_ENUM},
+        "field": {"type": "string", "enum": _FACT_ENUM},
         "value": {"type": ["number", "string", "boolean", "array"], "items": {"type": "string"}},
         "quote": {"type": "string", "description": "The exact words on the page that state it, copied verbatim"},
         "source_url": {"type": "string", "description": "The page the quote is on: one you loaded"},
@@ -383,7 +430,7 @@ def _fact(raw: Any, *, item_key: str, page_text: dict[str, str], allowed: dict, 
     if not isinstance(raw, dict):
         return None, "dropped a fact that wasn't an object"
     spec = F.LIBRARY.get(str(raw.get("field") or ""))
-    if spec is None:
+    if spec is None or spec.key in F.COMPUTED:
         return None, "dropped a fact about an unknown field"
     source = schema.normalize_url(str(raw.get("source_url") or ""))
     quote = _text(raw.get("quote"), 300)
@@ -571,7 +618,7 @@ def normalize_refine(args: dict, *, plan: dict, brief: dict, today: date,
     changed = {**plan, "constraints": constraints, "preferences": preferences, "fields": fields,
                "queries": queries or plan.get("queries") or []}
     # The brief's limits are already in `constraints` (kept or changed above).
-    limits = ("budget_max", "needed_by", *(kind.limit_keys if kind else ()))
+    limits = ("budget_max", "budget_min", "needed_by", *(kind.limit_keys if kind else ()))
     rest = {k: v for k, v in (brief or {}).items() if k not in limits}
     final = finalize_plan(changed, rest, today=today, kind=kind)
     return {"plan": final, "search_again": bool(result.get("search_again")),

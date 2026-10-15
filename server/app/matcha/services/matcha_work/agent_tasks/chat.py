@@ -21,7 +21,10 @@ from . import items as items_mod
 logger = logging.getLogger(__name__)
 
 METADATA_KIND = "agent_task"
-TOP_ITEMS = 3
+# The summary's top picks ("find 5" shows five), in its order.
+TOP_ITEMS = 5
+# The summary picks from the best ten by rank (`research.model_phases.SUMMARY_TOP`).
+PICKED_FROM = 10
 
 
 def card_view(task: dict, *, summary: dict | None = None, top: list[dict] | None = None,
@@ -73,6 +76,12 @@ async def post_card(conn, task: dict, *, company_id: UUID, channel_id: UUID, eve
     )
 
 
+def picks(ranked: list[dict], summary: dict) -> list[dict]:
+    """The summary's top picks first, in its order, then the ranking's best."""
+    order = {str(p.get("item_id")): n for n, p in enumerate(summary.get("top") or []) if isinstance(p, dict)}
+    return sorted(ranked, key=lambda item: order.get(str(item["id"]), len(order)))[:TOP_ITEMS]
+
+
 async def post_stopped(conn, task_id: UUID) -> dict | None:
     """The finished (or stopped, or waiting) card in the task's conversation,
     if it came from one. Returns the message to broadcast."""
@@ -87,10 +96,10 @@ async def post_stopped(conn, task_id: UUID) -> dict | None:
     summary = decode_jsonb(await conn.fetchval(
         "SELECT summary FROM mw_agent_task_rounds WHERE task_id = $1 AND n = $2", task_id, row["current_round"],
     ), {}) or {}
-    top = [items_mod.item_summary(r) for r in await conn.fetch(
+    top = picks([items_mod.item_summary(r) for r in await conn.fetch(
         f"""SELECT * FROM mw_agent_task_items WHERE task_id = $1 AND rank_band < 9
-            ORDER BY rank LIMIT {TOP_ITEMS}""",
+            ORDER BY rank LIMIT {PICKED_FROM}""",
         task_id,
-    )] if row["status"] == "done" else []
+    )], summary) if row["status"] == "done" else []
     return await post_card(conn, dict(row), company_id=row["company_id"], channel_id=row["origin_channel_id"],
                            summary=summary, top=top)

@@ -79,6 +79,17 @@ def test_queue_and_switch(monkeypatch):
 async def test_preflight_refusals(gates, monkeypatch):
     assert await enqueue.preflight(CLIENT, COMPANY, RESEARCH) == "pro"
     assert gates.rate.await_args.args == (str(USER), "espresso_agent_task_user", 10, 86400)
+    # The day's cap says what it is, so Espresso doesn't retry or blame a search.
+    gates.rate.side_effect = HTTPException(status_code=429, detail="Too many requests. Please try again later.")
+    with pytest.raises(HTTPException) as refused:
+        await enqueue.preflight(CLIENT, COMPANY, RESEARCH)
+    assert refused.value.status_code == 429 and refused.value.detail == {
+        "code": "daily_limit", "message": "That's 10 tasks started today, the most in a day. Try again tomorrow."}
+    gates.rate.side_effect = HTTPException(status_code=503, detail="Redis down")
+    with pytest.raises(HTTPException) as other:
+        await enqueue.preflight(CLIENT, COMPANY, RESEARCH)
+    assert other.value.status_code == 503
+    gates.rate.side_effect = None
     assert await enqueue.preflight(ADMIN, COMPANY, RESEARCH) is None
     gates.enabled = False
     with pytest.raises(HTTPException) as exc:

@@ -65,6 +65,22 @@ def _limit_error(usage: dict, cost: int) -> HTTPException:
     })
 
 
+async def _daily(user_id: str, action: str, limit: int, what: str) -> None:
+    """The per-day cap, refused in words the person (and Espresso, which
+    relays it) can act on, not a bare "Too many requests"."""
+    from app.core.services.redis_cache import check_rate_limit
+
+    try:
+        await check_rate_limit(user_id, action, limit, 86400)
+    except HTTPException as exc:
+        if exc.status_code != 429:
+            raise
+        raise HTTPException(status_code=429, detail={
+            "code": "daily_limit",
+            "message": f"That's {limit} {what} today, the most in a day. Try again tomorrow.",
+        }) from exc
+
+
 def _live_error() -> HTTPException:
     return HTTPException(status_code=409, detail={
         "code": "task_running",
@@ -114,11 +130,10 @@ async def preflight(user, company_id: UUID, playbook: Playbook, *, consent_versi
         plan = await require_plan(user.id, PLAN_PRO, ENTITLEMENT)
     await _consent(user, company_id, playbook, consent_version)
     if not _is_admin(user):
-        from app.core.services.redis_cache import check_rate_limit
         from app.matcha.services.billing import token_budget_service
 
         await token_budget_service.check_token_budget(company_id)
-        await check_rate_limit(str(user.id), "espresso_agent_task_user", DAILY_CREATES, 86400)
+        await _daily(str(user.id), "espresso_agent_task_user", DAILY_CREATES, "tasks started")
     return plan
 
 
@@ -251,7 +266,6 @@ async def start_round(user, task_id: UUID, body) -> dict:
     plan = None if _is_admin(user) else await require_plan(user.id, PLAN_PRO, ENTITLEMENT)
     limit = allowance.limit_for_plan(plan) if plan is not None else None
     if plan is not None and kind != "document":
-        from app.core.services.redis_cache import check_rate_limit
         from app.matcha.services.billing import token_budget_service
 
         async with connection_or_direct() as conn:
@@ -260,7 +274,7 @@ async def start_round(user, task_id: UUID, body) -> dict:
             )
         if company_id is not None:
             await token_budget_service.check_token_budget(company_id)
-        await check_rate_limit(str(user.id), "espresso_agent_task_round", DAILY_ROUNDS, 86400)
+        await _daily(str(user.id), "espresso_agent_task_round", DAILY_ROUNDS, "follow-ups")
     token = uuid4()
     async with connection_or_direct() as conn:
         async with conn.transaction():
