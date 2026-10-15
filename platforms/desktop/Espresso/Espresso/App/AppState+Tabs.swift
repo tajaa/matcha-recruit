@@ -3,8 +3,16 @@ import Foundation
 extension AppState {
     // MARK: - Workspace tabs
 
-    static func loadTabs() -> [WorkTab] {
-        guard let data = UserDefaults.standard.data(forKey: tabsKey),
+    /// Per person, like the side pane: tabs name the account's workspaces and
+    /// threads, and the next person to sign in on this Mac can't open them
+    /// (the server 404s every one).
+    static func tabsKey(userId: String) -> String { "mw-open-tabs-v2:\(userId)" }
+
+    /// The one key every account shared before tabs were per person.
+    static let sharedTabsKey = "mw-open-tabs-v1"
+
+    static func loadTabs(userId: String, defaults: UserDefaults = .standard) -> [WorkTab] {
+        guard let data = defaults.data(forKey: tabsKey(userId: userId)),
               let tabs = try? JSONDecoder().decode([WorkTab].self, from: data),
               !tabs.isEmpty
         else { return [.home] }
@@ -12,9 +20,9 @@ extension AppState {
         return tabs.first?.kind == .home ? tabs : [.home] + tabs.filter { $0.kind != .home }
     }
 
-    static func saveTabs(_ tabs: [WorkTab]) {
+    static func saveTabs(_ tabs: [WorkTab], userId: String, defaults: UserDefaults = .standard) {
         if let data = try? JSONEncoder().encode(tabs) {
-            UserDefaults.standard.set(data, forKey: tabsKey)
+            defaults.set(data, forKey: tabsKey(userId: userId))
         }
     }
 
