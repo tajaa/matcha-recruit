@@ -62,7 +62,7 @@ struct TaskItemDetailView: View {
             }
             if let url = TasksViewModel.webURL(item.url) {
                 Link(destination: url) {
-                    Label(url.host() ?? "Open its page", systemImage: "arrow.up.right.square")
+                    Label(TasksViewModel.linkLabel(url), systemImage: "arrow.up.right.square")
                         .font(.system(size: 11))
                 }
             }
@@ -261,7 +261,7 @@ private struct FactRow: View {
             }
             if let url = TasksViewModel.webURL(field.evidence?.url) {
                 Link(destination: url) {
-                    Label(url.host() ?? "Source", systemImage: "arrow.up.right.square").font(.system(size: 11))
+                    Label(TasksViewModel.linkLabel(url), systemImage: "arrow.up.right.square").font(.system(size: 11))
                 }
             }
             if !field.isVerified {

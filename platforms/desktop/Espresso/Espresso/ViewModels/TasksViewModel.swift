@@ -266,6 +266,18 @@ final class TasksViewModel {
         return url
     }
 
+    /// What a link is called: the site ("drbronner.com"), or which part of
+    /// Google it is when a finding only has Google's page.
+    nonisolated static func linkLabel(_ url: URL) -> String {
+        guard let host = url.host()?.lowercased() else { return "Open its page" }
+        let site = host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+        guard site.split(separator: ".").contains("google") else { return site }
+        let path = url.path().lowercased()
+        if path.hasPrefix("/maps") { return "Google Maps" }
+        if path.hasPrefix("/shopping") || url.query()?.contains("ibp=oshop") == true { return "Google Shopping" }
+        return site
+    }
+
     /// The sidebar badge: how many run, and whether something needs the person.
     nonisolated static func badge(_ summary: AgentTasksSummary?) -> (count: Int, attention: Bool) {
         guard let summary else { return (0, false) }

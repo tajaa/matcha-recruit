@@ -81,6 +81,111 @@ async def test_providers_add_findings_then_hand_to_the_web(conn, monkeypatch):
     assert out.phase == phases.DISCOVER and out.progress["note"] == "Searching the web…"
 
 
+GOOGLE = "https://www.google.com/search?ibp=oshop&q={q}&prds=productid:{n}"
+
+
+def _shop(title, seller, *, n=1, q="balm", token="tok"):
+    return providers.ProviderItem(kind="product", title=title, subtitle=seller, url=GOOGLE.format(q=q, n=n),
+                                  provider="google_shopping", offers_token=token)
+
+
+def test_the_best_of_each_query_first_and_which_to_look_up():
+    assert phases.interleave([[1, 2, 3], [], [4]]) == [1, 4, 2, 3] and phases.interleave([]) == []
+    found = [
+        _shop("Balm", "Acme"),
+        _shop("Balm", "Acme", q="lip balm"),           # the same listing from another query
+        _shop("Old", "Shop"),                           # the task has it
+        _shop("No token", "Shop", token=None),
+        providers.ProviderItem(kind="product", title="Own page", subtitle="Shop", url="https://shop.test/x",
+                               offers_token="tok"),
+        _shop("", "Shop"),
+        _shop("Wax", "Bee Co"),
+        _shop("Tin", "Bee Co"),
+    ]
+    assert phases.store_lookups(found, {("old", "shop")}, limit=5) == [0, 6, 7]
+    assert phases.store_lookups(found, set(), limit=2) == [0, 2]
+
+
+@pytest.mark.asyncio
+async def test_shopping_findings_are_kept_at_their_stores_page(conn, monkeypatch):
+    provider = AsyncMock()
+    provider.search = AsyncMock(side_effect=[
+        [_shop("Balm", "Acme", n=1), _shop("Wax", "Bee Co", n=2)],
+        [_shop("Balm", "Acme", n=1, q="lip balm"), _shop("Tin", "Tin Co", n=3, q="lip balm")],
+    ])
+
+    async def stores(token):
+        if token == "fail":
+            raise providers.ProviderError("SerpApi answered 500")
+        return [providers.Store(name="Acme", link="https://acme.test/balm", price=4.0)]
+
+    provider.stores = AsyncMock(side_effect=stores)
+    insert = AsyncMock(return_value=3)
+    monkeypatch.setattr(items_mod, "insert_items", insert)
+    conn.on("COUNT(*) FROM mw_agent_task_items", 0)
+    conn.on("SELECT title, subtitle FROM mw_agent_task_items", [{"title": "Tin", "subtitle": "Tin Co"}])
+    task = task_row(plan=json.dumps({**PLAN, "source": "shopping", "queries": ["balm", "lip balm"]}))
+    out = await phases.run_providers(task, _deps(provider=lambda: provider), _guard())
+    assert out.cursor["provider_added"] == 3
+    records = insert.await_args.args[4]
+    # Each query's best first; the repeat and the one the task has aren't looked up.
+    assert [r["title"] for r in records] == ["Balm", "Balm", "Wax", "Tin"]
+    assert provider.stores.await_count == 2
+    assert records[0]["url"] == "https://acme.test/balm" and records[0]["subtitle"] == "Acme"
+    # Wax's seller isn't among the stores: the first store's page, name and price.
+    assert records[2]["url"] == "https://acme.test/balm" and records[2]["fields"]["price"]["value"] == 4.0
+    assert records[3]["url"].startswith("https://www.google.com/")
+
+    # A failed lookup keeps Google's link; with no budget left nothing is asked.
+    provider.search = AsyncMock(return_value=[_shop("Balm", "Acme", token="fail")])
+    provider.stores.reset_mock()
+    await phases.run_providers(task, _deps(provider=lambda: provider), _guard())
+    assert insert.await_args.args[4][0]["url"].startswith("https://www.google.com/")
+    conn.on("RETURNING GREATEST(LEAST($2, $3 - cur.before), 0)", lambda row_id, want, limit: 0)
+    provider.search = AsyncMock(return_value=[_shop("Balm", "Acme")])
+    provider.stores.reset_mock()
+    assert (await phases.with_stores(task, provider, [_shop("Balm", "Acme")], set(), TODAY))[0].url.startswith(
+        "https://www.google.com/")
+    provider.stores.assert_not_awaited()
+
+
+def test_shopping_results_are_ranked_before_the_lookups():
+    """The lookups go to what the person will see first, not to whatever the
+    search listed first."""
+    def rated(title, rating, n):
+        item = _shop(title, "Shop", n=n)
+        return replace(item, fields={"rating": {"value": rating, "status": "verified",
+                                                "evidence": {"quote": f"rating {rating}", "url": item.url,
+                                                             "origin": "provider"}}})
+
+    found = [rated("Okay", 3.9, 1), rated("Best", 4.9, 2), rated("Good", 4.4, 3)]
+    plan = {"constraints": [], "preferences": [{"field": "rating", "weight": 1.0}], "fit_weight": 0}
+    assert [i.title for i in phases.prerank(found, plan)] == ["Best", "Good", "Okay"]
+    assert phases.prerank(found[:1], plan) == found[:1]
+    assert phases.STORE_LOOKUPS == 20
+
+
+@pytest.mark.asyncio
+async def test_store_lookups_are_only_paid_for_findings_there_is_room_for(conn, monkeypatch):
+    provider = AsyncMock()
+    provider.stores = AsyncMock(return_value=[providers.Store(name="Acme", link="https://acme.test/balm")])
+    monkeypatch.setattr(items_mod, "insert_items", AsyncMock(return_value=0))
+    task = task_row(plan=json.dumps({**PLAN, "source": "shopping", "queries": ["balm"]}))
+    three = [_shop("Balm", "Acme"), _shop("Wax", "Bee Co", n=2), _shop("Tin", "Tin Co", n=3)]
+    # Room for one more finding: one lookup.
+    provider.search = AsyncMock(return_value=three)
+    conn.on("COUNT(*) FROM mw_agent_task_items", phases.BUDGETS.items - 1)
+    await phases.run_providers(task, _deps(provider=lambda: provider), _guard())
+    assert provider.stores.await_count == 1
+    # Full: nothing is looked up, and nothing is asked about what it has.
+    provider.stores.reset_mock()
+    conn.calls.clear()
+    conn.on("COUNT(*) FROM mw_agent_task_items", phases.BUDGETS.items)
+    await phases.run_providers(task, _deps(provider=lambda: provider), _guard())
+    provider.stores.assert_not_awaited()
+    assert not conn.ran("SELECT title, subtitle FROM mw_agent_task_items")
+
+
 @pytest.mark.asyncio
 async def test_enrich_one_reads_the_items_own_page(monkeypatch):
     row = dict(item_row(fields=json.dumps({}), kind="listing", image_candidates="[]"))
