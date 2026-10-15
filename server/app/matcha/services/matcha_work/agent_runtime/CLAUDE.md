@@ -218,18 +218,36 @@ column as `<playbook>.<phase>`).
 - **Upload:** the ordinary channel upload (`POST /channels/{id}/upload`). In a
   conversation whose scope is `assistant` it stores the files privately
   (`upload_private_file`, `agent-inputs/<user>/…`) under Espresso's own limits
-  (5 files and 25 MB a message, 10 MB a file, 200 MB a person; PDF, Word,
-  text, Markdown, CSV, JSON, PNG, JPEG, WebP) and returns
+  (5 files and 25 MB a message, 10 MB a file, 200 MB a person; PDF, Word
+  `.docx` (not `.doc`: nothing here reads it), text, Markdown, CSV, JSON, PNG,
+  JPEG, WebP) and returns
   `espresso-input:<id>` attachments. Nothing about them is public. Older app
   builds get the same treatment, since the route decides, not the client.
 - **At upload, once:** images are re-encoded as JPEG ≤1568px with no EXIF, and
-  only that copy is kept; document text is extracted (30 s, ≤20k characters).
+  only that copy is kept; one that would decode to over 40M pixels is refused
+  from its header, before decoding (a JPEG decodes at a fraction of its size
+  first). Document text is extracted (30 s, ≤20k characters, a PDF's first 30
+  pages). A parser can't be stopped, so at most 2 run at once, counting any
+  still running past their timeout; a file that can't get a slot in time is
+  kept with no text.
+- **The 200 MB:** checked again under `pg_advisory_xact_lock('<user>:agent_inputs')`
+  in the insert transaction, so two uploads at once can't both pass. Deleting
+  a message deletes its files (`delete_for_message`, in the soft delete's
+  transaction; stored copies after). Uploads never sent with a message, and
+  files whose conversation was deleted, are removed at the person's next
+  upload once a day old, unless a task holds them (`mw_agent_tasks.input_ids`:
+  a form's files have no message).
 - **Sending:** the socket keeps only `espresso-input:` attachments the sender
   uploaded to this conversation and hasn't sent yet, described from our rows
   (`claim_for_message`), then links them to the message.
-- **A run** gets the files on its own message, plus any sent on their own just
-  before (`seen_run_id IS NULL`, last 24 h), as one user message: the words,
-  then document text as marked data (≤6k a file, ≤12k a run), then ≤3 images.
+- **A run** gets the files on its own message, plus, for 24 h, any no run has
+  answered: never given to one (sent on their own), or whose last run failed
+  (the person's "try again" is a new run) or ended asking (an `ask_user`/form
+  question or a held action: the reply is a new run). `seen_run_id` is the
+  last run given the file, re-marked by every run; a worker retry of the same
+  run gets them again. Own-message files come first. As one user message: the
+  words, then document text as marked data (≤6k a file, ≤12k a run), then ≤3
+  images, downloaded side by side on threads.
   It's also told the conversation's 10 newest files by id, and `read_file`
   reads any of them a page at a time. File text never grounds an outward
   action (it isn't the person's own words to Espresso).
@@ -242,7 +260,13 @@ column as `<playbook>.<phase>`).
   `resume_url` is a fifteen-minute link.
 - **Backfill:** `server/scripts/privatize_agent_inputs.py` moves résumés and
   assistant-chat attachments uploaded before `agentin01` off the public CDN.
-  Dry run by default; `--apply` moves; rerunnable.
+  Dry run by default; `--apply` moves; rerunnable. One message's files move
+  all or none (a failure deletes the private copies made for it). Backfilled
+  rows keep the message's date and are marked given to the conversation's
+  latest run after it. A deleted message's public files are deleted, not
+  kept. A public copy counts as removed only when the delete succeeds (an
+  older CloudFront distribution's URL is deleted from our bucket under the
+  same key); anything left is listed and the script exits 1.
 
 ## Photos and screenshots
 

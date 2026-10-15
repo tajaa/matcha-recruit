@@ -71,7 +71,11 @@ def test_kinds_and_refusals():
         inputs.kind_of("IMG_1.heic")
     with pytest.raises(inputs.InputError, match="PDF, Word"):
         inputs.kind_of("setup.zip")
+    # python-docx can't read the older binary format: refused, not kept unread.
+    with pytest.raises(inputs.InputError, match=r"\.docx or PDF"):
+        inputs.kind_of("old.doc")
     assert ".pdf" in inputs.accepted_extensions() and ".webp" in inputs.accepted_extensions()
+    assert ".doc" not in inputs.accepted_extensions()
 
 
 @pytest.mark.parametrize("uploads, message", [
@@ -99,6 +103,24 @@ def test_an_image_is_shrunk_flattened_and_stripped_of_exif():
     assert inputs.jpeg_name("dir/My Photo.png") == "My Photo.jpg"
 
 
+def test_an_image_too_big_to_decode_is_refused_before_decoding(monkeypatch):
+    from PIL import ImageOps
+
+    monkeypatch.setattr(inputs, "MAX_PIXELS", 100 * 100)
+    decoded = []
+    monkeypatch.setattr(ImageOps, "exif_transpose", lambda img: decoded.append(img) or img)
+    # A flat PNG compresses to almost nothing, whatever it decodes to.
+    with pytest.raises(inputs.InputError, match="too large"):
+        inputs.prepare_image(_png((200, 200), mode="RGB"))
+    assert decoded == []
+
+    # A JPEG decodes at a fraction of its size, so a big photo still fits.
+    out = io.BytesIO()
+    Image.new("RGB", (inputs.IMAGE_SIDE * 4, inputs.IMAGE_SIDE * 4), (1, 2, 3)).save(out, "JPEG")
+    monkeypatch.setattr(inputs, "MAX_PIXELS", (inputs.IMAGE_SIDE * 2) ** 2)
+    assert max(Image.open(io.BytesIO(inputs.prepare_image(out.getvalue()))).size) == inputs.IMAGE_SIDE
+
+
 @pytest.mark.asyncio
 async def test_text_extraction(monkeypatch):
     assert await inputs.extract_text(b"hello\x00 world", "a.txt", ".txt") == ("hello world", "ok")
@@ -122,7 +144,26 @@ async def test_text_extraction(monkeypatch):
     assert await inputs.extract_text(b"%PDF", "a.pdf", ".pdf") == (None, "failed")
 
 
-def test_word_and_pdf_go_through_the_document_parser(monkeypatch):
+@pytest.mark.asyncio
+async def test_parsers_still_running_past_their_timeout_hold_the_slots(monkeypatch):
+    import threading
+
+    ran = []
+    monkeypatch.setattr(inputs, "_extract_sync", lambda *a: ran.append(a) or "text")
+    monkeypatch.setattr(inputs, "EXTRACT_SECONDS", 0.05)
+    # Every slot taken by a parser that hasn't come back: a new file waits
+    # until its own deadline, then gives up without starting another.
+    monkeypatch.setattr(inputs, "_EXTRACT_SLOTS", threading.BoundedSemaphore(1))
+    inputs._EXTRACT_SLOTS.acquire()
+    assert await inputs.extract_text(b"%PDF", "a.pdf", ".pdf") == (None, "failed")
+    assert ran == []
+    inputs._EXTRACT_SLOTS.release()
+    assert await inputs.extract_text(b"%PDF", "a.pdf", ".pdf") == ("text", "ok")
+
+
+def test_word_goes_through_the_document_parser_and_pdf_reads_only_its_first_pages(monkeypatch):
+    import fitz
+
     from app.matcha.services.er import er_document_parser
 
     seen = []
@@ -133,7 +174,18 @@ def test_word_and_pdf_go_through_the_document_parser(monkeypatch):
             return "parsed", 1
 
     monkeypatch.setattr(er_document_parser, "ERDocumentParser", Parser)
-    assert inputs._extract_sync(b"%PDF", "cv.pdf", ".pdf") == "parsed" and seen == ["cv.pdf"]
+    assert inputs._extract_sync(b"PK", "cv.docx", ".docx") == "parsed" and seen == ["cv.docx"]
+
+    doc = fitz.open()
+    for n in range(5):
+        doc.new_page().insert_text((72, 72), f"page {n}")
+    pdf = doc.tobytes()
+    monkeypatch.setattr(inputs, "PDF_PAGES", 3)
+    text = inputs._extract_sync(pdf, "cv.pdf", ".pdf")
+    assert "page 2" in text and "page 3" not in text and seen == ["cv.docx"]
+    # Stops once there is enough text.
+    monkeypatch.setattr(inputs, "TEXT_CHARS", 1)
+    assert "page 1" not in inputs._extract_sync(pdf, "cv.pdf", ".pdf")
 
 
 # ---- saving ---------------------------------------------------------------
@@ -171,6 +223,64 @@ async def test_save_refuses_past_the_stored_space(conn):
         await inputs.save(user_id=USER, company_id=COMPANY, channel_id=CHANNEL, storage=storage,
                           uploads=[inputs.Upload("a.txt", None, b"hi")])
     assert storage.uploads == []
+
+
+@pytest.mark.asyncio
+async def test_two_uploads_at_once_cant_both_pass_the_space_check(conn):
+    # The first look says there's room; under the lock, the other upload has
+    # landed and there isn't.
+    totals = iter([0, inputs.MAX_STORED_BYTES])
+    conn.on("SUM(size_bytes)", lambda *_a: next(totals))
+    storage = FakeStorage()
+    with pytest.raises(inputs.InputError, match="Delete messages with files"):
+        await inputs.save(user_id=USER, company_id=COMPANY, channel_id=CHANNEL, storage=storage,
+                          uploads=[inputs.Upload("a.txt", None, b"hi")])
+    [lock] = conn.ran("pg_advisory_xact_lock")
+    assert lock[2] == (f"{USER}:agent_inputs",)
+    assert conn.ran("INSERT INTO mw_agent_inputs") == []
+    assert storage.deleted == [storage.uploads[0][0]]
+
+
+@pytest.mark.asyncio
+async def test_unsent_uploads_stop_counting_after_a_day(conn):
+    conn.on("WHERE i.user_id = $1 AND i.message_id IS NULL", [{"storage_path": "s3://p/old.txt"}])
+    conn.on("SUM(size_bytes)", 0).on("INSERT INTO mw_agent_inputs", _row(1))
+    storage = FakeStorage()
+    await inputs.save(user_id=USER, company_id=COMPANY, channel_id=CHANNEL, storage=storage,
+                      uploads=[inputs.Upload("a.txt", None, b"one")])
+    [purge] = conn.ran("DELETE FROM mw_agent_inputs")
+    assert purge[2] == (USER, inputs.UNSENT_HOURS)
+    assert "NOT EXISTS (SELECT 1 FROM mw_agent_tasks t" in purge[1]  # a task's form files stay
+    assert storage.deleted == ["s3://p/old.txt"]
+    # Only after the purge is the space counted.
+    assert conn.calls.index(purge) < conn.calls.index(conn.ran("SUM(size_bytes)")[0])
+
+
+@pytest.mark.asyncio
+async def test_a_deleted_messages_files_go_with_it(monkeypatch):
+    conn = FakeConn().on("WHERE message_id = $1 RETURNING", [{"storage_path": "s3://p/cv.pdf"}])
+    message_id = uuid4()
+    assert await inputs.delete_for_message(conn, message_id) == ["s3://p/cv.pdf"]
+    assert conn.ran("DELETE FROM mw_agent_inputs")[0][2] == (message_id,)
+
+    class Flaky(FakeStorage):
+        async def delete_private_file(self, path):
+            self.deleted.append(path)
+            if path.endswith("bad"):
+                raise RuntimeError("S3 down")
+            return True
+
+    storage = Flaky()
+    await inputs.remove_stored(["s3://p/bad", "s3://p/ok"], storage=storage)
+    assert storage.deleted == ["s3://p/bad", "s3://p/ok"]  # one failure doesn't stop the rest
+    await inputs.remove_stored([])
+
+    from app.core.services import storage as storage_module
+
+    shared = FakeStorage()
+    monkeypatch.setattr(storage_module, "get_storage", lambda: shared)
+    await inputs.remove_stored(["s3://p/x"])
+    assert shared.deleted == ["s3://p/x"]
 
 
 @pytest.mark.asyncio
@@ -242,14 +352,16 @@ async def test_a_run_gets_its_files_and_marks_them_given():
     newest = {"id": UUID(int=2), "kind": "image"}
     oldest = {"id": UUID(int=1), "kind": "document"}
     conn = (FakeConn()
-            .on("seen_run_id IS NULL AND created_at", [newest, oldest])
+            .on("LEFT JOIN mw_project_agent_runs r", [newest, oldest])
             .on("SELECT id, filename, kind, created_at", [newest, oldest]))
     files = await inputs.for_run(conn, user_id=USER, channel_id=CHANNEL,
                                  trigger_message_id=trigger, run_id=run_id)
     assert files.fresh == [oldest, newest] and files.index == [newest, oldest]
+    # Marked as given to this run, even when an earlier run was given them.
     [mark] = conn.ran("SET seen_run_id = $2")
-    assert mark[2] == ([UUID(int=2), UUID(int=1)], run_id)
-    assert conn.ran("message_id = $3")[0][2][2] == trigger
+    assert mark[2] == ([UUID(int=2), UUID(int=1)], run_id) and "seen_run_id IS NULL" not in mark[1]
+    [query] = conn.ran("LEFT JOIN mw_project_agent_runs r")
+    assert query[2] == (USER, CHANNEL, trigger, inputs.RUN_FILES, run_id, inputs.FRESH_HOURS)
 
     empty = await inputs.for_run(FakeConn(), user_id=USER, channel_id=CHANNEL,
                                  trigger_message_id=None, run_id=run_id)

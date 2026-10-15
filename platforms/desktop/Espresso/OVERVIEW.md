@@ -23,6 +23,11 @@ The app is organized around a persistent left sidebar and a detail pane on the r
 
 **Themes** — Light, Dark, and Cappuchin (warm brown) — are selectable from Settings.
 
+**Feature guides** explain each feature: what it is, how to use it, and what to expect (limits, privacy, what happens automatically and what waits for you). A guide opens on its own the first time a person opens that feature, once per account. After that it opens from the feature's "?" button, the sidebar row's context menu, or Help ▸ Feature Guides. The text is in `Espresso/Models/MatchaWork/FeatureGuides.swift`.
+- A new feature needs a guide there, and its "?" and `.featureGuideOnFirstVisit`.
+- A new sidebar section won't compile until it maps to a guide.
+- `FeatureGuideTests` checks that every guide covers both how to use it and what to expect.
+
 ---
 
 ## Channels & Messaging

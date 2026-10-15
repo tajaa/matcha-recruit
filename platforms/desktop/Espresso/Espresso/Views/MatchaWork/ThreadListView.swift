@@ -415,6 +415,7 @@ struct ThreadsLibraryView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .foldsRailForSidePane($railFoldedForPane)
+        .featureGuideOnFirstVisit(.threads, when: appState.selectedThreadId == nil)
         .task { await load() }
         .onChange(of: filter) { _, _ in Task { await load() } }
     }
@@ -474,6 +475,8 @@ struct ThreadsLibraryView: View {
                         .font(.system(size: 12)).foregroundColor(appState.themeTextSecondary)
                 }
                 Spacer()
+                FeatureGuideButton(id: .threads, size: 14)
+                    .padding(.trailing, 2)
                 Button { Task { await create() } } label: {
                     HStack(spacing: 5) {
                         if creating { ProgressView().controlSize(.small) }

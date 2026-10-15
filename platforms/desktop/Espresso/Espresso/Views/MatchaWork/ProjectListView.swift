@@ -58,6 +58,7 @@ struct ProjectsLibraryView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .featureGuideOnFirstVisit(.workspaces, when: appState.selectedProjectId == nil)
         .task { await load() }
         .onChange(of: appState.projectsListGeneration) { _, _ in Task { await load() } }
         .onChange(of: appState.selectedProjectId) { _, _ in
@@ -155,6 +156,8 @@ struct ProjectsLibraryView: View {
                         .font(.system(size: 12)).foregroundColor(appState.themeTextSecondary)
                 }
                 Spacer()
+                FeatureGuideButton(id: .workspaces, size: 14)
+                    .padding(.trailing, 6)
                 if selectMode {
                     Button("Cancel") { selectMode = false; selectedIds.removeAll() }
                         .buttonStyle(.plain).foregroundColor(appState.themeTextSecondary)

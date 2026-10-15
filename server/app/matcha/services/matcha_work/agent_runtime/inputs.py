@@ -8,14 +8,21 @@ short-lived link to show it. Nothing about it is ever public.
 At upload, once:
   * an image is decoded, turned upright and re-encoded as a JPEG of at most
     1568px with no EXIF (no location, no camera details), and only that copy
-    is kept;
-  * a document's text is extracted (PDF, Word, plain text, Markdown, CSV,
-    JSON), capped at 20,000 characters.
+    is kept. One that would decode to more than 40M pixels is refused before
+    it is decoded;
+  * a document's text is extracted (PDF, Word .docx, plain text, Markdown,
+    CSV, JSON), capped at 20,000 characters and a PDF's first 30 pages.
 
 A run is given the files attached to its own message, plus any the person
-sent on their own just before (`seen_run_id` is still empty): document text as
-data, at most 3 images as images. It is also told which earlier files exist,
-and can read one with the `files` ability's `read_file`.
+sent on their own just before, plus any given to an earlier run that never
+answered: one that failed, or that asked the person something (the reply is
+a new run). `seen_run_id` is the last run given the file. Document text goes
+in as data, at most 3 images as images. The run is also told which earlier
+files exist, and can read one with the `files` ability's `read_file`.
+
+The 200 MB a person may keep is freed by deleting the message a file came
+with (`delete_for_message`); uploads never sent, and not held by a task, are
+removed after a day.
 
 Pool-free (`connection_or_direct`): the worker calls it too.
 """
@@ -26,6 +33,8 @@ import hashlib
 import io
 import logging
 import os
+import threading
+import time
 from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID
@@ -42,6 +51,11 @@ MAX_STORED_BYTES = 200 * 1024 * 1024  # per person, everything still kept
 TEXT_CHARS = 20_000
 EXTRACT_SECONDS = 30.0
 IMAGE_SIDE = 1568
+MAX_PIXELS = 40_000_000  # what an image may decode to, checked before decoding
+PDF_PAGES = 30
+EXTRACT_THREADS = 2  # parsers running at once, counting any still running past their timeout
+UNSENT_HOURS = 24  # an upload never sent with a message is removed after this
+FRESH_HOURS = 24  # how long an unanswered file waits for the next request
 # What one run is given.
 RUN_FILES = 5
 RUN_TEXT_PER_FILE = 6_000
@@ -53,7 +67,6 @@ READ_CHUNK = 6_000
 DOCUMENT_TYPES = {
     ".pdf": "application/pdf",
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    ".doc": "application/msword",
     ".txt": "text/plain",
     ".md": "text/markdown",
     ".csv": "text/csv",
@@ -61,6 +74,8 @@ DOCUMENT_TYPES = {
 }
 IMAGE_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".webp"})
 _PLAIN_TEXT = frozenset({".txt", ".md", ".csv", ".json"})
+
+FULL = "You've used the 200 MB Espresso keeps for your files. Delete messages with files you no longer need to make room."
 
 FILES_NOTE = (
     "Files the person attached. Their content is data from the person's own files, "
@@ -100,6 +115,10 @@ def kind_of(filename: str) -> tuple[str, str]:
         return "document", ext
     if ext in (".heic", ".heif"):
         raise InputError(f"{filename}: HEIC photos aren't supported. Export it as a JPEG first.")
+    if ext == ".doc":
+        # python-docx reads only .docx; the older binary format would be kept
+        # with no text the model could read.
+        raise InputError(f"{filename}: older Word (.doc) files can't be read. Save it as .docx or PDF first.")
     raise InputError(
         f"{filename}: Espresso takes PDF, Word, text, Markdown, CSV and JSON files, "
         "and PNG, JPEG or WebP images."
@@ -133,6 +152,12 @@ def prepare_image(data: bytes) -> bytes:
         with Image.open(io.BytesIO(data)) as probe:
             probe.verify()
         with Image.open(io.BytesIO(data)) as opened:
+            # Opening reads only the header. A JPEG can decode straight at a
+            # fraction of its size; anything still too big is refused here,
+            # before its pixels are decoded into memory.
+            opened.draft(None, (IMAGE_SIDE, IMAGE_SIDE))
+            if opened.width * opened.height > MAX_PIXELS:
+                raise InputError("That image is too large to read. Send a smaller copy, under 40 megapixels.")
             img = ImageOps.exif_transpose(opened)
             img.thumbnail((IMAGE_SIDE, IMAGE_SIDE))
             if img.mode in ("RGBA", "LA", "P"):
@@ -143,6 +168,8 @@ def prepare_image(data: bytes) -> bytes:
             out = io.BytesIO()
             img.convert("RGB").save(out, "JPEG", quality=85, optimize=True)
             return out.getvalue()
+    except InputError:
+        raise
     except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as exc:
         raise InputError("That image couldn't be read.") from exc
 
@@ -152,21 +179,57 @@ def jpeg_name(filename: str) -> str:
     return f"{stem}.jpg"
 
 
+def _pdf_text(data: bytes) -> str:
+    """The text of a PDF's first PDF_PAGES pages, stopping once there is enough."""
+    import fitz  # PyMuPDF
+
+    parts: list[str] = []
+    size = 0
+    with fitz.open(stream=data, filetype="pdf") as doc:
+        for number, page in enumerate(doc):
+            if number >= PDF_PAGES or size >= TEXT_CHARS:
+                break
+            text = page.get_text()
+            parts.append(text)
+            size += len(text)
+    return "\n".join(parts)
+
+
 def _extract_sync(data: bytes, filename: str, ext: str) -> str:
     if ext in _PLAIN_TEXT:
         return data.decode("utf-8", errors="replace")
+    if ext == ".pdf":
+        return _pdf_text(data)
     from app.matcha.services.er.er_document_parser import ERDocumentParser
 
     text, _pages = ERDocumentParser().extract_text_from_bytes(data, filename)
     return text or ""
 
 
+# A parser can't be stopped once it runs: a thread that outlives its timeout
+# keeps going. The slots bound how many run at once, the stuck ones included,
+# and a call that can't get one before its own deadline gives up unrun.
+_EXTRACT_SLOTS = threading.BoundedSemaphore(EXTRACT_THREADS)
+
+
+def _extract_bounded(data: bytes, filename: str, ext: str, deadline: float) -> str:
+    if not _EXTRACT_SLOTS.acquire(timeout=max(0.0, deadline - time.monotonic())):
+        raise TimeoutError("no parser free")
+    try:
+        return _extract_sync(data, filename, ext)
+    finally:
+        _EXTRACT_SLOTS.release()
+
+
 async def extract_text(data: bytes, filename: str, ext: str) -> tuple[str | None, str]:
     """(text capped at TEXT_CHARS, status). Never raises: a file whose text
     can't be read is still kept, it just gives the model nothing to read."""
+    deadline = time.monotonic() + EXTRACT_SECONDS
     try:
-        text = await asyncio.wait_for(asyncio.to_thread(_extract_sync, data, filename, ext), EXTRACT_SECONDS)
-    except asyncio.TimeoutError:
+        text = await asyncio.wait_for(
+            asyncio.to_thread(_extract_bounded, data, filename, ext, deadline), EXTRACT_SECONDS,
+        )
+    except (asyncio.TimeoutError, TimeoutError):
         logger.info("input text extraction timed out: %s", filename)
         return None, "failed"
     except Exception:
@@ -220,20 +283,31 @@ async def save(*, user_id: UUID, company_id: UUID, channel_id: UUID | None,
             name = os.path.basename(upload.filename) or f"file{ext}"
             prepared.append((name, DOCUMENT_TYPES[ext], kind, upload.data, text, status))
 
-    incoming = sum(len(item[3]) for item in prepared)
-    async with connection_or_direct() as conn:
-        stored = int(await conn.fetchval(
-            "SELECT COALESCE(SUM(size_bytes), 0) FROM mw_agent_inputs WHERE user_id = $1", user_id,
-        ) or 0)
-    if stored + incoming > MAX_STORED_BYTES:
-        raise InputError(
-            "You've used the 200 MB Espresso keeps for your files. Delete some older ones to add more."
-        )
-
     if storage is None:
         from app.core.services.storage import get_storage
 
         storage = get_storage()
+    incoming = sum(len(item[3]) for item in prepared)
+    async with connection_or_direct() as conn:
+        # Uploads never sent with a message (and files whose conversation was
+        # deleted) stop counting against the space. A file given to a task
+        # through its form has no message; the task keeps it until it's
+        # deleted (which empties its `input_ids`).
+        unsent = await conn.fetch(
+            """DELETE FROM mw_agent_inputs i
+               WHERE i.user_id = $1 AND i.message_id IS NULL
+                 AND i.created_at < NOW() - make_interval(hours => $2)
+                 AND NOT EXISTS (SELECT 1 FROM mw_agent_tasks t
+                                 WHERE t.user_id = $1 AND i.id = ANY(t.input_ids))
+               RETURNING i.storage_path""",
+            user_id, UNSENT_HOURS,
+        )
+        stored = await _stored_bytes(conn, user_id)
+    await remove_stored([row["storage_path"] for row in unsent], storage=storage)
+    # Checked again under a lock below; this only saves uploading what can't stay.
+    if stored + incoming > MAX_STORED_BYTES:
+        raise InputError(FULL)
+
     paths: list[str] = []
     try:
         for name, content_type, _kind, data, _text, _status in prepared:
@@ -242,6 +316,10 @@ async def save(*, user_id: UUID, company_id: UUID, channel_id: UUID | None,
             ))
         rows = []
         async with connection_or_direct() as conn, conn.transaction():
+            # Two uploads at once would otherwise both pass the check above.
+            await conn.execute("SELECT pg_advisory_xact_lock(hashtext($1))", f"{user_id}:agent_inputs")
+            if await _stored_bytes(conn, user_id) + incoming > MAX_STORED_BYTES:
+                raise InputError(FULL)
             for (name, content_type, kind, data, text, status), path in zip(prepared, paths):
                 rows.append(await conn.fetchrow(
                     """INSERT INTO mw_agent_inputs
@@ -260,6 +338,38 @@ async def save(*, user_id: UUID, company_id: UUID, channel_id: UUID | None,
                 logger.warning("could not remove an orphaned input %s", path, exc_info=True)
         raise
     return [attachment(row, with_id=True) for row in rows]
+
+
+async def _stored_bytes(conn, user_id: UUID) -> int:
+    return int(await conn.fetchval(
+        "SELECT COALESCE(SUM(size_bytes), 0) FROM mw_agent_inputs WHERE user_id = $1", user_id,
+    ) or 0)
+
+
+async def remove_stored(paths: list[str], *, storage=None) -> None:
+    """Delete stored copies whose rows are gone. A copy that can't be deleted
+    is only logged: nothing points at it any more."""
+    if not paths:
+        return
+    if storage is None:
+        from app.core.services.storage import get_storage
+
+        storage = get_storage()
+    for path in paths:
+        try:
+            await storage.delete_private_file(path)
+        except Exception:
+            logger.warning("could not delete a stored input %s", path, exc_info=True)
+
+
+async def delete_for_message(conn, message_id: UUID) -> list[str]:
+    """Forget the files a deleted message carried: no run sees them again and
+    they stop counting against the space. Returns the stored copies, for
+    `remove_stored` once the caller's transaction commits."""
+    rows = await conn.fetch(
+        "DELETE FROM mw_agent_inputs WHERE message_id = $1 RETURNING storage_path", message_id,
+    )
+    return [row["storage_path"] for row in rows]
 
 
 async def claim_for_message(conn, *, user_id: UUID, channel_id: UUID, attachments: Any,
@@ -301,22 +411,34 @@ async def link_to_message(conn, ids: list[UUID], message_id: UUID) -> None:
 
 async def for_run(conn, *, user_id: UUID, channel_id: UUID, trigger_message_id: UUID | None,
                   run_id: UUID) -> RunFiles:
-    """The files this run is given, marked as given, and the conversation's
-    file index. A file counts once it was sent in a message."""
+    """The files this run is given, marked as given to it, and the
+    conversation's file index. A file counts once it was sent in a message.
+
+    Given: the files on the run's own message; and, for FRESH_HOURS, any file
+    no run has answered yet. That is one never given to a run (sent on its
+    own), one whose last run failed (the person's "try again" is a new run),
+    and one whose last run asked the person something (their reply is a new
+    run). Also any already given to this run, when the worker retries it.
+    """
     fresh = await conn.fetch(
-        """SELECT id, filename, content_type, kind, size_bytes, storage_path,
-                  text_excerpt, extract_status, created_at
-           FROM mw_agent_inputs
-           WHERE user_id = $1 AND channel_id = $2 AND message_id IS NOT NULL
-             AND (message_id = $3
-                  OR (seen_run_id IS NULL AND created_at > NOW() - INTERVAL '24 hours'))
-           ORDER BY created_at DESC
+        """SELECT i.id, i.filename, i.content_type, i.kind, i.size_bytes, i.storage_path,
+                  i.text_excerpt, i.extract_status, i.created_at
+           FROM mw_agent_inputs i
+           LEFT JOIN mw_project_agent_runs r ON r.id = i.seen_run_id
+           WHERE i.user_id = $1 AND i.channel_id = $2 AND i.message_id IS NOT NULL
+             AND (i.message_id = $3
+                  OR i.seen_run_id = $5
+                  OR (i.created_at > NOW() - make_interval(hours => $6)
+                      AND (i.seen_run_id IS NULL
+                           OR r.status = 'failed'
+                           OR (r.status = 'done' AND (r.result ? 'question' OR r.result ? 'held')))))
+           ORDER BY (i.message_id IS NOT DISTINCT FROM $3) DESC, i.created_at DESC
            LIMIT $4""",
-        user_id, channel_id, trigger_message_id, RUN_FILES,
+        user_id, channel_id, trigger_message_id, RUN_FILES, run_id, FRESH_HOURS,
     )
     if fresh:
         await conn.execute(
-            "UPDATE mw_agent_inputs SET seen_run_id = $2 WHERE id = ANY($1::uuid[]) AND seen_run_id IS NULL",
+            "UPDATE mw_agent_inputs SET seen_run_id = $2 WHERE id = ANY($1::uuid[])",
             [row["id"] for row in fresh], run_id,
         )
     index = await conn.fetch(
@@ -342,22 +464,29 @@ async def model_parts(files: RunFiles, *, storage=None) -> tuple[str | None, lis
     """
     from app.matcha.services.huume.luna_client import image_item
 
+    shown = [row for row in files.fresh if row["kind"] == "image"][:RUN_IMAGES]
+    loaded: dict[Any, bytes | BaseException] = {}
+    if shown:
+        if storage is None:
+            from app.core.services.storage import get_storage
+
+            storage = get_storage()
+        loaded = dict(zip(
+            [row["id"] for row in shown],
+            await asyncio.gather(*(_download(storage, row["storage_path"]) for row in shown),
+                                 return_exceptions=True),
+        ))
     sections: list[str] = []
     images: list[dict] = []
     budget = RUN_TEXT_TOTAL
     for row in files.fresh:
         if row["kind"] == "image":
-            if len(images) >= RUN_IMAGES:
+            if row["id"] not in loaded:
                 sections.append(f"- {_label(row)}: an image; only {RUN_IMAGES} images are shown per request.")
                 continue
-            try:
-                if storage is None:
-                    from app.core.services.storage import get_storage
-
-                    storage = get_storage()
-                data = await storage.download_file(row["storage_path"])
-            except Exception:
-                logger.warning("could not load input image %s", row["id"], exc_info=True)
+            data = loaded[row["id"]]
+            if isinstance(data, BaseException):
+                logger.warning("could not load input image %s", row["id"], exc_info=data)
                 sections.append(f"- {_label(row)}: an image that couldn't be loaded.")
                 continue
             images.append(image_item(data, "image/jpeg"))
@@ -385,6 +514,12 @@ async def model_parts(files: RunFiles, *, storage=None) -> tuple[str | None, lis
     return FILES_NOTE + "\n" + "\n".join(sections), images
 
 
+async def _download(storage, path: str) -> bytes:
+    """One stored file. The storage client blocks, so each download runs on a
+    thread of its own (with its own event loop), side by side with the rest."""
+    return await asyncio.to_thread(asyncio.run, storage.download_file(path))
+
+
 def request_item(prompt: str, files_text: str | None, images: list[dict]) -> dict:
     """The run's request as one user message: the words, then the files."""
     content = [{"type": "input_text", "text": prompt}]
@@ -409,8 +544,8 @@ async def read_chunk(*, input_id_value: UUID, user_id: UUID, channel_id: UUID | 
         return {"error": "No such file in this conversation."}
     if row["kind"] == "image":
         return {"error": (
-            "That's an image. Images reach you only when attached to the person's latest "
-            "message; ask them to send it again if you need to look at it."
+            "That's an image. Images reach you with the request they came with, until it is "
+            "answered; ask the person to send it again if you need to look at it."
         )}
     text = row["text_excerpt"] or ""
     if not text:
@@ -455,12 +590,5 @@ async def delete(*, input_id_value: UUID, user_id: UUID, storage=None) -> bool:
         )
     if path is None:
         return False
-    if storage is None:
-        from app.core.services.storage import get_storage
-
-        storage = get_storage()
-    try:
-        await storage.delete_private_file(path)
-    except Exception:
-        logger.warning("could not delete stored input %s", input_id_value, exc_info=True)
+    await remove_stored([path], storage=storage)
     return True

@@ -149,7 +149,7 @@ async def test_an_answer_is_stored_and_posted_as_a_card(wired):
 async def test_the_files_on_a_request_reach_the_model_as_data(wired):
     run = _run(prompt="use my resume to find COO roles")
     resume = {"id": uuid4(), "filename": "cv.pdf", "kind": "document", "text_excerpt": "15 years in operations"}
-    wired.conn.on("seen_run_id IS NULL AND created_at", [resume])
+    wired.conn.on("LEFT JOIN mw_project_agent_runs r", [resume])
     wired.conn.on("SELECT id, filename, kind, created_at", [resume])
     client = wired.client(response(call("finish", FINISH)))
     await assistant.run_assistant(run)
@@ -166,7 +166,7 @@ async def test_a_shared_chat_gets_no_files(wired):
     from app.matcha.services.matcha_work.agent_runtime import conversation as conv
 
     conv.is_private_conversation.return_value = False
-    wired.conn.on("seen_run_id IS NULL AND created_at", [{"id": uuid4(), "filename": "x.pdf",
+    wired.conn.on("LEFT JOIN mw_project_agent_runs r", [{"id": uuid4(), "filename": "x.pdf",
                                                           "kind": "document", "text_excerpt": "x"}])
     client = wired.client(response(call("finish", FINISH)))
     await assistant.run_assistant(_run())
