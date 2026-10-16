@@ -72,8 +72,9 @@ async def test_the_request_and_what_the_model_sees():
 
 
 @pytest.mark.asyncio
-async def test_an_unknown_freshness_is_left_out():
-    _, seen = await _search(_ok([]), freshness="decade")
+@pytest.mark.parametrize("freshness", ["decade", ["week"], {"week": 1}, 7])
+async def test_an_unknown_freshness_is_left_out(freshness):
+    _, seen = await _search(_ok([]), freshness=freshness)
     assert "freshness" not in dict(seen[0].url.params)
 
 
@@ -96,9 +97,9 @@ async def test_a_refused_key_or_bill_takes_brave_out_for_an_hour(status, caplog)
 @pytest.mark.asyncio
 async def test_no_searches_left_is_out_until_the_month_resets():
     clock = Clock()
-    exc, _ = await _search(httpx.Response(429, headers={**MONTHLY, "x-ratelimit-remaining": "0, 0",
-                                                        "x-ratelimit-reset": "1, 86400"}), clock=clock)
-    assert exc.out and "no searches left" in str(exc)
+    exc, seen = await _search(httpx.Response(429, headers={**MONTHLY, "x-ratelimit-remaining": "0, 0",
+                                                           "x-ratelimit-reset": "1, 86400"}), clock=clock)
+    assert exc.out and "no searches left" in str(exc) and len(seen) == 1  # not asked again
     clock.now += 86_399
     assert not B.available(clock=clock)
     clock.now += 1
@@ -134,8 +135,8 @@ async def test_down_twice_is_this_search_only():
 
 @pytest.mark.asyncio
 async def test_a_bad_request_or_answer_is_this_search_only():
-    exc, seen = await _search(httpx.Response(422, json={"error": {"code": "VALIDATION"}}))
-    assert not exc.out and "422: VALIDATION" in str(exc) and len(seen) == 1
+    exc, seen = await _search(httpx.Response(422, json={"error": {"status": 422, "detail": "bad count"}}))
+    assert not exc.out and "422: bad count" in str(exc) and len(seen) == 1
     exc, _ = await _search(httpx.Response(200, text="<html>"))
     assert not exc.out and "JSON" in str(exc)
     assert B.available()
@@ -173,6 +174,13 @@ def test_spent_quota_reads_only_day_or_longer_windows():
     # No reset given: the whole window.
     assert B.spent_quota(httpx.Headers({"x-ratelimit-policy": "100;w=86400",
                                         "x-ratelimit-remaining": "0"})) == 86400.0
+    # A blank or odd part keeps its place, so each number stays with its window.
+    assert B.spent_quota(httpx.Headers({**MONTHLY, "x-ratelimit-remaining": " , 0",
+                                        "x-ratelimit-reset": "x, 50"})) == 50.0
+    assert B.spent_quota(httpx.Headers({**MONTHLY, "x-ratelimit-remaining": "0, ",
+                                        "x-ratelimit-reset": "1, 50"})) is None
+    assert B.spent_quota(httpx.Headers({"x-ratelimit-policy": "1;w=1, 2000",
+                                        "x-ratelimit-remaining": "1, 0"})) is None
 
 
 def test_out_is_capped_and_logged_once(caplog):

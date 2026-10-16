@@ -47,10 +47,16 @@ async def _unused_fetch(_url: str) -> tuple[dict, set[str]]:  # pragma: no cover
 
 
 def declarations(*, flights: bool = False) -> list[dict[str, Any]]:
-    """The card's tools as the loop offers them: `web_search` first, then
-    `search_flights` when offered, then `fetch_page`, then `finish`."""
-    ability = web.build(fetch_page=_unused_fetch, max_fetches=0, fetch_seconds=0)
-    tools = list(ability.tools)
+    """The card's web and flight tools as the loop offers them, then `finish`.
+
+    Built the way `agent.run_card_agent` builds them (flights first, then web)
+    and ordered by `registry.offered_tools`, so this is the real order: the
+    hosted search first when it is the hosted one, then our tools in ability
+    order. With Brave, `web_search` is one of ours and follows `search_flights`.
+    """
+    abilities = []
     if flights:
-        tools.insert(1, flights_ability.search_tool(max_searches=0, search_seconds=0, min_seconds=0))
-    return registry.declarations([*tools, FINISH_TOOL])
+        abilities.append(flights_ability.build(max_searches=0, search_seconds=0, min_seconds=0))
+    abilities.append(web.build(fetch_page=_unused_fetch, max_fetches=0, fetch_seconds=0))
+    offered = registry.offered_tools(abilities, last_call=False, hosted_left=1)
+    return registry.declarations([*offered, FINISH_TOOL])

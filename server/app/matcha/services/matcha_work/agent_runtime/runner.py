@@ -40,6 +40,9 @@ logger = logging.getLogger(__name__)
 WRITES = frozenset({"commit", "draft"})
 FINISH_AFTER_ACTION = ("Not accepted: an action in this same turn had not finished yet. "
                        "Read its outcome, then call finish again.")
+# A response that asked for more function-tool searches than one response may
+# (`RunLimits.max_hosted_per_response`, the hosted search's own cap).
+SEARCHES_AT_ONCE = "Too many searches at once. Read these results, then search again if you still need to."
 FINISH_NUDGE = "Call the finish tool with the structured result now."
 FINISH_TWICE = "Not accepted: a result was already accepted this turn, and it stands."
 # Without stored responses there is no chain to follow, so every call resends
@@ -448,6 +451,7 @@ async def run_agent(
             continue
 
         outputs: list[dict[str, Any]] = []
+        searched = 0  # function-tool searches in this response (`counts_as_search`)
         # A result written in the same turn as an action was written before
         # the action's outcome existed, so it cannot be trusted to describe it.
         # A draft writes too (a saved Gmail draft, an event on the person's own
@@ -510,6 +514,17 @@ async def run_agent(
                     return ended
                 outputs.append(tool_output_item(call["call_id"], out))
                 continue
+            if tool.counts_as_search:
+                searched += 1
+                spent = state.hosted_calls >= limits.max_hosted_per_run
+                if spent or searched > limits.max_hosted_per_response:
+                    out = {"error": tool.exhausted_message if spent else SEARCHES_AT_ONCE}
+                    await step(tool.name, tool.step_kind,
+                               tool.exhausted_label if spent else "Too many searches at once",
+                               args, out, "skipped")
+                    outputs.append(tool_output_item(call["call_id"], out))
+                    continue
+                state.hosted_calls += 1
             outputs.append(tool_output_item(call["call_id"], await run_tool(tool, args)))
         pending = outputs
         if transcript is not None:

@@ -6,20 +6,21 @@ Anthropic's search, and $5 per 1,000 searches against $10) and lets code choose
 the count, the freshness and the snippets. See
 `agent_runtime/abilities/web.py` for the tool and what happens without Brave.
 
-`search` makes one request:
-- 401 or 403: the key was refused. 402: the subscription can't pay for more.
-  A 429, or a 200, whose rate-limit headers show a window of a day or longer
-  with nothing left: no searches left until that window resets. Each of these
-  takes Brave out of play for this process (`available` is False) and raises
-  `Unavailable`; a refusal is logged as an error once, so it shows in
-  Admin → Server Errors.
-- Any other 429 (more than the per-second rate), a 5xx or a dropped
-  connection: asked once more after a second. Failing again raises
-  `Unavailable` for this search only.
-- Any other 4xx: also `Unavailable` for this search only.
+`search` makes one request through `search_apis.answer` (the rules job search
+and research follow), plus Brave's own quota headers:
+- 401 or 403 (a refused key) or 402 (the subscription can't pay for more):
+  Brave is out for `REFUSED_SECONDS`.
+- A 429, or a 200, whose rate-limit headers show a window of a day or longer
+  with nothing left: out until that window resets. A 429 like that is not
+  asked again; the 200 is used, and it was the last one.
+- Any other 429 (faster than the per-second rate), a 5xx or a dropped
+  connection: asked once more. Failing again, or any other 4xx, fails this
+  search only.
 
-Being out is remembered per process, not shared: a worker that starts after
-Brave ran out spends one refused request finding out.
+Out means `available` is False and `search` raises `Unavailable(out=True)`
+without a request. Going out is logged as an error once, so it shows in
+Admin → Server Errors. It is remembered per process, not shared: a worker that
+starts after Brave ran out spends one refused request finding out.
 """
 from __future__ import annotations
 
@@ -32,6 +33,8 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 import httpx
+
+from app.matcha.services.matcha_work import search_apis
 
 logger = logging.getLogger(__name__)
 
@@ -104,21 +107,26 @@ def reset() -> None:
     _out_until, _out_reason = 0.0, ""
 
 
-def _numbers(value: str | None) -> list[int]:
-    out = []
-    for part in (value or "").split(","):
-        part = part.strip().split(";", 1)[0].strip()
-        if part.isdigit():
-            out.append(int(part))
+def _parts(value: str | None) -> list[int | None]:
+    """`X-RateLimit-*` numbers by position (`1, 2000`); a part that isn't a
+    number stays as None, so the windows still line up."""
+    if not value:
+        return []
+    out: list[int | None] = []
+    for part in value.split(","):
+        part = part.split(";", 1)[0].strip()
+        out.append(int(part) if part.isdigit() else None)
     return out
 
 
-def _windows(policy: str | None) -> list[int]:
+def _windows(policy: str | None) -> list[int | None]:
     """Each window's length in seconds, from `X-RateLimit-Policy: 1;w=1, 2000;w=2678400`."""
-    found = []
-    for part in (policy or "").split(","):
+    if not policy:
+        return []
+    found: list[int | None] = []
+    for part in policy.split(","):
         match = re.search(r"w=(\d+)", part)
-        found.append(int(match.group(1)) if match else 0)
+        found.append(int(match.group(1)) if match else None)
     return found
 
 
@@ -126,26 +134,24 @@ def spent_quota(headers: httpx.Headers) -> float | None:
     """Seconds until a spent quota resets, when a day-or-longer window has
     nothing left; None otherwise (a per-second limit is a rate, not a quota)."""
     windows = _windows(headers.get("x-ratelimit-policy"))
-    remaining = _numbers(headers.get("x-ratelimit-remaining"))
-    resets = _numbers(headers.get("x-ratelimit-reset"))
+    remaining = _parts(headers.get("x-ratelimit-remaining"))
+    resets = _parts(headers.get("x-ratelimit-reset"))
     longest = None
     for n, window in enumerate(windows):
-        if window < _QUOTA_WINDOW or n >= len(remaining) or remaining[n] > 0:
+        if window is None or window < _QUOTA_WINDOW or n >= len(remaining) or remaining[n] != 0:
             continue
-        reset_in = float(resets[n]) if n < len(resets) else float(window)
+        reset = resets[n] if n < len(resets) else None
+        reset_in = float(reset if reset is not None else window)
         longest = reset_in if longest is None else max(longest, reset_in)
     return longest
 
 
-def _said(response: httpx.Response) -> str:
-    try:
-        body = response.json()
-    except ValueError:
-        return ""
-    error = body.get("error") if isinstance(body, dict) else None
-    if isinstance(error, dict):
-        error = error.get("detail") or error.get("code")
-    return " ".join(str(error or "").split())[:200]
+class _Spent(Exception):
+    """A 429 whose headers show a spent quota: stop, don't ask again."""
+
+    def __init__(self, seconds: float):
+        super().__init__("no searches left")
+        self.seconds = seconds
 
 
 def _clean(text: Any, limit: int) -> str:
@@ -172,7 +178,7 @@ def results(body: dict) -> list[dict]:
     return out
 
 
-async def search(query: str, *, freshness: str | None = None,
+async def search(query: str, *, freshness: Any = None,
                  transport: httpx.AsyncBaseTransport | None = None,
                  sleep: SleepFn = asyncio.sleep, clock: Clock = time.monotonic) -> list[dict]:
     """Up to `COUNT` web results for `query`, under the rules in the docstring."""
@@ -183,45 +189,32 @@ async def search(query: str, *, freshness: str | None = None,
         raise Unavailable(f"Brave search is out ({_out_reason})", out=True)
     params: dict[str, Any] = {"q": query[:400], "count": COUNT, "extra_snippets": "true",
                               "result_filter": "web", "text_decorations": "false"}
-    if freshness in FRESHNESS:
+    if isinstance(freshness, str) and freshness in FRESHNESS:
         params["freshness"] = FRESHNESS[freshness]
     headers = {"X-Subscription-Token": key, "Accept": "application/json"}
-    last = ""
-    for attempt in range(2):
-        try:
-            async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS, transport=transport) as client:
-                response = await client.get(URL, params=params, headers=headers)
-        except httpx.HTTPError as exc:
-            last = type(exc).__name__
-        else:
-            status, why = response.status_code, _said(response)
+    answered: list[httpx.Response] = []
+
+    async def send(client: httpx.AsyncClient) -> httpx.Response:
+        response = await client.get(URL, params=params, headers=headers)
+        answered.append(response)
+        if response.status_code == 429:
             spent = spent_quota(response.headers)
-            if status in (401, 403):
-                mark_out(f"Brave refused the API key ({status}{': ' + why if why else ''})",
-                         REFUSED_SECONDS, clock=clock)
-                raise Unavailable(_out_reason, out=True)
-            if status == 402:
-                mark_out(f"Brave would not bill the search (402{': ' + why if why else ''})",
-                         REFUSED_SECONDS, clock=clock)
-                raise Unavailable(_out_reason, out=True)
-            if status == 429 and spent is not None:
-                mark_out("Brave has no searches left this period", spent, clock=clock)
-                raise Unavailable(_out_reason, out=True)
-            if status == 429 or status >= 500:
-                last = f"Brave answered {status}{': ' + why if why else ''}"
-            elif status >= 400:
-                raise Unavailable(f"Brave answered {status}{': ' + why if why else ''}")
-            else:
-                try:
-                    body = response.json()
-                except ValueError:
-                    body = None
-                if not isinstance(body, dict):
-                    raise Unavailable("Brave returned something other than a JSON object")
-                if spent is not None:
-                    # That was the last one: the next search would be refused.
-                    mark_out("Brave has no searches left this period", spent, clock=clock)
-                return results(body)
-        if attempt == 0:
-            await sleep(1.0)
-    raise Unavailable(f"Brave did not answer: {last}")
+            if spent is not None:
+                raise _Spent(spent)
+        return response
+
+    try:
+        body = await search_apis.answer("Brave", send, transport=transport, sleep=sleep, timeout=TIMEOUT_SECONDS)
+    except _Spent as exc:
+        mark_out("Brave has no searches left this period", exc.seconds, clock=clock)
+        raise Unavailable(_out_reason, out=True) from None
+    except search_apis.ProviderError as exc:
+        if exc.fatal:
+            mark_out(str(exc), REFUSED_SECONDS, clock=clock)
+            raise Unavailable(_out_reason, out=True) from None
+        raise Unavailable(str(exc)) from None
+    spent = spent_quota(answered[-1].headers)
+    if spent is not None:
+        # That was the last one: the next search would be refused.
+        mark_out("Brave has no searches left this period", spent, clock=clock)
+    return results(body)

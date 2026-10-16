@@ -80,6 +80,11 @@ class AgentTool:
     hosted_note: Callable[[int], str] | None = None
     include: tuple[str, ...] = ()  # Responses `include` entries the observer needs
     max_calls: int | None = None
+    # A function tool that is a web search (Brave's `web_search`): it counts
+    # against the same limits as a hosted search, `RunLimits.
+    # max_hosted_per_response` and `max_hosted_per_run`, and the run's
+    # `hosted_calls`. The runner enforces both before the handler runs.
+    counts_as_search: bool = False
     timeout_seconds: float | None = None
     min_seconds_left: float = 0.0
     describe: Callable[[dict], str] | None = None  # step label from the arguments
