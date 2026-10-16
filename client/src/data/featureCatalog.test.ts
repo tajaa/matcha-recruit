@@ -5,6 +5,9 @@ import {
   FEATURE_KEYS,
   FEATURE_LABELS,
   FEATURE_REQUIRES,
+  featureLabel,
+  OTHER_GROUP_LABEL,
+  withOtherGroup,
 } from './featureCatalog'
 
 describe('inventory voice feature', () => {
@@ -130,5 +133,55 @@ describe('hr cases feature', () => {
     const work = FEATURE_GROUPS.find((group) => group.label === 'Matcha Work')
     expect(work?.features.hr_cases).toContain('HR Cases')
     expect(FEATURE_REQUIRES.hr_cases).toEqual(['matcha_work', 'matcha_drive'])
+  })
+})
+
+describe('withOtherGroup', () => {
+  it('adds an Other group for backend flags the catalog does not name, labelled by key', () => {
+    const groups = withOtherGroup(['handbooks', 'zz_new_flag', 'aa_new_flag', 'zz_new_flag'])
+
+    expect(groups.slice(0, -1)).toEqual(FEATURE_GROUPS)
+    expect(groups.at(-1)).toEqual({
+      label: OTHER_GROUP_LABEL,
+      features: { aa_new_flag: 'aa_new_flag', zz_new_flag: 'zz_new_flag' },
+    })
+  })
+
+  it('adds nothing when the catalog names every backend flag', () => {
+    expect(withOtherGroup(['handbooks', 'huume'])).toBe(FEATURE_GROUPS)
+    expect(withOtherGroup([])).toBe(FEATURE_GROUPS)
+  })
+
+  it('does not treat inherited object keys as catalog entries', () => {
+    expect(withOtherGroup(['constructor']).at(-1)?.features).toEqual({ constructor: 'constructor' })
+    expect(featureLabel('constructor')).toBe('constructor')
+  })
+})
+
+describe('featureLabel', () => {
+  it('uses the catalog name, else the raw key', () => {
+    expect(featureLabel('ask_hr')).toContain('Ask HR')
+    expect(featureLabel('zz_new_flag')).toBe('zz_new_flag')
+  })
+})
+
+describe('flags the admin catalog used to miss', () => {
+  it('names every one of them', () => {
+    for (const key of [
+      'acord_forms', 'ask_hr', 'carrier_quotes', 'channel_job_postings', 'coi_tracking',
+      'compliance_lite', 'do_readiness', 'handbook_audit', 'handbook_watch', 'huume_code',
+      'labor_cost', 'labor_relations', 'paid_channel_creator', 'property', 'tcor',
+      'werk_lite_calls_all_members',
+    ]) {
+      expect(FEATURE_KEYS).toContain(key)
+    }
+  })
+
+  it('mirrors their backend prerequisites', () => {
+    expect(FEATURE_REQUIRES.huume_code).toEqual(['matcha_work'])
+    expect(FEATURE_REQUIRES.labor_cost).toEqual(['employee_schedule'])
+    expect(applyFeatureToggle({ matcha_work: true, huume_code: true }, 'matcha_work', false)).toMatchObject({
+      huume_code: false,
+    })
   })
 })
