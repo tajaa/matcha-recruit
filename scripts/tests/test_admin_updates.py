@@ -375,8 +375,9 @@ def test_label_with_an_apostrophe_is_not_truncated():
 
 
 def test_multi_line_nav_row_is_extracted():
-    """ClientSidebar's conditional Broker Chat row spells `to:` and `label:` on
-    separate lines; a line-at-a-time reader told the model it did not exist."""
+    """ClientSidebar's conditional Broker Chat row (removed with the broker
+    frontend in #718) spelled `to:` and `label:` on separate lines; a
+    line-at-a-time reader told the model it did not exist."""
     items = admin_nav_inventory._collect_sidebar_file(
         """const entry: NavItem = {
           to: '/app/broker-chat',
@@ -404,9 +405,17 @@ def test_commented_out_nav_row_is_not_reported_as_shipped():
     assert [item["label"] for item in items] == ["Incidents"]
 
 
-def test_real_client_tree_has_the_multi_line_broker_chat_row():
+def test_real_client_tree_reports_every_sidebar_row():
+    """Every `to:` a sidebar spells outside a comment comes back as a nav row,
+    however the row is laid out across lines."""
     inventory = admin_nav_inventory.collect(REPO_ROOT)
-    assert any(item["to"] == "/app/broker-chat" for item in inventory["navItems"])
+    spelled = set()
+    for folder in admin_nav_inventory._SIDEBAR_DIRS:
+        for path in sorted((REPO_ROOT / "client" / "src" / folder).rglob("*.tsx")):
+            for line in path.read_text().splitlines():
+                if not line.lstrip().startswith("//"):
+                    spelled.update(m.group("to") for m in admin_nav_inventory._TO_RE.finditer(line))
+    assert spelled and spelled == {item["to"] for item in inventory["navItems"]}
 
 
 def test_nav_inventory_extracts_real_sidebar_rows():

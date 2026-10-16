@@ -66,9 +66,9 @@ def _iter_tsx(root: Path) -> list[Path]:
 
 
 # Brace-aware lexer. Sidebar rows are single-line object literals *by
-# convention*, not by rule: ClientSidebar's conditional "Broker Chat" row spells
-# `to:` and `label:` on separate lines, and a line-at-a-time reader told the
-# model that a shipped nav row did not exist.
+# convention*, not by rule: ClientSidebar's conditional "Broker Chat" row (since
+# removed) spelled `to:` and `label:` on separate lines, and a line-at-a-time
+# reader told the model that a shipped nav row did not exist.
 _TOKEN_RE = re.compile(
     r"(?P<skip>\s+|//[^\n]*|/\*.*?\*/)"
     r"|(?P<string>'(?:\\.|[^'\\\n])*'|\"(?:\\.|[^\"\\\n])*\"|`(?:\\.|[^`\\])*`)"

@@ -232,11 +232,16 @@ grep -qF 'VITE_HOST_ARGS="--host 127.0.0.1"' "$REPO_ROOT/scripts/dev-remote.sh"
 grep -qF 'VITE_HOST_ARGS="--host 0.0.0.0"' "$REPO_ROOT/scripts/dev-remote.sh"
 grep -qF 'EXTRA_ALLOWED_HOSTS="${EXTRA_ALLOWED_HOSTS:+${EXTRA_ALLOWED_HOSTS},}host.docker.internal"' \
     "$REPO_ROOT/scripts/dev-remote.sh"
-grep -qF '${CHAT_ENV}${BACKEND_TRUST_ENV}source venv/bin/activate' \
-    "$REPO_ROOT/scripts/dev-remote.sh"
+# The backend pane exports the gateway trust and chat settings before its venv;
+# other *_ENV exports may sit between them.
+grep -F '${BACKEND_TRUST_ENV}source venv/bin/activate' "$REPO_ROOT/scripts/dev-remote.sh" \
+    | grep -F '${CHAT_ENV}' >/dev/null
 grep -qF "printf -v SERVER_ROOT_Q '%q' \"\$PROJECT_ROOT/server\"" \
     "$REPO_ROOT/scripts/dev-remote.sh"
-[ "$(grep -c 'cd \$SERVER_ROOT_Q &&' "$REPO_ROOT/scripts/dev-remote.sh")" -eq 2 ]
+# Every server pane (backend, workers) starts in the quoted server root.
+SERVER_PANES="$(grep -c 'source venv/bin/activate' "$REPO_ROOT/scripts/dev-remote.sh")"
+[ "$SERVER_PANES" -ge 2 ]
+[ "$(grep -c 'cd \$SERVER_ROOT_Q &&.*source venv/bin/activate' "$REPO_ROOT/scripts/dev-remote.sh")" -eq "$SERVER_PANES" ]
 [ "$(grep -c 'cd \$CLIENT_ROOT_Q &&' "$REPO_ROOT/scripts/dev-remote.sh")" -eq 1 ]
 for config in \
     "$REPO_ROOT/client/vite.config.ts" \
