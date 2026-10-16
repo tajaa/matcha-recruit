@@ -215,7 +215,10 @@ def output_items(blocks: list[Any]) -> list[dict[str, Any]]:
         if kind == "server_tool_use" and getattr(block, "name", None) == "web_search":
             found = results.get(block.id)
             ok = isinstance(found, list)
-            sources = [{"type": "url", "url": r.url} for r in found if getattr(r, "url", None)] if ok else []
+            sources = [
+                {"type": "url", "url": r.url, "title": getattr(r, "title", None) or ""}
+                for r in found if getattr(r, "url", None)
+            ] if ok else []
             query = block.input.get("query") if isinstance(block.input, dict) else None
             items.append({
                 "type": "web_search_call", "id": block.id,

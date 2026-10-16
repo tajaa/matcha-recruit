@@ -150,6 +150,19 @@ def test_a_search_that_did_not_complete_says_so():
     row = _step(uuid4(), "web_search", "search", args={"query": "q"}, result={"status": "failed"})
     assert history._step_line(row) == 'searched the web for "q", which did not complete'
     assert history._step_line({**row, "args": {}, "result": {}}) == "searched the web"
+    # Brave's function tool: an error step or an audit `error` did not search;
+    # a step the runner skipped (budget) was never tried.
+    brave = {"query": "q", "by": "brave", "results": 3}
+    assert history._step_line(_step(uuid4(), "web_search", "search", args={"query": "q"},
+                                    result=brave)) == 'searched the web for "q"'
+    for failed in (_step(uuid4(), "web_search", "search", args={"query": "q"}, status="error",
+                         result={"query": "q", "results": 0, "error": "That tool failed: TimeoutError"}),
+                   _step(uuid4(), "web_search", "search", args={"query": "q"},
+                         result={"query": "q", "by": None, "error": "Web search is unavailable right now."})):
+        assert history._step_line(failed) == 'searched the web for "q", which did not complete'
+    skipped = _step(uuid4(), "web_search", "search", args={"query": "q"}, status="skipped",
+                    result={"error": "Search budget used up; finish with what you have."})
+    assert history._step_line(skipped) == 'did not search the web for "q" (the run\'s search budget ran out)'
     odd = _step(uuid4(), "view_page", "browse", status="weird", label=None)
     assert history._step_line(odd) == "view_page (weird)"
 

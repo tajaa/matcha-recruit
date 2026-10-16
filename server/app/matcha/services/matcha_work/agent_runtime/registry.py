@@ -50,6 +50,9 @@ class ToolOutput:
     label: str | None = None
     status: str = "ok"
     receipt: dict | None = None  # commit tools: what the receipt card shows
+    # A tool that asked a model itself (web search without Brave): that call's
+    # Responses-shaped usage, added to the run's token count.
+    usage: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -77,6 +80,11 @@ class AgentTool:
     hosted_note: Callable[[int], str] | None = None
     include: tuple[str, ...] = ()  # Responses `include` entries the observer needs
     max_calls: int | None = None
+    # A function tool that is a web search (Brave's `web_search`): it counts
+    # against the same limits as a hosted search, `RunLimits.
+    # max_hosted_per_response` and `max_hosted_per_run`, and the run's
+    # `hosted_calls`. The runner enforces both before the handler runs.
+    counts_as_search: bool = False
     timeout_seconds: float | None = None
     min_seconds_left: float = 0.0
     describe: Callable[[dict], str] | None = None  # step label from the arguments

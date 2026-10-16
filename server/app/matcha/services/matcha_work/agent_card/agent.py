@@ -165,7 +165,8 @@ async def run_card_agent(
     flight_token = flights.token() if travel else None
     abilities = []
     if flight_token:
-        # Listed first: its tool is offered right after the hosted search.
+        # Listed first: its tool is offered right after the hosted search, or
+        # first of all when Brave's `web_search` (one of our tools) is in use.
         abilities.append(flights_ability.build(
             token=lambda: flight_token,
             session=lambda token: flights.FlightSession(token),

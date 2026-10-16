@@ -247,6 +247,9 @@ class Settings:
     # Google Weather daily forecasts for premium Schedule Autopilot. Optional:
     # a missing key degrades to an unmodified sales forecast.
     google_weather_api_key: Optional[str] = None
+    # Brave Search API: the agent runtime's web_search. Optional: unset, the
+    # agents use their model's own web search (`matcha_work/brave_search.py`).
+    brave_search_api_key: Optional[str] = None
 
     # Google Sign-In (Continue with Google) — audience allowlist for
     # verify_google_id_token. iOS OAuth clients are public (no secret) and
@@ -477,6 +480,7 @@ def load_settings() -> Settings:
         tellus_admin_emails=os.getenv("TELLUS_ADMIN_EMAILS", ""),
         google_maps_api_key=os.getenv("GOOGLE_MAPS_API_KEY"),
         google_weather_api_key=os.getenv("GOOGLE_WEATHER_API_KEY"),
+        brave_search_api_key=os.getenv("BRAVE_SEARCH_API_KEY") or None,
         google_ios_client_id=os.getenv("GOOGLE_IOS_CLIENT_ID"),
         google_web_client_id=os.getenv("GOOGLE_WEB_CLIENT_ID"),
         stripe_secret_key=os.getenv("STRIPE_SECRET_KEY"),

@@ -528,6 +528,16 @@ def test_prompt_and_tools_only_offer_flights_for_travel():
     assert [t.get("name") or t["type"] for t in tools.declarations()] == ["web_search", "fetch_page", "finish"]
 
 
+def test_with_brave_web_search_is_ours_and_follows_flights(monkeypatch):
+    from app.matcha.services.matcha_work import brave_search
+
+    monkeypatch.setattr(brave_search, "_key", lambda: "brave-key")
+    brave_search.reset()
+    declared = tools.declarations(flights=True)
+    assert [t["name"] for t in declared] == ["search_flights", "web_search", "fetch_page", "finish"]
+    assert declared[1]["type"] == "function"
+
+
 # ── the result gate ───────────────────────────────────────────────────────────
 
 async def _searched_session():

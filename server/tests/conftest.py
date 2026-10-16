@@ -41,6 +41,8 @@ os.environ["ANTHROPIC_API_KEY"] = ""
 # logged to the dev database's ai_usage_log).
 os.environ["OPENAI_API_KEY"] = ""
 os.environ["OPENAI_API_1"] = ""
+# Same for Brave: with a key, the agents' web_search calls Brave's API.
+os.environ["BRAVE_SEARCH_API_KEY"] = ""
 
 
 class _Permissive:
