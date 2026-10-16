@@ -50,6 +50,9 @@ class ToolOutput:
     label: str | None = None
     status: str = "ok"
     receipt: dict | None = None  # commit tools: what the receipt card shows
+    # A tool that asked a model itself (web search without Brave): that call's
+    # Responses-shaped usage, added to the run's token count.
+    usage: dict | None = None
 
 
 @dataclass(frozen=True)

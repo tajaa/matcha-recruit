@@ -1,6 +1,7 @@
 """Responses tools for the agent-card loop.
 
-One hosted tool (OpenAI `web_search`, run on the provider's side) and the
+`web_search` (Brave's API when `BRAVE_SEARCH_API_KEY` is set, else the
+model's own hosted search; see `agent_runtime/abilities/web.py`) and the
 function tools we execute: `fetch_page` (SSRF-guarded GET + structured page
 extraction), `search_flights` (Duffel, only for travel requests when a token is
 configured; see `flights.py`) and `finish` (the structured result, validated by
@@ -46,7 +47,7 @@ async def _unused_fetch(_url: str) -> tuple[dict, set[str]]:  # pragma: no cover
 
 
 def declarations(*, flights: bool = False) -> list[dict[str, Any]]:
-    """The card's tools as the loop offers them: hosted search first, then
+    """The card's tools as the loop offers them: `web_search` first, then
     `search_flights` when offered, then `fetch_page`, then `finish`."""
     ability = web.build(fetch_page=_unused_fetch, max_fetches=0, fetch_seconds=0)
     tools = list(ability.tools)

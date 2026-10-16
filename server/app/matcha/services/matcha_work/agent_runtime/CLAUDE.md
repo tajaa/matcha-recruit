@@ -203,8 +203,21 @@ column as `<playbook>.<phase>`).
   (picked, or the admin setting for `espresso.assistant`), `ClaudeSession.keeps_history` makes the runner send only
   what is new even on a private run: Messages has no stored-response chain to
   opt out of, so `store=False`/`chain=False` and the encrypted-reasoning replay
-  do not apply. Web search becomes Anthropic's server tool; its results reach
+  do not apply. Without a Brave key, web search becomes Anthropic's server tool; its results reach
   the provenance gate as the same Responses items (`claude_client.output_items`).
+- **Web search is Brave when `BRAVE_SEARCH_API_KEY` is set** (`abilities/web.py`,
+  `../brave_search.py`). `web_search` is then our own function tool (`query`, optional
+  `freshness`): ten results with title, URL, age and snippets, about 1.4k tokens, against
+  about 13.8k for Anthropic's search and half its per-search price. Brave's URLs are the
+  run's provenance. When Brave can't answer (a refused key or 402, no searches left in a
+  day-or-longer rate window, or down after one retry) the same tool asks the model's own
+  search instead: one short call on Claude Haiku (the run's model when it isn't Claude)
+  with the hosted search, `max_tool_calls=1`, whose sources, citations and summary are the
+  output and whose tokens fold into the run (`ToolOutput.usage`). A refusal or spent quota
+  keeps Brave out for this process (an hour, or until the quota resets) and logs one error.
+  The tool list never changes mid-run, which a Claude session needs. Without a key, the
+  hosted search runs exactly as before. Every search, either kind, counts toward
+  `RunLimits.max_hosted_per_run` (`RunState.hosted_calls`, the run's `search_calls`).
 - **Card runs store `agent_result.v1`, byte for byte.** `agent_card/agent.py`
   keeps its limits and collaborators as module attributes read at call time,
   because its tests patch them there. Do not move them behind a re-export.

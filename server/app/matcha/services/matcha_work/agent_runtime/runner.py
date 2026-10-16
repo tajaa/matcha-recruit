@@ -231,6 +231,7 @@ async def run_agent(
             payload = {"error": f"That tool failed: {type(exc).__name__}"}
         if output is not None:
             state.provenance.update(output.provenance)
+            _fold_usage(usage, output)
         status = output.status if output is not None and "error" not in payload else "error"
         await step(tool.name, tool.step_kind, label_for(tool, args, output), args,
                    audit_for(tool, payload, output), status)
