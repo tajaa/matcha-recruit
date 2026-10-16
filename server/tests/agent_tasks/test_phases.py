@@ -99,6 +99,43 @@ async def test_providers_add_findings_then_hand_to_the_web(conn, monkeypatch):
     assert out.phase == phases.DISCOVER and out.progress["note"] == "Searching the web…"
 
 
+@pytest.mark.asyncio
+async def test_listings_that_refused_for_good_are_asked_no_more(conn, monkeypatch):
+    provider = AsyncMock()
+    provider.search = AsyncMock(side_effect=[
+        [_shop("Balm", "Acme")],
+        providers.ProviderError("no research listings API left", fatal=True),
+    ])
+    insert = AsyncMock(return_value=1)
+    monkeypatch.setattr(items_mod, "insert_items", insert)
+    monkeypatch.setattr(phases, "QUERY_CONCURRENCY", 1)
+    conn.on("COUNT(*) FROM mw_agent_task_items", 0)
+    task = task_row(plan=json.dumps({**PLAN, "source": "shopping", "queries": ["a", "b", "c", "d"]}))
+    out = await phases.run_providers(task, _deps(provider=lambda *_: provider), _guard())
+    assert provider.search.await_count == 2 and out.phase == phases.DISCOVER  # the web search still runs
+    # What was found is kept, at Google's page: no store is asked.
+    provider.stores.assert_not_awaited()
+    assert [r["title"] for r in insert.await_args.args[4]] == ["Balm"]
+    # The calls it never made are given back.
+    assert conn.ran("SET provider_calls = GREATEST(provider_calls - $2, 0)")[-1][2][1] == 2
+
+
+@pytest.mark.asyncio
+async def test_store_lookups_stop_once_every_api_refused(conn, monkeypatch):
+    provider = AsyncMock()
+    provider.stores = AsyncMock(side_effect=providers.ProviderError("no research listings API left", fatal=True))
+    monkeypatch.setattr(phases, "QUERY_CONCURRENCY", 1)
+    found = [_shop("Balm", "Acme", n=1), _shop("Wax", "Bee Co", n=2), _shop("Tin", "Tin Co", n=3)]
+    out = await phases.with_stores(task_row(), provider, found, set(), TODAY)
+    assert out == found and provider.stores.await_count == 1
+    assert conn.ran("SET provider_calls = GREATEST(provider_calls - $2, 0)")[-1][2][1] == 2
+    # A token whose API was dropped is never looked up, or counted.
+    listings = providers.Listings([providers.SearchApi("k"), providers.SerpApi("k")])
+    listings._dropped[0] = providers.ProviderError("spent", fatal=True)
+    tagged = [_shop("Balm", "Acme", token="0:t")]
+    assert await phases.with_stores(task_row(), listings, tagged, set(), TODAY) == tagged
+
+
 GOOGLE = "https://www.google.com/search?ibp=oshop&q={q}&prds=productid:{n}"
 
 

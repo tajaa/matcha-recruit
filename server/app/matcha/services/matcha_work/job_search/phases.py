@@ -240,23 +240,27 @@ async def discover(search: dict, deps: Deps, guard: chain.Guard) -> PhaseOutcome
     room = max(0, MAX_LEADS - existing)
     budget = Budget(left=await grant(search["id"], "provider_calls",
                                      len(queries) * PAGES_PER_QUERY, MAX_PROVIDER_CALLS))
-    state = {"errors": 0}
+    state = {"errors": 0, "refused": False}
     records: dict[str, dict] = {}
     gate = asyncio.Semaphore(QUERY_CONCURRENCY)
 
     async def run_query(query: dict) -> None:
         token = None
         for _page in range(PAGES_PER_QUERY):
-            if len(records) >= room or not budget.take():
-                return
             async with gate:
+                # Checked once it's this query's turn: others may have refused meanwhile.
+                if state["refused"] or len(records) >= room or not budget.take():
+                    return
                 try:
                     postings, token = await provider.search(
                         query["q"], query.get("location"), page_token=token,
                     )
                 except providers.ProviderError as exc:
                     if exc.fatal:
-                        raise
+                        # Every listings API refused for good (the provider logged it):
+                        # nothing more is asked, and what was found is kept.
+                        state["refused"] = True
+                        return
                     state["errors"] += 1
                     logger.info("job search query failed search=%s: %s", search["id"], exc)
                     return
@@ -276,8 +280,6 @@ async def discover(search: dict, deps: Deps, guard: chain.Guard) -> PhaseOutcome
     results = await asyncio.gather(*(run_query(q) for q in queries), return_exceptions=True)
     await refund(search["id"], "provider_calls", budget.left)
     for result in results:
-        if isinstance(result, providers.ProviderError) and result.fatal:
-            raise PhaseFailed("The job listings service refused our request.") from result
         if isinstance(result, BaseException):
             raise result
     await _insert_leads(search, guard.token, list(records.values())[:room])
@@ -286,6 +288,8 @@ async def discover(search: dict, deps: Deps, guard: chain.Guard) -> PhaseOutcome
             "SELECT COUNT(*) FROM mw_job_leads WHERE search_id = $1", search["id"],
         ) or 0)
     if total == 0:
+        if state["refused"]:
+            raise PhaseFailed(UNAVAILABLE)
         if state["errors"] and state["errors"] >= budget.used:
             raise RuntimeError("every job listing query failed")  # retried
         raise PhaseFailed("No postings matched. Try broader titles or more locations.")
@@ -296,6 +300,10 @@ async def discover(search: dict, deps: Deps, guard: chain.Guard) -> PhaseOutcome
 
 
 NEXT_AFTER_DISCOVER = "screening"
+# Every listings API refused for good (a refused key, no searches left): not
+# the person's search, and retrying won't help. A failed search is free.
+UNAVAILABLE = ("Job listings aren't available right now, so the search stopped. "
+               "It didn't count against your allowance. Please try again later.")
 
 
 # ── enrich ───────────────────────────────────────────────────────────────────

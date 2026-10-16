@@ -139,8 +139,9 @@ async def test_discover_failures(conn):
         await phases.discover(discover_search(["COO"]), phases.Deps(provider=lambda: None), guard())
 
     fatal = FakeProvider({"COO": [providers.ProviderError("bad key", fatal=True)]})
-    with pytest.raises(phases.PhaseFailed, match="refused"):
+    with pytest.raises(phases.PhaseFailed, match="aren't available right now") as failed:
         await phases.discover(discover_search(["COO"]), phases.Deps(provider=lambda: fatal), guard())
+    assert "allowance" in str(failed.value)  # a failed search is free
 
     conn.on("SELECT COUNT(*) FROM mw_job_leads", 0)
     flaky = FakeProvider({"COO": [providers.ProviderError("503")]})
@@ -150,6 +151,23 @@ async def test_discover_failures(conn):
     empty = FakeProvider({})
     with pytest.raises(phases.PhaseFailed, match="No postings matched"):
         await phases.discover(discover_search(["COO"]), phases.Deps(provider=lambda: empty), guard())
+
+
+@pytest.mark.asyncio
+async def test_discover_keeps_what_it_found_before_the_listings_ran_out(conn, monkeypatch):
+    monkeypatch.setattr(phases, "QUERY_CONCURRENCY", 1)
+    spent = providers.ProviderError("no job listings API left", fatal=True)
+    provider = FakeProvider({"COO": [([posting("COO", "Acme"), posting("COO", "Beta")], None)], "CFO": [spent],
+                             "CEO": [([posting("CEO", "Never asked")], None)]})
+    conn.on("SELECT COUNT(*) FROM mw_job_leads", count_script(0, 2))
+    conn.on("RETURNING GREATEST(LEAST($2, $3 - cur.before), 0)", 9)
+    out = await phases.discover(discover_search(["COO", "CFO", "CEO"]), phases.Deps(provider=lambda: provider),
+                                guard())
+    assert out.status == "screening" and out.progress["found"] == 2
+    assert [c[0] for c in provider.calls] == ["COO", "CFO"]  # nothing asked after the refusal
+    records = json.loads(conn.ran("INSERT INTO mw_job_leads")[0][2][2])
+    assert sorted(r["company"] for r in records) == ["Acme", "Beta"]
+    assert conn.ran("SET provider_calls = GREATEST(provider_calls - $2, 0)")[0][2] == (SEARCH, 7)
 
 
 def ats_posting(**over):

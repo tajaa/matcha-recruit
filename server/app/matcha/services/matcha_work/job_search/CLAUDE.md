@@ -18,7 +18,7 @@ costs 5 units of Pro's 60 / Business's 150, so 12 searches with nothing else;
 
 | Piece | File | What it owns |
 |---|---|---|
-| Listings | `providers.py` | Google Jobs via SearchAPI (`SEARCH_API_KEY`) or SerpApi (`SERP_API_KEY`). Only query + location leave the server |
+| Listings | `providers.py` | Google Jobs via SearchAPI (`SEARCH_API_KEY`), then SerpApi (`SERP_API_KEY`) (`FallbackJobs`). Requests and moving between them are `matcha_work/search_apis.py`'s, shared with research tasks: one that refuses for good (a refused key, or no searches left: a 402, or a 429 in the API's own words, `out_of_searches`; never a per-minute quota) is dropped for the phase and logged as an error (Admin → Server Errors); one still down after its retry is passed over when another follows. Only query + location leave the server |
 | ATS | `ats.py` | Greenhouse / Lever / Ashby detection from apply links, their public APIs, application questions; `find_on_board`, the employer's own board found by name |
 | Pay | `comp.py` (pure) | Text scanning, structured mappers, `combine`, claim checks (`verify_quote`, `numbers_supported`) |
 | Ranking | `ranking.py` (pure) | Weighted score inside bands; `comp_line` |
@@ -138,7 +138,7 @@ ran out before is left unread (`NOT_TRIED`), not marked read.
 | Status | Phase | Notes |
 |---|---|---|
 | `queued` → `planning` | `model_phases.plan` | Model: queries (≤8), titles, deal-breakers, profile summary, weights (applied only while `weights_source='default'`). Falls back to `plan_from_criteria`; what the person typed is always searched. Google's `location` only takes Google place names, so a city goes in the query text |
-| `discovering` | `discover` | Up to 3 pages per query, 3 at a time; dedupe on company + title + city; exclusions and remote preference applied |
+| `discovering` | `discover` | Up to 3 pages per query, 3 at a time; dedupe on company + title + city; exclusions and remote preference applied. Every API refused for good: nothing more is asked and what was found goes on to screening; with nothing found, fails at once with `UNAVAILABLE` ("Job listings aren't available right now…", free), never retried. Passing errors on every query: retried |
 | `screening` | `model_phases.screen` | Model, batches of 40 by short id (J1…): relevant, fit 0-5, reasons, deal-breaker. A failed batch stays in (unranked fit) |
 | `enriching` | `enrich` | Batches of 24. Reads up to 2 ATS links (via the API), then up to 2 company pages (their JSON-LD `JobPosting`); a careers page that redirects into an ATS is read as that ATS. Only the lead's own job counts, see Invariants. If no link is it, `ats.find_on_board` looks the title up on the employer's Greenhouse, Lever and Ashby boards, by name. Then `service.rerank` and the top 8 are queued (`phase_cursor.approach_queue`) |
 | `approaching` | `model_phases.approach` | Model with web search + `fetch_page`, 2 jobs per task. A failed batch is `approach_status='failed'`; the person can redraft |

@@ -1,4 +1,5 @@
 """Google Jobs through SearchAPI and SerpApi, with no network."""
+import asyncio
 from types import SimpleNamespace
 
 import httpx
@@ -107,6 +108,67 @@ async def test_errors_retry_once_and_a_refused_key_is_fatal():
         await api.search("COO")
 
 
+SPENT_SEARCHAPI = {"error": "You have used all of the searches for the month. "
+                             "Please upgrade your plan on SearchApi.io."}  # prod, 2026-10-16
+
+
+@pytest.mark.asyncio
+async def test_an_account_with_no_searches_left_is_fatal_and_not_retried():
+    for status, body in ((429, SPENT_SEARCHAPI), (429, {"error": "Your account has run out of searches."}), (402, {})):
+        seen = []
+        api = providers.SearchApiJobs("k", transport=transport((status, body), seen=seen), sleep=no_sleep)
+        with pytest.raises(providers.ProviderError, match="has no searches left") as exc:
+            await api.search("COO")
+        assert exc.value.fatal and len(seen) == 1, body
+    # Too many at once, a per-minute quota, an hourly limit or a 429 with no JSON: tried again, not fatal.
+    for body in ({"error": "Too many requests per second"}, "slow down",
+                 {"error": {"code": 429, "status": "RESOURCE_EXHAUSTED",
+                            "message": "Quota exceeded for quota metric 'Requests' per minute"}},
+                 {"error": "You have exceeded the hourly searches limit. Please upgrade your plan."}):
+        seen = []
+        api = providers.SearchApiJobs("k", transport=transport((429, body), (200, SEARCHAPI_PAGE), seen=seen),
+                                      sleep=no_sleep)
+        postings, _ = await api.search("COO")
+        assert len(postings) == 1 and len(seen) == 2
+
+
+class Api:
+    def __init__(self, name, *answers):
+        self.name, self.answers, self.calls = name, list(answers), []
+
+    async def search(self, query, location=None, *, page_token=None):
+        self.calls.append((query, page_token))
+        answer = self.answers.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+
+@pytest.mark.asyncio
+async def test_a_refusing_api_is_dropped_for_the_next():
+    spent = providers.ProviderError("SearchAPI has no searches left (…)", fatal=True)
+    first = Api("SearchAPI", ([], "p1"), spent)
+    second = Api("SerpApi", ([], "p2"), ([], None))
+    jobs = providers.FallbackJobs([first, second])
+    # A page token is marked with the API that gave it.
+    assert await jobs.search("COO") == ([], "0:p1")
+    assert await jobs.search("CFO") == ([], "1:p2") and jobs.first() is second
+    # The next page goes to the API that gave its token, without the mark.
+    assert await jobs.search("CFO", page_token="1:p2") == ([], None) and second.calls[-1] == ("CFO", "p2")
+    # A token from the API that was dropped ends that query: nothing is asked.
+    assert await jobs.search("COO", page_token="0:p1") == ([], None) and len(first.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_an_api_that_is_down_hands_over_to_the_next():
+    down = providers.ProviderError("SearchAPI did not answer: SearchAPI answered 503", down=True)
+    first = Api("SearchAPI", down)
+    second = Api("SerpApi", ([], None), ([], None))
+    jobs = providers.FallbackJobs([first, second])
+    assert await asyncio.gather(jobs.search("COO"), jobs.search("CFO")) == [([], None), ([], None)]
+    assert len(first.calls) == 1 and len(second.calls) == 2
+
+
 def test_provider_choice(monkeypatch):
     import app.config as config
 
@@ -114,9 +176,11 @@ def test_provider_choice(monkeypatch):
         monkeypatch.setattr(config, "get_settings", lambda: SimpleNamespace(search_api_key=search, serp_api_key=serp))
 
     settings("a", "b")
-    assert isinstance(providers.choose_provider(), providers.SearchApiJobs) and providers.configured()
+    chosen = providers.choose_provider()
+    assert [type(api) for api in chosen.apis] == [providers.SearchApiJobs, providers.SerpApiJobs]
+    assert providers.configured()
     settings(None, "b")
-    assert isinstance(providers.choose_provider(), providers.SerpApiJobs)
+    assert [type(api) for api in providers.choose_provider().apis] == [providers.SerpApiJobs]
     settings(None, None)
     assert providers.choose_provider() is None and not providers.configured()
 
