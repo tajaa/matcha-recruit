@@ -104,7 +104,7 @@ export function isCustomProductPending(profile: MeClientProfile | null | undefin
  *  rounded: the server charges these cents (product_definitions.
  *  compute_product_price_cents), so a $9.50 price must not display as $10. */
 export function productPriceDollars(
-  product: ProductDefinition,
+  product: Pick<ProductDefinition, 'pricing_model' | 'price_cents' | 'block_size' | 'min_headcount' | 'max_headcount'>,
   headcount: number,
   locationCount?: number,
 ): number | null {

@@ -79,16 +79,32 @@ async def test_personal_checkout_charges_the_admin_price():
 
 @pytest.mark.asyncio
 async def test_personal_plans_lists_the_live_prices():
-    prices = {"espresso_lite": _pricing(900), "espresso_pro": _pricing(2000, sale=1500)}
+    lookup = AsyncMock(return_value={"espresso_lite": _pricing(900), "espresso_pro": _pricing(2000, sale=1500)})
 
-    async def lookup(*, product_code):
-        return prices[product_code]
-
-    with patch.object(routes, "get_matcha_lite_pricing", lookup):
+    with patch.object(routes, "get_matcha_lite_pricings", lookup):
         plans = await routes.list_personal_plans(SimpleNamespace(id=uuid4(), role="individual"))
 
+    lookup.assert_awaited_once_with(["espresso_lite", "espresso_pro"])
     assert [(p.plan, p.amount_cents) for p in plans] == [("lite", 900), ("pro", 1500)]
     assert plans[1].name == StripeService.PERSONAL_PLANS["pro"]["name"]
+
+
+@pytest.mark.asyncio
+async def test_buying_the_plan_you_have_409s_before_pricing():
+    user = SimpleNamespace(id=uuid4(), role="individual")
+    price = AsyncMock(side_effect=AssertionError("priced a checkout that can't happen"))
+    with (
+        patch.object(routes, "get_client_company_id", AsyncMock(return_value=uuid4())),
+        patch.object(routes, "personal_plan_price_cents", price),
+        patch.object(billing_service, "get_active_subscription", AsyncMock(
+            return_value={"pack_id": StripeService.PERSONAL_PLANS["lite"]["pack_id"]},
+        )),
+    ):
+        with pytest.raises(HTTPException) as exc:
+            await routes.create_personal_checkout_session(routes.PersonalCheckoutRequest(plan="lite"), user)
+
+    assert exc.value.status_code == 409
+    price.assert_not_awaited()
 
 
 @pytest.mark.asyncio

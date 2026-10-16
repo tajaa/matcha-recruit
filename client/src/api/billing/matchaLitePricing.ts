@@ -36,7 +36,10 @@ export function fetchMatchaLitePricing(productCode: MatchaLiteProductCode = 'mat
   return api.get<MatchaLitePricingConfig>(`/resources/matcha-lite/pricing?product_code=${encodeURIComponent(productCode)}`)
 }
 
-export function computeLitePriceDollars(headcount: number, pricing: MatchaLitePricingConfig): number {
+export function computeLitePriceDollars(
+  headcount: number,
+  pricing: Pick<MatchaLitePricingConfig, 'block_size' | 'effective_price_per_block_cents'>,
+): number {
   return Math.ceil(headcount / pricing.block_size) * (pricing.effective_price_per_block_cents / 100)
 }
 
@@ -77,6 +80,9 @@ export interface MatchaLitePricingUpdate {
   sale_active: boolean
   min_headcount: number
   max_headcount: number
+  /** The `updated_at` the form loaded (null before the first save). The
+   *  server 409s if the row changed since, instead of undoing that change. */
+  expected_updated_at?: string | null
 }
 
 export function fetchMatchaLitePricingAdmin(productCode: MatchaLiteProductCode = 'matcha_lite') {

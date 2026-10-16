@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import {
   FLAT_PLAN_CODES,
+  computeLitePriceDollars,
   fetchMatchaLitePricingAdmin,
   saveMatchaLitePricingAdmin,
   type MatchaLiteProductCode,
@@ -117,6 +118,8 @@ export function PricingForm({ productCode }: { productCode: MatchaLiteProductCod
           sale_active: saleActive,
           min_headcount: isFlatPlan ? 1 : minNum,
           max_headcount: isFlatPlan ? 1 : maxNum,
+          // This row is also editable on the other pricing page.
+          expected_updated_at: config?.updated_at ?? null,
         },
         productCode,
       )
@@ -145,12 +148,15 @@ export function PricingForm({ productCode }: { productCode: MatchaLiteProductCod
     !isNaN(effectivePriceNum) && !isNaN(blockSizeNum) && blockSizeNum > 0
       ? (effectivePriceNum / blockSizeNum).toFixed(2)
       : null
-  // What the next checkout charges, with the server's formula
-  // (compute_matcha_lite_price_cents): ceil(quantity / block) × effective price.
+  // What the next checkout charges, with the same formula the signup pages
+  // use (the server's compute_matcha_lite_price_cents).
   const sampleQuantity = isFlatPlan ? 1 : Math.min(Math.max(25, minNum || 1), maxNum || 25)
   const nextCharge =
     !isNaN(effectivePriceNum) && effectivePriceNum > 0 && blockSizeNum > 0
-      ? Math.ceil(sampleQuantity / (isFlatRate || isFlatPlan ? 1 : blockSizeNum)) * effectivePriceNum
+      ? computeLitePriceDollars(sampleQuantity, {
+          block_size: isFlatRate || isFlatPlan ? 1 : blockSizeNum,
+          effective_price_per_block_cents: Math.round(effectivePriceNum * 100),
+        })
       : null
 
   return (

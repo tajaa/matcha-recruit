@@ -42,6 +42,10 @@ PAID_PRICING_MODELS = ("per_seat", "per_location", "block", "flat")
 
 STATUSES = ("draft", "published", "archived")
 
+# Stripe refuses a USD charge under $0.50, so a price whose smallest possible
+# checkout is below it would save fine and then 400 every checkout.
+STRIPE_MIN_CHARGE_CENTS = 50
+
 _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{2,39}$")
 
 # signup_source values already in use by the hardcoded products — a custom
@@ -290,6 +294,24 @@ def validate_pricing(
         raise ProductDefinitionError("Minimum headcount must be at least 1")
     if max_headcount < min_headcount:
         raise ProductDefinitionError("Maximum headcount must be at least the minimum")
+    if pricing_model in PAID_PRICING_MODELS and smallest_charge_cents(
+        pricing_model, int(price_cents or 0), block_size, min_headcount
+    ) < STRIPE_MIN_CHARGE_CENTS:
+        raise ProductDefinitionError(
+            "Stripe can't charge less than $0.50 — raise the price so the smallest checkout reaches it"
+        )
+
+
+def smallest_charge_cents(
+    pricing_model: str, price_cents: int, block_size: Optional[int], min_headcount: int
+) -> int:
+    """The cheapest checkout this pricing allows (one location, the minimum
+    headcount) — the same arithmetic as compute_product_price_cents."""
+    if pricing_model == "per_seat":
+        return price_cents * min_headcount
+    if pricing_model == "block":
+        return math.ceil(min_headcount / (block_size or 1)) * price_cents
+    return price_cents  # flat, or per_location at one location
 
 
 def validate_gate_feature(

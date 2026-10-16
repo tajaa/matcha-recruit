@@ -9,9 +9,11 @@ maps it to a feature/quota set. Consumed by:
 
 Plans:
   free      — non-AI collaboration (channels/DMs/people) + basic journals + AI taste
-  lite      — $9/mo `matcha_work_lite`: solo projects, full journals, email AI, flash
-  pro       — $20/mo `matcha_work_personal` (grandfathered): pro model, collab
+  lite      — `matcha_work_lite`: solo projects, full journals, email AI, flash
+  pro       — `matcha_work_personal` (grandfathered): pro model, collab
               projects + kanban, Go Live, paid-channel creation, big quota
+  (Lite and Pro prices are the espresso_lite / espresso_pro rows set at
+  /admin/pricing.)
   business  — role=client on a non-personal company with the `matcha_work`
               feature: pro-level + business modes; billed via company contract
               and token packs, never via personal SKUs.

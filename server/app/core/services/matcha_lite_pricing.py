@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Sequence
 
 from ...database import get_connection
 
@@ -110,18 +110,33 @@ async def get_matcha_lite_pricing(conn=None, product_code: str = "matcha_lite") 
         async with get_connection() as c:
             row = await c.fetchrow(query, product_code)
 
-    if row is None:
-        # Defensive fallback if the seed row was somehow deleted — matches
-        # the launch defaults (migrations mlpricing01/mlpricing02).
-        defaults = _FALLBACK_DEFAULTS.get(product_code, _FALLBACK_DEFAULTS["matcha_lite"])
-        return MatchaLitePricing(
-            sale_price_per_block_cents=None,
-            sale_active=False,
-            updated_at=None,
-            updated_by=None,
-            **defaults,
-        )
-    return row_to_pricing(row)
+    return row_to_pricing(row) if row is not None else _fallback_pricing(product_code)
+
+
+async def get_matcha_lite_pricings(product_codes: Sequence[str], conn=None) -> dict[str, MatchaLitePricing]:
+    """`get_matcha_lite_pricing` for several codes in one query (e.g. both
+    Espresso plans for the paywall), each falling back the same way."""
+    query = f"SELECT product_code, {SELECT_COLUMNS} FROM matcha_lite_pricing WHERE product_code = ANY($1::text[])"
+    if conn is not None:
+        rows = await conn.fetch(query, list(product_codes))
+    else:
+        async with get_connection() as c:
+            rows = await c.fetch(query, list(product_codes))
+    found = {row["product_code"]: row_to_pricing(row) for row in rows}
+    return {code: found.get(code) or _fallback_pricing(code) for code in product_codes}
+
+
+def _fallback_pricing(product_code: str) -> MatchaLitePricing:
+    # No row: the seed migration hasn't run here, or (Espresso plans) no admin
+    # has saved one yet — charge the launch defaults.
+    defaults = _FALLBACK_DEFAULTS.get(product_code, _FALLBACK_DEFAULTS["matcha_lite"])
+    return MatchaLitePricing(
+        sale_price_per_block_cents=None,
+        sale_active=False,
+        updated_at=None,
+        updated_by=None,
+        **defaults,
+    )
 
 
 def compute_matcha_lite_price_cents(pricing: MatchaLitePricing, headcount: int) -> Optional[int]:

@@ -2,10 +2,11 @@ import { useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { ExternalLink, Info, Loader2 } from 'lucide-react'
 import { useAsync } from '../../hooks/useAsync'
-import { api } from '../../api/client'
+import { ApiError, api } from '../../api/client'
 import { Button, Card, useToast } from '../../components/ui'
 import type { MatchaLiteProductCode } from '../../api/billing/matchaLitePricing'
 import { formatPrice } from '../../utils/format'
+import { productPriceDollars } from '../../utils/tier'
 import { PricingForm } from './MatchaLitePricingPanel'
 
 /**
@@ -32,7 +33,10 @@ type AdminProduct = {
   pricing_model: PaidModel | 'free' | 'contact_sales'
   price_cents: number | null
   block_size: number | null
+  min_headcount: number
+  max_headcount: number
   status: 'draft' | 'published' | 'archived'
+  updated_at: string | null
 }
 
 const PAID_MODELS: readonly string[] = ['per_seat', 'per_location', 'block', 'flat']
@@ -47,14 +51,16 @@ const ESPRESSO_PLANS: { code: MatchaLiteProductCode; name: string; blurb: string
   { code: 'espresso_pro', name: 'Espresso Pro', blurb: 'Personal plan, web paywall and the Mac app' },
 ]
 
-/** One worked example per model, so the admin sees a checkout-sized number. */
-function exampleCharge(model: PaidModel, cents: number, blockSize: number | null): string {
-  const dollars = cents / 100
+/** A checkout-sized worked example, priced by the signup page's own formula
+ *  (productPriceDollars) at a headcount the product actually sells. */
+function exampleCharge(product: AdminProduct, cents: number): string | null {
+  const model = product.pricing_model as PaidModel
+  const headcount = Math.min(Math.max(25, product.min_headcount), product.max_headcount)
+  const dollars = productPriceDollars({ ...product, pricing_model: model, price_cents: cents }, headcount, 3)
+  if (dollars === null) return null
   if (model === 'flat') return `${formatPrice(dollars)}/month`
-  if (model === 'per_location') return `${formatPrice(dollars * 3)}/month for 3 locations`
-  if (model === 'per_seat') return `${formatPrice(dollars * 25)}/month for 25 employees`
-  const block = blockSize || 1
-  return `${formatPrice(Math.ceil(25 / block) * dollars)}/month for 25 employees`
+  if (model === 'per_location') return `${formatPrice(dollars)}/month for 3 locations`
+  return `${formatPrice(dollars)}/month for ${headcount} employees`
 }
 
 function unitLabel(p: AdminProduct): string {
@@ -84,7 +90,15 @@ function PlanCard({ name, blurb, code }: { name: string; blurb: string; code: Ma
   )
 }
 
-function ProductPriceCard({ product, onSaved }: { product: AdminProduct; onSaved: (p: AdminProduct) => void }) {
+function ProductPriceCard({
+  product,
+  onSaved,
+  onStale,
+}: {
+  product: AdminProduct
+  onSaved: (p: AdminProduct) => void
+  onStale: () => void
+}) {
   const { toast } = useToast()
   const [dollars, setDollars] = useState(String((product.price_cents ?? 0) / 100))
   const [saving, setSaving] = useState(false)
@@ -92,16 +106,21 @@ function ProductPriceCard({ product, onSaved }: { product: AdminProduct; onSaved
   const cents = Math.round(value * 100)
   const valid = !isNaN(value) && cents > 0
   const changed = valid && cents !== product.price_cents
-  const model = product.pricing_model as PaidModel
+  const example = valid ? exampleCharge(product, cents) : null
 
   async function save() {
     setSaving(true)
     try {
-      const saved = await api.put<AdminProduct>(`/admin/products/${product.id}/price`, { price_cents: cents })
+      const saved = await api.put<AdminProduct>(`/admin/products/${product.id}/price`, {
+        price_cents: cents,
+        // Also editable in Products: refuse rather than overwrite a newer save.
+        expected_updated_at: product.updated_at,
+      })
       onSaved(saved)
       toast(`${product.name} now ${formatPrice(cents / 100)} ${unitLabel(saved)}`, 'success')
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Price change failed', 'error')
+      if (e instanceof ApiError && e.status === 409) onStale()
     } finally {
       setSaving(false)
     }
@@ -134,9 +153,9 @@ function ProductPriceCard({ product, onSaved }: { product: AdminProduct; onSaved
           className="mt-1 w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:border-emerald-700 focus:outline-none"
         />
       </label>
-      {valid && (
+      {example && (
         <p className="text-xs text-zinc-400">
-          Next checkout charges <span className="font-medium text-zinc-100">{exampleCharge(model, cents, product.block_size)}</span>
+          Next checkout charges <span className="font-medium text-zinc-100">{example}</span>
         </p>
       )}
       <div className="flex items-center justify-between gap-3">
@@ -167,7 +186,10 @@ export default function Pricing() {
 
   const productGrid = (list: AdminProduct[]) => (
     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-      {list.map((p) => <ProductPriceCard key={p.id} product={p} onSaved={replace} />)}
+      {/* Keyed by version too, so a reload after a 409 resets the input to the saved price. */}
+      {list.map((p) => (
+        <ProductPriceCard key={`${p.id}:${p.updated_at}`} product={p} onSaved={replace} onStale={products.reload} />
+      ))}
     </div>
   )
 

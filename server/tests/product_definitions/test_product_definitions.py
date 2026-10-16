@@ -256,6 +256,20 @@ def test_block_pricing_needs_a_block_size():
     validate_pricing("block", 5000, 10, 1, 300)
 
 
+def test_prices_under_stripes_minimum_are_refused():
+    # Smallest checkout = one location / the minimum headcount / one block.
+    for model, cents, block, min_head in (
+        ("flat", 49, None, 1),
+        ("per_location", 49, None, 1),
+        ("per_seat", 9, None, 5),
+        ("block", 49, 10, 10),
+    ):
+        with pytest.raises(ProductDefinitionError, match=r"\$0\.50"):
+            validate_pricing(model, cents, block, min_head, 300)
+    validate_pricing("per_seat", 10, None, 5, 300)  # 5 seats x $0.10 = $0.50
+    validate_pricing("block", 50, 10, 1, 300)
+
+
 def test_per_location_is_a_paid_pricing_model():
     validate_pricing("per_location", 2500, None, 1, 300)
     assert validate_gate_feature(

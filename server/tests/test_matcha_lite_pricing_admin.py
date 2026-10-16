@@ -8,6 +8,7 @@ configured yet", not a 404 — GET falls back to launch defaults, PUT upserts.
 """
 
 import sys
+from datetime import datetime, timezone
 from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -188,3 +189,87 @@ async def test_put_pins_flat_espresso_plan_to_one_unit(monkeypatch):
     insert_args = conn.fetchrow.call_args_list[1].args
     assert insert_args[1:4] == ("espresso_pro", 1900, 1)
     assert insert_args[6:8] == (1, 1)
+
+
+SAVED_AT = datetime(2026, 10, 16, 12, 0, tzinfo=timezone.utc)
+_EXISTING = {
+    "price_per_block_cents": 5000, "block_size": 10, "sale_price_per_block_cents": None,
+    "sale_active": False, "min_headcount": 1, "max_headcount": 300, "updated_at": SAVED_AT,
+}
+
+
+@pytest.mark.asyncio
+async def test_put_refuses_a_stale_edit(monkeypatch):
+    # The same row is editable from /admin/pricing and Signup Links; a save
+    # from a page loaded before the other one saved must not undo it.
+    conn = MagicMock()
+    conn.fetchrow = AsyncMock(side_effect=[_EXISTING])
+    conn.execute = AsyncMock()
+    monkeypatch.setattr(f"{MOD}.get_connection", _conn_ctx(conn))
+
+    with pytest.raises(HTTPException) as exc:
+        await update_matcha_lite_pricing(
+            _update_body(price_per_block_cents=4500, block_size=10,
+                         expected_updated_at="2026-10-16T11:00:00+00:00"),
+            product_code="matcha_lite",
+            current_user=_user(),
+        )
+
+    assert exc.value.status_code == 409
+    assert conn.fetchrow.await_count == 1
+    conn.execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_put_refuses_a_first_save_when_someone_saved_first(monkeypatch):
+    # The editor loaded the fallback (no row, updated_at null) but a row exists now.
+    conn = MagicMock()
+    conn.fetchrow = AsyncMock(side_effect=[_EXISTING])
+    monkeypatch.setattr(f"{MOD}.get_connection", _conn_ctx(conn))
+
+    with pytest.raises(HTTPException) as exc:
+        await update_matcha_lite_pricing(
+            _update_body(price_per_block_cents=4500, block_size=10, expected_updated_at=None),
+            product_code="matcha_lite",
+            current_user=_user(),
+        )
+    assert exc.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_put_saves_when_the_loaded_version_is_current(monkeypatch):
+    conn = MagicMock()
+    saved = {**_EXISTING, "price_per_block_cents": 4500, "updated_by": "admin@example.com"}
+    conn.fetchrow = AsyncMock(side_effect=[_EXISTING, saved])
+    conn.execute = AsyncMock()
+    monkeypatch.setattr(f"{MOD}.get_connection", _conn_ctx(conn))
+
+    result = await update_matcha_lite_pricing(
+        _update_body(price_per_block_cents=4500, block_size=10, expected_updated_at=SAVED_AT.isoformat()),
+        product_code="matcha_lite",
+        current_user=_user(),
+    )
+
+    assert result.price_per_block_cents == 4500
+    # The version check is not part of the price, so it stays out of the history.
+    _, _, old_values, new_values = conn.execute.call_args.args
+    assert "updated_at" not in old_values
+    assert "expected_updated_at" not in new_values
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("overrides", [
+    dict(price_per_block_cents=49),
+    dict(price_per_block_cents=4900, block_size=10, min_headcount=1, sale_active=True,
+         sale_price_per_block_cents=40),
+])
+async def test_put_refuses_prices_stripe_cannot_charge(monkeypatch, overrides):
+    conn = MagicMock()
+    monkeypatch.setattr(f"{MOD}.get_connection", _conn_ctx(conn))
+
+    with pytest.raises(HTTPException) as exc:
+        await update_matcha_lite_pricing(
+            _update_body(**overrides), product_code="matcha_lite", current_user=_user(),
+        )
+    assert exc.value.status_code == 400
+    assert "$0.50" in exc.value.detail
