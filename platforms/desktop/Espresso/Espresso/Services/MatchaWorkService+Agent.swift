@@ -12,6 +12,11 @@ extension MatchaWorkService {
         try await client.request(method: "GET", path: "\(basePath)/entitlements")
     }
 
+    /// What each personal plan's checkout charges right now.
+    func listPersonalPlans() async throws -> [MWPersonalPlanPrice] {
+        try await client.request(method: "GET", path: "\(basePath)/billing/plans")
+    }
+
     func startPersonalCheckout(successUrl: String, cancelUrl: String, plan: String = "pro") async throws -> String {
         struct Body: Codable {
             let successUrl: String

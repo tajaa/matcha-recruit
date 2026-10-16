@@ -10,17 +10,20 @@ import { BuyerGuide, BuyerQuestions, BuyerTopBar, OperationFit, Recovery, Setup 
 import { Pricing } from './buyers/Pricing'
 import { Value } from './buyers/Value'
 import { useHashScroll } from './useHashScroll'
+import { useSchedulingPrice } from './useSchedulingPrice'
 
 /** `/` — the scheduling home page. */
 export default function SchedulingTab({ onContact }: { onContact: () => void }) {
   useHashScroll()
+  // One fetch for every price on the page: the product "Start now" buys.
+  const livePrice = useSchedulingPrice()
   return (
     <>
       <BuyerTopBar />
       <TimelineRail darkStep="cost" />
       <Hero onContact={onContact} showCommercial />
       <main>
-        <BuyerGuide />
+        <BuyerGuide livePrice={livePrice} />
         <Draft />
         <Check />
         <Change />
@@ -29,8 +32,8 @@ export default function SchedulingTab({ onContact }: { onContact: () => void }) 
         <Publish />
         <Setup onContact={onContact} />
         <OperationFit />
-        <Value onContact={onContact} />
-        <Pricing onContact={onContact} />
+        <Value onContact={onContact} livePrice={livePrice} />
+        <Pricing onContact={onContact} livePrice={livePrice} />
         <BuyerQuestions onContact={onContact} />
         <Closing onContact={onContact} />
       </main>

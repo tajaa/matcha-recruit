@@ -274,6 +274,43 @@ async def update_product(
     return row_to_product(row).to_dict()
 
 
+class PriceChange(BaseModel):
+    price_cents: int = Field(gt=0)
+
+
+@router.put("/products/{product_id}/price")
+async def set_product_price(
+    product_id: UUID, body: PriceChange, current_user=Depends(require_admin)
+):
+    """Change only what a Stripe-billed product charges — /admin/pricing.
+
+    Checkout builds its Stripe price inline from this row, so the next checkout
+    charges the new amount with no Stripe-side sync. Existing subscribers keep
+    the amount they signed up at. Narrower than PUT /products/{id} so the
+    pricing page never re-sends (and can't clobber) features, nav or slug.
+    """
+    async with get_connection() as conn:
+        async with conn.transaction():
+            current = await conn.fetchrow(
+                "SELECT pricing_model FROM product_definitions WHERE id = $1 FOR UPDATE",
+                product_id,
+            )
+            if not current:
+                raise HTTPException(status_code=404, detail="Product not found")
+            if current["pricing_model"] not in PAID_PRICING_MODELS:
+                raise HTTPException(status_code=400, detail="This product isn't billed through Stripe")
+            await _snapshot(conn, product_id, current_user.email)
+            row = await conn.fetchrow(
+                f"""UPDATE product_definitions
+                       SET price_cents = $1, updated_at = NOW(), updated_by = $2
+                     WHERE id = $3
+                 RETURNING {SELECT_COLUMNS}""",
+                body.price_cents, current_user.email, product_id,
+            )
+    logger.info("Admin set product %s price to %s by %s", product_id, body.price_cents, current_user.email)
+    return row_to_product(row).to_dict()
+
+
 class StatusChange(BaseModel):
     status: str
 

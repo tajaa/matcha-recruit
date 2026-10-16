@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from app.core.models.auth import CurrentUser
 from app.core.dependencies import require_admin as require_platform_admin
+from app.core.services.matcha_lite_pricing import compute_matcha_lite_price_cents, get_matcha_lite_pricing
 from app.core.services.stripe_service import StripeService, StripeServiceError
 from app.database import get_connection
 from app.matcha.dependencies import get_client_company_id, require_admin_or_client
@@ -71,10 +72,35 @@ class CheckoutRequest(BaseModel):
     cancel_url: Optional[str] = Field(default=None, max_length=2000)
 
 
+PersonalPlan = Literal["lite", "pro"]
+
+# Each personal plan's price is a matcha_lite_pricing row (flat, one unit),
+# edited at /admin/pricing. Checkout and both paywalls read the same row, so a
+# price change reaches the next Stripe checkout with no Stripe-side sync.
+PERSONAL_PLAN_PRICE_CODES: dict[str, str] = {"lite": "espresso_lite", "pro": "espresso_pro"}
+
+
 class PersonalCheckoutRequest(CheckoutRequest):
     # Personal Werk plan ladder. Defaults to "pro" so pre-tier clients that
-    # don't send a plan keep buying the original $20 SKU.
-    plan: Literal["lite", "pro"] = "pro"
+    # don't send a plan keep buying the original Pro SKU.
+    plan: PersonalPlan = "pro"
+
+
+class PersonalPlanResponse(BaseModel):
+    plan: PersonalPlan
+    name: str
+    description: str
+    amount_cents: int
+    currency: str = "usd"
+
+
+async def personal_plan_price_cents(plan: str) -> int:
+    """What the next checkout for `plan` charges, sale price included."""
+    pricing = await get_matcha_lite_pricing(product_code=PERSONAL_PLAN_PRICE_CODES[plan])
+    amount = compute_matcha_lite_price_cents(pricing, 1)
+    if amount is None:  # the admin PUT pins flat plans to one unit
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="This plan's price is misconfigured")
+    return amount
 
 
 class CheckoutResponse(BaseModel):
@@ -125,6 +151,22 @@ async def list_packs(
             amount_cents=SUBSCRIPTION_AMOUNT_CENTS,
             tokens_per_month=SUBSCRIPTION_TOKENS,
         )
+    ]
+
+
+@router.get("/plans", response_model=list[PersonalPlanResponse])
+async def list_personal_plans(
+    _: CurrentUser = Depends(require_admin_or_client),
+):
+    """Personal plan prices for the web and macOS paywalls."""
+    return [
+        PersonalPlanResponse(
+            plan=plan,
+            name=cfg["name"],
+            description=cfg["description"],
+            amount_cents=await personal_plan_price_cents(plan),
+        )
+        for plan, cfg in StripeService.PERSONAL_PLANS.items()
     ]
 
 
@@ -188,6 +230,7 @@ async def create_personal_checkout_session(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No workspace associated with this account")
 
     plan_cfg = StripeService.PERSONAL_PLANS[body.plan]
+    amount_cents = await personal_plan_price_cents(body.plan)
 
     existing = await billing_service.get_active_subscription(
         company_id, pack_ids=billing_service.WERK_PACK_IDS
@@ -213,6 +256,7 @@ async def create_personal_checkout_session(
         session = await stripe_service.create_personal_subscription_checkout(
             company_id=company_id,
             user_id=current_user.id,
+            amount_cents=amount_cents,
             success_url=body.success_url,
             cancel_url=body.cancel_url,
             plan=body.plan,
@@ -234,7 +278,7 @@ async def create_personal_checkout_session(
         stripe_session_id=stripe_session_id,
         credit_pack_id=plan_cfg["pack_id"],
         credits_to_add=0,
-        amount_cents=plan_cfg["amount_cents"],
+        amount_cents=amount_cents,
     )
 
     return CheckoutResponse(checkout_url=checkout_url, stripe_session_id=stripe_session_id)

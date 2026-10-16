@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from app.database import get_connection
 from app.core.dependencies import require_admin
 from app.core.services.matcha_lite_pricing import (
+    FLAT_PRODUCT_CODES,
     PRODUCT_CODES,
     SELECT_COLUMNS,
     get_matcha_lite_pricing,
@@ -72,6 +73,10 @@ async def update_matcha_lite_pricing(
     current_user=Depends(require_admin),
 ):
     product_code = _validate_product_code(product_code)
+    if product_code in FLAT_PRODUCT_CODES:
+        # A flat plan is one unit; anything else here would only make the
+        # checkout's headcount-of-1 price lookup refuse.
+        body = body.model_copy(update={"block_size": 1, "min_headcount": 1, "max_headcount": 1})
     if body.min_headcount > body.max_headcount:
         raise HTTPException(status_code=400, detail="min_headcount cannot exceed max_headcount")
     if body.sale_active and body.sale_price_per_block_cents is None:

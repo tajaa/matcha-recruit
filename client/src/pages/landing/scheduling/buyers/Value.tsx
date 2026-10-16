@@ -4,6 +4,8 @@ import { WRAP, display, mono } from '../../../../components/marketing/kit/styles
 import { CARD, INK, INK_SOFT, PAPER, STAMP, hexA } from '../../../../components/marketing/kit/theme'
 import { Accent, CellLabel, PrimaryButton } from '../sections/Chrome'
 import { BuyerHeading } from './BuyerSections'
+import { formatPrice } from '../../../../utils/format'
+import type { SchedulingPrice } from '../useSchedulingPrice'
 import { estimateSchedulingCost, inRange, VALUE_LIMITS, VALUE_PLAN } from './valueEstimate'
 
 const currency = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })
@@ -27,12 +29,14 @@ function NumberField({ id, label, value, onChange, max, min = 0, step = 1, note,
   )
 }
 
-export function Value({ onContact }: { onContact: () => void }) {
+export function Value({ onContact, livePrice = null }: { onContact: () => void; livePrice?: SchedulingPrice | null }) {
+  // The self-serve price people actually check out at, once it has loaded.
+  const plan = livePrice ? { name: livePrice.name, price: livePrice.perLocation } : VALUE_PLAN
   // Editable starting figures, so the result is visible before anything is typed.
   const [locations, setLocations] = useState('1')
   const [managerRate, setManagerRate] = useState('25')
   const [hoursPerWeek, setHoursPerWeek] = useState('4')
-  const result = estimateSchedulingCost({ locations: numberFrom(locations), managerRate: numberFrom(managerRate), hoursPerWeek: numberFrom(hoursPerWeek) })
+  const result = estimateSchedulingCost({ locations: numberFrom(locations), managerRate: numberFrom(managerRate), hoursPerWeek: numberFrom(hoursPerWeek) }, plan.price)
   const count = result ? `${numberFrom(locations)} ${numberFrom(locations) === 1 ? 'location' : 'locations'}` : 'your locations'
   const breakEven = result?.breakEvenMinutes == null ? null : Math.ceil(result.breakEvenMinutes)
   const spentMinutes = numberFrom(hoursPerWeek) * 60
@@ -58,15 +62,19 @@ export function Value({ onContact }: { onContact: () => void }) {
             <p className="mt-3 text-sm" style={{ color: INK_SOFT }}>of manager time a month, across {count}</p>
             <dl className="mt-8 space-y-4 border-t pt-6 text-sm" style={{ borderColor: RULE }}>
               <div className="flex flex-wrap justify-between gap-2"><dt style={{ color: INK_SOFT }}>Manager hours a month</dt><dd className="tabular-nums" data-testid="hours-monthly">{result ? hours.format(result.hoursPerMonth) : '—'}</dd></div>
-              <div className="flex flex-wrap justify-between gap-2"><dt style={{ color: INK_SOFT }}>{VALUE_PLAN.name} a month</dt><dd className="tabular-nums" data-testid="subscription">{result ? currency.format(result.subscription) : '—'}</dd></div>
+              <div className="flex flex-wrap justify-between gap-2"><dt style={{ color: INK_SOFT }}>{plan.name} a month</dt><dd className="tabular-nums" data-testid="subscription">{result ? formatPrice(result.subscription) : '—'}</dd></div>
             </dl>
             <p className="mt-7 border-t pt-6 text-base leading-relaxed" data-testid="break-even" style={{ borderColor: RULE }}>
               {!result ? 'Check the three numbers to see your estimate.'
                 : breakEven === null ? 'Enter an hourly wage above $0 to see the time that covers the subscription.'
-                : result.coversItself ? <>{VALUE_PLAN.name} pays for itself once it saves <strong>{breakEven.toLocaleString()} minutes a week</strong> per location, out of the {spentMinutes.toLocaleString()} you spend now.</>
-                : <>{VALUE_PLAN.name} would need to save <strong>{breakEven.toLocaleString()} minutes a week</strong> per location, more than the {spentMinutes.toLocaleString()} you spend now. On schedule-building time alone, it would not pay for itself.</>}
+                : result.coversItself ? <>{plan.name} pays for itself once it saves <strong>{breakEven.toLocaleString()} minutes a week</strong> per location, out of the {spentMinutes.toLocaleString()} you spend now.</>
+                : <>{plan.name} would need to save <strong>{breakEven.toLocaleString()} minutes a week</strong> per location, more than the {spentMinutes.toLocaleString()} you spend now. On schedule-building time alone, it would not pay for itself.</>}
             </p>
-            <p className="mt-auto pt-7" style={mono('10px', { color: INK_SOFT })}>Assumes {VALUE_PLAN.name}, our highest plan · ${VALUE_PLAN.price} / location / month</p>
+            <p className="mt-auto pt-7" style={mono('10px', { color: INK_SOFT })}>
+              {livePrice
+                ? <>Assumes {plan.name} at checkout · {formatPrice(plan.price)} / location / month</>
+                : <>Assumes {VALUE_PLAN.name}, our highest plan · ${VALUE_PLAN.price} / location / month</>}
+            </p>
           </div>
         </Reveal>
       </div>

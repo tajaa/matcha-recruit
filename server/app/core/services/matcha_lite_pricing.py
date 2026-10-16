@@ -26,7 +26,9 @@ SELECT_COLUMNS = """
 # (/compliance/signup + /checkout/compliance), the Lite add-ons
 # (/checkout/lite-addon — see services/lite_addons.py; block_size=1 ⇒ PEPM),
 # and Tell-Us brand billing (server/app/tellus/routes/billing.py; block_size=1
-# ⇒ flat per-store — "headcount" here means store count, not employees).
+# ⇒ flat per-store — "headcount" here means store count, not employees), and
+# the personal Espresso plans (/matcha-work/billing/checkout/personal — flat
+# monthly prices, see FLAT_PRODUCT_CODES).
 PRODUCT_CODES = (
     "matcha_lite",
     "matcha_lite_essentials",
@@ -35,7 +37,14 @@ PRODUCT_CODES = (
     "addon_hris_sync",
     "addon_handbook_watch",
     "tellus_brand",
+    "espresso_lite",
+    "espresso_pro",
 )
+
+# Flat monthly prices: one unit, no headcount. The admin form hides block size
+# and the headcount range for these, and the admin PUT pins them to 1 so a
+# stray value can't make compute_matcha_lite_price_cents(pricing, 1) refuse.
+FLAT_PRODUCT_CODES = ("espresso_lite", "espresso_pro")
 
 _FALLBACK_DEFAULTS = {
     "matcha_lite": dict(price_per_block_cents=5000, block_size=10, min_headcount=1, max_headcount=300),
@@ -47,6 +56,10 @@ _FALLBACK_DEFAULTS = {
     "addon_hris_sync": dict(price_per_block_cents=200, block_size=1, min_headcount=1, max_headcount=300),
     "addon_handbook_watch": dict(price_per_block_cents=100, block_size=1, min_headcount=1, max_headcount=300),
     "tellus_brand": dict(price_per_block_cents=2900, block_size=1, min_headcount=1, max_headcount=500),
+    # Launch prices of the personal Espresso plans (Lite $9 / Pro $20). No seed
+    # migration: the first admin save at /admin/pricing creates the row.
+    "espresso_lite": dict(price_per_block_cents=900, block_size=1, min_headcount=1, max_headcount=1),
+    "espresso_pro": dict(price_per_block_cents=2000, block_size=1, min_headcount=1, max_headcount=1),
 }
 
 

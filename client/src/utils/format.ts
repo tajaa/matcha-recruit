@@ -110,6 +110,13 @@ export function formatMoney(
   })
 }
 
+/** A price a customer is charged: "$20", "$9.50". Cents appear only when the
+ *  amount has them, so an admin-set $9.50 never shows as "$10". */
+export function formatPrice(dollars: number | null | undefined): string {
+  if (dollars === null || dollars === undefined || Number.isNaN(dollars)) return '—'
+  return formatMoney(dollars, { cents: !Number.isInteger(Math.round(dollars * 100) / 100) })
+}
+
 /** "1.2 KB" / "3.4 MB". Base 1024, matching what the upload widgets report. */
 export function formatBytes(bytes: number | null | undefined): string {
   if (bytes === null || bytes === undefined || Number.isNaN(bytes)) return '—'

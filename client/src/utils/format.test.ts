@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { relativeTime, formatMoney, formatBytes, shortDate, shortDateWithYear } from './format'
+import { relativeTime, formatMoney, formatPrice, formatBytes, shortDate, shortDateWithYear } from './format'
 
 const NOW = new Date('2026-07-20T12:00:00Z').getTime()
 const ago = (ms: number) => new Date(NOW - ms).toISOString()
@@ -112,6 +112,15 @@ describe('formatMoney', () => {
     expect(formatMoney(-400)).toBe('-$400')
     expect(formatMoney(null)).toBe('—')
     expect(formatMoney(undefined)).toBe('—')
+  })
+})
+
+describe('formatPrice', () => {
+  it('shows cents only when the price has them', () => {
+    expect(formatPrice(20)).toBe('$20')
+    expect(formatPrice(9.5)).toBe('$9.50')
+    expect(formatPrice(1250)).toBe('$1,250')
+    expect(formatPrice(null)).toBe('—')
   })
 })
 

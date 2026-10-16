@@ -163,3 +163,28 @@ async def test_put_rejects_min_greater_than_max(monkeypatch):
             current_user=_user(),
         )
     assert exc.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_put_pins_flat_espresso_plan_to_one_unit(monkeypatch):
+    conn = MagicMock()
+    returned = {
+        "price_per_block_cents": 1900, "block_size": 1, "sale_price_per_block_cents": None,
+        "sale_active": False, "min_headcount": 1, "max_headcount": 1,
+        "updated_at": None, "updated_by": "admin@example.com",
+    }
+    conn.fetchrow = AsyncMock(side_effect=[None, returned])
+    conn.execute = AsyncMock()
+    monkeypatch.setattr(f"{MOD}.get_connection", _conn_ctx(conn))
+
+    # A block size or range left over from a per-head form must not reach the
+    # row: the checkout prices a flat plan at one unit.
+    await update_matcha_lite_pricing(
+        _update_body(price_per_block_cents=1900, block_size=10, min_headcount=5, max_headcount=300),
+        product_code="espresso_pro",
+        current_user=_user(),
+    )
+
+    insert_args = conn.fetchrow.call_args_list[1].args
+    assert insert_args[1:4] == ("espresso_pro", 1900, 1)
+    assert insert_args[6:8] == (1, 1)

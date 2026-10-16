@@ -9,6 +9,7 @@ import pytest
 from fastapi import HTTPException
 
 from app.core.routes.billing import stripe_webhook as webhook
+from app.core.services.matcha_lite_pricing import MatchaLitePricing
 from app.core.services.stripe_service import StripeServiceError
 from app.core.services.stripe_service import StripeService
 from app.matcha.routes.work import billing as routes
@@ -31,7 +32,7 @@ async def test_personal_checkout_carries_upgrade_intent_in_stripe_metadata():
         patch("app.core.services.stripe_service.stripe", fake_stripe),
     ):
         await service.create_personal_subscription_checkout(
-            company_id=uuid4(), user_id=uuid4(), plan="pro",
+            company_id=uuid4(), user_id=uuid4(), plan="pro", amount_cents=1900,
             success_url="https://example.com/espresso?upgraded=1",
             cancel_url="https://example.com/espresso?canceled=1",
             upgrade_from_subscription_id="sub_lite",
@@ -39,6 +40,64 @@ async def test_personal_checkout_carries_upgrade_intent_in_stripe_metadata():
 
     assert created["metadata"]["upgrade_from_subscription_id"] == "sub_lite"
     assert created["subscription_data"]["metadata"]["upgrade_from_subscription_id"] == "sub_lite"
+    # The caller's price, not a constant, is what Stripe charges and records.
+    assert created["line_items"][0]["price_data"]["unit_amount"] == 1900
+    assert created["metadata"]["amount_cents"] == "1900"
+
+
+def _pricing(cents, *, sale=None, max_headcount=1):
+    return MatchaLitePricing(
+        price_per_block_cents=cents, block_size=1,
+        sale_price_per_block_cents=sale, sale_active=sale is not None,
+        min_headcount=1, max_headcount=max_headcount, updated_at=None, updated_by=None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_personal_checkout_charges_the_admin_price():
+    user = SimpleNamespace(id=uuid4(), role="individual")
+    stripe = SimpleNamespace(
+        create_personal_subscription_checkout=AsyncMock(return_value=SimpleNamespace(
+            id="cs_lite", url="https://checkout.stripe.com/cs_lite",
+        )),
+    )
+    lookup = AsyncMock(return_value=_pricing(900, sale=700))
+    with (
+        patch.object(routes, "get_client_company_id", AsyncMock(return_value=uuid4())),
+        patch.object(routes, "get_matcha_lite_pricing", lookup),
+        patch.object(billing_service, "get_active_subscription", AsyncMock(return_value=None)),
+        patch.object(billing_service, "create_pending_stripe_session", AsyncMock()) as pending,
+        patch.object(routes, "StripeService", return_value=stripe),
+    ):
+        await routes.create_personal_checkout_session(routes.PersonalCheckoutRequest(plan="lite"), user)
+
+    assert lookup.await_args.kwargs["product_code"] == "espresso_lite"
+    # The sale price is on, so it is what Stripe charges and what we record.
+    assert stripe.create_personal_subscription_checkout.await_args.kwargs["amount_cents"] == 700
+    assert pending.await_args.kwargs["amount_cents"] == 700
+
+
+@pytest.mark.asyncio
+async def test_personal_plans_lists_the_live_prices():
+    prices = {"espresso_lite": _pricing(900), "espresso_pro": _pricing(2000, sale=1500)}
+
+    async def lookup(*, product_code):
+        return prices[product_code]
+
+    with patch.object(routes, "get_matcha_lite_pricing", lookup):
+        plans = await routes.list_personal_plans(SimpleNamespace(id=uuid4(), role="individual"))
+
+    assert [(p.plan, p.amount_cents) for p in plans] == [("lite", 900), ("pro", 1500)]
+    assert plans[1].name == StripeService.PERSONAL_PLANS["pro"]["name"]
+
+
+@pytest.mark.asyncio
+async def test_misconfigured_plan_price_refuses_instead_of_charging():
+    # A row whose range excludes one unit can't be priced; never send Stripe a guess.
+    with patch.object(routes, "get_matcha_lite_pricing", AsyncMock(return_value=_pricing(900, max_headcount=0))):
+        with pytest.raises(HTTPException) as exc:
+            await routes.personal_plan_price_cents("lite")
+    assert exc.value.status_code == 503
 
 
 @pytest.mark.asyncio
@@ -60,7 +119,7 @@ async def test_lite_upgrade_keeps_old_subscription_until_checkout_completes():
     user = SimpleNamespace(id=uuid4(), role="individual")
     company_id = uuid4()
     stripe = SimpleNamespace(
-        PERSONAL_PLANS={"pro": {"pack_id": entitlements_service.PRO_PACK_ID, "amount_cents": 2000}},
+        PERSONAL_PLANS={"pro": {"pack_id": entitlements_service.PRO_PACK_ID}},
         create_personal_subscription_checkout=AsyncMock(return_value=SimpleNamespace(
             id="cs_pro", url="https://checkout.stripe.com/cs_pro",
         )),
@@ -73,6 +132,7 @@ async def test_lite_upgrade_keeps_old_subscription_until_checkout_completes():
         patch.object(billing_service, "create_pending_stripe_session", AsyncMock()),
         patch.object(billing_service, "cancel_subscription_record", AsyncMock()) as cancel_record,
         patch.object(routes, "StripeService", return_value=stripe),
+        patch.object(routes, "personal_plan_price_cents", AsyncMock(return_value=2000)),
     ):
         result = await routes.create_personal_checkout_session(
             routes.PersonalCheckoutRequest(plan="pro"), user,
@@ -88,7 +148,7 @@ async def test_lite_upgrade_keeps_old_subscription_until_checkout_completes():
 async def test_failed_pro_checkout_does_not_cancel_lite():
     user = SimpleNamespace(id=uuid4(), role="individual")
     stripe = SimpleNamespace(
-        PERSONAL_PLANS={"pro": {"pack_id": entitlements_service.PRO_PACK_ID, "amount_cents": 2000}},
+        PERSONAL_PLANS={"pro": {"pack_id": entitlements_service.PRO_PACK_ID}},
         create_personal_subscription_checkout=AsyncMock(side_effect=StripeServiceError("Stripe unavailable")),
         cancel_subscription=AsyncMock(),
     )
@@ -98,6 +158,7 @@ async def test_failed_pro_checkout_does_not_cancel_lite():
         patch.object(billing_service, "get_active_subscription", AsyncMock(return_value=old)),
         patch.object(billing_service, "cancel_subscription_record", AsyncMock()) as cancel_record,
         patch.object(routes, "StripeService", return_value=stripe),
+        patch.object(routes, "personal_plan_price_cents", AsyncMock(return_value=2000)),
     ):
         with pytest.raises(HTTPException) as exc:
             await routes.create_personal_checkout_session(routes.PersonalCheckoutRequest(plan="pro"), user)

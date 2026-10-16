@@ -3,11 +3,30 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import PaywallModal from './PaywallModal'
 
 const checkout = vi.hoisted(() => vi.fn())
-vi.mock('../../api/matchaWork/billing', () => ({ startPersonalCheckout: checkout }))
+const listPlans = vi.hoisted(() => vi.fn())
+vi.mock('../../api/matchaWork/billing', () => ({ startPersonalCheckout: checkout, listPersonalPlans: listPlans }))
 
-beforeEach(() => { checkout.mockReset() })
+beforeEach(() => {
+  checkout.mockReset()
+  listPlans.mockReset()
+  listPlans.mockReturnValue(new Promise(() => {}))
+})
 
 describe('PaywallModal', () => {
+  it('shows the price the checkout charges, set at /admin/pricing', async () => {
+    listPlans.mockResolvedValue([
+      { plan: 'lite', name: 'Werk Lite', description: '', amount_cents: 950, currency: 'usd' },
+      { plan: 'pro', name: 'Werk Pro', description: '', amount_cents: 1900, currency: 'usd' },
+    ])
+    render(<PaywallModal
+      detail={{ code: 'plan_required', feature: 'journals_full', required_plan: 'lite', current_plan: 'free' }}
+      onClose={() => {}}
+    />)
+    expect(screen.getByText('$9/mo')).toBeInTheDocument()  // fallback until the price arrives
+    expect(await screen.findByText('$9.50/mo')).toBeInTheDocument()
+    expect(screen.getByText('$19/mo')).toBeInTheDocument()
+  })
+
   it('offers Lite for a free user and requests the Lite checkout', () => {
     checkout.mockImplementation(() => new Promise(() => {}))
     render(<PaywallModal

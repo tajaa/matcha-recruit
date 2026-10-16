@@ -44,8 +44,8 @@ PRO_PACK_ID = "matcha_work_personal"
 # Business metered token pack ($40/5M) — orthogonal to the personal ladder.
 TOKEN_PACK_ID = "matcha_work_pro"
 
-LITE_AMOUNT_CENTS = 900
-PRO_AMOUNT_CENTS = 2000
+# Prices are not here: they are the espresso_lite / espresso_pro rows of
+# matcha_lite_pricing, edited at /admin/pricing.
 
 # Per-user rolling-window quota defaults by plan: (token_limit, window_hours).
 # Explicit mw_token_quotas rows always override these (admin grants).

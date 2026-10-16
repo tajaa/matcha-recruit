@@ -1,6 +1,7 @@
 """Pure-function tests for the admin-configurable Matcha Lite pricing engine."""
 
 from app.core.services.matcha_lite_pricing import (
+    FLAT_PRODUCT_CODES,
     PRODUCT_CODES,
     MatchaLitePricing,
     _FALLBACK_DEFAULTS,
@@ -68,6 +69,8 @@ def test_product_codes_has_standard_and_essentials():
         "addon_hris_sync",
         "addon_handbook_watch",
         "tellus_brand",
+        "espresso_lite",
+        "espresso_pro",
     )
 
 
@@ -102,3 +105,13 @@ def test_addon_fallback_defaults_are_flat_pepm():
         assert compute_matcha_lite_price_cents(pricing, 1) == per_head
         assert compute_matcha_lite_price_cents(pricing, 25) == 25 * per_head
         assert compute_matcha_lite_price_cents(pricing, 301) is None
+
+
+def test_espresso_fallback_defaults_are_the_launch_plan_prices():
+    # No seed migration: until an admin saves at /admin/pricing, checkout
+    # charges these. One unit; anything above it is out of range.
+    for code, cents in (("espresso_lite", 900), ("espresso_pro", 2000)):
+        assert code in FLAT_PRODUCT_CODES
+        pricing = _pricing(**_FALLBACK_DEFAULTS[code])
+        assert compute_matcha_lite_price_cents(pricing, 1) == cents
+        assert compute_matcha_lite_price_cents(pricing, 2) is None

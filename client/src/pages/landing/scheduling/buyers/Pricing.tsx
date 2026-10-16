@@ -2,7 +2,10 @@ import { ArrowRight, Check, ChevronDown, Minus } from 'lucide-react'
 import { Reveal } from '../../../../components/marketing/kit/motion'
 import { WRAP, display, mono } from '../../../../components/marketing/kit/styles'
 import { BOARD, PAPER, hexA } from '../../../../components/marketing/kit/theme'
-import { Accent, CellLabel, PrimaryButton } from '../sections/Chrome'
+import { formatPrice } from '../../../../utils/format'
+import { Accent, CellLabel, PrimaryButton, PrimaryLink } from '../sections/Chrome'
+import { SCHEDULING_SIGNUP_PATH } from '../signup'
+import type { SchedulingPrice } from '../useSchedulingPrice'
 import { BuyerHeading } from './BuyerSections'
 import { SCHEDULING_PLANS as PLANS } from './plans'
 
@@ -25,7 +28,7 @@ const FEATURES = [
 const RULE = hexA(PAPER, 0.14)
 const MUTED = hexA(PAPER, 0.65)
 
-export function Pricing({ onContact }: { onContact: () => void }) {
+export function Pricing({ onContact, livePrice = null }: { onContact: () => void; livePrice?: SchedulingPrice | null }) {
   return (
     <section id="pricing" className="sched-dark" style={{ backgroundColor: BOARD.PAPER, color: PAPER }}>
       <div className={`${WRAP} py-28 sm:py-44`}>
@@ -36,6 +39,17 @@ export function Pricing({ onContact }: { onContact: () => void }) {
           <p className="flex items-center gap-2 text-sm" style={{ color: MUTED }}><Check size={14} style={{ color: BOARD.STAMP }} aria-hidden />Core assignment checks in every plan</p>
           <p style={mono('10px', { color: MUTED })}>Monthly · per location · USD</p>
         </div>
+        {livePrice && (
+          // The price "Start now" checks out at — the product row edited at
+          // /admin/pricing, so this and the Stripe checkout always agree.
+          <div className="mt-8 flex flex-wrap items-center justify-between gap-5 rounded-2xl border px-6 py-5" style={{ borderColor: RULE }} data-testid="live-price">
+            <p className="text-base">
+              Start today at <strong className="font-medium">{formatPrice(livePrice.perLocation)}</strong> per location, per month.
+              <span className="ml-2 text-sm" style={{ color: MUTED }}>{livePrice.name}, billed monthly through Stripe.</span>
+            </p>
+            <PrimaryLink to={SCHEDULING_SIGNUP_PATH} tone="paper">Start now</PrimaryLink>
+          </div>
+        )}
         <div className="grid md:grid-cols-3">
           {PLANS.map((plan, i) => (
             <Reveal key={plan.name} delay={i * 100} className="flex min-w-0 flex-col border-b py-10 md:py-12 md:[&+div]:border-l md:[&+div]:pl-7 md:[&:not(:last-child)]:pr-7 lg:[&+div]:pl-10 lg:[&:not(:last-child)]:pr-10" style={{ borderColor: RULE }}>

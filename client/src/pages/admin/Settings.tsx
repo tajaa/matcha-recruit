@@ -259,12 +259,20 @@ export default function Settings() {
   const hasChanges = selectedMode !== null && selectedMode !== researchMode
 
   return (
-    <div>
+    <div className="max-w-6xl">
       <h1 className="text-2xl font-semibold text-zinc-100">Settings</h1>
       <p className="mt-2 text-sm text-zinc-500">Platform-wide configuration.</p>
 
+      {/* Two columns on wide screens: the short sections stack on the left
+          against AutoPR's taller board list on the right; the wide ones (AI
+          models, quotas, live usage) take the full width below. One column
+          below lg. */}
+      <div className="mt-8 space-y-12">
+      <div className="grid items-start gap-x-8 gap-y-12 lg:grid-cols-2">
+      <div className="min-w-0 space-y-12">
+
       {/* ── Compliance Research Model ── */}
-      <div className="mt-8 max-w-xl">
+      <div className="min-w-0">
         <h2 className="text-sm font-medium text-zinc-300 mb-1">Compliance Research Model</h2>
         <p className="text-xs text-zinc-500 mb-3">
           Controls which Gemini model is used for jurisdiction &amp; specialization research.
@@ -308,34 +316,75 @@ export default function Settings() {
         </div>
       </div>
 
-      {/* ── AI models ── */}
-      <div className="mt-12 max-w-2xl">
-        <h2 className="text-sm font-medium text-zinc-300 mb-1">AI models</h2>
-        <p className="text-xs text-zinc-500 mb-3">
-          Which model each app runs on, with per-product overrides. Built-in keeps a product on the
-          model it was built on. Managers can still pick a model per chat in the schedule assistant.
+      {/* ── Beta Invitations ── */}
+      <div className="min-w-0">
+        <h2 className="text-sm font-medium text-zinc-300 mb-1">Matcha Work Beta Invitations</h2>
+        <p className="text-xs text-zinc-500 mb-4">
+          Send private beta invitations for Matcha Work. Recipients get an independent individual account (not attached to any business).
         </p>
-        {settings.loading ? (
-          <div className="flex items-center gap-2 py-4 text-sm text-zinc-500">
-            <Loader2 className="w-4 h-4 animate-spin" /> Loading settings...
-          </div>
-        ) : settings.error ? (
-          <p className="py-4 text-sm text-red-400">{settings.error}</p>
-        ) : (
-          <AgentModelsSetting
-            models={settings.data?.agent_models ?? { apps: {}, surfaces: {} }}
-            registry={settings.data?.agent_model_registry ?? []}
-            choices={settings.data?.agent_model_choices ?? []}
-            version={settings.data?.agent_models_version ?? null}
-            anthropicConfigured={!!settings.data?.anthropic_configured}
-            onSaved={(models, version) =>
-              settings.setData({ ...settings.data, agent_models: models, agent_models_version: version })}
+
+        {/* Send form */}
+        <Card className="p-4 mb-4">
+          <label className="text-[10px] text-zinc-500 mb-1 block">Email addresses (one per line, or comma-separated)</label>
+          <textarea
+            value={betaEmails}
+            onChange={(e) => setBetaEmails(e.target.value)}
+            placeholder="jane@example.com&#10;john@example.com"
+            rows={3}
+            className="w-full text-xs rounded border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 resize-y"
           />
+          {betaResult && <p className="text-xs text-emerald-400 mt-2">{betaResult}</p>}
+          <div className="mt-3">
+            <Button onClick={handleSendBetaInvites} disabled={betaSending || !betaEmails.trim()}>
+              <Send size={12} className="mr-1.5" />
+              {betaSending ? 'Sending...' : 'Send Invitations'}
+            </Button>
+          </div>
+        </Card>
+
+        {/* Invitation list */}
+        {betaLoading ? (
+          <div className="flex items-center gap-2 py-4 text-sm text-zinc-500">
+            <Loader2 className="w-4 h-4 animate-spin" /> Loading invitations...
+          </div>
+        ) : beta.error ? (
+          <p className="py-4 text-sm text-red-400">{beta.error}</p>
+        ) : betaInvites.length === 0 ? (
+          <p className="text-xs text-zinc-500 py-4">No invitations sent yet.</p>
+        ) : (
+          <div className="space-y-1.5">
+            {betaInvites.map((inv) => (
+              <Card key={inv.id} className="flex items-center gap-3 px-3 py-2.5">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-zinc-200 truncate">{inv.email}</p>
+                  <p className="text-[10px] text-zinc-500">
+                    Sent {inv.created_at ? new Date(inv.created_at).toLocaleDateString() : '—'}
+                    {inv.registered_at && ` · Registered ${new Date(inv.registered_at).toLocaleDateString()}`}
+                  </p>
+                </div>
+                <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
+                  inv.status === 'registered'
+                    ? 'bg-emerald-900/30 text-emerald-400'
+                    : inv.status === 'pending'
+                    ? 'bg-amber-900/30 text-amber-400'
+                    : 'bg-zinc-800 text-zinc-500'
+                }`}>
+                  {inv.status}
+                </span>
+                {inv.status === 'pending' && (
+                  <button onClick={() => handleRevokeBetaInvite(inv.id)} className="text-zinc-600 hover:text-red-400 p-1">
+                    <Trash2 size={12} />
+                  </button>
+                )}
+              </Card>
+            ))}
+          </div>
         )}
+      </div>
       </div>
 
       {/* ── AutoPR board capabilities ── */}
-      <div className="mt-12 max-w-2xl">
+      <div className="min-w-0">
         <h2 className="text-sm font-medium text-zinc-300 mb-1">AutoPR board capabilities</h2>
         <p className="text-xs text-zinc-500 mb-3">
           What the AutoPR bot may do on each Espresso board it watches. Every grant is off by
@@ -406,9 +455,36 @@ export default function Settings() {
           </div>
         )}
       </div>
+      </div>
+
+      {/* ── AI models ── */}
+      <div className="min-w-0">
+        <h2 className="text-sm font-medium text-zinc-300 mb-1">AI models</h2>
+        <p className="text-xs text-zinc-500 mb-3">
+          Which model each app runs on, with per-product overrides. Built-in keeps a product on the
+          model it was built on. Managers can still pick a model per chat in the schedule assistant.
+        </p>
+        {settings.loading ? (
+          <div className="flex items-center gap-2 py-4 text-sm text-zinc-500">
+            <Loader2 className="w-4 h-4 animate-spin" /> Loading settings...
+          </div>
+        ) : settings.error ? (
+          <p className="py-4 text-sm text-red-400">{settings.error}</p>
+        ) : (
+          <AgentModelsSetting
+            models={settings.data?.agent_models ?? { apps: {}, surfaces: {} }}
+            registry={settings.data?.agent_model_registry ?? []}
+            choices={settings.data?.agent_model_choices ?? []}
+            version={settings.data?.agent_models_version ?? null}
+            anthropicConfigured={!!settings.data?.anthropic_configured}
+            onSaved={(models, version) =>
+              settings.setData({ ...settings.data, agent_models: models, agent_models_version: version })}
+          />
+        )}
+      </div>
 
       {/* ── Token Quotas ── */}
-      <div className="mt-12 max-w-2xl">
+      <div className="min-w-0">
         <div className="flex items-center justify-between mb-1">
           <h2 className="text-sm font-medium text-zinc-300">Token Quotas</h2>
           <div className="flex items-center gap-2">
@@ -519,7 +595,7 @@ export default function Settings() {
       </div>
 
       {/* ── Live Token Usage ── */}
-      <div className="mt-10 max-w-2xl">
+      <div className="min-w-0">
         <h2 className="text-sm font-medium text-zinc-300 mb-1">Live Token Usage (last 12h)</h2>
         <p className="text-xs text-zinc-500 mb-4">Active users and their token consumption in the current window.</p>
 
@@ -573,71 +649,6 @@ export default function Settings() {
           </div>
         )}
       </div>
-
-      {/* ── Beta Invitations ── */}
-      <div className="mt-12 max-w-2xl">
-        <h2 className="text-sm font-medium text-zinc-300 mb-1">Matcha Work Beta Invitations</h2>
-        <p className="text-xs text-zinc-500 mb-4">
-          Send private beta invitations for Matcha Work. Recipients get an independent individual account (not attached to any business).
-        </p>
-
-        {/* Send form */}
-        <Card className="p-4 mb-4">
-          <label className="text-[10px] text-zinc-500 mb-1 block">Email addresses (one per line, or comma-separated)</label>
-          <textarea
-            value={betaEmails}
-            onChange={(e) => setBetaEmails(e.target.value)}
-            placeholder="jane@example.com&#10;john@example.com"
-            rows={3}
-            className="w-full text-xs rounded border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 resize-y"
-          />
-          {betaResult && <p className="text-xs text-emerald-400 mt-2">{betaResult}</p>}
-          <div className="mt-3">
-            <Button onClick={handleSendBetaInvites} disabled={betaSending || !betaEmails.trim()}>
-              <Send size={12} className="mr-1.5" />
-              {betaSending ? 'Sending...' : 'Send Invitations'}
-            </Button>
-          </div>
-        </Card>
-
-        {/* Invitation list */}
-        {betaLoading ? (
-          <div className="flex items-center gap-2 py-4 text-sm text-zinc-500">
-            <Loader2 className="w-4 h-4 animate-spin" /> Loading invitations...
-          </div>
-        ) : beta.error ? (
-          <p className="py-4 text-sm text-red-400">{beta.error}</p>
-        ) : betaInvites.length === 0 ? (
-          <p className="text-xs text-zinc-500 py-4">No invitations sent yet.</p>
-        ) : (
-          <div className="space-y-1.5">
-            {betaInvites.map((inv) => (
-              <Card key={inv.id} className="flex items-center gap-3 px-3 py-2.5">
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm text-zinc-200 truncate">{inv.email}</p>
-                  <p className="text-[10px] text-zinc-500">
-                    Sent {inv.created_at ? new Date(inv.created_at).toLocaleDateString() : '—'}
-                    {inv.registered_at && ` · Registered ${new Date(inv.registered_at).toLocaleDateString()}`}
-                  </p>
-                </div>
-                <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
-                  inv.status === 'registered'
-                    ? 'bg-emerald-900/30 text-emerald-400'
-                    : inv.status === 'pending'
-                    ? 'bg-amber-900/30 text-amber-400'
-                    : 'bg-zinc-800 text-zinc-500'
-                }`}>
-                  {inv.status}
-                </span>
-                {inv.status === 'pending' && (
-                  <button onClick={() => handleRevokeBetaInvite(inv.id)} className="text-zinc-600 hover:text-red-400 p-1">
-                    <Trash2 size={12} />
-                  </button>
-                )}
-              </Card>
-            ))}
-          </div>
-        )}
       </div>
     </div>
   )

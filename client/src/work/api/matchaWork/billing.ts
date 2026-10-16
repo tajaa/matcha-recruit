@@ -19,6 +19,19 @@ export function cancelPersonalSubscription() {
   return api.delete<{ canceled: boolean; message: string }>('/matcha-work/billing/subscription')
 }
 
+export interface MWPersonalPlan {
+  plan: 'lite' | 'pro'
+  name: string
+  description: string
+  amount_cents: number
+  currency: string
+}
+
+/** What each personal plan's checkout charges right now — set at /admin/pricing. */
+export function listPersonalPlans() {
+  return api.get<MWPersonalPlan[]>('/matcha-work/billing/plans')
+}
+
 export function startPersonalCheckout(plan: 'lite' | 'pro' = 'pro') {
   const successUrl = `${window.location.origin}/espresso?upgraded=1`
   const cancelUrl = `${window.location.origin}/espresso?canceled=1`

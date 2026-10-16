@@ -301,6 +301,6 @@ class TestPersonalPlanTable:
 
         plans = StripeService.PERSONAL_PLANS
         assert plans["lite"]["pack_id"] == ent.LITE_PACK_ID
-        assert plans["lite"]["amount_cents"] == ent.LITE_AMOUNT_CENTS
         assert plans["pro"]["pack_id"] == ent.PRO_PACK_ID
-        assert plans["pro"]["amount_cents"] == ent.PRO_AMOUNT_CENTS
+        # Prices live in matcha_lite_pricing, never in the SKU table.
+        assert all("amount_cents" not in cfg for cfg in plans.values())

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Copy, Check, Link, Trash2 } from 'lucide-react'
+import { Link as RouterLink } from 'react-router-dom'
 import { api } from '../../api/client'
 import MatchaLitePricingPanel from './MatchaLitePricingPanel'
 
@@ -25,13 +26,14 @@ export default function MatchaLiteAdmin() {
   const [copied, setCopied] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
+  const fetchTokens = () => api.get<InviteToken[]>('/admin/matcha-lite/invite-tokens')
+
   async function load() {
-    const data = await api.get<InviteToken[]>('/admin/matcha-lite/invite-tokens')
-    setTokens(data)
+    setTokens(await fetchTokens())
   }
 
   useEffect(() => {
-    void load().catch((e: unknown) => {
+    fetchTokens().then(setTokens).catch((e: unknown) => {
       setError(e instanceof Error ? e.message : 'Failed to load signup links')
     })
   }, [])
@@ -96,7 +98,15 @@ export default function MatchaLiteAdmin() {
         </button>
       </div>
 
-      {tab === 'pricing' && <MatchaLitePricingPanel />}
+      {tab === 'pricing' && (
+        <>
+          <p className="mb-4 text-xs text-zinc-500">
+            Lite, Essentials, scheduling and Espresso are all on one page in{' '}
+            <RouterLink to="/admin/pricing" className="text-zinc-300 hover:text-zinc-100">Pricing</RouterLink>.
+          </p>
+          <MatchaLitePricingPanel />
+        </>
+      )}
       {tab === 'bespoke' && <BespokeInvitesPanel />}
 
       {tab !== 'links' ? null : <>
@@ -220,12 +230,16 @@ function BespokeInvitesPanel() {
   const [copied, setCopied] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
+  const fetchInvites = () =>
+    api.get<{ invites: BusinessInvite[]; total: number }>('/admin/business-invites').then((data) => data.invites)
+
   async function load() {
-    const data = await api.get<{ invites: BusinessInvite[]; total: number }>('/admin/business-invites')
-    setInvites(data.invites)
+    setInvites(await fetchInvites())
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    fetchInvites().then(setInvites).catch(() => {})
+  }, [])
 
   async function generate() {
     setGenerating(true)
