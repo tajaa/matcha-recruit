@@ -5,15 +5,21 @@
  * product builder (pages/admin/Products.tsx) so both show the same names for
  * the same flags. The backend list (GET /admin/products → available_features,
  * derived from DEFAULT_COMPANY_FEATURES) stays authoritative for what MAY be
- * sold; this map only supplies human labels.
+ * sold; this map only supplies human labels. A backend flag this map doesn't
+ * name still shows up, in the "Other" group (see `withOtherGroup`).
  */
-export const FEATURE_GROUPS: { label: string; features: Record<string, string> }[] = [
+export type FeatureGroup = { label: string; features: Record<string, string> }
+
+export const FEATURE_GROUPS: FeatureGroup[] = [
   {
     label: 'Core HR',
     features: {
       policies: 'Policies',
       handbooks: 'Handbooks',
+      handbook_audit: 'Handbook Audit (gap analyzer)',
+      handbook_watch: 'Handbook Watch (scheduled freshness sweeps + alerts)',
       compliance: 'Compliance',
+      compliance_lite: 'Compliance Lite (read-only requirement viewers)',
       employees: 'Employees',
       offer_letters: 'Offer Letters',
       er_copilot: 'ER Copilot',
@@ -34,8 +40,10 @@ export const FEATURE_GROUPS: { label: string; features: Record<string, string> }
       credential_templates: 'Credential Templates',
       employee_schedule: 'Employee Schedule (shift scheduling — assignments, templates, swap/drop requests)',
       schedule_intelligence: 'Schedule Intelligence (incident correlation, Fair Workweek exposure, qualified coverage — needs Employee Schedule too)',
+      labor_cost: 'Labor Cost (scheduled wage cost, overtime-aware — needs Employee Schedule too)',
       schedule_autopilot: 'Schedule Autopilot (forecast-driven week generation — needs Employee Schedule, Huume and Matcha Work)',
       benefits_admin: 'Benefits (roster ingest, eligibility exceptions, renewal-risk radar)',
+      labor_relations: 'Labor Relations (CBAs, grievances, bargaining units)',
     },
   },
   {
@@ -53,9 +61,12 @@ export const FEATURE_GROUPS: { label: string; features: Record<string, string> }
       matcha_work: 'Matcha Work',
       hr_pilot: 'HR Pilot (thread mode — handbook-grounded supervisor guidance + hard-stop HR escalation gate)',
       huume: 'Huume (agentic thread mode — offer letters, onboarding plans, HR-ops actions, Legal/Handbook Pilot in chat) — needs Matcha Work too',
+      huume_code: 'Huume Code (draft PRs from a collab chat — internal only) — needs Matcha Work too',
       sym_chat: 'Sym-chat (private-tunnel group chats that settle a meeting time or a decision) — needs Matcha Work too',
       matcha_drive: 'Matcha Drive (company + HR document store with per-folder access) — needs Matcha Work too',
       hr_cases: 'HR Cases (incident → write-up → approval → signed copy) — needs Matcha Work and Matcha Drive',
+      paid_channel_creator: 'Paid Channels (Stripe-gated paid channel creation)',
+      channel_job_postings: 'Channel Job Postings (Stripe-gated)',
     },
   },
   {
@@ -70,9 +81,11 @@ export const FEATURE_GROUPS: { label: string; features: Record<string, string> }
       inventory_waste: 'Ops — Inventory Waste & Shrinkage (waste log, variance, predictive par) — needs Inventory too',
       employee_schedule: 'Ops — Employee Schedule',
       schedule_intelligence: 'Ops — Schedule Intelligence — needs Employee Schedule too',
+      labor_cost: 'Ops — Labor Cost — needs Employee Schedule too',
       schedule_autopilot: 'Ops — Schedule Autopilot — needs Employee Schedule, Huume and Matcha Work',
       matcha_ops_calls_all_members: 'Matcha Ops — any member can start calls',
       werk_lite: 'Werk Lite (Ops channels + Work boards)',
+      werk_lite_calls_all_members: 'Werk Lite — any member can start calls',
     },
   },
   {
@@ -82,6 +95,12 @@ export const FEATURE_GROUPS: { label: string; features: Record<string, string> }
       risk_profile: 'Risk Profile (client-facing composite risk index)',
       controls_evidence: 'Proof of Controls (controls-evidence register + packet)',
       limit_adequacy: 'Limit Adequacy & Contract Review (limits vs contracts)',
+      property: 'Property (SOV/COPE grading, insurance-to-value, cat perils)',
+      tcor: 'TCOR (total cost of risk + retention optimizer)',
+      coi_tracking: 'COI Tracking (certificate capture, limit check, expiry alerts)',
+      do_readiness: 'D&O Readiness (management-liability readiness score)',
+      acord_forms: 'ACORD Forms (125/126/130/140 equivalents)',
+      carrier_quotes: 'Carrier Quotes (quote + bind)',
     },
   },
   {
@@ -92,6 +111,7 @@ export const FEATURE_GROUPS: { label: string; features: Record<string, string> }
       legal_defense: 'Legal Pilot (AI litigation-evidence packets)',
       handbook_pilot: 'Handbook Pilot (AI handbook/policy generation)',
       analysis_pilot: 'Analysis Pilot (general data-analysis chat — CSV/XLSX/PDF, deterministic metrics)',
+      ask_hr: 'Ask HR (employee-portal HR Pilot, coworker data redacted)',
     },
   },
 ]
@@ -102,6 +122,31 @@ export const FEATURE_LABELS: Record<string, string> = Object.fromEntries(
 
 export const FEATURE_KEYS = Object.keys(FEATURE_LABELS)
 
+const FEATURE_KEY_SET = new Set(FEATURE_KEYS)
+
+export const OTHER_GROUP_LABEL = 'Other'
+
+/** The catalog's name for a flag, or the raw key when the catalog has none. */
+export function featureLabel(key: string): string {
+  return FEATURE_KEY_SET.has(key) ? FEATURE_LABELS[key] : key
+}
+
+/**
+ * FEATURE_GROUPS plus an "Other" group holding every key in `backendKeys`
+ * that the catalog doesn't name, labelled with the raw key. The admin pages
+ * render their toggles from groups, so without this a flag added to the
+ * backend's DEFAULT_COMPANY_FEATURES but not to this file could be neither
+ * seen nor toggled (17 were, until this group existed).
+ */
+export function withOtherGroup(backendKeys: Iterable<string>): FeatureGroup[] {
+  const other = [...new Set(backendKeys)].filter((key) => !FEATURE_KEY_SET.has(key)).sort()
+  if (other.length === 0) return FEATURE_GROUPS
+  return [
+    ...FEATURE_GROUPS,
+    { label: OTHER_GROUP_LABEL, features: Object.fromEntries(other.map((key) => [key, key])) },
+  ]
+}
+
 /**
  * Mirrors backend `FEATURE_REQUIRES` (server/app/core/feature_flags.py) —
  * flags that do nothing without another flag also being on. The backend is
@@ -111,6 +156,7 @@ export const FEATURE_KEYS = Object.keys(FEATURE_LABELS)
  */
 export const FEATURE_REQUIRES: Record<string, string[]> = {
   huume: ['matcha_work'],
+  huume_code: ['matcha_work'],
   sym_chat: ['matcha_work'],
   matcha_drive: ['matcha_work'],
   hr_cases: ['matcha_work', 'matcha_drive'],
@@ -121,6 +167,7 @@ export const FEATURE_REQUIRES: Record<string, string[]> = {
   inventory_forecasting: ['inventory', 'sales_intake'],
   inventory_waste: ['inventory'],
   schedule_intelligence: ['employee_schedule'],
+  labor_cost: ['employee_schedule'],
   schedule_autopilot: ['employee_schedule', 'huume', 'matcha_work'],
   matcha_ops_calls_all_members: ['matcha_ops'],
   werk_lite: ['matcha_ops', 'matcha_work'],

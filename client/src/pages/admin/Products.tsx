@@ -3,7 +3,7 @@ import { Boxes, Check, Copy, Loader2, Plus, RefreshCw } from 'lucide-react'
 import { useAsync } from '../../hooks/useAsync'
 import { api } from '../../api/client'
 import { Badge, Button, Input, Select, Textarea, Toggle, useToast } from '../../components/ui'
-import { applyFeatureToggle, FEATURE_GROUPS, FEATURE_LABELS } from '../../data/featureCatalog'
+import { applyFeatureToggle, FEATURE_LABELS, featureLabel, withOtherGroup } from '../../data/featureCatalog'
 import { PRODUCT_NAV_CATALOG } from '../../data/productNavCatalog'
 
 /**
@@ -151,6 +151,8 @@ export default function Products() {
   // employees) are pickable — a label in the catalog for a flag the server
   // rejects would fail on save.
   const sellable = new Set(data.available_features)
+  // A sellable flag the catalog doesn't name is still composable, under "Other".
+  const featureGroups = withOtherGroup(data.available_features)
 
   function startNew() {
     setSelectedBuiltinSlug(null)
@@ -487,7 +489,7 @@ export default function Products() {
               <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
                 Included features ({enabledFeatures.length})
               </h3>
-              {FEATURE_GROUPS.map((group) => {
+              {featureGroups.map((group) => {
                 const keys = Object.keys(group.features).filter((k) => sellable.has(k))
                 if (keys.length === 0) return null
                 return (
@@ -501,7 +503,7 @@ export default function Products() {
                             checked={!!draft.features[key]}
                             onChange={(on) => toggleFeature(key, on)}
                           />
-                          <span className="truncate" title={FEATURE_LABELS[key]}>{FEATURE_LABELS[key]}</span>
+                          <span className="truncate" title={featureLabel(key)}>{featureLabel(key)}</span>
                         </label>
                       ))}
                     </div>

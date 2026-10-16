@@ -3,7 +3,7 @@ import { useAsync } from '../../hooks/useAsync'
 import { ToggleLeft, Search, Loader2, Settings2 } from 'lucide-react'
 import { Badge, Button, Input, Modal, Select, Toggle, useToast, LABEL } from '../../components/ui'
 import { api } from '../../api/client'
-import { FEATURE_GROUPS, FEATURE_LABELS, FEATURE_KEYS, FEATURE_REQUIRES } from '../../data/featureCatalog'
+import { featureLabel, FEATURE_REQUIRES, withOtherGroup } from '../../data/featureCatalog'
 
 
 type CompanyFeatures = {
@@ -17,6 +17,7 @@ type FeatureFlagStatus = {
   key: string
   is_beta: boolean
   non_test_enabled_count: number
+  non_test_companies: { id: string; company_name: string }[]
 }
 
 type ProvenanceBucket =
@@ -102,8 +103,8 @@ function provenanceLabel(entry: ProvenanceEntry): string {
   return PROVENANCE_META[entry.bucket].label
 }
 
-function enabledCount(features: Record<string, boolean>) {
-  return FEATURE_KEYS.filter((k) => features[k]).length
+function enabledCount(features: Record<string, boolean>, keys: string[]) {
+  return keys.filter((k) => features[k]).length
 }
 
 export default function Features() {
@@ -135,6 +136,13 @@ export default function Features() {
   const betaKeys = useMemo(
     () => new Set(flagStatuses.filter((f) => f.is_beta).map((f) => f.key)),
     [flagStatuses]
+  )
+  // GET /admin/feature-flags lists every backend flag (ALL_FEATURES), so a
+  // flag the catalog doesn't name still gets a toggle, under "Other".
+  const groups = useMemo(() => withOtherGroup(flagStatuses.map((f) => f.key)), [flagStatuses])
+  const allKeys = useMemo(
+    () => [...new Set(groups.flatMap((g) => Object.keys(g.features)))],
+    [groups]
   )
   const [search, setSearch] = useState('')
   const [toggling, setToggling] = useState<string | null>(null)
@@ -241,7 +249,7 @@ export default function Features() {
             <p className="p-3 text-xs text-zinc-500">No tenants found.</p>
           ) : (
             filtered.map((c) => {
-              const count = enabledCount(c.enabled_features)
+              const count = enabledCount(c.enabled_features, allKeys)
               const isSelected = selected?.id === c.id
               return (
                 <button
@@ -258,7 +266,7 @@ export default function Features() {
                     {c.company_name}
                   </span>
                   <span className={`shrink-0 text-[11px] font-mono ${count > 0 ? 'text-emerald-400' : 'text-zinc-600'}`}>
-                    {count}/{FEATURE_KEYS.length}
+                    {count}/{allKeys.length}
                   </span>
                 </button>
               )
@@ -288,8 +296,8 @@ export default function Features() {
                 <h2 className="text-sm font-semibold text-zinc-100">{selected.company_name}</h2>
                 {selected.is_test && <Badge variant="neutral">Test account</Badge>}
               </div>
-              <Badge variant={enabledCount(selected.enabled_features) > 0 ? 'success' : 'neutral'}>
-                {enabledCount(selected.enabled_features)}/{FEATURE_KEYS.length} enabled
+              <Badge variant={enabledCount(selected.enabled_features, allKeys) > 0 ? 'success' : 'neutral'}>
+                {enabledCount(selected.enabled_features, allKeys)}/{allKeys.length} enabled
               </Badge>
             </div>
             <div className="space-y-2.5 border-b border-white/[0.06] px-4 py-3">
@@ -315,7 +323,7 @@ export default function Features() {
                         title={grant?.note || PROVENANCE_META[p.bucket].hint}
                         className="flex items-center gap-1 rounded border border-white/[0.08] bg-white/[0.03] px-1.5 py-0.5 text-[11px] text-zinc-300"
                       >
-                        {FEATURE_LABELS[key] ?? key}
+                        {featureLabel(key)}
                         <span className="text-zinc-600">
                           · {grant ? GRANT_TYPE_LABELS[grant.grant_type] ?? grant.grant_type : provenanceLabel(p)}
                         </span>
@@ -338,7 +346,7 @@ export default function Features() {
               </p>
             )}
             <div className="flex-1 space-y-5 overflow-y-auto p-4">
-              {FEATURE_GROUPS.map((group) => (
+              {groups.map((group) => (
                 <div key={group.label}>
                   <div className={`mb-2 ${LABEL}`}>{group.label}</div>
                   <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-x-5 gap-y-3">
@@ -349,6 +357,11 @@ export default function Features() {
                       // Beta features can only be switched ON for test companies —
                       // turning one OFF (remediation) always stays live.
                       const lockedOn = isBeta && !on && !selected.is_test
+                      // The reverse: a real company that had the flag before
+                      // it went beta keeps it. Mark it, or it looks the same
+                      // as the flag on a test account.
+                      const betaOnLive = isBeta && on && !selected.is_test
+                      const label = featureLabel(key)
                       const prov = on ? provenance.features[key] : undefined
                       const forcedOff = !on && selectedForcedOff.has(key)
                       const provLabel = prov ? provenanceLabel(prov) : undefined
@@ -381,23 +394,25 @@ export default function Features() {
                         : []
                       const blockedByDependent = blockingDependents.length > 0
                       const title = lockedOn
-                        ? `${FEATURE_LABELS[key]} — beta, test accounts only`
+                        ? `${label} — beta, test accounts only`
                         : missingPrereq
-                          ? `${FEATURE_LABELS[key]} — needs ${missingPrereqs.map((r) => FEATURE_LABELS[r] ?? r).join(', ')} enabled first`
+                          ? `${label} — needs ${missingPrereqs.map(featureLabel).join(', ')} enabled first`
                           : blockedByDependent
-                            ? `${FEATURE_LABELS[key]} — disable ${blockingDependents.map((r) => FEATURE_LABELS[r] ?? r).join(', ')} first`
-                            : provHint
-                              ? `${FEATURE_LABELS[key]} — ${provHint}`
-                              : FEATURE_LABELS[key]
+                            ? `${label} — disable ${blockingDependents.map(featureLabel).join(', ')} first`
+                            : betaOnLive
+                              ? `${label} — beta, but on for this non-test company. Turning it off works; turning it back on won't.`
+                              : provHint
+                                ? `${label} — ${provHint}`
+                                : label
                       return (
                         <div key={key} className="flex items-center gap-3">
                           <span
-                            className="flex min-w-0 flex-1 items-center gap-1.5 truncate text-xs text-zinc-400"
+                            className={`flex min-w-0 flex-1 items-center gap-1.5 truncate text-xs ${betaOnLive ? 'text-amber-400' : 'text-zinc-400'}`}
                             title={title}
                           >
-                            <span className="truncate">{FEATURE_LABELS[key]}</span>
+                            <span className="truncate">{label}</span>
                             {isBeta && (
-                              <Badge variant="warning" className="shrink-0">Beta</Badge>
+                              <Badge variant="warning" className="shrink-0">{betaOnLive ? 'Beta · non-test' : 'Beta'}</Badge>
                             )}
                             {provLabel && (
                               <Badge variant="neutral" className="shrink-0">{provLabel}</Badge>
@@ -474,7 +489,7 @@ function GrantsModal({
         note: (draft.note ?? '').trim() || null,
       })
       await onSaved()
-      toast(`${FEATURE_LABELS[key] ?? key} classified as ${GRANT_TYPE_LABELS[draft.grant_type] ?? draft.grant_type}`, 'success')
+      toast(`${featureLabel(key)} classified as ${GRANT_TYPE_LABELS[draft.grant_type] ?? draft.grant_type}`, 'success')
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Save failed', 'error')
     } finally {
@@ -494,7 +509,7 @@ function GrantsModal({
           return (
             <div key={key} className="grid grid-cols-[1fr_140px_1fr_auto] items-end gap-2 border-b border-white/[0.06] pb-3">
               <div className="text-[13px] text-zinc-300">
-                {FEATURE_LABELS[key] ?? key}
+                {featureLabel(key)}
                 <p className="text-[11px] text-zinc-600">{provenanceLabel(p)}</p>
               </div>
               <Select
@@ -540,13 +555,14 @@ function BetaManageModal({
     () => Object.fromEntries(flagStatuses.map((f) => [f.key, f])),
     [flagStatuses],
   )
+  const groups = useMemo(() => withOtherGroup(flagStatuses.map((f) => f.key)), [flagStatuses])
 
   async function setBeta(key: string, isBeta: boolean) {
     setToggling(key)
     try {
       await api.patch(`/admin/feature-flags/${key}`, { is_beta: isBeta })
       await onSaved()
-      toast(`${FEATURE_LABELS[key] ?? key} moved to ${isBeta ? 'beta' : 'ready'}`, 'success')
+      toast(`${featureLabel(key)} moved to ${isBeta ? 'beta' : 'ready'}`, 'success')
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Update failed', 'error')
     } finally {
@@ -562,7 +578,7 @@ function BetaManageModal({
           an admin override — no deploy needed; the code default in `feature_flags.BETA_FEATURES`
           is unaffected.
         </p>
-        {FEATURE_GROUPS.map((group) => (
+        {groups.map((group) => (
           <div key={group.label}>
             <div className={`mb-2 ${LABEL}`}>{group.label}</div>
             <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-x-5 gap-y-2">
@@ -571,12 +587,10 @@ function BetaManageModal({
                 if (!status) return null
                 return (
                   <div key={key} className="flex items-center gap-3">
-                    <span className="min-w-0 flex-1 truncate text-xs text-zinc-400" title={FEATURE_LABELS[key]}>
-                      {FEATURE_LABELS[key]}
+                    <span className="min-w-0 flex-1 text-xs text-zinc-400">
+                      <span className="block truncate" title={featureLabel(key)}>{featureLabel(key)}</span>
                       {status.is_beta && status.non_test_enabled_count > 0 && (
-                        <span className="ml-1.5 text-[10px] text-amber-400">
-                          ({status.non_test_enabled_count} non-test enabled)
-                        </span>
+                        <NonTestCompanies status={status} />
                       )}
                     </span>
                     <Toggle
@@ -593,5 +607,16 @@ function BetaManageModal({
         ))}
       </div>
     </Modal>
+  )
+}
+
+// Which real companies still have a beta flag on — the count alone left the
+// admin to find them one by one.
+function NonTestCompanies({ status }: { status: FeatureFlagStatus }) {
+  const names = status.non_test_companies.map((c) => c.company_name).join(', ')
+  return (
+    <span className="block truncate text-[10px] text-amber-400" title={names}>
+      On for {status.non_test_enabled_count} non-test: {names}
+    </span>
   )
 }
