@@ -9,8 +9,8 @@ Output is DATA for the model, never instructions.
 from __future__ import annotations
 
 import json
-from typing import Any
-from urllib.parse import urljoin, urlsplit
+from typing import Any, Iterator
+from urllib.parse import SplitResult, urljoin, urlsplit
 
 from bs4 import BeautifulSoup
 
@@ -322,7 +322,23 @@ def _listing(node: dict, base: str) -> dict:
         "date_posted": _scalar(home.get("datePosted"), 40),
         "images": _image_urls(home.get("image") or home.get("photo"), base),
         "offers": offers[:4],
+        **_geo(home.get("geo")),
     }
+
+
+def _geo(value: Any) -> dict:
+    """`{"geo": {"lat", "lng"}}` from a schema.org GeoCoordinates, or {} (so a
+    page without one keeps its exact shape)."""
+    value = value[0] if isinstance(value, list) and value else value
+    if not isinstance(value, dict):
+        return {}
+    try:
+        lat, lng = float(value.get("latitude")), float(value.get("longitude"))
+    except (TypeError, ValueError):
+        return {}
+    if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+        return {}
+    return {"geo": {"lat": lat, "lng": lng}}
 
 
 def _hours(node: dict) -> list[str]:
@@ -357,6 +373,7 @@ def _place(node: dict, base: str) -> dict:
         "accepts_reservations": _pets(node.get("acceptsReservations")),
         "menu_url": urljoin(base, menu) if isinstance(menu, str) else None,
         "images": _image_urls(node.get("image") or node.get("photo"), base),
+        **_geo(node.get("geo")),
     }
 
 
@@ -475,9 +492,20 @@ def page_urls(page: dict) -> set[str]:
 MAX_LINKS = 30
 
 
-def _site(host: str | None) -> str:
+def site_of(host: str | None) -> str:
+    """A host as one site: lower case, no trailing dot, no "www."."""
     host = (host or "").lower().rstrip(".")
     return host[4:] if host.startswith("www.") else host
+
+
+def anchors(html: bytes, base: str, *, limit: int | None = None) -> Iterator[tuple[Any, str, SplitResult, str]]:
+    """The page's links in order (the first `limit` of them), each made
+    absolute without its fragment: `(the <a> element, url, its parts, its site)`."""
+    soup = BeautifulSoup(html, "lxml")
+    for anchor in soup.find_all("a", href=True)[:limit]:
+        href = urljoin(base, str(anchor["href"]).strip()).split("#")[0]
+        parts = urlsplit(href)
+        yield anchor, href, parts, site_of(parts.hostname)
 
 
 def page_links(html: bytes, base: str, limit: int = MAX_LINKS) -> list[dict]:
@@ -485,16 +513,13 @@ def page_links(html: bytes, base: str, limit: int = MAX_LINKS) -> list[dict]:
     how a listing or results page points at each item's own page. Navigation,
     headers and footers are skipped, as are short and anchor-only links.
     Only Espresso Tasks asks for these; `extract_page` is unchanged."""
-    soup = BeautifulSoup(html, "lxml")
-    site = _site(urlsplit(base).hostname)
+    site = site_of(urlsplit(base).hostname)
     out: list[dict] = []
     seen = {base.split("#")[0]}
-    for anchor in soup.find_all("a", href=True):
+    for anchor, href, parts, its_site in anchors(html, base):
         if anchor.find_parent(["nav", "header", "footer"]):
             continue
-        href = urljoin(base, str(anchor["href"]).strip()).split("#")[0]
-        parts = urlsplit(href)
-        if parts.scheme not in ("http", "https") or _site(parts.hostname) != site:
+        if parts.scheme not in ("http", "https") or its_site != site:
             continue
         if len(parts.path.rstrip("/")) < 8 or href in seen:
             continue

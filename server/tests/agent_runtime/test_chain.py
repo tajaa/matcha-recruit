@@ -324,3 +324,7 @@ def test_budget_counts_what_it_hands_out():
     budget = chain.Budget(left=1)
     assert budget.take() is True and budget.take() is False
     assert (budget.left, budget.used, budget.exhausted) == (0, 1, True)
+    # Several at once, or none: a search that costs two calls never spends one.
+    budget = chain.Budget(left=3)
+    assert budget.take(2) is True and budget.take(2) is False and budget.take(0) is True
+    assert (budget.left, budget.used, budget.exhausted) == (1, 2, True)

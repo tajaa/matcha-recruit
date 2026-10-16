@@ -39,7 +39,8 @@ PLAN_LIMITS = RunLimits(max_model_calls=2, wall_seconds=90.0)
 DISCOVER_LIMITS = RunLimits(max_model_calls=8, wall_seconds=330.0, max_hosted_per_response=4,
                             max_hosted_per_run=8)
 SCREEN_LIMITS = RunLimits(max_model_calls=2, wall_seconds=150.0)
-SUMMARY_LIMITS = RunLimits(max_model_calls=2, wall_seconds=120.0)
+# Three calls: a summary sent as broken JSON text gets two repairs, not one.
+SUMMARY_LIMITS = RunLimits(max_model_calls=3, max_repairs=2, wall_seconds=120.0)
 REFINE_LIMITS = RunLimits(max_model_calls=2, wall_seconds=90.0)
 DISCOVER_FETCHES = 10
 DISCOVER_VIEWS = 2
@@ -50,6 +51,7 @@ TARGET_MORE = 20
 PROVIDER_ENOUGH = 15
 SCREEN_BATCH = 30
 SUMMARY_TOP = 10
+TOP_PICKS = 5
 MIN_SURVIVORS = 5
 REENRICH = 24
 FOUND_LIST = 40
@@ -301,16 +303,29 @@ def _item_text(item: dict) -> str:
 
 def fallback_summary(shown: list[dict], *, total: int, hidden: int, note: str | None) -> dict:
     """The summary written from the ranking alone, when the model's fails."""
+    fit = total - hidden  # `shown` is only the best few of them
     if not shown:
         headline = "Nothing found meets every limit" if total else "Nothing found"
     else:
-        headline = f"{len(shown)} that fit, of {total} found" if total > len(shown) else f"Found {total}"
+        headline = f"{fit} that fit, of {total} found" if hidden else f"Found {total}"
     summary = note or (f"{hidden} were hidden for breaking a limit or not fitting." if hidden else "")
     return {
         "headline": headline, "summary": summary, "sections": [],
-        "top": [{"item_id": item["id"], "why": (item.get("fit_reasons") or [""])[0]} for item in shown[:5]],
+        "top": fill_top([], shown),
         "origin": "ranking",
     }
+
+
+def fill_top(top: list[dict], shown: list[dict], want: int = TOP_PICKS) -> list[dict]:
+    """The model's picks, then the ranking's best it didn't pick, up to `want`:
+    a finished task always shows its best few, whatever the model chose."""
+    out, picked = list(top), {p["item_id"] for p in top}
+    for item in shown:
+        if len(out) >= want:
+            break
+        if item["id"] not in picked:
+            out.append({"item_id": item["id"], "why": (item.get("fit_reasons") or [""])[0]})
+    return out
 
 
 async def summarize(task: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
@@ -355,7 +370,7 @@ async def summarize(task: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
                 limits=SUMMARY_LIMITS, progress=_progress(guard), client_factory=deps.client,
                 first_note="Writing up what it found…",
             )
-            summary = {**outcome.result, "origin": "model"}
+            summary = {**outcome.result, "top": fill_top(outcome.result["top"], shown), "origin": "model"}
         except runner.AgentRunError:
             logger.info("research summary fell back to the ranking task=%s", task["id"])
     summary["counts"] = {"found": total, "shown": visible, "hidden": total - visible}
