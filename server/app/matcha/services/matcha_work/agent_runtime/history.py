@@ -157,8 +157,14 @@ def _step_line(row) -> str:
         return f"tried to load {url}, which failed"
     if row["tool"] == "web_search":
         query = " ".join(str(args.get("query") or "").split())[:100]
+        if status == "skipped":
+            what = f'search the web for "{query}"' if query else "search the web"
+            return f"did not {what} (the run's search budget ran out)"
         said = f'searched the web for "{query}"' if query else "searched the web"
-        return said if out.get("status") in (None, "completed") else f"{said}, which did not complete"
+        # A hosted search reports its own status; our Brave tool's step says
+        # "error" (and its audit an `error`) when it didn't search.
+        done = status == "ok" and not out.get("error") and out.get("status") in (None, "completed")
+        return said if done else f"{said}, which did not complete"
     # Flights, the booking browser and any later tool: the server's own label.
     label = " ".join(str(row["label"] or row["tool"]).split())[:_URL_CHARS]
     return label + ("" if status == "ok" else _STATUS_SUFFIX.get(status, f" ({status})"))

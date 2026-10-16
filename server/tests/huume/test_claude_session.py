@@ -171,6 +171,7 @@ async def test_search_blocks_come_back_as_responses_items():
     assert [c["action"]["query"] for c in calls] == ["lip balm", "again"]
     assert [c["status"] for c in calls] == ["completed", "failed"]
     assert cited_urls(out.output_items) == ["https://reviews.example/a", "https://reviews.example/b"]
+    assert calls[0]["action"]["sources"][0]["title"] == "A"  # the model-only search shows titles
     assert out.text == "The best one."
 
 

@@ -56,10 +56,10 @@ _NO_SEARCHES_LEFT = re.compile(r"used all (?:of )?(?:the|your) searches|out of (
 
 def _said(body: Any) -> str:
     """What an API's error body says: SearchAPI's and SerpApi's `error` text,
-    or Google's error status and message."""
+    Google's error status and message, or Brave's status and detail."""
     error = body.get("error") if isinstance(body, dict) else None
     if isinstance(error, dict):
-        error = ": ".join(str(error[k]) for k in ("status", "message") if error.get(k))
+        error = ": ".join(str(error[k]) for k in ("status", "message", "detail") if error.get(k))
     return " ".join(str(error or "").split())[:200]
 
 
@@ -81,12 +81,13 @@ def result_error(data: dict) -> str:
 
 
 async def answer(name: str, send: SendFn, *, transport: httpx.AsyncBaseTransport | None = None,
-                 sleep: SleepFn = asyncio.sleep) -> dict:
-    """One JSON object from an API, under the rules above."""
+                 sleep: SleepFn = asyncio.sleep, timeout: float = TIMEOUT_SECONDS) -> dict:
+    """One JSON object from an API, under the rules above. `send` may raise
+    an error of its own (not an `httpx.HTTPError`) to stop at once."""
     last = ""
     for attempt in range(2):
         try:
-            async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS, transport=transport) as client:
+            async with httpx.AsyncClient(timeout=timeout, transport=transport) as client:
                 response = await send(client)
         except httpx.HTTPError as exc:
             last = type(exc).__name__

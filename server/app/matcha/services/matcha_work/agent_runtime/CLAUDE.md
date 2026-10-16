@@ -203,8 +203,37 @@ column as `<playbook>.<phase>`).
   (picked, or the admin setting for `espresso.assistant`), `ClaudeSession.keeps_history` makes the runner send only
   what is new even on a private run: Messages has no stored-response chain to
   opt out of, so `store=False`/`chain=False` and the encrypted-reasoning replay
-  do not apply. Web search becomes Anthropic's server tool; its results reach
+  do not apply. When Brave isn't in play, web search is Anthropic's server tool; its results reach
   the provenance gate as the same Responses items (`claude_client.output_items`).
+- **Web search is Brave while Brave can answer** (`abilities/web.py`, `../brave_search.py`).
+  `search_tool()` picks once, when the run's abilities are built: with `BRAVE_SEARCH_API_KEY`
+  set and Brave not out, `web_search` is our own function tool (`query`, optional
+  `freshness`): ten results with title, URL, age and snippets, about 1.4k tokens, against
+  about 13.8k for Anthropic's search and half its per-search price. Otherwise (no key, or
+  Brave already out when the run starts) it is the hosted search exactly as before, so a
+  spent quota doesn't put a model call on top of every search for the rest of the month.
+  Brave's URLs are the run's provenance. Its requests go through `search_apis.answer`, the
+  rules job search and research use, plus Brave's quota headers.
+- **Brave out mid-run: the model's own search, inside the time left.** The tool list never
+  changes mid-run, which a Claude session needs. So when Brave can't answer (a refused key
+  or 402, no searches left in a day-or-longer rate window, or down after one retry), the
+  same tool makes one short call on Claude Haiku (the run's model when it isn't Claude)
+  with the hosted search, `max_tool_calls=1`, whose sources, citations and summary are the
+  output and whose tokens fold into the run (`ToolOutput.usage`). That call's timeout is
+  what the tool has left after Brave, less a margin, so it ends before the runner's own
+  deadline; with under `MIN_MODEL_SEARCH_SECONDS` left it isn't made (a call cut off is
+  billed but its tokens never reach the run). A refusal or spent quota keeps Brave out for
+  this process (an hour, or until the quota resets) and logs one error.
+- **The runner owns the search limits** for a function tool marked `counts_as_search`
+  (Brave's `web_search`): each call counts in `RunState.hosted_calls` (the run's
+  `search_calls`) before its handler runs, a response's calls past
+  `max_hosted_per_response` get `SEARCHES_AT_ONCE`, and calls past `max_hosted_per_run`
+  get the tool's `exhausted_message`. Both are recorded as `skipped` steps, so the same
+  caps hold whichever search the run has.
+- **The run record says when a search didn't happen.** `history._step_line` writes a
+  skipped search as "did not search…" and a search that errored (or a hosted one whose
+  status isn't `completed`) as "…, which did not complete", so a later run never reads a
+  failed search as a done one.
 - **Card runs store `agent_result.v1`, byte for byte.** `agent_card/agent.py`
   keeps its limits and collaborators as module attributes read at call time,
   because its tests patch them there. Do not move them behind a re-export.
