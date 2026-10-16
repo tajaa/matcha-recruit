@@ -29,7 +29,7 @@ struct TaskItemDetailView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
                         heading(item)
-                        if !item.images.isEmpty { photos(item) }
+                        if !item.images.isEmpty || !item.screenshots.isEmpty { photos(item) }
                         doneSection(item)
                         facts(item)
                         homesSection(item)
@@ -156,34 +156,39 @@ struct TaskItemDetailView: View {
         .disabled(vm.busy)
     }
 
+    /// Its photos, then its page as the browser drew it (marked as such).
     private func photos(_ item: AgentTaskItem) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                ForEach(item.images, id: \.url) { image in
-                    if let url = TasksViewModel.webURL(image.url) {
-                        AsyncImage(url: url) { phase in
-                            if let picture = phase.image {
-                                picture.resizable().scaledToFill()
-                            } else {
-                                Color.gray.opacity(0.1)
-                            }
-                        }
-                        .frame(width: 150, height: 110)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                        .overlay(alignment: .bottomLeading) {
-                            if image.screenshot {
-                                Text("Its page")
-                                    .font(.system(size: 9, weight: .semibold))
-                                    .padding(.horizontal, 5).padding(.vertical, 2)
-                                    .background(Capsule().fill(.black.opacity(0.55)))
-                                    .foregroundColor(.white)
-                                    .padding(5)
-                            }
-                        }
-                        .help(image.alt ?? "")
-                    }
+                ForEach(item.images, id: \.url) { image in picture(image, page: false) }
+                ForEach(item.screenshots, id: \.url) { image in picture(image, page: true) }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func picture(_ image: AgentTaskImage, page: Bool) -> some View {
+        if let url = TasksViewModel.webURL(image.url) {
+            AsyncImage(url: url) { phase in
+                if let picture = phase.image {
+                    picture.resizable().scaledToFill()
+                } else {
+                    Color.gray.opacity(0.1)
                 }
             }
+            .frame(width: 150, height: 110)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(alignment: .bottomLeading) {
+                if page {
+                    Text("Its page")
+                        .font(.system(size: 9, weight: .semibold))
+                        .padding(.horizontal, 5).padding(.vertical, 2)
+                        .background(Capsule().fill(.black.opacity(0.55)))
+                        .foregroundColor(.white)
+                        .padding(5)
+                }
+            }
+            .help(image.alt ?? "")
         }
     }
 

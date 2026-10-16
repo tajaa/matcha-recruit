@@ -8,7 +8,8 @@
              (`units.py`), else its floor plans page for its rents; a page
              that is gone marks the finding unavailable; where it is, from
              the place the person named; photos and floor plans rehosted on
-             our CDN, and the page as the browser drew it kept when viewed
+             our CDN, and the page as the browser drew it kept (apart from
+             the photos) when viewed
   rank       every finding ordered from stored facts (`ranking.py`)
 
 The model phases (plan, discover, screen, summarize, refine) are in
@@ -54,14 +55,17 @@ PROVIDER_QUERIES = {"shopping": 4, "places": 6}
 # Apartment buildings kept from Google Maps a round: each may take
 # BUILDING_LOADS page loads, within the round's page loads.
 PROVIDER_BUILDINGS = 30
-# A building's page loads: its site, its floor plans page, and its leasing
-# system (a unit map is two: its embed page, then its API).
-BUILDING_LOADS = 4
+# A building's page loads: its site, its floor plans page, and LEASING_LOADS
+# for its leasing system (a unit map is two: its embed page, then its API).
+LEASING_LOADS = 2
+BUILDING_LOADS = 2 + LEASING_LOADS
 LEASING_BYTES = 3_000_000
-# Floor plans rehosted per building (the plans of homes that meet the limits
-# first), and how long a batch spends on them.
-PLAN_IMAGES = 4
+# Floor plans newly rehosted per building a pass (the plans of homes that meet
+# the limits first, then the cheapest homes'), and how long a pass may take:
+# an enrich batch's, alongside its photos; a refine's, for homes that fit now.
+PLAN_IMAGES = 8
 PLAN_IMAGE_SECONDS = 45.0
+PLAN_FILL_SECONDS = 30.0
 PLAN_IMAGE_CONCURRENCY = 4
 # Shopping products looked up at their stores per round (one provider call
 # each, within the round's provider budget alongside its searches).
@@ -452,8 +456,7 @@ async def view_scan(url: str, deps: Deps, views: Budget, *, prefix: str, today: 
         return {}
     shot = viewed.get("screenshot_url")
     if shots is not None and isinstance(shot, str) and shot.startswith("https://"):
-        shots.append({"url": shot, "page_url": viewed.get("url") or url, "alt": "Its page as it looked",
-                      "screenshot": True})
+        shots.append({"url": shot, "page_url": viewed.get("url") or url, "alt": "Its page as it looked"})
     return {k: {**v, "evidence": {**v["evidence"], "origin": "browser"}}
             for k, v in F.scan_listing_text(str(viewed.get("text") or ""), url=url, today=today,
                                              building=building).items()}
@@ -499,11 +502,12 @@ async def floor_plans(plans: Loaded | None, deps: Deps, views: Budget, *, prefix
     return found
 
 
-def leasing_loader(deps: Deps, fetches: Budget) -> leasing.Load:
-    """How `units.find_units` loads a leasing system's pages, each one of
-    this round's page loads."""
+def leasing_loader(deps: Deps, fetches: Budget, mine: Budget) -> leasing.Load:
+    """How `units.find_units` loads a leasing system's pages: each one of
+    this round's page loads, and of `mine`, the building's own LEASING_LOADS,
+    so one building never spends another's."""
     async def load(url: str, is_json: bool) -> bytes | None:
-        if not fetches.take():
+        if not mine.take() or not fetches.take():
             return None
         try:
             # SightMap's API sends gzip whatever is asked for.
@@ -577,12 +581,12 @@ async def enrich_one(row: dict, deps: Deps, fetches: Budget, views: Budget, *, p
     homes, plans = None, None
     if building:
         # Its homes one by one, from the leasing system its site or its floor plans page names.
-        load = leasing_loader(deps, fetches)
-        homes = await leasing.find_units(fetched.body, fetched.final_url, load, today=today)
+        load, tried = leasing_loader(deps, fetches, Budget(left=LEASING_LOADS)), set()
+        homes = await leasing.find_units(fetched.body, fetched.final_url, load, today=today, tried=tried)
         if homes is None:
             plans = await plans_page(fetched.body, fetched.final_url, deps, fetches)
             if plans is not None:
-                homes = await leasing.find_units(plans.body, plans.url, load, today=today)
+                homes = await leasing.find_units(plans.body, plans.url, load, today=today, tried=tried)
     if homes is not None:
         update["units"] = homes.units
         found = F.merge(found, leasing.building_fields(homes, today=today))
@@ -594,7 +598,7 @@ async def enrich_one(row: dict, deps: Deps, fetches: Budget, views: Budget, *, p
             found = _take_rent(found, await view_scan(fetched.final_url, deps, views, prefix=prefix, today=today,
                                                       building=True, shots=shots) or {})
     if shots:
-        update["shots"] = shots[:1]
+        update["screenshots"] = shots[:1]
     update["fields"] = F.merge(fields, found)
     update["status"] = "verified"
     point = geo.page_point(page, row.get("title") or "")
@@ -626,7 +630,7 @@ async def locate(update: dict, anchor: dict, deps: Deps) -> None:
 async def enrich(task: dict, deps: Deps, guard: chain.Guard) -> PhaseOutcome:
     async with connection_or_direct() as conn:
         rows = await conn.fetch(
-            f"""SELECT id, kind, title, url, origin, status, fields, image_candidates, images
+            f"""SELECT id, kind, title, url, origin, status, fields, image_candidates, images, units
                 FROM mw_agent_task_items
                 WHERE task_id = $1 AND enriched_at IS NULL AND status IN ('candidate', 'verified')
                 ORDER BY created_at, id LIMIT {ENRICH_BATCH}""",
@@ -687,31 +691,40 @@ async def enrich(task: dict, deps: Deps, guard: chain.Guard) -> PhaseOutcome:
     await chain.refund(_chain(), task["id"], "fetch_calls", fetches.left)
     await chain.refund(_chain(), task["id"], "browser_views", views.left)
 
-    # Photos: up to images_per_item each, within the task's cap.
-    photo_room = max(0, min(ENRICH_IMAGES_PER_BATCH, BUDGETS.images - images_kept))
-    for row in rows:
-        update = updates.get(row["id"])
-        if not isinstance(update, dict) or update["status"] == "unavailable" or photo_room <= 0:
-            continue
-        have = decode_jsonb(row["images"], []) or []
-        want = min(BUDGETS.images_per_item - len(have), photo_room)
-        if want <= 0 or not update["image_candidates"]:
-            continue
-        kept, _warnings = await deps.rehost(update["image_candidates"], prefix=f"{prefix}/photos",
-                                            limit=want, total_seconds=IMAGE_SECONDS / 2)
-        update["images"] = have + kept
-        photo_room -= len(kept)
-    # A page the browser drew (on our CDN already): after the photos, never
-    # one taking a photo's place.
-    for row in rows:
-        update = updates.get(row["id"])
-        if isinstance(update, dict) and update.get("shots") and update["status"] != "unavailable":
-            have = update.get("images")
-            have = have if have is not None else decode_jsonb(row["images"], []) or []
-            known = {image.get("url") for image in have if isinstance(image, dict)}
-            update["images"] = have + [shot for shot in update["shots"] if shot["url"] not in known]
-    await rehost_plans([u for u in updates.values() if isinstance(u, dict) and u.get("units")],
-                       plan_of(task), deps, prefix=prefix)
+    async def photos() -> None:
+        # Up to images_per_item each, within the task's cap and IMAGE_SECONDS.
+        photo_room = max(0, min(ENRICH_IMAGES_PER_BATCH, BUDGETS.images - images_kept))
+        stop = time.monotonic() + IMAGE_SECONDS
+        for row in rows:
+            update = updates.get(row["id"])
+            left = stop - time.monotonic()
+            if not isinstance(update, dict) or update["status"] == "unavailable" or photo_room <= 0 or left <= 1:
+                continue
+            have = decode_jsonb(row["images"], []) or []
+            want = min(BUDGETS.images_per_item - len(have), photo_room)
+            if want <= 0 or not update["image_candidates"]:
+                continue
+            kept, _warnings = await deps.rehost(update["image_candidates"], prefix=f"{prefix}/photos",
+                                                limit=want, total_seconds=min(IMAGE_SECONDS / 2, left))
+            update["images"] = have + kept
+            photo_room -= len(kept)
+
+    async def plans() -> None:
+        found = [(row, updates.get(row["id"])) for row in rows]
+        found = [(row, u) for row, u in found if isinstance(u, dict) and u.get("units") and u["status"] != "unavailable"]
+        if not found:
+            return
+        # Floor plans this finding already has on our CDN are kept, not copied again.
+        copies = {u["plan_source"]: u["plan_image"] for row, _ in found
+                  for u in decode_jsonb(row.get("units"), []) or []
+                  if isinstance(u, dict) and u.get("plan_source") and u.get("plan_image")}
+        copied = await rehost_plans([u["units"] for _, u in found], plan_of(task), deps, prefix=prefix,
+                                    seconds=PLAN_IMAGE_SECONDS, copies=copies)
+        for (_, update), units in zip(found, copied):
+            update["units"] = units
+
+    # Both at once, so a batch's media take about a minute, not one after the other.
+    await asyncio.gather(photos(), plans())
 
     async with connection_or_direct() as conn:
         for item_id, update in updates.items():
@@ -723,6 +736,7 @@ async def enrich(task: dict, deps: Deps, guard: chain.Guard) -> PhaseOutcome:
                        fields = COALESCE($4::jsonb, fields), status = COALESCE($5, status),
                        image_candidates = COALESCE($6::jsonb, image_candidates),
                        images = COALESCE($7::jsonb, images), units = COALESCE($8::jsonb, units),
+                       screenshots = COALESCE($9::jsonb, screenshots),
                        enriched_at = NOW(), updated_at = NOW()
                    WHERE id = $1 AND task_id = $2
                      AND EXISTS (SELECT 1 FROM mw_agent_tasks WHERE id = $2 AND dispatch_token = $3)""",
@@ -732,6 +746,7 @@ async def enrich(task: dict, deps: Deps, guard: chain.Guard) -> PhaseOutcome:
                 json.dumps(update["image_candidates"]) if "image_candidates" in update else None,
                 json.dumps(update["images"]) if "images" in update else None,
                 json.dumps(update["units"], default=str) if "units" in update else None,
+                json.dumps(update["screenshots"]) if "screenshots" in update else None,
             )
         remaining = await count_items(
             conn, task["id"], "AND enriched_at IS NULL AND status IN ('candidate', 'verified')",
@@ -743,29 +758,31 @@ async def enrich(task: dict, deps: Deps, guard: chain.Guard) -> PhaseOutcome:
 
 
 def plan_order(units: list[dict], plan: dict) -> list[str]:
-    """A building's floor plan images, those of homes that meet the person's
+    """A building's floor plans, those of homes that meet the person's
     limits first, then the cheapest homes'; each once."""
     per_home = [c for c in plan.get("constraints") or []
                 if isinstance(c, dict) and c.get("field") in ranking.UNIT_FIELDS]
     fits = set(ranking.unit_verdict(units, per_home)[0]) if per_home else set()
     ordered = sorted(units, key=lambda u: str(u.get("id")) not in fits)  # stable: cheapest first within each
-    return list(dict.fromkeys(u["plan_image"] for u in ordered if u.get("plan_image")))
+    return list(dict.fromkeys(u["plan_source"] for u in ordered if u.get("plan_source")))
 
 
-async def rehost_plans(updates: list[dict], plan: dict, deps: Deps, *, prefix: str) -> None:
-    """Each building's floor plans on our CDN, PLAN_IMAGES at most, within the
-    batch's PLAN_IMAGE_SECONDS. A home's `plan_image` becomes its plan's CDN
-    copy, or None: a leasing system's image is never shown from its own host."""
-    wanted = [(update, source) for update in updates if update["status"] != "unavailable"
-              for source in plan_order(update["units"], plan)[:PLAN_IMAGES]]
-    copies: dict[str, str] = {}
+async def rehost_plans(buildings: list[list[dict]], plan: dict, deps: Deps, *, prefix: str, seconds: float,
+                       copies: dict[str, str] | None = None) -> list[list[dict]]:
+    """Each building's homes with their floor plans on our CDN (`plan_image`):
+    PLAN_IMAGES not yet copied per building, within `seconds`, `copies`
+    (source -> our copy) reused. A plan not copied stays None, never the
+    leasing system's URL; its `plan_source` is kept for a later pass."""
+    copies = dict(copies or {})
+    wanted = [source for units in buildings
+              for source in [s for s in plan_order(units, plan) if s not in copies][:PLAN_IMAGES]]
     gate = asyncio.Semaphore(PLAN_IMAGE_CONCURRENCY)
-    stop = time.monotonic() + PLAN_IMAGE_SECONDS
+    stop = time.monotonic() + seconds
 
     async def one(source: str) -> None:
         async with gate:
             left = stop - time.monotonic()
-            if left <= 1 or source in copies:
+            if left <= 1:
                 return
             try:
                 kept, _warnings = await deps.rehost([{"source_url": source, "alt": "Floor plan"}],
@@ -776,9 +793,38 @@ async def rehost_plans(updates: list[dict], plan: dict, deps: Deps, *, prefix: s
             if kept:
                 copies[source] = kept[0]["url"]
 
-    await asyncio.gather(*(one(source) for source in dict.fromkeys(source for _, source in wanted)))
-    for update in updates:
-        update["units"] = [{**unit, "plan_image": copies.get(unit.get("plan_image"))} for unit in update["units"]]
+    await asyncio.gather(*(one(source) for source in dict.fromkeys(wanted)))
+    return [[{**unit, "plan_image": copies.get(unit.get("plan_source"))} for unit in units] for units in buildings]
+
+
+async def fill_plans(task: dict, plan: dict, deps: Deps, guard: chain.Guard) -> None:
+    """After a refine: the floor plans of homes that fit now, where they were
+    never copied (enrich copies the plans that fit then, and the cheapest)."""
+    async with connection_or_direct() as conn:
+        rows = await conn.fetch(
+            """SELECT id, units FROM mw_agent_task_items
+               WHERE task_id = $1 AND rank_band < 9 AND units <> '[]'::jsonb""",
+            task["id"],
+        )
+    found = [(row["id"], [u for u in decode_jsonb(row["units"], []) or [] if isinstance(u, dict)]) for row in rows]
+    found = [(item_id, units) for item_id, units in found
+             if any(u.get("plan_source") and not u.get("plan_image") for u in units)]
+    if not found:
+        return
+    copies = {u["plan_source"]: u["plan_image"] for _, units in found for u in units
+              if u.get("plan_source") and u.get("plan_image")}
+    prefix = f"matcha-work/{task['company_id']}/agent-tasks/{task['id']}"
+    copied = await rehost_plans([units for _, units in found], plan, deps, prefix=prefix,
+                                seconds=PLAN_FILL_SECONDS, copies=copies)
+    async with connection_or_direct() as conn:
+        for (item_id, before), after in zip(found, copied):
+            if after != before:
+                await conn.execute(
+                    """UPDATE mw_agent_task_items SET units = $3::jsonb, updated_at = NOW()
+                       WHERE id = $1 AND task_id = $2
+                         AND EXISTS (SELECT 1 FROM mw_agent_tasks WHERE id = $2 AND dispatch_token = $4)""",
+                    item_id, task["id"], json.dumps(after, default=str), guard.token,
+                )
 
 
 # ── rank ─────────────────────────────────────────────────────────────────────

@@ -1,5 +1,6 @@
 """An apartment building's homes one by one (`research/units.py`) and how
 they reach ranking, the item views, the model and the enrich phase."""
+import asyncio
 import json
 from dataclasses import replace
 from unittest.mock import AsyncMock
@@ -101,19 +102,20 @@ def test_an_avalon_community_is_named_only_on_avalons_own_site():
 # ── reading them ─────────────────────────────────────────────────────────────
 
 def test_a_unit_maps_homes_are_read_with_their_rent_floor_plan_and_tour():
-    homes = U.sightmap_units(_sightmap(), url=SITE, today=TODAY)
+    homes = U.sightmap_units(_sightmap(), today=TODAY)
     assert [h["number"] for h in homes] == ["A107", "B201"]  # B202 has no rent: says nothing
     a107, b201 = homes
     assert a107 == {
         "id": "sightmap:1000752", "number": "A107", "floor": "1", "plan": "1 Bed 1 Bath", "beds": 1.0, "baths": 1.0,
         "sqft": 644.0, "rent": 4177.0, "currency": "USD", "available": "2026-11-04", "lease_months": 12,
-        "special": None, "plan_image": PLAN_A, "tour_url": TOUR, "url": SITE, "source": "sightmap",
-    }
+        "special": None, "plan_image": None, "plan_source": PLAN_A, "tour_url": TOUR, "url": None,
+        "source": "sightmap",
+    }  # a unit map's homes have no page of their own; the plan waits to be copied to our CDN
     # A move-in date already past is now; the special's free weeks give a net rent on its own lease.
     assert b201["available"] == TODAY.isoformat() and b201["beds"] == 2.0 and b201["lease_months"] == 13
     assert b201["net_rent"] == 2949.0 and b201["net_note"] == "6 weeks free on a 13-month lease"
     # A map with no rents (Avalon's own) lists nothing.
-    assert U.sightmap_units({"units": [{"id": 1, "price": None}]}, url=SITE, today=TODAY) == []
+    assert U.sightmap_units({"units": [{"id": 1, "price": None}]}, today=TODAY) == []
 
 
 def test_avalons_homes_are_read_once_each_with_their_promotions():
@@ -124,13 +126,24 @@ def test_avalons_homes_are_read_once_each_with_their_promotions():
     h1215, h319 = homes
     assert h1215["url"] == "https://www.avaloncommunities.com/california/x/ava-55-ninth/apartment/CA100-CA100-001-1215/"
     assert h1215["floor"] == "12" and h1215["lease_months"] == 18 and h1215["available"] == "2027-01-25"
-    assert h1215["plan"] == "A2" and h1215["plan_image"].endswith("CA100-A2.png") and "net_rent" not in h1215
+    assert h1215["plan"] == "A2" and h1215["plan_source"].endswith("CA100-A2.png") and "net_rent" not in h1215
     # "1 month free" on an 18-month lease, worked out by code (Avalon's own net is only used when there is none).
     assert h319["special"] == "1 month free" and h319["net_rent"] == round(3970 * 17 / 18)
     plain = _avalon()
     plain["results"]["availableFloorPlanTypes"][0]["availableFloorPlans"][0]["apartments"][1]["promotions"] = []
     homes, _ = U.avalon_units(plain, url=SITE, today=TODAY)
     assert homes[1]["net_rent"] == 3640 and homes[1]["net_note"] == "Avalon's net effective rent"
+
+
+def test_avalon_homes_without_a_key_are_known_by_their_number():
+    keyless = _avalon()
+    plan = keyless["results"]["availableFloorPlanTypes"][0]["availableFloorPlans"][0]
+    for home in plan["apartments"]:
+        home["unitKey"] = None
+    plan["apartments"].append({**plan["apartments"][0], "apartmentNumber": None})  # no key, no number: skipped
+    plan["finishPackages"] = []
+    homes, _ = U.avalon_units(keyless, url=SITE, today=TODAY)
+    assert [(h["id"], h["url"]) for h in homes] == [("avalon:A2#1215", None), ("avalon:A2#319", None)]
 
 
 @pytest.mark.parametrize("special,lease,expected", [
@@ -160,6 +173,10 @@ async def test_find_units_tries_avalon_then_the_unit_map():
     assert found.source == "sightmap" and [u["number"] for u in found.units] == ["B201", "A107"]  # cheapest first
     assert calls == [(EMBED, False), (API, True)]
     # Nothing named, an embed page without its API, an answer that can't be read, or no homes: None.
+    # A system already asked for this building is never asked again.
+    load, calls = _loads({EMBED: embed_page, API: _sightmap()})
+    assert await U.find_units(f'"{EMBED}"'.encode(), SITE, load, today=TODAY,
+                              tried={"sightmap:my8px6mqp19"}) is None and calls == []
     for page, answers in ((b"<p>x</p>", {}), (f'"{EMBED}"'.encode(), {EMBED: b"<p>no api</p>"}),
                           (f'"{EMBED}"'.encode(), {EMBED: embed_page, API: b"not json"}),
                           (f'"{EMBED}"'.encode(), {EMBED: embed_page, API: b"[1, 2]"}),
@@ -170,7 +187,7 @@ async def test_find_units_tries_avalon_then_the_unit_map():
 
 
 def test_a_buildings_fields_come_from_its_homes():
-    found = U.Found(U._cheapest(U.sightmap_units(_sightmap(), url=SITE, today=TODAY)), [], "sightmap", SITE)
+    found = U.Found(U._cheapest(U.sightmap_units(_sightmap(), today=TODAY)), [], "sightmap", SITE)
     fields = U.building_fields(found, today=TODAY)
     price = fields["price"]
     assert price["display"] == "$3,300–$4,177/mo" and price["spans"] == [[2949.0, 3300.0], [4177.0, 4177.0]]
@@ -185,7 +202,7 @@ def test_a_buildings_fields_come_from_its_homes():
 
 
 def test_a_home_as_a_line():
-    home = U.sightmap_units(_sightmap(), url=SITE, today=TODAY)[1]
+    home = U.sightmap_units(_sightmap(), today=TODAY)[1]
     assert U.unit_line(home) == ("#B201, floor 2, 2 bd, 1 ba, 910 sq ft, $3,300/mo, $2,949/mo net "
                                  "(6 weeks free on a 13-month lease), available 2026-10-14, "
                                  "special: 6 weeks free on a 13-month lease")
@@ -234,6 +251,22 @@ def test_a_building_ranks_on_its_homes_and_says_which_fit():
     assert ranking.assess(found[0], plan["constraints"]) == (ranking.OK, [], [])
 
 
+def test_no_home_fits_a_building_that_breaks_a_limit_of_its_own():
+    plan = {"constraints": [UNDER_3100, {"field": "pets", "op": "includes", "value": "dogs"}], "preferences": []}
+    no_pets = {"pets": {"value": ["none"], "status": "verified"}}
+    [ranked] = ranking.rank([{"id": "x", "fields": no_pets, "units": HOMES}], plan)
+    assert ranked.band == ranking.HIDDEN and ranked.explain["units_fit"] == []
+    # Pets unconfirmed: the homes that fit still do, and the building says what it couldn't confirm.
+    [ranked] = ranking.rank([{"id": "x", "fields": {}, "units": HOMES}], plan)
+    assert ranked.explain["units_fit"] == ["a", "b"] and ranked.explain["flags"] == ["unconfirmed:pets"]
+
+
+def test_a_homes_lowest_rent_is_its_net_rent():
+    assert U.lowest_rent({"rent": 3300.0, "net_rent": 2949.0}) == 2949.0
+    assert U.lowest_rent({"rent": 3300.0}) == 3300.0
+    assert U.lowest_rent({"rent": 3300.0, "net_rent": 3500.0}) == 3300.0
+
+
 # ── what the app and the model see ───────────────────────────────────────────
 
 def _row(**over):
@@ -250,12 +283,25 @@ def test_the_app_sees_how_many_homes_fit_and_each_ones_verdict():
     assert items_mod.item_summary(item_row())["homes"] is None and items_mod.units_view(item_row()) == []
 
 
+def test_the_app_never_sees_a_floor_plans_source():
+    homes = [{**HOMES[0], "plan_source": PLAN_A, "plan_image": "https://cdn.test/a.webp"}]
+    [unit] = items_mod.units_view(item_row(units=json.dumps(homes)))
+    assert "plan_source" not in unit and unit["plan_image"] == "https://cdn.test/a.webp"
+
+
 def test_the_model_sees_the_homes_that_fit_not_their_ids():
     seen = items_mod.view_for_model(_row())
     assert "units_fit" not in seen["rank_explain"]
-    assert seen["homes"]["listed"] == 3 and seen["homes"]["meet_every_limit"] == 1
-    assert seen["homes"]["examples"] == [U.unit_line(HOMES[0])]
+    assert seen["homes"] == {"listed": 3, "meet_every_limit": 1, "homes_that_fit": [U.unit_line(HOMES[0])]}
     assert "homes" not in items_mod.view_for_model(item_row())
+    # None fit: the cheapest are shown as not fitting, never as examples of a fit.
+    none_fit = items_mod.view_for_model(item_row(units=json.dumps(HOMES), rank_explain='{"units_fit": []}'))
+    assert none_fit["homes"] == {"listed": 3, "meet_every_limit": 0, "homes_that_fit": [],
+                                 "cheapest_not_fitting": [U.unit_line(h) for h in HOMES]}
+    # Not ranked yet (screening): examples, none judged.
+    unranked = items_mod.view_for_model(item_row(units=json.dumps(HOMES)))
+    assert unranked["homes"] == {"listed": 3, "examples": [U.unit_line(h) for h in HOMES]}
+    assert "never call one a fit" in prompts.SUMMARIZE
     turn = prompts.screen_turn("a 2bd", {}, [("i1", seen)])
     assert '"meet_every_limit": 1' in turn
     assert '"homes"' in prompts.summary_turn("a 2bd", {}, [("i1", seen)], total=1, hidden=0, note=None)
@@ -333,8 +379,46 @@ async def test_a_leasing_system_that_fails_leaves_the_floor_plans_as_before():
     assert [u for u, _ in calls] == [SITE] and "units" not in update
     # A cut-off answer is not read.
     load = phases.leasing_loader(_deps(page_fetch=AsyncMock(return_value=_fetched(b"{", truncated=True))),
-                                 Budget(left=1))
+                                 Budget(left=1), Budget(left=1))
     assert await load(API, True) is None
+
+
+AVALON_SITE = "https://www.avaloncommunities.com/ca/sf/ava-x/"
+AVALON_PLANS = AVALON_SITE + "floor-plans/"
+
+
+@pytest.mark.asyncio
+async def test_a_building_spends_only_its_own_page_loads():
+    # An AVA-style building: Avalon answers with no homes to let, its unit map has no rents,
+    # and its floor plans page names both again.
+    names = f"communityId: 'AVB-CA100' <iframe src='{EMBED}'>".encode()
+    home = b"<html><body><a href='/ca/sf/ava-x/floor-plans/'>Floor Plans</a>" + names + b"</body></html>"
+    no_homes = _avalon(availableFloorPlanTypes=[])
+    fetch, calls = _web({AVALON_SITE: home, AVALON_PLANS: home, U.AVALON_API.format(code="CA100"): no_homes,
+                         EMBED: EMBED_PAGE, API: _sightmap(units=[])})
+    fetches = Budget(left=phases.BUILDING_LOADS * 3)  # the round has loads for other buildings too
+    row = {**BUILDING, "url": AVALON_SITE}
+    update = await phases.enrich_one(row, _deps(page_fetch=fetch), fetches, Budget(left=0), prefix="p")
+    asked = [url for url, _ in calls]
+    # Its site, Avalon, the map's embed page (its API would be a third leasing load), its floor plans page;
+    # nothing on the floor plans page is asked again.
+    assert asked == [AVALON_SITE, U.AVALON_API.format(code="CA100"), EMBED, AVALON_PLANS]
+    assert fetches.used == phases.BUILDING_LOADS and not fetches.exhausted and "units" not in update
+
+
+@pytest.mark.asyncio
+async def test_the_leasing_systems_figures_beat_the_pages_structured_data():
+    offer = (b"<script type='application/ld+json'>{\"@type\": \"ApartmentComplex\", \"name\": \"Park West\", "
+             b"\"offers\": {\"@type\": \"Offer\", \"price\": 2800, \"priceCurrency\": \"USD\"}}</script>")
+    home = b"<html><head>" + offer + b"</head><body>" + f'<iframe src="{EMBED}">'.encode() + b"</body></html>"
+    fetch, _ = _web({SITE: home, EMBED: EMBED_PAGE, API: _sightmap()})
+    stored = {"price": {"value": 2700.0, "status": "verified", "display": "$2,700/mo",
+                        "evidence": {"origin": "provider"}}}
+    row = {**BUILDING, "fields": json.dumps(stored)}
+    update = await phases.enrich_one(row, _deps(page_fetch=fetch), Budget(left=4), Budget(left=0), prefix="p")
+    price = update["fields"]["price"]
+    assert price["display"] == "$3,300–$4,177/mo" and price["evidence"]["origin"] == "leasing"
+    assert update["fields"]["available_date"]["evidence"]["origin"] == "leasing"
 
 
 @pytest.fixture
@@ -366,43 +450,121 @@ async def test_a_batch_saves_the_homes_with_their_floor_plans_on_our_cdn(conn, m
 
     rehost = AsyncMock(side_effect=rehost)
     plan = {"constraints": [UNDER_3100, TWO_BEDS], "preferences": []}
+    monkeypatch.setattr(phases, "PLAN_IMAGE_CONCURRENCY", 1)
     await phases.enrich(task_row(plan=json.dumps(plan)), _deps(page_fetch=fetch, rehost=rehost), _guard())
     # Its fetch grant covers its site, its floor plans page and its leasing system.
     assert conn.ran("fetch_calls AS before")[0][2][1] == phases.BUILDING_LOADS
-    # The plan of the home that fits (B201) first; the one that failed is never shown from SightMap.
+    # The plan of the home that fits (B201) first; the one that failed is never shown from SightMap,
+    # but its source is kept for a later pass.
     assert [c.args[0][0]["source_url"] for c in rehost.await_args_list] == [PLAN_B, PLAN_A]
     [save] = conn.ran("enriched_at = NOW(), updated_at = NOW()")
     saved = json.loads(save[2][7])
-    assert [(u["number"], u["plan_image"]) for u in saved] == [("B201", "https://cdn.test/b.webp"), ("A107", None)]
+    assert [(u["number"], u["plan_image"], u["plan_source"]) for u in saved] == [
+        ("B201", "https://cdn.test/b.webp", PLAN_B), ("A107", None, PLAN_A)]
+    # Read again later: the plan already on our CDN is reused, not copied again.
+    conn.on("WHERE task_id = $1 AND enriched_at IS NULL AND status IN", [{**row, "units": save[2][7]}])
+    conn.on("COUNT(*) FROM mw_agent_task_items WHERE task_id = $1 AND enriched_at IS NULL", 0)
+    rehost.reset_mock()
+    await phases.enrich(task_row(plan=json.dumps(plan)), _deps(page_fetch=_web(
+        {SITE: home, EMBED: EMBED_PAGE, API: _sightmap()})[0], rehost=rehost), _guard())
+    assert [c.args[0][0]["source_url"] for c in rehost.await_args_list] == [PLAN_A]
+    saved = json.loads(conn.ran("enriched_at = NOW(), updated_at = NOW()")[-1][2][7])
+    assert saved[0]["plan_image"] == "https://cdn.test/b.webp"
+
+
+@pytest.mark.asyncio
+async def test_a_batchs_photos_and_floor_plans_are_copied_at_the_same_time(conn):
+    rows = [item_row(id=uuid4(), origin="provider", url=SITE, fields="{}", status="candidate", images="[]")]
+    conn.on("WHERE task_id = $1 AND enriched_at IS NULL AND status IN", rows)
+    conn.on("COALESCE(SUM(jsonb_array_length(images)), 0)", 0)
+    conn.on("COUNT(*) FROM mw_agent_task_items WHERE task_id = $1 AND enriched_at IS NULL", 0)
+    home = (f'<html><head><meta property="og:image" content="https://www.parkwest.test/p.jpg"></head>'
+            f'<body><iframe src="{EMBED}"></body></html>').encode()
+    fetch, _ = _web({SITE: home, EMBED: EMBED_PAGE, API: _sightmap()})
+    started, both = [], asyncio.Event()
+
+    async def rehost(images, **kw):
+        started.append(kw["prefix"].rsplit("/", 1)[1])
+        if len(started) == 2:
+            both.set()
+        await asyncio.wait_for(both.wait(), 2)  # each finishes only once the other has started
+        return [{"url": "https://cdn.test/x.webp"}], []
+
+    await phases.enrich(task_row(), _deps(page_fetch=fetch, rehost=AsyncMock(side_effect=rehost)), _guard())
+    assert {"photos", "plans"} <= set(started)
+
+
+@pytest.mark.asyncio
+async def test_photos_stop_when_the_batchs_time_for_them_is_up(conn, monkeypatch):
+    rows = [item_row(id=uuid4(), url=f"https://apts.test/{n}", fields="{}", status="candidate", images="[]")
+            for n in range(2)]
+    conn.on("WHERE task_id = $1 AND enriched_at IS NULL AND status IN", rows)
+    conn.on("COALESCE(SUM(jsonb_array_length(images)), 0)", 0)
+    conn.on("COUNT(*) FROM mw_agent_task_items WHERE task_id = $1 AND enriched_at IS NULL", 0)
+    monkeypatch.setattr(phases, "IMAGE_SECONDS", 0)
+    page = b'<html><head><meta property="og:image" content="https://apts.test/p.jpg"></head><body>1 bd</body></html>'
+    rehost = AsyncMock(return_value=([], []))
+    await phases.enrich(task_row(), _deps(page_fetch=AsyncMock(side_effect=lambda url, **_: _fetched(page, final=url)),
+                                          rehost=rehost), _guard())
+    rehost.assert_not_awaited()
 
 
 def test_floor_plans_are_ordered_by_fit_then_rent_and_kept_once():
-    homes = [{"id": "1", "rent": 2000.0, "beds": 1.0, "plan_image": "p1"},
-             {"id": "2", "rent": 2500.0, "beds": 2.0, "plan_image": "p2"},
-             {"id": "3", "rent": 2600.0, "beds": 2.0, "plan_image": "p2"},
-             {"id": "4", "rent": 2700.0, "beds": 1.0, "plan_image": None}]
+    homes = [{"id": "1", "rent": 2000.0, "beds": 1.0, "plan_source": "p1"},
+             {"id": "2", "rent": 2500.0, "beds": 2.0, "plan_source": "p2"},
+             {"id": "3", "rent": 2600.0, "beds": 2.0, "plan_source": "p2"},
+             {"id": "4", "rent": 2700.0, "beds": 1.0, "plan_source": None}]
     assert phases.plan_order(homes, {"constraints": [TWO_BEDS]}) == ["p2", "p1"]
     assert phases.plan_order(homes, {}) == ["p1", "p2"]
 
 
 @pytest.mark.asyncio
 async def test_rehosting_floor_plans_stops_in_time_and_survives_a_failure(monkeypatch):
-    update = {"status": "verified", "units": [{"id": "1", "rent": 1.0, "plan_image": PLAN_A},
-                                              {"id": "2", "rent": 2.0, "plan_image": PLAN_B}]}
+    units = [{"id": "1", "rent": 1.0, "plan_source": PLAN_A}, {"id": "2", "rent": 2.0, "plan_source": PLAN_B}]
     rehost = AsyncMock(side_effect=[RuntimeError("s3 down"), ([{"url": "https://cdn.test/b.webp"}], [])])
     monkeypatch.setattr(phases, "PLAN_IMAGE_CONCURRENCY", 1)
-    await phases.rehost_plans([update], {}, _deps(rehost=rehost), prefix="p")
-    assert [u["plan_image"] for u in update["units"]] == [None, "https://cdn.test/b.webp"]
-    monkeypatch.setattr(phases, "PLAN_IMAGE_SECONDS", 0)
-    late = {"status": "verified", "units": [{"id": "1", "rent": 1.0, "plan_image": PLAN_A}]}
+    [copied] = await phases.rehost_plans([units], {}, _deps(rehost=rehost), prefix="p", seconds=10)
+    assert [u["plan_image"] for u in copied] == [None, "https://cdn.test/b.webp"]
     rehost = AsyncMock()
-    await phases.rehost_plans([late], {}, _deps(rehost=rehost), prefix="p")
+    [late] = await phases.rehost_plans([units], {}, _deps(rehost=rehost), prefix="p", seconds=0)
     rehost.assert_not_awaited()
-    assert late["units"][0]["plan_image"] is None
+    assert late[0]["plan_image"] is None and late[0]["plan_source"] == PLAN_A
+    # PLAN_IMAGES new ones a building a pass; ones already copied are reused.
+    monkeypatch.setattr(phases, "PLAN_IMAGES", 1)
+    rehost = AsyncMock(return_value=([{"url": "https://cdn.test/new.webp"}], []))
+    [some] = await phases.rehost_plans([units], {}, _deps(rehost=rehost), prefix="p", seconds=10,
+                                       copies={PLAN_A: "https://cdn.test/a.webp"})
+    assert [u["plan_image"] for u in some] == ["https://cdn.test/a.webp", "https://cdn.test/new.webp"]
+
+
+@pytest.fixture
+def items_conn(monkeypatch):
+    c = FakeConn()
+    monkeypatch.setattr(phases, "connection_or_direct", connection(c))
+    return c
 
 
 @pytest.mark.asyncio
-async def test_a_viewed_pages_screenshot_is_kept_after_the_photos(conn):
+async def test_a_refine_copies_the_floor_plans_of_homes_that_fit_only_now(items_conn):
+    copied = {**HOMES[0], "plan_source": PLAN_A, "plan_image": "https://cdn.test/a.webp"}
+    waiting = {**HOMES[1], "plan_source": PLAN_B, "plan_image": None}
+    item_id = uuid4()
+    items_conn.on("SELECT id, units FROM mw_agent_task_items", [{"id": item_id, "units": json.dumps([copied, waiting])}])
+    rehost = AsyncMock(return_value=([{"url": "https://cdn.test/b.webp"}], []))
+    plan = {"constraints": [{"field": "beds", "op": "lte", "value": 0}]}  # a studio now: home b fits
+    await phases.fill_plans(task_row(), plan, _deps(rehost=rehost), _guard())
+    assert [c.args[0][0]["source_url"] for c in rehost.await_args_list] == [PLAN_B]
+    [write] = items_conn.ran("SET units = $3::jsonb")
+    assert [u["plan_image"] for u in json.loads(write[2][2])] == ["https://cdn.test/a.webp", "https://cdn.test/b.webp"]
+    # Every plan copied already: nothing to do.
+    items_conn.on("SELECT id, units FROM mw_agent_task_items", [{"id": item_id, "units": json.dumps([copied])}])
+    rehost.reset_mock()
+    await phases.fill_plans(task_row(), plan, _deps(rehost=rehost), _guard())
+    rehost.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_viewed_pages_screenshot_is_kept_apart_from_the_photos(conn):
     row = item_row(id=uuid4(), origin="provider", url=SITE, fields="{}", status="candidate",
                    images=json.dumps([{"url": "https://cdn.test/old.webp"}]))
     conn.on("WHERE task_id = $1 AND enriched_at IS NULL AND status IN", [row])
@@ -415,15 +577,19 @@ async def test_a_viewed_pages_screenshot_is_kept_after_the_photos(conn):
     deps = _deps(page_fetch=fetch, view=view, browser_ready=lambda: True, rehost=AsyncMock(return_value=([], [])))
     await phases.enrich(task_row(), deps, _guard())
     [save] = conn.ran("enriched_at = NOW(), updated_at = NOW()")
-    assert [i["url"] for i in json.loads(save[2][6])] == ["https://cdn.test/old.webp", "https://cdn.test/shot.webp"]
+    assert save[2][6] is None  # its photos are untouched: a screenshot never counts as one
+    assert json.loads(save[2][8]) == [{"url": "https://cdn.test/shot.webp", "page_url": SITE,
+                                       "alt": "Its page as it looked"}]
     assert save[2][7] is None  # no homes found: the stored ones are left as they are
+    assert items_mod.item_summary(item_row(screenshots=save[2][8]))["screenshots"][0]["url"] == \
+        "https://cdn.test/shot.webp"
 
 
 def test_a_document_lists_a_buildings_homes_that_fit_first():
     from app.matcha.services.matcha_work.agent_tasks import document
 
     homes = [{**HOMES[1], "number": "B1", "url": "https://bldg.test/apartment/B1/"},
-             {**HOMES[0], "number": "A1", "tour_url": TOUR, "url": SITE}]
+             {**HOMES[0], "number": "A1", "tour_url": TOUR, "url": None}]
     row = item_row(url=SITE, units=json.dumps(homes), rank_explain=json.dumps({"units_fit": ["a"]}))
     _, md = document.render(task_row(), [row], today=TODAY)
     assert "- Homes to let: 2 listed, 1 meet every limit" in md

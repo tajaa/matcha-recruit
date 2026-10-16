@@ -60,8 +60,9 @@ are requirements: something they asked to find out (what specials are offered) i
 it was found, and a finding without it doesn't fail. A price shown as a range fits a budget when \
 any part of it is inside: some of its homes are in budget. A building's `homes` are its own homes \
 to let, from its leasing system: `meet_every_limit` counts the ones that meet every limit at once \
-and `examples` lists them; when you pick a building, name a home that fits (its unit, rent, \
-move-in date and any special, net rent too when shown). Use only the facts \
+and `homes_that_fit` lists them; when you pick a building, name one of those (its unit, rent, \
+move-in date and any special, net rent too when shown). `cheapest_not_fitting` are homes that do \
+NOT meet every limit: never call one a fit or say the building has a home that fits. Use only the facts \
 shown for each finding; never state a number a finding doesn't show. Say plainly when a fact is \
 unconfirmed. Name findings by their title; their short ids are only for the `top` list. No links except the findings' own pages. Call finish once. {_DATA}"""
 

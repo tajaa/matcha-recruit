@@ -299,17 +299,26 @@ answer a plain request:
   JSON-escaped), whose embed page names its API
   (`sightmap.com/app/api/v1/<x>/sightmaps/<n>`). Two loads. A map with no
   rents (AVA's) lists nothing. Its API always sends gzip, so it is loaded with
-  `fetch_public(gzip=True)`, which inflates a bounded amount at a time.
+  `fetch_public(gzip=True)`, which inflates a bounded amount at a time. Its
+  homes carry no page of their own (`url` None): the unit map is the building's.
 - **Avalon** (`avaloncommunities.com` pages only): `communityId: 'AVB-CA104'`
   in the page, then `api.avalonbay.com/json/reply/ApartmentSearch`. One load;
-  its community promotions too.
+  its community promotions too. A home with no unit key in its id is known by
+  `<floor plan>#<number>` (no page link); one with neither is skipped.
 
 Its own page is tried first, then its floor plans page (`plans_page`), which a
 building now loads even when its own page gave a rent: the unit map is often
-only there. A building whose system answered gets its price, soonest move-in
-and special from its homes (origin `leasing`, which ranks with `jsonld`, with
-the cheapest home as the quote); its floor plans text is not read and no view
-is made. Otherwise everything above applies unchanged. 403s to a server
+only there. **A building's page loads are its own:** `BUILDING_LOADS` (4) is
+its site, its floor plans page and `LEASING_LOADS` (2) leasing-system loads,
+checked against a per-building `Budget` before the round's shared one, and a
+system already asked (`avalon:<code>`, `sightmap:<id>`, the shared `tried` set)
+is never asked again from the floor plans page, so an AVA-style building (an
+Avalon code with no homes plus a rentless unit map) can't spend other
+buildings' loads. A building whose system answered gets its price, soonest
+move-in and special from its homes (origin `leasing`, which outranks
+`jsonld` and a provider: the leasing system is the building's own current
+list), with the cheapest home as the quote; its floor plans text is not read
+and no view is made. Otherwise everything above applies unchanged. 403s to a server
 (Vara, Strata, OLUME, Hanover, Equity) and RentCafe/RealPage/AppFolio
 widgets are not read yet.
 
@@ -318,8 +327,9 @@ widgets are not read yet.
   home meets all of them at once (`unit_verdict`), never one home's rent with
   another's bedrooms. Every home breaking one limit names that limit ("From
   $4,211/mo (18 homes)"); otherwise "No home here meets every limit at once".
-  A home missing a figure makes the building Unconfirmed, not hidden. The
-  homes that fit are `rank_explain.units_fit`; the app shows "3 of 18 homes
+  A home missing a figure makes the building Unconfirmed, not hidden. A
+  building that breaks a limit of its own (no dogs) has no home that fits:
+  `units_fit` is empty. The homes that fit are `rank_explain.units_fit`; the app shows "3 of 18 homes
   fit · from $X" (`items.homes_view`) and marks each home (`units_view`).
 - **Net rent comes only from free time a special states** (`units.net_rent`):
   "6 weeks free", "1 month free", "first month free", over the lease the
@@ -327,17 +337,28 @@ widgets are not read yet.
   does). "Up to …" is a ceiling, so no net. Avalon's own net effective rent
   is used when no special gives one. A rent limit is met when the net rent is
   inside it (each home's price spans net to gross), as the person asked
-  ("if the promo makes it less than 3.1k that will count").
-- **Floor plans are ours or nothing.** `rehost_plans` puts up to
-  `PLAN_IMAGES` (4) of a building's floor plans on our CDN, the plans of homes
-  that meet the limits first, within `PLAN_IMAGE_SECONDS` (45 s) a batch; a
-  home whose plan wasn't rehosted has `plan_image` None, never the leasing
-  system's URL.
-- **A page the browser drew is kept** as one more image (`screenshot: true`,
-  already on our CDN) after the finding's photos, outside the photo caps.
-- The model sees a building's `homes`: how many are listed, how many meet
-  every limit and up to 6 lines (`items.view_for_model`), and the summary
-  names a fitting home. A document lists up to 8 homes, fitting first.
+  ("if the promo makes it less than 3.1k that will count"). `units.lowest_rent`
+  is the one rule for a home's lowest rent (net, else gross); ranking, the
+  building's span, its cheapest home and `homes_view` all use it.
+- **Floor plans are ours or nothing.** A home keeps the leasing system's
+  plan as `plan_source` (stored, never sent to the app: `units_view` drops
+  it) and `plan_image` is our CDN copy or None. `rehost_plans` copies up to
+  `PLAN_IMAGES` (8) new plans a building a pass, the plans of homes that meet
+  the limits first, within `PLAN_IMAGE_SECONDS` (45 s), reusing copies a
+  re-read already has. A refine that makes other homes fit copies theirs
+  (`fill_plans`, `PLAN_FILL_SECONDS` 30 s, after the rerank; a failure never
+  fails the refine).
+- **A batch's photos and floor plans are copied at the same time**, the
+  photos within `IMAGE_SECONDS` (60 s) as a whole.
+- **A page the browser drew is kept apart from the photos**, in
+  `mw_agent_task_items.screenshots` (already on our CDN): it never counts
+  against the photo caps or stands in for a photo. The app shows it after
+  the photos, marked "Its page".
+- The model sees a building's `homes`: how many are listed and, before
+  ranking, up to 6 example lines; once ranked, how many meet every limit and
+  only those homes (`homes_that_fit`), or, when none does, the 3 cheapest as
+  `cheapest_not_fitting`, which the summary must never call a fit
+  (`items.view_for_model`). A document lists up to 8 homes, fitting first.
 - Live 2026-10-16, San Francisco: The George 18 homes, Canyon 26, AVA 55
   Ninth 11, Solaire 19, 1190 Mission 11, Duboce 2, SoMa at 788 6; every one
   with floor plans, four with 3D tours.

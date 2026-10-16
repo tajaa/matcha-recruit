@@ -10,12 +10,15 @@ two answer a plain request:
   Avalon    avaloncommunities.com: the community's own API, with its
             promotions and each home's page.
 
-Every figure is the leasing system's own (origin `leasing`). A home's net
-rent is worked out only from a special that says how much is free
-(`net_rent`); "up to" isn't a promise, so it gives none.
+Every figure is the leasing system's own (origin `leasing`, which outranks a
+page's schema.org data: it is per home and current). A home's net rent is
+worked out only from a special that says how much is free (`net_rent`); "up
+to" isn't a promise, so it gives none.
 
 `find_units` returns None when the page names neither system or its answer
-can't be read, and the building's floor plans are read as before.
+can't be read, and the building's floor plans are read as before. A home's
+floor plan is kept as `plan_source` (never shown) until `phases.rehost_plans`
+puts it on our CDN as `plan_image`.
 """
 from __future__ import annotations
 
@@ -43,11 +46,18 @@ _SIGHTMAP_API = re.compile(r"https://sightmap\.com/app/api/v1/[A-Za-z0-9]+/sight
 _AVALON_ID = re.compile(r"""communityId['"]?\s*:\s*['"]AVB-([A-Z]{2}\d{3})['"]""")
 _AVALON_UNIT = re.compile(r"/apartment/([A-Z]{2}\d{3})-")
 AVALON_API = "https://api.avalonbay.com/json/reply/ApartmentSearch?communityCode={code}"
+_UNIT_KEY = re.compile(r"[A-Z0-9\-]{4,40}")
 _LEASE_TERM = re.compile(r"(\d{1,2})\s*(?:months?|mos?\.?)\b", re.I)
 
 # Loads a URL for this building (counted against the round's page loads):
 # the body, or None when it couldn't be read.
 Load = Callable[[str, bool], Awaitable[bytes | None]]
+
+
+def lowest_rent(unit: dict) -> float:
+    """What a home costs a month at least: its net rent after a stated
+    special, else its rent."""
+    return min(unit.get("net_rent") or unit["rent"], unit["rent"])
 
 
 @dataclass(frozen=True)
@@ -162,15 +172,17 @@ def net_rent(rent: float, special: str | None, lease_months: int | None) -> tupl
 
 def _unit(*, uid: str, number: str, floor: Any, plan: str, beds: Any, baths: Any, sqft: Any, rent: float,
           available: str | None, lease: int | None, special: str, plan_image: str | None,
-          tour: str | None, url: str, source: str) -> dict:
+          tour: str | None, url: str | None, source: str) -> dict:
     out = {
         "id": uid, "number": F.clean_text(number, 20), "floor": F.clean_text(floor, 10) if floor not in (None, "") else None,
         "plan": F.clean_text(plan, 40) or None,
         "beds": _number(beds), "baths": _number(baths), "sqft": _number(sqft),
         "rent": rent, "currency": "USD", "available": available, "lease_months": lease,
         "special": F.clean_text(special, 200) or None,
-        "plan_image": plan_image if isinstance(plan_image, str) and plan_image.startswith("https://") else None,
+        "plan_image": None,
+        "plan_source": plan_image if isinstance(plan_image, str) and plan_image.startswith("https://") else None,
         "tour_url": tour if isinstance(tour, str) and tour.startswith("https://") else None,
+        # Its own page, where it has one (Avalon's); a unit map's homes share the building's.
         "url": url, "source": source,
     }
     netted = net_rent(rent, out["special"], lease)
@@ -189,7 +201,7 @@ def _plan_name(plan: dict) -> str:
     return str(raw or plan.get("filter_label") or "")
 
 
-def sightmap_units(payload: dict, *, url: str, today: date) -> list[dict]:
+def sightmap_units(payload: dict, *, today: date) -> list[dict]:
     """Every home a SightMap lists with a rent. A map can list a building's
     homes without rents (Avalon's does): those say nothing about what's to let."""
     data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
@@ -216,7 +228,7 @@ def sightmap_units(payload: dict, *, url: str, today: date) -> list[dict]:
             beds=plan.get("bedroom_count"), baths=plan.get("bathroom_count"), sqft=raw.get("area"),
             rent=rent, available=available, lease=_months(raw.get("display_lease_term")),
             special=str(raw.get("specials_description") or ""), plan_image=plan.get("image_url"),
-            tour=tour, url=url, source="sightmap",
+            tour=tour, url=None, source="sightmap",
         ))
     return out
 
@@ -237,23 +249,32 @@ def avalon_units(payload: dict, *, url: str, today: date) -> tuple[list[dict], l
             for package in plan.get("finishPackages") or []:
                 homes.extend((package or {}).get("apartments") or [])
             for home in homes:
-                if not isinstance(home, dict) or home.get("unitKey") in seen:
+                if not isinstance(home, dict):
+                    continue
+                key = str(home.get("unitKey") or "")
+                if not _UNIT_KEY.fullmatch(key):
+                    # No key of its own: known by its number, never by "None".
+                    number = F.clean_text(home.get("apartmentNumber"), 20)
+                    if not number:
+                        continue
+                    key = f"{plan.get('floorPlanName') or ''}#{number}"
+                if key in seen:
                     continue
                 pricing = home.get("pricing") or {}
                 rent = _rent(pricing.get("effectiveRent") or pricing.get("amenitizedRent"))
                 if rent is None or pricing.get("showAsAvailable") is False:
                     continue
-                seen.add(home.get("unitKey"))
+                seen.add(key)
                 titles = [p.get("promotionTitle") for p in home.get("promotions") or []
                           if isinstance(p, dict) and p.get("promotionTitle")]
                 unit = _unit(
-                    uid=f"avalon:{home.get('unitKey')}", number=str(home.get("apartmentNumber") or ""),
+                    uid=f"avalon:{key}", number=str(home.get("apartmentNumber") or ""),
                     floor=home.get("floor"), plan=str(plan.get("floorPlanName") or ""),
                     beds=home.get("beds"), baths=home.get("baths"), sqft=home.get("apartmentSize"),
                     rent=rent, available=_iso(pricing.get("availableDate"), today),
                     lease=_months(pricing.get("term")), special="; ".join(titles),
                     plan_image=plan.get("floorPlanImage"), tour=None,
-                    url=f"{base}apartment/{home['unitKey']}/" if re.fullmatch(r"[A-Z0-9\-]{4,40}", str(home.get("unitKey") or "")) else url,
+                    url=f"{base}apartment/{key}/" if _UNIT_KEY.fullmatch(key) else None,
                     source="avalon",
                 )
                 net = _rent(pricing.get("netEffectiveRent"))
@@ -264,27 +285,32 @@ def avalon_units(payload: dict, *, url: str, today: date) -> tuple[list[dict], l
 
 
 def _cheapest(units: list[dict]) -> list[dict]:
-    return sorted(units, key=lambda u: (u.get("net_rent") or u["rent"], u["rent"], u["number"]))[:MAX_UNITS]
+    return sorted(units, key=lambda u: (lowest_rent(u), u["rent"], u["number"]))[:MAX_UNITS]
 
 
-async def find_units(raw: bytes, url: str, load: Load, *, today: date) -> Found | None:
-    """A building's homes from the leasing system its page names, or None."""
+async def find_units(raw: bytes, url: str, load: Load, *, today: date, tried: set[str] | None = None) -> Found | None:
+    """A building's homes from the leasing system its page names, or None.
+    `tried` holds the systems already asked for this building (its own page
+    and its floor plans page often name the same one): never asked twice."""
+    tried = set() if tried is None else tried
     code = avalon_code(raw, url)
-    if code is not None:
+    if code is not None and f"avalon:{code}" not in tried:
+        tried.add(f"avalon:{code}")
         url = _page(url)
         body = await load(AVALON_API.format(code=code), True)
         units, promotions = _parse(body, lambda p: avalon_units(p, url=url, today=today), ([], []))
         if units:
             return Found(_cheapest(units), promotions, "avalon", url)
     embed = sightmap_embed(raw)
-    if embed is None:
+    if embed is None or f"sightmap:{embed}" in tried:
         return None
+    tried.add(f"sightmap:{embed}")
     page = await load(f"https://sightmap.com/embed/{embed}", False)
     api = _SIGHTMAP_API.search(_text(page or b""))
     if api is None:
         return None
     body = await load(api.group(0), True)
-    units = _parse(body, lambda p: sightmap_units(p, url=url, today=today), [])
+    units = _parse(body, lambda p: sightmap_units(p, today=today), [])
     return Found(_cheapest(units), [], "sightmap", url) if units else None
 
 
@@ -312,8 +338,7 @@ def building_fields(found: Found, *, today: date) -> dict:
     price = F.entry(F.LIBRARY["price"], rents[0], status="verified", origin=ORIGIN, today=today,
                     url=found.url, unit="month", quote=unit_line(cheapest))
     if price is not None:
-        price["spans"] = [[min(u.get("net_rent") or u["rent"], u["rent"]), u["rent"]]
-                          for u in units][:F.MAX_SPANS]
+        price["spans"] = [[lowest_rent(u), u["rent"]] for u in units][:F.MAX_SPANS]
         if rents[-1] > rents[0]:
             spec = F.LIBRARY["price"]
             price["high"] = rents[-1]

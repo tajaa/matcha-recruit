@@ -563,7 +563,7 @@ struct TaskFindingRow: View {
 
     @ViewBuilder
     private var thumbnail: some View {
-        if let image = item.photos.first, let url = TasksViewModel.webURL(image.url) {
+        if let image = item.images.first, let url = TasksViewModel.webURL(image.url) {
             AsyncImage(url: url) { phase in
                 if let picture = phase.image {
                     picture.resizable().scaledToFill()

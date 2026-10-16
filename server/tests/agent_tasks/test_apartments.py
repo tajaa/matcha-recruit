@@ -565,7 +565,7 @@ async def test_floor_plans_are_read_or_viewed(monkeypatch):
                                Budget(left=1), Budget(left=1), shots)
     assert found["price"]["spans"] == [[1800, 1900]] and found["price"]["evidence"]["origin"] == "browser"
     assert shots == [{"url": "https://cdn.test/shot.webp", "page_url": "https://www.bldg.test/floorplans/",
-                      "alt": "Its page as it looked", "screenshot": True}]
+                      "alt": "Its page as it looked"}]
     # No link, no page loads left, or a page that won't load: nothing.
     for html, fetches, fetcher in ((b"<a href='/x'>x</a>", 1, fetch), (HOME, 0, fetch),
                                    (HOME, 1, AsyncMock(side_effect=OSError())),

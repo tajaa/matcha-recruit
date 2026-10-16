@@ -408,8 +408,8 @@ final class TasksLogicTests: XCTestCase {
 
     func testABuildingsHomesDecodeAndReadAsLines() throws {
         let item = try decode(AgentTaskItem.self, """
-        {"id": "i", "title": "Park West", "images": [{"url": "https://cdn.test/p.webp"},
-                                                     {"url": "https://cdn.test/shot.webp", "screenshot": true}],
+        {"id": "i", "title": "Park West", "images": [{"url": "https://cdn.test/p.webp"}],
+         "screenshots": [{"url": "https://cdn.test/shot.webp", "page_url": "https://parkwest.test/floor-plans/"}],
          "homes": {"count": 18, "fit": 3, "from": 2949},
          "units": [{"id": "sightmap:1", "number": "B201", "floor": "2", "beds": 2, "baths": 1, "sqft": 910,
                     "rent": 3300, "net_rent": 2949, "net_note": "6 weeks free on a 13-month lease",
@@ -419,7 +419,9 @@ final class TasksLogicTests: XCTestCase {
                    {"number": "C3", "rent": 5000, "available": "2027-01-25"}]}
         """)
         XCTAssertEqual(item.homes?.line, "3 of 18 homes fit · from $2,949/mo")
-        XCTAssertEqual(item.photos.map(\.url), ["https://cdn.test/p.webp"])
+        XCTAssertEqual(item.images.map(\.url), ["https://cdn.test/p.webp"])
+        XCTAssertEqual(item.screenshots.map(\.pageUrl), ["https://parkwest.test/floor-plans/"])
+        XCTAssertTrue(try decode(AgentTaskItem.self, #"{"id": "j"}"#).screenshots.isEmpty)  // older servers
         XCTAssertEqual(item.units.count, 3)  // one odd figure never drops the rest
         let b201 = item.units[0]
         XCTAssertEqual(b201.layoutLine, "#B201 · Floor 2 · 2 bd · 1 ba · 910 sq ft")

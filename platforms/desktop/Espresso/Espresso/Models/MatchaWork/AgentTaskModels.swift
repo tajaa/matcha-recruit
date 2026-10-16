@@ -67,24 +67,10 @@ struct AgentTaskImage: Decodable, Hashable {
     var url: String
     var pageUrl: String?
     var alt: String?
-    /// The finding's page as the browser drew it, not a photo.
-    var screenshot: Bool
 
     enum CodingKeys: String, CodingKey {
-        case url, alt, screenshot
+        case url, alt
         case pageUrl = "page_url"
-    }
-
-    init(url: String, pageUrl: String? = nil, alt: String? = nil, screenshot: Bool = false) {
-        self.url = url; self.pageUrl = pageUrl; self.alt = alt; self.screenshot = screenshot
-    }
-
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        url = try c.decode(String.self, forKey: .url)
-        pageUrl = c.value(.pageUrl)
-        alt = c.value(.alt)
-        screenshot = c.value(.screenshot) ?? false
     }
 }
 
@@ -232,6 +218,8 @@ struct AgentTaskItem: Decodable, Identifiable, Hashable {
     var provider: String?
     var fields: [String: AgentTaskField]
     var images: [AgentTaskImage]
+    /// Its page as the browser drew it: never one of its photos.
+    var screenshots: [AgentTaskImage]
     var status: String
     var fitScore: Int?
     var rank: Int?
@@ -252,8 +240,8 @@ struct AgentTaskItem: Decodable, Identifiable, Hashable {
     var units: [AgentTaskUnit]
 
     enum CodingKeys: String, CodingKey {
-        case id, kind, title, subtitle, url, origin, provider, fields, images, status, rank, flags, violations, notes
-        case actions, homes, units
+        case id, kind, title, subtitle, url, origin, provider, fields, images, screenshots, status, rank, flags
+        case violations, notes, actions, homes, units
         case fitScore = "fit_score"
         case rankBand = "rank_band"
         case userState = "user_state"
@@ -264,7 +252,8 @@ struct AgentTaskItem: Decodable, Identifiable, Hashable {
     init(id: String, title: String, subtitle: String = "", url: String? = nil, fields: [String: AgentTaskField] = [:],
          rank: Int? = nil, rankBand: Int? = 0, flags: [String] = [], userState: String = "new", status: String = "verified") {
         self.id = id; self.kind = "other"; self.title = title; self.subtitle = subtitle; self.url = url
-        self.origin = nil; self.provider = nil; self.fields = fields; self.images = []; self.status = status
+        self.origin = nil; self.provider = nil; self.fields = fields; self.images = []; self.screenshots = []
+        self.status = status
         self.fitScore = nil; self.rank = rank; self.rankBand = rankBand; self.flags = flags; self.userState = userState
         self.violations = []; self.fitReasons = []; self.notes = ""
         self.actions = []; self.actionHistory = []
@@ -282,6 +271,7 @@ struct AgentTaskItem: Decodable, Identifiable, Hashable {
         provider = c.value(.provider)
         fields = c.value(.fields) ?? [:]
         images = c.list(.images)
+        screenshots = c.list(.screenshots)
         status = c.value(.status) ?? "candidate"
         fitScore = c.value(.fitScore)
         rank = c.value(.rank)
@@ -296,9 +286,6 @@ struct AgentTaskItem: Decodable, Identifiable, Hashable {
         homes = c.value(.homes)
         units = c.list(.units)
     }
-
-    /// Its photos first, then its page as the browser drew it.
-    var photos: [AgentTaskImage] { images.filter { !$0.screenshot } }
 
     /// Hidden from the list unless asked: it breaks a limit, didn't fit,
     /// is gone, or the person dismissed it.

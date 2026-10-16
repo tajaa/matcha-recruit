@@ -25,6 +25,7 @@ from datetime import date
 from typing import Any
 
 from . import fields as F
+from .units import lowest_rent
 
 OPS = ("lte", "gte", "eq", "between", "includes", "excludes", "any_of", "is_true", "is_false", "before", "after")
 HIDDEN = 9
@@ -203,7 +204,7 @@ def unit_entry(unit: dict, key: str) -> dict | None:
         rent = unit.get("rent")
         if not isinstance(rent, (int, float)):
             return None
-        low = min(unit.get("net_rent") or rent, rent)
+        low = lowest_rent(unit)
         return {"value": low, "status": "verified", "unit": "month", "currency": unit.get("currency") or "USD",
                 "spans": [[low, rent]]}
     value = unit.get("available") if key == "available_date" else unit.get(key)
@@ -212,8 +213,7 @@ def unit_entry(unit: dict, key: str) -> dict | None:
 
 def _home_value(units: list[dict], constraint: dict) -> str:
     if constraint.get("field") == "price":
-        low = min(min(u.get("net_rent") or u["rent"], u["rent"]) for u in units)
-        return f"From ${low:,.0f}/mo ({len(units)} homes)"
+        return f"From ${min(lowest_rent(u) for u in units):,.0f}/mo ({len(units)} homes)"
     return f"None of {len(units)} homes"
 
 
@@ -254,7 +254,10 @@ def _assess(item: dict, constraints: list[dict]) -> tuple[int, list[dict], list[
             unconfirmed.append(constraint.get("field"))
     fits = None
     if units:
+        building_breaks = bool(violations)
         fits, home_violations, home_unsure = unit_verdict(units, per_home)
+        if building_breaks:
+            fits = []  # no home fits a building that breaks a limit of its own (no pets)
         violations += home_violations
         unconfirmed += [f for f in home_unsure if f not in unconfirmed]
     if violations:
