@@ -284,6 +284,7 @@ extension FeatureGuide {
              title: "Work with what it found",
              points: [
                 "Open a finding to see its facts. Verified ones show the quote and the page they came from.",
+                "Where a building lists its homes online, open it to see each one: unit, floor, beds and baths, size, rent, move-in date, lease, any special, its floor plan and a 3D tour. The list says how many fit, like “3 of 18 homes fit.”",
                 "Save, Choose or Dismiss findings, add notes, or Ask Espresso about one.",
                 "Buy on a product shows exactly what will happen first, then opens the store's checkout with it in the cart (your saved shipping address filled in, if you have one). Done lists what you did with it.",
                 "Apply on a home opens the application its page links to, or the listing when it has none. You fill it in there.",
@@ -296,6 +297,8 @@ extension FeatureGuide {
                 "It never pays, orders, books, applies or contacts anyone on its own. Buy takes you to the store's checkout and Apply to the application; you review, fill in and pay there.",
                 "Distances are straight-line miles from where Google Maps or the US Census puts each place. A home it couldn't place is Unconfirmed, not ruled out.",
                 "Only a fact it verified can rule a finding out. One it couldn't check is marked Unconfirmed and ranked after the confirmed ones.",
+                "A building fits only when one of its homes meets all your limits at once, not one home's rent with another's bedrooms. A special like “6 weeks free” counts: the net rent spreads the free weeks over the lease, and a home whose net rent is in your budget fits. “Up to” specials don't count.",
+                "Many buildings' sites don't list their homes one by one, or turn away anything but a person's browser. Those show the rents their floor plans give instead.",
                 "Up to \(tasksRunningAtOnce) tasks run at once.",
              ]),
         Page(stage: .expect, icon: "lock.fill",

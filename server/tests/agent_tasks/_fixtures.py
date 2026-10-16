@@ -44,7 +44,7 @@ def item_row(**over):
         "id": ITEM, "task_id": TASK, "round_n": 1, "dedupe_key": "u:https://apts.test/1", "kind": "listing",
         "title": "Sunny 1BR", "subtitle": "Mission", "url": "https://apts.test/1", "origin": "web",
         "provider": None, "fields": json.dumps({"price": price(3200)}), "images": "[]",
-        "image_candidates": "[]", "status": "verified", "violations": "[]", "enriched_at": NOW,
+        "image_candidates": "[]", "units": "[]", "status": "verified", "violations": "[]", "enriched_at": NOW,
         "screened_at": NOW, "fit_score": 4, "fit_reasons": '["Close to transit"]', "rank": 1, "rank_band": 0,
         "rank_score": 0.8, "rank_explain": '{"flags": []}', "user_state": "new", "notes": "",
         "created_at": NOW, "updated_at": NOW, **over,

@@ -22,12 +22,13 @@ struct AgentTaskProgress: Decodable, Hashable {
 struct AgentTaskEvidence: Decodable, Hashable {
     var quote: String?
     var url: String?
-    /// `provider`, `jsonld`, `page_text`, `browser` or `model`.
+    /// `provider`, `jsonld`, `leasing`, `page_text`, `browser` or `model`.
     var origin: String?
 
     var originLabel: String {
         switch origin {
         case "provider": return "From the listings provider"
+        case "leasing": return "From the building's leasing system"
         case "jsonld": return "From the page's structured data"
         case "page_text", "browser": return "From the page's text"
         case "model": return "Quoted by Espresso"
@@ -66,10 +67,151 @@ struct AgentTaskImage: Decodable, Hashable {
     var url: String
     var pageUrl: String?
     var alt: String?
+    /// The finding's page as the browser drew it, not a photo.
+    var screenshot: Bool
 
     enum CodingKeys: String, CodingKey {
-        case url, alt
+        case url, alt, screenshot
         case pageUrl = "page_url"
+    }
+
+    init(url: String, pageUrl: String? = nil, alt: String? = nil, screenshot: Bool = false) {
+        self.url = url; self.pageUrl = pageUrl; self.alt = alt; self.screenshot = screenshot
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        url = try c.decode(String.self, forKey: .url)
+        pageUrl = c.value(.pageUrl)
+        alt = c.value(.alt)
+        screenshot = c.value(.screenshot) ?? false
+    }
+}
+
+/// One home to let in an apartment building, as its leasing system lists it
+/// (SightMap's unit map, Avalon's site): every figure is the building's own.
+struct AgentTaskUnit: Decodable, Hashable, Identifiable {
+    var id: String
+    var number: String?
+    var floor: String?
+    var plan: String?
+    var beds: Double?
+    var baths: Double?
+    var sqft: Double?
+    var rent: Double
+    /// A month's rent over the lease after a special that frees stated time.
+    var netRent: Double?
+    var netNote: String?
+    /// ISO date it can be moved into.
+    var available: String?
+    var leaseMonths: Int?
+    var special: String?
+    /// The floor plan, on our CDN (nil when it couldn't be copied there).
+    var planImage: String?
+    var tourUrl: String?
+    var url: String?
+    /// Meets every one of the person's limits at once; nil before ranking.
+    var fits: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case id, number, floor, plan, beds, baths, sqft, rent, available, special, url, fits
+        case netRent = "net_rent", netNote = "net_note", leaseMonths = "lease_months"
+        case planImage = "plan_image", tourUrl = "tour_url"
+    }
+
+    init(id: String, number: String? = nil, floor: String? = nil, beds: Double? = nil, baths: Double? = nil,
+         sqft: Double? = nil, rent: Double, netRent: Double? = nil, netNote: String? = nil, available: String? = nil,
+         leaseMonths: Int? = nil, special: String? = nil, fits: Bool? = nil) {
+        self.id = id; self.number = number; self.floor = floor; self.plan = nil; self.beds = beds; self.baths = baths
+        self.sqft = sqft; self.rent = rent; self.netRent = netRent; self.netNote = netNote; self.available = available
+        self.leaseMonths = leaseMonths; self.special = special; self.planImage = nil; self.tourUrl = nil
+        self.url = nil; self.fits = fits
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        number = c.value(.number)
+        id = c.value(.id) ?? number ?? ""
+        floor = c.value(.floor)
+        plan = c.value(.plan)
+        beds = c.value(.beds)
+        baths = c.value(.baths)
+        sqft = c.value(.sqft)
+        rent = c.value(.rent) ?? 0
+        netRent = c.value(.netRent)
+        netNote = c.value(.netNote)
+        available = c.value(.available)
+        leaseMonths = c.value(.leaseMonths)
+        special = c.value(.special)
+        planImage = c.value(.planImage)
+        tourUrl = c.value(.tourUrl)
+        url = c.value(.url)
+        fits = c.value(.fits)
+    }
+
+    /// "#B201 · Floor 2 · 2 bd · 1 ba · 910 sq ft"
+    var layoutLine: String {
+        var parts = [number.map { "#\($0)" } ?? "A home"]
+        if let floor, !floor.isEmpty { parts.append("Floor \(floor)") }
+        if let beds { parts.append(beds == 0 ? "Studio" : "\(AgentTaskUnit.figure(beds)) bd") }
+        if let baths { parts.append("\(AgentTaskUnit.figure(baths)) ba") }
+        if let sqft, sqft > 0 { parts.append("\(AgentTaskUnit.dollars(sqft).dropFirst()) sq ft") }
+        return parts.joined(separator: " · ")
+    }
+
+    /// When it can be moved into: "Now" once the day has come (where the
+    /// person is), else "Nov 4" ("Jan 25, 2027" in another year).
+    func availableLabel(today: Date = Date(), zone: TimeZone = .current) -> String? {
+        guard let available, let day = AgentTaskUnit.isoDay.date(from: String(available.prefix(10))) else { return nil }
+        let local = DateFormatter()
+        local.locale = Locale(identifier: "en_US_POSIX")
+        local.timeZone = zone
+        local.dateFormat = "yyyy-MM-dd"
+        let now = local.string(from: today)
+        let iso = AgentTaskUnit.isoDay.string(from: day)
+        if iso <= now { return "Now" }
+        let shown = DateFormatter()
+        shown.locale = Locale(identifier: "en_US_POSIX")
+        shown.timeZone = TimeZone(identifier: "UTC")
+        shown.dateFormat = iso.prefix(4) == now.prefix(4) ? "MMM d" : "MMM d, yyyy"
+        return shown.string(from: day)
+    }
+
+    static func dollars(_ value: Double) -> String {
+        let format = NumberFormatter()
+        format.numberStyle = .decimal
+        format.maximumFractionDigits = 0
+        format.locale = Locale(identifier: "en_US")
+        return "$" + (format.string(from: NSNumber(value: value.rounded())) ?? String(Int(value)))
+    }
+
+    static func figure(_ value: Double) -> String {
+        value == value.rounded() ? String(Int(value)) : String(value)
+    }
+
+    private static let isoDay: DateFormatter = {
+        let format = DateFormatter()
+        format.locale = Locale(identifier: "en_US_POSIX")
+        format.timeZone = TimeZone(identifier: "UTC")
+        format.dateFormat = "yyyy-MM-dd"
+        return format
+    }()
+}
+
+/// A building's homes in brief: how many are listed, how many fit, and the
+/// cheapest that does (net of a stated special).
+struct AgentTaskHomes: Decodable, Hashable {
+    var count: Int
+    /// nil before ranking.
+    var fit: Int?
+    var from: Double?
+
+    /// "3 of 18 homes fit · from $2,949/mo", or "18 homes listed".
+    var line: String {
+        let homes = count == 1 ? "home" : "homes"
+        guard let fit else { return "\(count) \(homes) listed" + (from.map { " · from \(AgentTaskUnit.dollars($0))/mo" } ?? "") }
+        if fit == 0 { return "None of \(count) \(homes) fit" }
+        return "\(fit) of \(count) \(homes) fit" + (from.map { " · from \(AgentTaskUnit.dollars($0))/mo" } ?? "")
     }
 }
 
@@ -105,10 +247,13 @@ struct AgentTaskItem: Decodable, Identifiable, Hashable {
     var actions: [AgentTaskAction]
     /// What was done with it, newest first.
     var actionHistory: [AgentTaskActionRun]
+    /// An apartment building's homes in brief (list), and one by one (detail).
+    var homes: AgentTaskHomes?
+    var units: [AgentTaskUnit]
 
     enum CodingKeys: String, CodingKey {
         case id, kind, title, subtitle, url, origin, provider, fields, images, status, rank, flags, violations, notes
-        case actions
+        case actions, homes, units
         case fitScore = "fit_score"
         case rankBand = "rank_band"
         case userState = "user_state"
@@ -123,6 +268,7 @@ struct AgentTaskItem: Decodable, Identifiable, Hashable {
         self.fitScore = nil; self.rank = rank; self.rankBand = rankBand; self.flags = flags; self.userState = userState
         self.violations = []; self.fitReasons = []; self.notes = ""
         self.actions = []; self.actionHistory = []
+        self.homes = nil; self.units = []
     }
 
     init(from decoder: Decoder) throws {
@@ -147,7 +293,12 @@ struct AgentTaskItem: Decodable, Identifiable, Hashable {
         notes = c.value(.notes) ?? ""
         actions = c.list(.actions)
         actionHistory = c.list(.actionHistory)
+        homes = c.value(.homes)
+        units = c.list(.units)
     }
+
+    /// Its photos first, then its page as the browser drew it.
+    var photos: [AgentTaskImage] { images.filter { !$0.screenshot } }
 
     /// Hidden from the list unless asked: it breaks a limit, didn't fit,
     /// is gone, or the person dismissed it.

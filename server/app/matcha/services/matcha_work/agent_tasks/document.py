@@ -1,8 +1,10 @@
 """A task's findings as a document: fixed Markdown, saved as a journal note.
 
 No model writes it. It is the brief, a table of the top findings, a section
-per finding with each fact's evidence, and the sources, "as of" today. Every
-link is a finding's own page or a fact's source, both of which a run saw.
+per finding with each fact's evidence (and an apartment building's homes to
+let, the ones that meet every limit first), and the sources, "as of" today.
+Every link is a finding's own page or a fact's source, both of which a run
+saw, or a home's own page or tour from the building's leasing system.
 """
 from __future__ import annotations
 
@@ -13,9 +15,12 @@ from uuid import UUID
 from app.database import decode_jsonb
 from app.matcha.services.matcha_work.agent_card.schema import normalize_url
 
-from . import playbooks
+from . import items as items_mod, playbooks
+from .research.units import unit_line
 
 MAX_ITEMS = 10
+# A building's homes listed under it, the ones that fit first.
+HOMES_LISTED = 8
 _TABLE_COLUMNS = 4
 _UNSAFE = re.compile(r"[\\`*_{}\[\]<>|#]")
 
@@ -43,6 +48,25 @@ def _fact(entry: dict) -> str:
     if evidence.get("url"):
         shown += f" ({_link('source', evidence['url'])})"
     return shown
+
+
+def _homes(row: dict) -> list[str]:
+    homes = items_mod.units_view(row)
+    if not homes:
+        return []
+    fit = [h for h in homes if h["fits"]]
+    head = f"- Homes to let: {len(homes)} listed"
+    if any(h["fits"] is not None for h in homes):
+        head += f", {len(fit)} meet every limit"
+    out = [head]
+    for home in (fit + [h for h in homes if not h["fits"]])[:HOMES_LISTED]:
+        line = f"  - {_md(unit_line(home), 300)}"
+        if home.get("url") and home["url"] != row.get("url"):
+            line += f" ({_link('its page', home['url'])})"
+        if home.get("tour_url"):
+            line += f" ({_link('tour', home['tour_url'])})"
+        out.append(line)
+    return out
 
 
 def render(task: dict, rows: list[dict], *, today: date) -> tuple[str, str]:
@@ -94,6 +118,7 @@ def render(task: dict, rows: list[dict], *, today: date) -> tuple[str, str]:
                 url = (entry.get("evidence") or {}).get("url")
                 if isinstance(url, str):
                     sources.append(url)
+        lines += _homes(row)
         reasons = decode_jsonb(row.get("fit_reasons"), []) or []
         if reasons:
             lines.append(f"- Why it fits: {_md('; '.join(reasons), 400)}")

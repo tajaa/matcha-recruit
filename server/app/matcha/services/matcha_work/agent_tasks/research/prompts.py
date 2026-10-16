@@ -58,7 +58,10 @@ short sections, and the top picks with one sentence each on why: five, best firs
 finding when there are fewer. The headline says what was found. Only the limits and must haves \
 are requirements: something they asked to find out (what specials are offered) is reported where \
 it was found, and a finding without it doesn't fail. A price shown as a range fits a budget when \
-any part of it is inside: some of its homes are in budget. Use only the facts \
+any part of it is inside: some of its homes are in budget. A building's `homes` are its own homes \
+to let, from its leasing system: `meet_every_limit` counts the ones that meet every limit at once \
+and `examples` lists them; when you pick a building, name a home that fits (its unit, rent, \
+move-in date and any special, net rent too when shown). Use only the facts \
 shown for each finding; never state a number a finding doesn't show. Say plainly when a fact is \
 unconfirmed. Name findings by their title; their short ids are only for the `top` list. No links except the findings' own pages. Call finish once. {_DATA}"""
 
@@ -176,8 +179,10 @@ def _facts(item: dict) -> dict:
 def screen_turn(directive: str, plan: dict, batch: list[tuple[str, dict]]) -> str:
     lines = ["----", f"Ask: {directive}", *plan_lines(plan), "Findings:"]
     for short, item in batch:
-        lines.append(json.dumps({"id": short, "title": item.get("title"), "about": item.get("subtitle"),
-                                 "facts": _facts(item)}, ensure_ascii=False))
+        shown = {"id": short, "title": item.get("title"), "about": item.get("subtitle"), "facts": _facts(item)}
+        if item.get("homes"):
+            shown["homes"] = item["homes"]
+        lines.append(json.dumps(shown, ensure_ascii=False))
     return "\n".join(lines)
 
 
@@ -195,6 +200,7 @@ def summary_turn(directive: str, plan: dict, batch: list[tuple[str, dict]], *, t
             "id": short, "title": item.get("title"), "about": item.get("subtitle"), "url": item.get("url"),
             "facts": _facts(item), "unconfirmed": [F.LIBRARY[k].label for k in flags if k in F.LIBRARY],
             "fit": item.get("fit_score"), "reasons": item.get("fit_reasons") or [],
+            **({"homes": item["homes"]} if item.get("homes") else {}),
         }, ensure_ascii=False))
     return "\n".join(lines)
 

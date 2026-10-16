@@ -545,25 +545,32 @@ def test_a_buildings_floor_plans_link():
     assert not phases._no_rent({"price": {"value": 1500}})
 
 
+async def _floor_plans(html, deps, fetches, views, shots=None):
+    plans = await phases.plans_page(html, "https://www.bldg.test/", deps, fetches)
+    return await phases.floor_plans(plans, deps, views, prefix="p", today=TODAY, shots=shots)
+
+
 @pytest.mark.asyncio
 async def test_floor_plans_are_read_or_viewed(monkeypatch):
     plans = f"<html><body><p>{FLOOR_PLANS}</p></body></html>".encode()
     fetch = AsyncMock(return_value=_fetched(plans, final="https://www.bldg.test/floorplans/"))
-    found = await phases.floor_plans(HOME, "https://www.bldg.test/", _deps(page_fetch=fetch), Budget(left=1),
-                                     Budget(left=0), prefix="p", today=TODAY)
+    found = await _floor_plans(HOME, _deps(page_fetch=fetch), Budget(left=1), Budget(left=0))
     assert found["price"]["display"] == "$1,449–$2,753/mo"
-    # Drawn by JavaScript: viewed in the browser.
+    # Drawn by JavaScript: viewed in the browser, and the screenshot kept.
     blank = AsyncMock(return_value=_fetched(b"<html><body><div id=app>Loading</div></body></html>"))
-    view = AsyncMock(return_value={"url": "https://www.bldg.test/floorplans/", "text": "A1 $1,800 - $1,900 /mo"})
-    found = await phases.floor_plans(HOME, "https://www.bldg.test/", _deps(page_fetch=blank, view=view,
-                                     browser_ready=lambda: True), Budget(left=1), Budget(left=1), prefix="p", today=TODAY)
+    view = AsyncMock(return_value={"url": "https://www.bldg.test/floorplans/", "text": "A1 $1,800 - $1,900 /mo",
+                                   "screenshot_url": "https://cdn.test/shot.webp"})
+    shots = []
+    found = await _floor_plans(HOME, _deps(page_fetch=blank, view=view, browser_ready=lambda: True),
+                               Budget(left=1), Budget(left=1), shots)
     assert found["price"]["spans"] == [[1800, 1900]] and found["price"]["evidence"]["origin"] == "browser"
+    assert shots == [{"url": "https://cdn.test/shot.webp", "page_url": "https://www.bldg.test/floorplans/",
+                      "alt": "Its page as it looked", "screenshot": True}]
     # No link, no page loads left, or a page that won't load: nothing.
     for html, fetches, fetcher in ((b"<a href='/x'>x</a>", 1, fetch), (HOME, 0, fetch),
                                    (HOME, 1, AsyncMock(side_effect=OSError())),
                                    (HOME, 1, AsyncMock(return_value=_fetched(status=404)))):
-        assert await phases.floor_plans(html, "https://www.bldg.test/", _deps(page_fetch=fetcher), Budget(left=fetches),
-                                        Budget(left=0), prefix="p", today=TODAY) == {}
+        assert await _floor_plans(html, _deps(page_fetch=fetcher), Budget(left=fetches), Budget(left=0)) == {}
 
 
 @pytest.mark.asyncio
@@ -600,8 +607,8 @@ async def test_floor_plans_keep_what_their_page_said_when_the_view_adds_nothing(
     plans = b"<html><body><p>Up to 6 weeks free! Call for pricing.</p></body></html>"
     fetch = AsyncMock(return_value=_fetched(plans, final="https://www.bldg.test/floorplans/"))
     view = AsyncMock(return_value={"url": "https://www.bldg.test/floorplans/", "text": "Loading"})
-    found = await phases.floor_plans(HOME, "https://www.bldg.test/", _deps(page_fetch=fetch, view=view,
-                                     browser_ready=lambda: True), Budget(left=1), Budget(left=1), prefix="p", today=TODAY)
+    found = await _floor_plans(HOME, _deps(page_fetch=fetch, view=view, browser_ready=lambda: True),
+                               Budget(left=1), Budget(left=1))
     view.assert_awaited_once()
     assert "price" not in found and found["specials"]["value"] == "Up to 6 weeks free"
 
@@ -680,12 +687,16 @@ def test_a_rent_with_one_open_plan_is_still_a_rent():
 
 
 @pytest.mark.asyncio
-async def test_a_building_with_a_real_rent_skips_its_floor_plans():
+async def test_a_building_with_a_real_rent_keeps_it_over_its_floor_plans():
     home = b"<html><body><a href='/floorplans/'>Floor Plans</a> A1 $1,449 - $1,464 /mo. B2 starting at $2,900</body></html>"
-    fetch = AsyncMock(return_value=_fetched(home, final="https://www.bldg.test/"))
+    plans = f"<html><body><p>{FLOOR_PLANS}</p></body></html>".encode()
+    fetch = AsyncMock(side_effect=[_fetched(home, final="https://www.bldg.test/"),
+                                   _fetched(plans, final="https://www.bldg.test/floorplans/")])
     row = dict(item_row(fields="{}", origin="provider", url="https://www.bldg.test/", title="Bldg"))
     update = await phases.enrich_one(row, _deps(page_fetch=fetch), Budget(left=2), Budget(left=0), prefix="p")
-    assert update["fields"]["price"]["display"] == "$1,449–$2,900+/mo" and fetch.await_count == 1
+    # Its floor plans page is loaded only to look for its homes one by one (it names no leasing system).
+    assert update["fields"]["price"]["display"] == "$1,449–$2,900+/mo" and fetch.await_count == 2
+    assert "units" not in update
 
 
 def test_a_sale_price_is_not_a_rent():

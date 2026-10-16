@@ -265,7 +265,7 @@ async def test_enrich_batches_saves_and_moves_on(conn, monkeypatch):
     assert len(saves) == 3
     first = saves[0][2]
     assert json.loads(first[3])["price"]["value"] == 3200 and json.loads(first[6])[0]["url"] == "https://cdn.test/a.webp"
-    assert saves[2][2][3:] == (None, None, None, None)  # failed: marked read, nothing changed
+    assert saves[2][2][3:] == (None, None, None, None, None)  # failed: marked read, nothing changed
     conn.on("COUNT(*) FROM mw_agent_task_items WHERE task_id = $1 AND enriched_at IS NULL", 5)
     monkeypatch.setattr(phases, "enrich_one", AsyncMock(return_value=phases.NOT_TRIED))
     out = await phases.enrich(task_row(), _deps(rehost=rehost), _guard())
@@ -274,7 +274,7 @@ async def test_enrich_batches_saves_and_moves_on(conn, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_rerank_and_rank_phase(conn):
-    conn.on("SELECT id, fields, status, fit_score, user_state", [
+    conn.on("SELECT id, fields, units, status, fit_score, user_state", [
         item_row(id=ITEM), item_row(id=uuid4(), fields=json.dumps({"pets": {"value": ["none"], "status": "verified"}}))])
     assert await phases.rerank(conn, task_row()) == 2
     [update] = conn.ran("SET rank = v.rank")

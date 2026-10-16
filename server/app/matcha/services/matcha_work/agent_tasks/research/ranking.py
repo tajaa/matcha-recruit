@@ -8,6 +8,11 @@ Bands first, then a weighted score inside each band, then fit:
   9  hidden: breaks a constraint on a verified fact, judged irrelevant,
      no longer available, or dismissed by the person
 
+An apartment building with its homes listed one by one (`units.py`) is
+judged on its homes: a limit on rent, beds, baths, size or move-in date is met
+only when one home meets every such limit at once (`unit_verdict`), never
+when one home has the rent and another the bedrooms.
+
 The score is the plan's preferences (`{field, weight, higher_is_better}`),
 each scaled 0..1 across the task's findings, plus fit (0-5) at the plan's
 `fit_weight`. A fact that is not verified or claimed scores as the worst; a
@@ -26,6 +31,8 @@ HIDDEN = 9
 UNCONFIRMED = 1
 OK = 0
 _FIT_UNKNOWN = 0.4
+# Limits a building with listed homes is judged on home by home.
+UNIT_FIELDS = frozenset({"price", "beds", "baths", "sqft", "available_date"})
 
 
 @dataclass(frozen=True)
@@ -188,24 +195,81 @@ def _scaled(items: list[dict], pref: dict) -> dict[str, float]:
     return out
 
 
-def assess(item: dict, constraints: list[dict]) -> tuple[int, list[dict], list[str]]:
-    """(band, violations, unconfirmed field keys) before the person's own say."""
+def unit_entry(unit: dict, key: str) -> dict | None:
+    """One home's figure as a stored field, so `check` reads it like any
+    other. Its rent spans its net rent (after a stated special) to its rent:
+    a budget the special brings it under is met."""
+    if key == "price":
+        rent = unit.get("rent")
+        if not isinstance(rent, (int, float)):
+            return None
+        low = min(unit.get("net_rent") or rent, rent)
+        return {"value": low, "status": "verified", "unit": "month", "currency": unit.get("currency") or "USD",
+                "spans": [[low, rent]]}
+    value = unit.get("available") if key == "available_date" else unit.get(key)
+    return None if value is None else {"value": value, "status": "verified"}
+
+
+def _home_value(units: list[dict], constraint: dict) -> str:
+    if constraint.get("field") == "price":
+        low = min(min(u.get("net_rent") or u["rent"], u["rent"]) for u in units)
+        return f"From ${low:,.0f}/mo ({len(units)} homes)"
+    return f"None of {len(units)} homes"
+
+
+def unit_verdict(units: list[dict], constraints: list[dict]) -> tuple[list[str], list[dict], list[str]]:
+    """(ids of the homes that meet every one of `constraints`, violations,
+    unconfirmed field keys). A building breaks a limit only when every home
+    breaks one; a limit every home breaks is named, otherwise the violation
+    is that no home meets them all together."""
+    verdicts = [[check(c, unit_entry(u, c.get("field"))) for c in constraints] for u in units]
+    fits = [str(u.get("id")) for u, v in zip(units, verdicts) if all(x == "ok" for x in v)]
+    if fits:
+        return fits, [], []
+    if verdicts and all("violates" in v for v in verdicts):
+        named = [c for i, c in enumerate(constraints) if all(v[i] == "violates" for v in verdicts)]
+        if named:
+            return [], [{"field": c.get("field"), "rule": describe(c), "value": _home_value(units, c)}
+                        for c in named], []
+        return [], [{"field": "units", "rule": "No home here meets every limit at once: "
+                     + "; ".join(describe(c) for c in constraints), "value": f"{len(units)} homes"}], []
+    # Homes not ruled out, each with something that can't be confirmed.
+    unsure = [c.get("field") for i, c in enumerate(constraints)
+              if any(v[i] == "unknown" for v in verdicts if "violates" not in v)]
+    return [], [], list(dict.fromkeys(unsure))
+
+
+def _assess(item: dict, constraints: list[dict]) -> tuple[int, list[dict], list[str], list[str] | None]:
+    units = [u for u in item.get("units") or [] if isinstance(u, dict)]
+    per_home = [c for c in constraints if units and c.get("field") in UNIT_FIELDS]
     violations, unconfirmed = [], []
     for constraint in constraints:
+        if constraint in per_home:
+            continue
         verdict = check(constraint, (item.get("fields") or {}).get(constraint.get("field")))
         if verdict == "violates":
             violations.append({"field": constraint.get("field"), "rule": describe(constraint),
                                "value": ((item.get("fields") or {}).get(constraint.get("field")) or {}).get("display")})
         elif verdict == "unknown" and constraint.get("field") not in unconfirmed:
             unconfirmed.append(constraint.get("field"))
+    fits = None
+    if units:
+        fits, home_violations, home_unsure = unit_verdict(units, per_home)
+        violations += home_violations
+        unconfirmed += [f for f in home_unsure if f not in unconfirmed]
     if violations:
-        return HIDDEN, violations, unconfirmed
-    return (UNCONFIRMED if unconfirmed else OK), violations, unconfirmed
+        return HIDDEN, violations, unconfirmed, fits
+    return (UNCONFIRMED if unconfirmed else OK), violations, unconfirmed, fits
+
+
+def assess(item: dict, constraints: list[dict]) -> tuple[int, list[dict], list[str]]:
+    """(band, violations, unconfirmed field keys) before the person's own say."""
+    return _assess(item, constraints)[:3]
 
 
 def rank(items: list[dict], plan: dict) -> list[Ranked]:
     """Every item ranked. `items`: `{id, fields, status, fit_score, user_state}`
-    in the order found (ties keep it)."""
+    (and a building's `units`) in the order found (ties keep it)."""
     constraints = [c for c in plan.get("constraints") or [] if isinstance(c, dict)]
     prefs = [p for p in plan.get("preferences") or [] if isinstance(p, dict) and (p.get("weight") or 0) > 0]
     fit_weight = float(plan.get("fit_weight") if plan.get("fit_weight") is not None else 0.3)
@@ -214,7 +278,7 @@ def rank(items: list[dict], plan: dict) -> list[Ranked]:
     rows = []
     for order, item in enumerate(items):
         key = str(item["id"])
-        band, violations, unconfirmed = assess(item, constraints)
+        band, violations, unconfirmed, fits = _assess(item, constraints)
         flags = [f"unconfirmed:{field}" for field in unconfirmed]
         if item.get("status") == "unavailable":
             band, flags = HIDDEN, [*flags, "unavailable"]
@@ -229,8 +293,10 @@ def rank(items: list[dict], plan: dict) -> list[Ranked]:
         parts = {p["field"]: round(s.get(key, 0.0), 3) for (s, _), p in zip(scaled, prefs)}
         raw = sum(s.get(key, 0.0) * w for s, w in scaled) + fit_share * fit_weight
         score = round(raw / total, 4) if total > 0 else 0.0
-        rows.append((band, -score, -(fit if isinstance(fit, (int, float)) else -1), order, key, score,
-                     {"band": band, "flags": flags, "violations": violations, "score": score,
-                      "parts": parts, "fit": fit}))
+        explain = {"band": band, "flags": flags, "violations": violations, "score": score,
+                   "parts": parts, "fit": fit}
+        if fits is not None:
+            explain["units_fit"] = fits  # the homes that meet every per-home limit
+        rows.append((band, -score, -(fit if isinstance(fit, (int, float)) else -1), order, key, score, explain))
     rows.sort(key=lambda r: r[:4])
     return [Ranked(item_id=r[4], rank=i + 1, band=r[0], score=r[5], explain=r[6]) for i, r in enumerate(rows)]

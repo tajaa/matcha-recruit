@@ -249,7 +249,7 @@ def _wrap(normalized: tuple[list[dict], list[str]]) -> tuple[dict, list[str]]:
 async def screen(task: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
     async with connection_or_direct() as conn:
         rows = await conn.fetch(
-            f"""SELECT id, title, subtitle, url, fields, fit_score, fit_reasons, rank_explain
+            f"""SELECT id, title, subtitle, url, fields, units, fit_score, fit_reasons, rank_explain
                 FROM mw_agent_task_items
                 WHERE task_id = $1 AND screened_at IS NULL AND status <> 'unavailable'
                 ORDER BY created_at, id LIMIT {SCREEN_BATCH}""",
@@ -298,7 +298,10 @@ async def screen(task: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
 # ── summarize ────────────────────────────────────────────────────────────────
 
 def _item_text(item: dict) -> str:
-    return " ".join([item.get("title") or "", item.get("subtitle") or "", F.check_text(item.get("fields") or {})])
+    homes = item.get("homes") or {}
+    return " ".join([item.get("title") or "", item.get("subtitle") or "", F.check_text(item.get("fields") or {}),
+                     *(homes.get("examples") or []), str(homes.get("listed") or ""),
+                     str(homes.get("meet_every_limit") or "")])
 
 
 def fallback_summary(shown: list[dict], *, total: int, hidden: int, note: str | None) -> dict:
@@ -332,7 +335,7 @@ async def summarize(task: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
     cursor = cursor_of(task)
     async with connection_or_direct() as conn:
         rows = await conn.fetch(
-            f"""SELECT id, title, subtitle, url, fields, fit_score, fit_reasons, rank_explain
+            f"""SELECT id, title, subtitle, url, fields, units, fit_score, fit_reasons, rank_explain
                 FROM mw_agent_task_items WHERE task_id = $1 AND rank_band < 9
                 ORDER BY rank LIMIT {SUMMARY_TOP}""",
             task["id"],

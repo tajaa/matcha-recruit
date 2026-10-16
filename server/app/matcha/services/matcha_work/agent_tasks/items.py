@@ -15,6 +15,8 @@ from app.database import decode_jsonb
 from app.matcha.services.matcha_work.agent_card.schema import normalize_url
 
 _WORDS = re.compile(r"[a-z0-9]+")
+# A building's homes a model is shown: the ones that fit first.
+HOMES_FOR_MODEL = 6
 
 
 def _iso(value):
@@ -119,6 +121,38 @@ def _fields_view(fields: dict, *, evidence: bool) -> dict:
     return out
 
 
+def _units(row: dict) -> list[dict]:
+    return [u for u in decode_jsonb(row.get("units"), []) or [] if isinstance(u, dict)]
+
+
+def _fitting(row: dict, units: list[dict]) -> set[str] | None:
+    """The homes the last ranking found meet every per-home limit, or None
+    before a ranking has looked at them."""
+    explain = decode_jsonb(row.get("rank_explain"), {}) or {}
+    fits = explain.get("units_fit")
+    return {str(f) for f in fits} if isinstance(fits, list) else None
+
+
+def homes_view(row) -> dict | None:
+    """How many homes a building lists, how many fit, and the cheapest that fits."""
+    row = dict(row)
+    units = _units(row)
+    if not units:
+        return None
+    fits = _fitting(row, units)
+    fitting = [u for u in units if fits is None or str(u.get("id")) in fits]
+    cheapest = min((min(u.get("net_rent") or u["rent"], u["rent"]) for u in fitting), default=None)
+    return {"count": len(units), "fit": len(fitting) if fits is not None else None, "from": cheapest}
+
+
+def units_view(row) -> list[dict]:
+    """A building's homes for the app, each marked `fits` (None before ranking)."""
+    row = dict(row)
+    units = _units(row)
+    fits = _fitting(row, units)
+    return [{**u, "fits": None if fits is None else str(u.get("id")) in fits} for u in units]
+
+
 def item_summary(row) -> dict:
     row = dict(row)
     explain = decode_jsonb(row.get("rank_explain"), {}) or {}
@@ -139,6 +173,7 @@ def item_summary(row) -> dict:
         "flags": list(explain.get("flags") or []),
         "user_state": row.get("user_state") or "new",
         "round": row.get("round_n"),
+        "homes": homes_view(row),
     }
 
 
@@ -151,6 +186,7 @@ def item_detail(row) -> dict:
         "fit_reasons": decode_jsonb(row.get("fit_reasons"), []) or [],
         "rank_explain": decode_jsonb(row.get("rank_explain"), {}) or {},
         "notes": row.get("notes") or "",
+        "units": units_view(row),
         "created_at": _iso(row.get("created_at")),
         "updated_at": _iso(row.get("updated_at")),
     }
@@ -164,12 +200,13 @@ def as_rank_input(row) -> dict:
         "status": row.get("status"),
         "fit_score": row.get("fit_score"),
         "user_state": row.get("user_state"),
+        "units": _units(row),
     }
 
 
 def view_for_model(row) -> dict[str, Any]:
     row = dict(row)
-    return {
+    out = {
         "id": str(row["id"]),
         "title": row.get("title") or "",
         "subtitle": row.get("subtitle") or "",
@@ -177,5 +214,19 @@ def view_for_model(row) -> dict[str, Any]:
         "fields": decode_jsonb(row.get("fields"), {}) or {},
         "fit_score": row.get("fit_score"),
         "fit_reasons": decode_jsonb(row.get("fit_reasons"), []) or [],
-        "rank_explain": decode_jsonb(row.get("rank_explain"), {}) or {},
+        # The homes below say which fit; their ids would only be noise.
+        "rank_explain": {k: v for k, v in (decode_jsonb(row.get("rank_explain"), {}) or {}).items()
+                         if k != "units_fit"},
     }
+    units = _units(row)
+    if units:
+        from .research.units import unit_line  # research imports this module
+
+        fits = _fitting(row, units)
+        first = [u for u in units if fits is None or str(u.get("id")) in fits] or units
+        out["homes"] = {
+            "listed": len(units),
+            "meet_every_limit": None if fits is None else len(fits),
+            "examples": [unit_line(u) for u in first[:HOMES_FOR_MODEL]],
+        }
+    return out
