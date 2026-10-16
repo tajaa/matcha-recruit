@@ -4,8 +4,8 @@ Resolves jurisdiction + role-specific credential requirements using a tiered str
 1. Company-specific templates
 2. System-wide templates
 3. Static fallback (credential_inference.py)
-4. OpenAI Luna research (creates templates for future reuse) — or Claude, when
-   the admin "AI models" setting routes agent workloads there
+4. AI research (creates templates for future reuse), on Claude
+   (`claude_default`), or OpenAI Luna on a server with no Anthropic key
 """
 
 from __future__ import annotations

@@ -1,5 +1,6 @@
-"""Grounded, optional Luna interpretation for inventory conclusions — or
-Claude, when the admin "AI models" setting routes agent workloads there.
+"""Grounded, optional AI interpretation for inventory conclusions, on Claude
+(`claude_default`: Haiku unless the admin "AI models" setting picks Sonnet;
+OpenAI Luna only on a server with no Anthropic key).
 
 The model only sees server-formatted display tokens. It may choose wording and
 an allowed action, but never numbers, raw ids, or a diagnosis outside the

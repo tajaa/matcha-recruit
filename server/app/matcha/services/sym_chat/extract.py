@@ -1,4 +1,5 @@
-"""The sym-chat tunnel turn — one bounded OpenAI Luna call per participant message.
+"""The sym-chat tunnel turn — one bounded model call per participant message:
+Claude (`claude_default`), or OpenAI Luna on a server with no Anthropic key.
 
 Same engine shape as `services/symlink/chat.py` (transcript in, structured
 state out, never raises, never persists), but on Luna through the Responses

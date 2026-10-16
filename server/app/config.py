@@ -210,14 +210,15 @@ class Settings:
     # Gemini API Rate Limits (research at scale needs higher ceilings)
     gemini_hourly_limit: int = 200
     gemini_daily_limit: int = 5000
-    # The OpenAI agent loops (Huume, Espresso) count in their own bucket. They
-    # used to spend the Gemini allowance above, which meant a compliance sweep
-    # could 429 a Huume turn. Same starting ceiling; tune independently.
+    # Each provider counts in its own bucket. OpenAI's is Huume on a server
+    # with no Anthropic key (Luna is that server's model). The buckets used to
+    # share the Gemini allowance above, which meant a compliance sweep could
+    # 429 a Huume turn. Same starting ceiling; tune independently.
     openai_hourly_limit: int = 200
     openai_daily_limit: int = 5000
-    # Anthropic Claude — an opt-in model for the schedule assistant's Huume
-    # loop (`services/huume/claude_client.py`). Luna stays the default, and
-    # Claude turns count in their own bucket.
+    # Anthropic Claude — what the agent loops run on (`claude_default`: Haiku
+    # unless Admin → AI models picks Sonnet). Its bucket counts Huume turns and
+    # the Gemini call sites the admin routes to Claude (`generate_content_routed`).
     anthropic_api_key: Optional[str] = None
     anthropic_hourly_limit: int = 200
     anthropic_daily_limit: int = 5000

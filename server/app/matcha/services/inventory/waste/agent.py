@@ -1,7 +1,8 @@
-"""Read-only grounded waste analyst, narrated by the configured OpenAI Luna
-(or Claude, when the admin "AI models" setting routes agent workloads there).
+"""Read-only grounded waste analyst, narrated by Claude (`claude_default`:
+Haiku unless the admin "AI models" setting picks Sonnet; OpenAI Luna only on a
+server with no Anthropic key).
 
-Tool results remain the source of truth. Luna receives only their bounded JSON
+Tool results remain the source of truth. The model receives only their bounded JSON
 and writes a qualitative lead-in; deterministic evidence records carry every
 number and its citation. A provider failure degrades to that evidence safely.
 """

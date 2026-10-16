@@ -14,8 +14,7 @@ pick any row.
 from __future__ import annotations
 
 from app.core.services import agent_surfaces, anthropic_messages
-from app.core.services.anthropic_messages import CLAUDE_HAIKU, CLAUDE_MODELS, CLAUDE_SONNET
-from app.matcha.services.huume.routing import LUNA
+from app.core.services.anthropic_messages import CLAUDE_HAIKU, CLAUDE_MODELS, CLAUDE_SONNET, LUNA
 
 LABELS: dict[str, str] = {
     LUNA: "OpenAI Luna",
@@ -25,20 +24,13 @@ LABELS: dict[str, str] = {
 
 
 def offered() -> tuple[str, ...]:
-    """The models a run can use on this server, in menu order: Claude with an
-    Anthropic key; OpenAI Luna only on a server without one (the safety net)."""
-    if anthropic_messages.anthropic_configured():
-        return tuple(CLAUDE_MODELS)
-    return (LUNA,)
-
-
-def fallback() -> str:
-    """What a run whose model is no longer offered uses: Haiku with a key, else Luna."""
-    return offered()[0]
+    """The models a run can use on this server, in menu order
+    (`anthropic_messages.offered_models`, the schedule panel's rule too)."""
+    return anthropic_messages.offered_models()
 
 
 async def default_model() -> str:
-    return await anthropic_messages.claude_default(agent_surfaces.ESPRESSO_ASSISTANT) or LUNA
+    return await anthropic_messages.surface_model(agent_surfaces.ESPRESSO_ASSISTANT)
 
 
 async def picker() -> tuple[list[dict], str]:

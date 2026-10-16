@@ -176,8 +176,9 @@ async def run_task_draft(
 ) -> dict:
     """Draft one ticket from the repository's root architecture guide."""
     started = time.monotonic()
-    # Luna unless the admin "AI models" setting routes projects to Claude
-    # (Matcha Work for a business account, Espresso for a personal one).
+    # Claude Haiku unless the admin "AI models" setting picks Sonnet for
+    # projects (Matcha Work for a business account, Espresso for a personal
+    # one); Luna only on a server with no Anthropic key (`claude_default`).
     claude_model = await anthropic_messages.claude_default(await work_surface(company_id, "projects"))
     client = get_claude_client() if claude_model else get_luna_client()
     files_read: set[str] = set()

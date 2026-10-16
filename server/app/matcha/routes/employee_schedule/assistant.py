@@ -12,7 +12,7 @@ from app.core.services.redis_cache import check_rate_limit
 from ...models.scheduling.employee_schedule import ScheduleVoiceTranscript
 from ...services._shared.uploads import read_wav_or_400
 from app.core.services import agent_surfaces, anthropic_messages
-from ...services.huume.routing import LUNA, schedule_model_options
+from ...services.huume.routing import schedule_model_options
 from ...services.scheduling import schedule_voice
 from ...services.scheduling.schedule_chat_rules import parse_confirm_reply
 from ...services.scheduling.schedule_assistant_session import (
@@ -70,17 +70,15 @@ async def create_schedule_assistant_session(
         week_start=body.week_start,
         session_id=body.session_id,
     )
-    # The panel's model dropdown. Claude is offered only when a key is
-    # configured, so the picker never lists a model every turn would fail on.
-    # `default_model` is what a manager who never picked runs on: the
-    # admin "AI models" setting for the Scheduler, else Luna — the same key
-    # `run_huume_turn` resolves on this surface.
+    # The panel's model dropdown: Claude with a key, Luna alone without one
+    # (`anthropic_messages.offered_models`), so the picker never lists a model
+    # every turn would fail on. `default_model` is what a manager who never
+    # picked runs on: the admin "AI models" setting for the Scheduler, else
+    # Claude Haiku — the same key `run_huume_turn` resolves on this surface.
     session["available_models"] = schedule_model_options(
         anthropic_configured=anthropic_messages.anthropic_configured(),
     )
-    session["default_model"] = (
-        await anthropic_messages.claude_default(agent_surfaces.MATCHA_SCHEDULING) or LUNA
-    )
+    session["default_model"] = await anthropic_messages.surface_model(agent_surfaces.MATCHA_SCHEDULING)
     return session
 
 

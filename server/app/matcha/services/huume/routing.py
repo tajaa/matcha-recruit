@@ -26,15 +26,14 @@ from typing import Any, Iterable, Optional
 
 from .tools import TOOLS, HuumeTool
 
-# Public — agent.py's `_MODEL` alias reads this so every Huume turn has one
-# canonical, auditable model id.
-LUNA = "gpt-5.6-luna"
-
 # The schedule assistant's model picker. Ids are the exact provider model ids,
-# and they are what the client sends as `huume_model`. A server with an
-# Anthropic key offers Claude only; Luna is offered (and run) only on a server
-# without one.
-from app.core.services.anthropic_messages import CLAUDE_HAIKU, CLAUDE_SONNET  # noqa: E402
+# and they are what the client sends as `huume_model`. Which of them this
+# server offers is `anthropic_messages.offered_models`, the Espresso menu's
+# rule too: Claude with an Anthropic key, Luna (offered and run) only without.
+# `LUNA` is public: agent.py's `_MODEL` alias reads it so every Huume turn has
+# one canonical, auditable model id.
+from app.core.services import anthropic_messages  # noqa: E402
+from app.core.services.anthropic_messages import CLAUDE_HAIKU, CLAUDE_SONNET, LUNA  # noqa: E402
 
 
 @dataclass(frozen=True)
@@ -58,9 +57,8 @@ def resolve_model_choice(model: Optional[str]) -> HuumeModelChoice:
 
 
 def schedule_choices(*, anthropic_configured: bool) -> tuple[HuumeModelChoice, ...]:
-    """The picker's entries on this server: Claude with an Anthropic key, Luna
-    only without one, so it never offers a model every turn would fail on."""
-    return tuple(c for c in SCHEDULE_MODEL_CHOICES if (c.provider == "anthropic") == anthropic_configured)
+    """The picker's entries on this server (`anthropic_messages.offered_models`)."""
+    return tuple(_CHOICES_BY_ID[m] for m in anthropic_messages.offered_models(configured=anthropic_configured))
 
 
 def schedule_model_options(*, anthropic_configured: bool) -> list[dict[str, Any]]:

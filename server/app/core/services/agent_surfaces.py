@@ -102,7 +102,7 @@ SURFACES: tuple[SurfaceDef, ...] = (
         MATCHA_SCHEDULING, MATCHA, "Scheduler",
         "Schedule Pilot's Huume (its own dropdown still wins per chat), shift edits asked for in "
         "Ops channels, and state schedule-rule extraction.",
-        f"{_HAIKU} · {_GEMINI} for channel edits",
+        f"{_HAIKU} for Schedule Pilot · {_GEMINI} for channel edits and rule extraction",
     ),
     SurfaceDef(
         MATCHA_IR, MATCHA, "Incidents (IR)",
@@ -117,7 +117,7 @@ SURFACES: tuple[SurfaceDef, ...] = (
         _GEMINI,
     ),
     SurfaceDef(MATCHA_OPS, MATCHA, "Ops channels", "@huume in channels: event logging and questions.",
-               f"{_GEMINI} · {_HAIKU} for questions"),
+               _GEMINI),
     SurfaceDef(MATCHA_INVENTORY, MATCHA, "Inventory",
                "Stock updates from channels, receipt reading, forecast and waste insights.",
                f"{_GEMINI} · {_HAIKU} for forecast and waste insights"),

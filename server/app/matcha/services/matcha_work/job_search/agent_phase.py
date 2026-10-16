@@ -17,7 +17,6 @@ from uuid import UUID
 
 from app.core.services import agent_surfaces, anthropic_messages
 from app.database import connection_or_direct
-from app.matcha.services.huume.routing import LUNA
 from app.matcha.services.matcha_work.agent_runtime import models, phase_run, runner
 from app.matcha.services.matcha_work.agent_runtime.context import RunLimits
 from app.matcha.services.matcha_work.agent_runtime.phase_run import NoteProgress, default_client
@@ -31,13 +30,20 @@ SearchProgress = NoteProgress
 
 async def default_model() -> str:
     """The model a new search uses: the admin's choice for Job search, else Claude Haiku."""
-    return await anthropic_messages.claude_default(agent_surfaces.ESPRESSO_JOB_SEARCH) or LUNA
+    return await anthropic_messages.surface_model(agent_surfaces.ESPRESSO_JOB_SEARCH)
 
 
-def model_for(search: dict) -> str:
-    """The search's model, if this server still offers it."""
+async def model_for(search: dict) -> str:
+    """The search's model while this server still offers it. Otherwise what a
+    new search would get, the admin's choice included, stamped on the row so it
+    says what runs."""
     model = search.get("model")
-    return model if model in models.offered() else models.fallback()
+    if model in models.offered():
+        return model
+    model = await default_model()
+    async with connection_or_direct() as conn:
+        await conn.execute("UPDATE mw_job_searches SET model = $2 WHERE id = $1", search["id"], model)
+    return model
 
 
 async def _count_run(search_id: UUID, stats: dict) -> None:
@@ -49,7 +55,7 @@ async def _count_run(search_id: UUID, stats: dict) -> None:
         )
 
 
-def run_owner(search: dict) -> phase_run.RunOwner:
+async def run_owner(search: dict) -> phase_run.RunOwner:
     """The search as the owner of its model runs."""
     return phase_run.RunOwner(
         kind="job_search",
@@ -57,7 +63,7 @@ def run_owner(search: dict) -> phase_run.RunOwner:
         owner_id=search["id"],
         user_id=search["user_id"],
         company_id=search["company_id"],
-        model=model_for(search),
+        model=await model_for(search),
         usage_feature=USAGE_FEATURE,
         storage_prefix=f"matcha-work/{search['company_id']}/job-search/{search['id']}",
         surface="job_search",
@@ -81,7 +87,7 @@ async def run_model_phase(
 ) -> runner.RunOutcome:
     """Run one bounded loop. Raises `runner.AgentRunError` when no usable result came."""
     return await phase_run.run_model_phase(
-        run_owner(search),
+        await run_owner(search),
         phase=phase,
         abilities=abilities,
         contract=contract,

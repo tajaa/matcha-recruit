@@ -204,8 +204,9 @@ async def run_assistant(run: dict, *, stats: dict | None = None) -> runner.RunOu
         })
 
     # Settled at enqueue (`models.resolve`): the person's pick from the menu,
-    # else the admin "AI models" setting, else Luna. A model this server no
-    # longer offers (the Anthropic key was removed since) runs the default.
+    # else the admin "AI models" setting, else Claude Haiku. A model this
+    # server no longer offers (a Luna run from before the Anthropic key, or the
+    # key was removed since) runs the default and is re-stamped.
     model = run.get("model") or ""
     if model not in models.offered():
         model = await models.default_model()

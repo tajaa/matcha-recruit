@@ -1,13 +1,18 @@
 """Anthropic Claude: the shared client, the per-app "AI models" switch, and
 a one-shot text/JSON call.
 
-Claude is an opt-in alternative for the workloads that run on OpenAI Luna or
-on Gemini's one-shot JSON calls. Which model runs is decided in ONE place —
-`claude_override(surface)` — from the admin setting `agent_models` (Admin →
-Settings → AI models): one choice per app, overridable per product, keyed by
-the surfaces in `agent_surfaces.py`. "default" keeps a surface on the
-provider it was built on; a Claude id routes it to that model. The schedule
-assistant's own dropdown is the one per-turn override on top of it.
+We run on Claude. Which model runs is decided from the admin setting
+`agent_models` (Admin → Settings → AI models): one choice per app,
+overridable per product, keyed by the surfaces in `agent_surfaces.py`.
+- The surfaces built on OpenAI Luna (the agent loops, Huume, sym-chat, …) read
+  `claude_default` / `surface_model`: "default" is Claude Haiku whenever the
+  server has an Anthropic key, and Luna runs only on a server without one.
+  `offered_models` is their menu, so the Espresso assistant's and the
+  schedule panel's pickers can't drift apart.
+- The surfaces built on Gemini (voice, Google-grounded research, one-shot
+  JSON) read `claude_override`: "default" keeps them on Gemini and a Claude id
+  routes them to that model.
+The schedule assistant's own dropdown is the one per-turn override on top.
 
 The multi-turn tool loops use `services/huume/claude_client.ClaudeSession`;
 this module is the single-shot half plus the pieces both share.
@@ -37,6 +42,8 @@ CLAUDE_HAIKU = "claude-haiku-5-5"
 CLAUDE_SONNET = "claude-sonnet-5-5"
 CLAUDE_MODELS: tuple[str, ...] = (CLAUDE_HAIKU, CLAUDE_SONNET)
 CLAUDE_LABELS: dict[str, str] = {CLAUDE_HAIKU: "Claude Haiku 5.5", CLAUDE_SONNET: "Claude Sonnet 5.5"}
+# OpenAI Luna: what the Luna-built surfaces run on a server with no Anthropic key.
+LUNA = "gpt-5.6-luna"
 
 # Server-side refusal fallback (Claude API only). Sonnet 5.5 accepts the
 # `"default"` form; Haiku 5.5 has no server-side fallback.
@@ -104,6 +111,20 @@ async def claude_default(surface: str) -> Optional[str]:
     `claude_override`, where "default" still means Gemini.
     """
     return await claude_override(surface) or (CLAUDE_HAIKU if anthropic_configured() else None)
+
+
+def offered_models(*, configured: bool | None = None) -> tuple[str, ...]:
+    """The models a Luna-built surface's menu offers, default first: Claude
+    with an Anthropic key, Luna alone without one, so no menu offers a model
+    every turn would fail on. `configured` defaults to this server's key."""
+    if configured is None:
+        configured = anthropic_configured()
+    return CLAUDE_MODELS if configured else (LUNA,)
+
+
+async def surface_model(surface: str) -> str:
+    """The model id a Luna-built surface runs: `claude_default`, else Luna."""
+    return await claude_default(surface) or LUNA
 
 
 def image_block(data: bytes, mime_type: str | None) -> dict[str, Any] | None:

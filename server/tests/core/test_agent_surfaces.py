@@ -101,6 +101,73 @@ def test_no_surface_offers_luna_as_its_default():
     assert not [s.key for s in reg.SURFACES if "Luna" in s.builtin]
 
 
+# Call sites that hand a `surface` parameter straight on; their callers name it.
+_PASS_THROUGH = {"app/core/services/anthropic_messages.py", "app/matcha/services/precedent_common.py"}
+
+
+def _surfaces_named(node: ast.AST, assigned: dict[str, list[ast.AST]]) -> set[str]:
+    """The surface keys an argument can be: `agent_surfaces.X`, a
+    `work_surface(company, "<product>")` (either app), or a local name
+    assigned from those (`key = A if schedule else B`)."""
+    keys: set[str] = set()
+    for sub in ast.walk(node):
+        if (isinstance(sub, ast.Attribute) and isinstance(sub.value, ast.Name)
+                and sub.value.id in {"agent_surfaces", "reg"} and sub.attr.isupper()):
+            keys.add(getattr(reg, sub.attr))
+        elif (isinstance(sub, ast.Call) and getattr(sub.func, "id", getattr(sub.func, "attr", None)) == "work_surface"
+              and len(sub.args) > 1 and isinstance(sub.args[1], ast.Constant)):
+            keys |= {app_surface._BUSINESS[sub.args[1].value], app_surface._PERSONAL[sub.args[1].value]}
+        elif isinstance(sub, ast.Name) and sub.id in assigned:
+            for value in assigned[sub.id]:
+                keys |= _surfaces_named(value, {})
+    return keys
+
+
+def _surfaces_by_resolver() -> tuple[set[str], set[str], list[str]]:
+    """(surfaces some call site reads with `claude_default`/`surface_model`,
+    surfaces read with `claude_override` or `generate_content_routed`, call
+    sites whose surface couldn't be worked out)."""
+    haiku, gemini, unresolved = set(), set(), []
+    for path in APP_DIR.rglob("*.py"):
+        tree = ast.parse(path.read_text(), filename=str(path))
+        assigned: dict[str, list[ast.AST]] = {}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        assigned.setdefault(target.id, []).append(node.value)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            called = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
+            if called in {"claude_default", "surface_model"}:
+                into, args = haiku, node.args[:1]
+            elif called == "claude_override":
+                into, args = gemini, node.args[:1]
+            elif called == "generate_content_routed":
+                into, args = gemini, [k.value for k in node.keywords if k.arg == "surface"]
+            else:
+                continue
+            keys = _surfaces_named(args[0], assigned) if args else set()
+            if not keys and _rel(path) not in _PASS_THROUGH:
+                unresolved.append(f"{_rel(path)}:{node.lineno}")
+            into |= keys
+    return haiku, gemini, unresolved
+
+
+def test_each_surfaces_label_names_the_providers_its_code_runs():
+    """The admin page's "default runs on" text against the code: a surface
+    read by `claude_default` runs Claude Haiku by default, one read by
+    `claude_override` runs Gemini, and a label names exactly those."""
+    haiku, gemini, unresolved = _surfaces_by_resolver()
+    assert unresolved == [], f"a call site's surface could not be worked out: {unresolved}"
+    for surface in reg.SURFACES:
+        says_haiku, says_gemini = "Claude Haiku" in surface.builtin, "Gemini" in surface.builtin
+        assert says_haiku == (surface.key in haiku), f"{surface.key}: {surface.builtin!r}"
+        assert says_gemini == (surface.key in gemini), f"{surface.key}: {surface.builtin!r}"
+
+
 def test_every_routed_gemini_call_names_its_surface():
     missing = [
         f"{_rel(p)}:{call.lineno}"

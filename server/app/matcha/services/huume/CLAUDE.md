@@ -270,10 +270,14 @@ out — so a provider swap could land without touching the loop or its tests. Th
 - **Not everything under `huume/` is OpenAI.** `er_skill` owns a real Gemini call, and
   `discipline_skill` / `handbook_skill` / `legal_skill` / `ir_skill` delegate to Gemini-backed pilot
   services. The package keeps its `google.genai` dependency for exactly that reason.
-- The loop counts in the **OpenAI** rate-limit bucket (`ApiRateLimiter(provider="openai")`). It used
-  to share Gemini's: `check_limit` counted `api_rate_limits` with no provider filter against
-  `settings.gemini_hourly_limit`, so Luna traffic spent the Gemini allowance and a Gemini-heavy
-  compliance sweep could 429 a Huume turn. Fixed by migration `ratelimit01` (#502).
+- The loop counts in its model's provider's rate-limit bucket (`ApiRateLimiter(provider=model_choice.provider)`):
+  **Anthropic** on Claude (every server with an Anthropic key), OpenAI only on Luna. The Anthropic
+  bucket also counts Gemini call sites the admin routes to Claude (`generate_content_routed`), so a
+  busy hour there can refuse Huume turns: raise `ANTHROPIC_HOURLY_LIMIT`/`ANTHROPIC_DAILY_LIMIT`
+  rather than moving Huume back. The buckets used to share Gemini's: `check_limit` counted
+  `api_rate_limits` with no provider filter against `settings.gemini_hourly_limit`, so Luna traffic
+  spent the Gemini allowance and a Gemini-heavy compliance sweep could 429 a Huume turn. Fixed by
+  migration `ratelimit01` (#502).
 - Espresso moved with it (`matcha_work/project_agent/{agent,task_draft_agent,tools}.py`,
   `matcha_work_ai/task_draft.py`) — they share the client, so leaving them behind would have meant
   keeping the shim alive for three callers.
