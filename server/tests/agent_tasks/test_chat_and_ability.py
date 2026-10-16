@@ -62,6 +62,13 @@ async def test_post_stopped_only_for_a_task_from_a_conversation(monkeypatch):
     assert persist.await_args.kwargs["metadata"]["task"]["items"] == []
 
 
+def test_the_card_shows_the_summarys_picks_in_its_order():
+    ranked = [{"id": f"i{n}"} for n in range(8)]
+    summary = {"top": [{"item_id": "i6"}, {"item_id": "i2"}, "junk"]}
+    assert [i["id"] for i in chat.picks(ranked, summary)] == ["i6", "i2", "i0", "i1", "i3"]
+    assert [i["id"] for i in chat.picks(ranked, {})] == ["i0", "i1", "i2", "i3", "i4"]
+
+
 @pytest.mark.asyncio
 async def test_a_stopped_task_posts_its_card(monkeypatch):
     from app.matcha.services.matcha_work.project_agent import chat as espresso_chat

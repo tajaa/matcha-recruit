@@ -207,12 +207,26 @@ async def test_summarize_writes_the_rounds_summary(conn, monkeypatch):
     assert saved["origin"] == "ranking" and saved["summary"] == "n" and saved["top"][0]["why"] == "Close to transit"
 
 
+def test_a_summary_gets_two_repairs():
+    assert (M.SUMMARY_LIMITS.max_model_calls, M.SUMMARY_LIMITS.max_repairs) == (3, 2)
+
+
+def test_the_top_picks_are_filled_from_the_ranking():
+    shown = [{"id": n, "fit_reasons": [f"why {n}"]} for n in "abcdefg"]
+    assert [p["item_id"] for p in M.fill_top([{"item_id": "c", "why": "best"}], shown)] == ["c", "a", "b", "d", "e"]
+    assert M.fill_top([], shown[:2]) == [{"item_id": "a", "why": "why a"}, {"item_id": "b", "why": "why b"}]
+    assert M.fill_top([], [{"id": "z"}])[0]["why"] == ""
+
+
 def test_fallback_summary_wording():
     assert M.fallback_summary([], total=0, hidden=0, note=None)["headline"] == "Nothing found"
     assert M.fallback_summary([], total=4, hidden=4, note=None)["summary"].startswith("4 were hidden")
     shown = [{"id": "a", "fit_reasons": []}, {"id": "b"}]
     assert M.fallback_summary(shown, total=2, hidden=0, note=None)["headline"] == "Found 2"
     assert M.fallback_summary(shown, total=9, hidden=7, note=None)["headline"] == "2 that fit, of 9 found"
+    # Shown is the best ten at most; the count is what fit.
+    assert M.fallback_summary(shown * 5, total=30, hidden=0, note=None)["headline"] == "Found 30"
+    assert M.fallback_summary(shown * 5, total=30, hidden=4, note=None)["headline"] == "26 that fit, of 30 found"
 
 
 # ── refine ───────────────────────────────────────────────────────────────────
@@ -283,10 +297,10 @@ async def test_a_kind_of_search_plans_as_its_kind(conn, monkeypatch):
                                 "queries": ["1 bedroom"], "fields": ["rating"], "constraints": [],
                                 "preferences": [], "fit_weight": 0.4, "prefer_sources": [], "summary": ""})
     await M.plan(task_row(playbook="apartments", brief=brief), _deps(), _guard())
-    assert "Kind of search: Apartments. Its item_kind and source are fixed (listing, web)." in seen[0]["instructions"]
+    assert "Kind of search: Apartments. Its item_kind and source are fixed (listing, places)." in seen[0]["instructions"]
     assert "Bedrooms (at least): 1" in seen[0]["user_text"] and "Pets: dogs" in seen[0]["user_text"]
     saved = json.loads(conn.ran("SET plan = $3::jsonb")[0][2][2])
-    assert saved["item_kind"] == "listing" and saved["source"] == "web"
-    assert saved["fields"][:3] == ["price", "beds", "baths"] and "rating" in saved["fields"]
+    assert saved["item_kind"] == "listing" and saved["source"] == "places"
+    assert saved["fields"][:3] == ["price", "specials", "beds"] and "rating" in saved["fields"]
     limits = {(c["field"], c["op"]) for c in saved["constraints"] if c["source"] == "brief"}
     assert limits == {("price", "lte"), ("beds", "gte"), ("pets", "includes"), ("available_date", "before")}

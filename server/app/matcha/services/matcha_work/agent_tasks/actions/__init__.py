@@ -1,4 +1,4 @@
-"""Doing something with a finding: buy it, book it, write about it.
+"""Doing something with a finding: buy it, apply to it, book it, write about it.
 
 A playbook names the actions its findings take (`Playbook.actions`); each is
 an `ItemAction` (`base.py`) in `ACTIONS`. Every action is proposed first (the
@@ -13,10 +13,10 @@ import re
 from typing import get_args
 
 from ..playbook import IntakeType, ItemKind
-from . import buy
+from . import apply, buy
 from .base import ActionContext, ActionError, ItemAction, Line, Proposal, outcome
 
-ACTIONS: dict[str, ItemAction] = {a.key: a for a in (buy.ACTION,)}
+ACTIONS: dict[str, ItemAction] = {a.key: a for a in (buy.ACTION, apply.ACTION)}
 _KEY = re.compile(r"[a-z][a-z0-9_]{0,39}")
 _ICONS = ("cart", "calendar", "envelope", "link", "phone")
 

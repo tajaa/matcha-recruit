@@ -8,6 +8,7 @@ from uuid import uuid4
 import pytest
 from fastapi import HTTPException
 
+from app.core.services import redis_cache
 from app.matcha.models.matcha_work.agent_tasks import AgentTaskCreate, RoundCreate
 from app.matcha.services.matcha_work.agent_runtime import enqueue as assistant_enqueue, grants
 from app.matcha.services.matcha_work.agent_tasks import allowance, enqueue, playbooks
@@ -79,6 +80,28 @@ def test_queue_and_switch(monkeypatch):
 async def test_preflight_refusals(gates, monkeypatch):
     assert await enqueue.preflight(CLIENT, COMPANY, RESEARCH) == "pro"
     assert gates.rate.await_args.args == (str(USER), "espresso_agent_task_user", 10, 86400)
+    # The day's cap says what it is, so Espresso doesn't retry or blame a search.
+    gates.rate.side_effect = HTTPException(status_code=429, detail="Too many requests. Please try again later.")
+    # The 24 hours start at the first task, so it says when they end.
+    monkeypatch.setattr(redis_cache, "get_rate_limit_state", AsyncMock(return_value={"resets_in_seconds": 4 * 3600 + 5}))
+    with pytest.raises(HTTPException) as refused:
+        await enqueue.preflight(CLIENT, COMPANY, RESEARCH)
+    assert refused.value.status_code == 429 and refused.value.detail == {
+        "code": "daily_limit",
+        "message": "That's 10 tasks started in 24 hours, the most allowed. More can start in about 5 hours."}
+    assert refused.value.headers == {"Retry-After": "14405"}
+    monkeypatch.setattr(redis_cache, "get_rate_limit_state", AsyncMock(return_value=None))
+    with pytest.raises(HTTPException) as unknown:
+        await enqueue.preflight(CLIENT, COMPANY, RESEARCH)
+    assert unknown.value.detail["message"].endswith("More can start within 24 hours.")
+    assert unknown.value.headers == {"Retry-After": "86400"}
+    assert [enqueue._wait_words(s) for s in (30, 150, 3600, 3601)] == [
+        "in about 1 minute", "in about 3 minutes", "in about 1 hour", "in about 2 hours"]
+    gates.rate.side_effect = HTTPException(status_code=503, detail="Redis down")
+    with pytest.raises(HTTPException) as other:
+        await enqueue.preflight(CLIENT, COMPANY, RESEARCH)
+    assert other.value.status_code == 503
+    gates.rate.side_effect = None
     assert await enqueue.preflight(ADMIN, COMPANY, RESEARCH) is None
     gates.enabled = False
     with pytest.raises(HTTPException) as exc:

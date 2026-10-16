@@ -39,7 +39,7 @@ RoundKind = Literal["refine", "more", "document", "action"]
 ItemKind = Literal["listing", "product", "place", "slot", "flight", "offer", "other"]
 FileKind = Literal["document", "image"]
 
-MAX_INTAKE = 8
+MAX_INTAKE = 14
 _KEY = re.compile(r"[a-z][a-z0-9_]{0,39}")
 
 
@@ -98,8 +98,8 @@ class Budgets:
     """Per round, except `items` and `images` (per task)."""
 
     provider_calls: int = 30
-    fetch_calls: int = 60
-    browser_views: int = 6
+    fetch_calls: int = 100
+    browser_views: int = 24  # a building without a rent may take two
     model_runs: int = 8
     items: int = 80
     items_after_more: int = 120

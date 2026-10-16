@@ -358,12 +358,13 @@ class Budget:
     used: int = 0
     exhausted: bool = False
 
-    def take(self) -> bool:
-        if self.left <= 0:
+    def take(self, n: int = 1) -> bool:
+        """Spend `n` calls at once, or none when fewer are left."""
+        if self.left < n:
             self.exhausted = True
             return False
-        self.left -= 1
-        self.used += 1
+        self.left -= n
+        self.used += n
         return True
 
 

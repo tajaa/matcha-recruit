@@ -34,6 +34,7 @@ from app.core.services.safe_fetch import UnsafeURL, fetch_public
 from app.database import connection_or_direct, decode_jsonb
 from app.matcha.services.matcha_work import shipping_addresses
 from app.matcha.services.matcha_work.agent_card.chat_flow import format_money
+from app.matcha.services.matcha_work.agent_card.page_extract import site_of
 
 from ..playbook import IntakeField
 from ..research import providers
@@ -83,10 +84,6 @@ def wanted_variant(url: str) -> int | None:
     return int(value) if value.isdigit() else None
 
 
-def _bare(host: str | None) -> str:
-    return (host or "").lower().removeprefix("www.")
-
-
 async def _json(url: str, fetch) -> tuple[dict | None, str]:
     """A small JSON document from a public page, and the URL it came from."""
     try:
@@ -119,7 +116,7 @@ async def shopify_store(url: str, *, fetch=fetch_public) -> dict | None:
         return None
     product, came_from = await _json(f"https://{shop}/products/{handle}.js", fetch)
     # Shopify sends a shop to its own domain: this host, or the shop itself.
-    if product is None or _bare(urlsplit(came_from).hostname) not in (_bare(host), shop):
+    if product is None or site_of(urlsplit(came_from).hostname) not in (site_of(host), shop):
         return None
     variants = product.get("variants")
     if not isinstance(variants, list) or not any(isinstance(v, dict) and isinstance(v.get("id"), int) for v in variants):
@@ -197,7 +194,7 @@ async def prepare(ctx: ActionContext, params: dict, *, fetch=fetch_public) -> Pr
         raise ActionError(available(ctx) or "There's no store page to buy from.")
     title = ctx.item.get("title") or "this"
     host = urlsplit(url).hostname or ""
-    store = _bare(host)
+    store = site_of(host)
     found, found_currency = _found_price(ctx.item)
     quantity = quantity_of(params)
     fill_in = params.get("fill_in", True) is not False

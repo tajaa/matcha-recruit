@@ -4,7 +4,7 @@ from dataclasses import replace
 import pytest
 
 from app.matcha.services.matcha_work.agent_tasks import playbooks
-from app.matcha.services.matcha_work.agent_tasks.playbook import IntakeField, ItemField
+from app.matcha.services.matcha_work.agent_tasks.playbook import MAX_INTAKE, IntakeField, ItemField
 from app.matcha.services.matcha_work.agent_tasks.research import PLAYBOOK, brief
 
 R = PLAYBOOK
@@ -27,7 +27,7 @@ def test_the_registry_is_valid_and_chained():
     ({"key": "unpriced"}, "no cost"),
     ({"engine": "rocket"}, "unknown engine"),
     ({"description": " "}, "description"),
-    ({"intake": tuple(IntakeField(key=f"f{i}", label="x", type="text") for i in range(9))}, "more than"),
+    ({"intake": tuple(IntakeField(key=f"f{i}", label="x", type="text") for i in range(MAX_INTAKE + 1))}, "more than"),
     ({"intake": (IntakeField(key="a", label="a", type="text"),) * 2}, "duplicate"),
     ({"intake": (IntakeField(key="a", label="a", type="color"),)}, "bad intake"),
     ({"intake": (IntakeField(key="a", label="a", type="select"),)}, "needs options"),

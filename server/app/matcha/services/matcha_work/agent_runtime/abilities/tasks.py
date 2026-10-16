@@ -221,8 +221,10 @@ def _prompt(_ctx: RunContext) -> str:
     from app.matcha.services.matcha_work.agent_tasks import allowance, playbooks
 
     def field(f) -> str:
-        # A choice field names its choices, so a value is one of them.
-        choices = f": one of {' | '.join(f.options)}" if f.options else ""
+        # A choice field names its choices, so a value is one of them (a list
+        # of them for a multi-choice field: "north or south" is both).
+        choices = (f": a list of any of {' | '.join(f.options)}" if f.type == "multi_select"
+                   else f": one of {' | '.join(f.options)}") if f.options else ""
         return f"{f.key} ({f.label}{choices}{', required' if f.required else ''})"
 
     books = "\n".join(
@@ -238,7 +240,10 @@ fact, and posts here when it is done. Answer quick questions yourself instead.
 - Playbooks:
 {books}
 - Put what they told you in `brief` by field key: a list field as an array, a choice field as one of \
-its choices exactly. If something that would change the results a lot \
+its choices exactly. A limit that has its own field (a price, a distance, a date) goes there, not in \
+must_haves. Something they want to find out about each one ("see what concessions they're \
+offering", the fees) is not a must have either: it is reported for every finding, and a must have \
+would throw out each one whose page doesn't say. If something that would change the results a lot \
 is missing (where, the budget, dates), call ask_form first, naming those field keys as missing and \
 the rest as known. Never ask for a task's details in prose. If nothing important is missing, start it.
 - Files they attached (by file id) can go in `input_ids`.

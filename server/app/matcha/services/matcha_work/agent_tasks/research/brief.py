@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any, Callable, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from ..playbook import IntakeField
 
@@ -29,6 +29,7 @@ class ResearchBrief(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     location: str | None = Field(default=None, max_length=120)
+    budget_min: float | None = Field(default=None, gt=0, le=10_000_000)
     budget_max: float | None = Field(default=None, gt=0, le=10_000_000)
     currency: str = Field(default="USD", min_length=3, max_length=3)
     must_haves: list[str] = Field(default_factory=list, max_length=10)
@@ -46,6 +47,12 @@ class ResearchBrief(BaseModel):
     def one_line(cls, value):
         return " ".join(value.split()) or None if value else None
 
+    @model_validator(mode="after")
+    def budget_range(self):
+        if self.budget_min is not None and self.budget_max is not None and self.budget_min > self.budget_max:
+            raise ValueError("The budget's low end is above its high end.")
+        return self
+
     @field_validator("currency")
     @classmethod
     def code(cls, value):
@@ -56,12 +63,33 @@ class ResearchBrief(BaseModel):
 
 
 class ApartmentBrief(ResearchBrief):
-    """A home to rent: what a listing has to have, as limits."""
+    """A home to rent: what a listing has to have, as limits. `near` is a place
+    distances are measured from ("Lady Bird Lake"); the miles and directions
+    are limits on that distance, so they need it."""
 
     beds_min: float | None = Field(default=None, ge=0, le=10)
     baths_min: float | None = Field(default=None, ge=0, le=10)
     pets: list[Literal["dogs", "cats"]] = Field(default_factory=list, max_length=2)
     move_in: date | None = None
+    near: str | None = Field(default=None, max_length=120)
+    min_miles: float | None = Field(default=None, ge=0, le=200)
+    max_miles: float | None = Field(default=None, gt=0, le=200)
+    directions: list[Literal["north", "east", "south", "west"]] = Field(default_factory=list, max_length=4)
+
+    @field_validator("near")
+    @classmethod
+    def near_one_line(cls, value):
+        return " ".join(value.split()) or None if value else None
+
+    @model_validator(mode="after")
+    def distance_needs_a_place(self):
+        if (self.min_miles is not None or self.max_miles is not None or self.directions) and not self.near:
+            raise ValueError("Say where the distance is measured from (near).")
+        if self.min_miles is not None and self.max_miles is not None and self.min_miles > self.max_miles:
+            raise ValueError("The least distance is more than the most.")
+        if len(set(self.directions)) == 4:
+            self.directions = []  # every direction is no limit
+        return self
 
 
 def validator(model: type[ResearchBrief]) -> Callable[[dict[str, Any]], dict]:
@@ -85,6 +113,7 @@ validate_brief = validator(ResearchBrief)
 INTAKE = (
     IntakeField(key="location", label="Where", type="location", help="A city, neighborhood or address"),
     IntakeField(key="budget_max", label="Budget (max)", type="money"),
+    IntakeField(key="budget_min", label="Budget (min)", type="money", ask="never"),
     IntakeField(key="must_haves", label="Must have", type="list"),
     IntakeField(key="nice_to_haves", label="Nice to have", type="list"),
     IntakeField(key="avoid", label="Avoid", type="list"),
