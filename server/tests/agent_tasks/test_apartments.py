@@ -176,7 +176,9 @@ async def test_the_anchor_is_found_on_google_maps_else_by_address():
     provider.locate = AsyncMock(side_effect=providers.ProviderError("down"))
     assert (await geo.resolve_anchor("100 Congress Ave", "Austin", provider=provider, geocode=census))["source"] == "census"
     lost = await geo.resolve_anchor("Atlantis", None, provider=None, geocode=AsyncMock(side_effect=RuntimeError()))
-    assert "lat" not in lost and "Atlantis" in lost["error"]
+    assert "lat" not in lost and "Atlantis" in lost["error"] and lost["transient"] is True  # the lookup failed
+    nowhere = await geo.resolve_anchor("Atlantis", None, provider=None, geocode=AsyncMock(return_value=None))
+    assert "transient" not in nowhere  # looked up, not there
 
 
 @pytest.mark.asyncio
@@ -248,6 +250,29 @@ async def test_the_anchor_is_found_once_and_kept_in_the_plan(conn):
     assert await phases.ensure_anchor(lost, deps, _guard()) is None
     assert "error" in phases.plan_of(lost)["anchor"]
     assert await phases.ensure_anchor(task_row(), _deps(), _guard()) is None  # nothing named
+
+
+@pytest.mark.asyncio
+async def test_an_anchor_lookup_that_failed_is_tried_again(conn):
+    provider = AsyncMock()
+    provider.locate = AsyncMock(side_effect=providers.ProviderError("rate limited"))
+    deps = _deps(provider=lambda *_: provider, geocode=AsyncMock(return_value=None))
+    task = task_row(playbook="apartments", brief=json.dumps(BRIEF))
+    for n in range(1, phases.ANCHOR_TRIES + 1):
+        assert await phases.ensure_anchor(task, deps, _guard()) is None
+        assert phases.plan_of(task)["anchor"]["tries"] == n
+    await phases.ensure_anchor(task, deps, _guard())
+    assert provider.locate.await_count == phases.ANCHOR_TRIES  # then it stops asking
+    # Found on a later try: kept.
+    task = task_row(playbook="apartments", brief=json.dumps(BRIEF))
+    provider.locate = AsyncMock(side_effect=[providers.ProviderError("down"), ("Lady Bird Lake", LAKE)])
+    assert await phases.ensure_anchor(task, deps, _guard()) is None
+    assert (await phases.ensure_anchor(task, deps, _guard()))["lat"] == LAKE[0]
+    # No provider calls left this round: also tried again.
+    conn.on("RETURNING GREATEST(LEAST($2, $3 - cur.before), 0)", lambda row_id, want, limit: 0)
+    task = task_row(playbook="apartments", brief=json.dumps(BRIEF))
+    await phases.ensure_anchor(task, deps, _guard())
+    assert phases.plan_of(task)["anchor"]["transient"] is True
 
 
 @pytest.mark.asyncio
@@ -383,6 +408,16 @@ def test_apply_is_the_apartments_action():
     assert "Only homes" in apply.available(_ctx(kind="product"))
     assert "Google's page" in apply.available(_ctx(url="https://www.google.com/maps/search/?api=1&query=x"))
     assert "off the market" in apply.available(_ctx(status="unavailable"))
+
+
+def test_fine_print_is_not_an_application():
+    banner = (b'<a href="/specials">Up to 8 weeks free! *Restrictions apply</a>'
+              b'<a href="/terms">Terms and conditions may apply</a>'
+              b'<a href="https://domain.securecafe.com/onlineleasing/x/oleapplication.aspx">Lease Online Now</a>')
+    assert [link["url"] for link in apply.apply_links(banner, LISTING)] == [
+        "https://domain.securecafe.com/onlineleasing/x/oleapplication.aspx"]
+    both = apply.apply_links(banner + b'<a href="/start">Apply now - restrictions apply</a>', LISTING)
+    assert both[0]["url"] == "https://www.thedomain.test/start"  # the fine print goes, the button stays
 
 
 def test_application_links_best_first():
@@ -629,6 +664,61 @@ async def test_a_batch_views_one_page_at_a_time_and_stops_in_time(conn, monkeypa
     await phases.enrich(task_row(), deps, _guard())
     viewer.assert_not_awaited()
     assert conn.ran("SET browser_views = GREATEST(browser_views - $2, 0)")[-1][2][1] == 6
+
+
+def test_a_rent_with_one_open_plan_is_still_a_rent():
+    assert not phases._no_rent({"price": {"value": 1449, "spans": [[1449, 1464], [2900, None]]}})
+    assert phases._no_rent({"price": {"value": 1125, "spans": [[1125, None], [1500, None]]}})
+    starting = {"value": 1125, "display": "From $1,125/mo", "spans": [[1125, None]], "status": "verified"}
+    real = {"value": 1449, "display": "$1,449–$1,464/mo", "spans": [[1449, 1464]], "status": "verified"}
+    special = {"value": "Up to 4 weeks free", "display": "Up to 4 weeks free", "status": "verified"}
+    # A real rent replaces a "starting at"; another "starting at" never replaces anything.
+    taken = phases._take_rent({"price": starting}, {"price": real, "specials": special})
+    assert taken["price"] is real and taken["specials"] is special
+    assert phases._take_rent({"price": real}, {"price": starting})["price"] is real
+    assert phases._take_rent({}, {"price": starting})["price"] is starting
+
+
+@pytest.mark.asyncio
+async def test_a_building_with_a_real_rent_skips_its_floor_plans():
+    home = b"<html><body><a href='/floorplans/'>Floor Plans</a> A1 $1,449 - $1,464 /mo. B2 starting at $2,900</body></html>"
+    fetch = AsyncMock(return_value=_fetched(home, final="https://www.bldg.test/"))
+    row = dict(item_row(fields="{}", origin="provider", url="https://www.bldg.test/", title="Bldg"))
+    update = await phases.enrich_one(row, _deps(page_fetch=fetch), Budget(left=2), Budget(left=0), prefix="p")
+    assert update["fields"]["price"]["display"] == "$1,449–$2,900+/mo" and fetch.await_count == 1
+
+
+def test_a_sale_price_is_not_a_rent():
+    assert "price" not in F.scan_listing_text("New homes starting at $1,250,000", url="u", today=TODAY, building=True)
+    assert "price" not in F.scan_listing_text("Sold for $1,250,000/mo", url="u", today=TODAY)
+    kept = F.scan_listing_text("Starting at $1,250, call today", url="u", today=TODAY, building=True)
+    assert kept["price"]["display"] == "From $1,250/mo"
+
+
+@pytest.mark.asyncio
+async def test_a_row_waiting_on_the_browser_lets_page_loads_through(conn, monkeypatch):
+    monkeypatch.setattr(phases, "ENRICH_CONCURRENCY", 1)
+    rows = [item_row(id=uuid4(), origin="provider", url="https://www.slow.test/", fields="{}", status="candidate"),
+            item_row(id=uuid4(), kind="product", url="https://shop.test/p", fields="{}", status="candidate")]
+    conn.on("WHERE task_id = $1 AND enriched_at IS NULL AND status IN", rows)
+    conn.on("COALESCE(SUM(jsonb_array_length(images)), 0)", 0)
+    conn.on("COUNT(*) FROM mw_agent_task_items WHERE task_id = $1 AND enriched_at IS NULL", 0)
+    loaded, viewed = asyncio.Event(), []
+
+    async def fetch(url, **_):
+        if "shop.test" in url:
+            loaded.set()
+        return _fetched(b"<html><body>Loading</body></html>", final=url)
+
+    async def view(url, where):
+        await asyncio.wait_for(loaded.wait(), 2)  # finishes only once the other row's page has loaded
+        viewed.append(url)
+        return {"url": url, "text": ""}
+
+    deps = _deps(page_fetch=AsyncMock(side_effect=fetch), view=AsyncMock(side_effect=view), browser_ready=lambda: True,
+                 rehost=AsyncMock(return_value=([], [])))
+    await phases.enrich(task_row(), deps, _guard())
+    assert viewed == ["https://www.slow.test/"]
 
 
 def test_a_finding_with_specials_ranks_higher():

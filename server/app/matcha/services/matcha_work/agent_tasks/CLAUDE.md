@@ -62,7 +62,8 @@ its order (`chat.picks`). `create_task`'s `origin` is server-only. The day's
 caps (10 tasks started, 30 follow-ups) refuse with `code: daily_limit` and a
 sentence saying so (`enqueue._daily`): a bare "Too many requests" had
 Espresso retrying three times and telling the person the search service was
-busy.
+busy. The 24 hours start at the first of them (a fixed Redis window), so the
+sentence and `Retry-After` say when they end, from the key's TTL.
 
 `start_task` runs in the worker, so the gates it goes through are pool-free
 (`workspace_enabled`, `resolve_plan_for_user`, `get_token_budget`).
@@ -137,8 +138,11 @@ machinery is bound to a chat run).
 fills anything in. It loads the listing's own page now and reads its links for
 an application: words ("Apply now", "application") beat a path
 (`/apply`), the listing's own site beats a leasing portal (`PORTALS`: RentCafe,
-Entrata, AppFolio, ...) beats anything else; job and career links are skipped;
-https only (the listing's own site as served). None found, or the page can't
+Entrata, AppFolio, ...) beats anything else; job and career links are skipped,
+and so is fine print (`_FINE_PRINT`: "Restrictions apply" on a specials banner
+used to beat the portal's "Lease Online Now"); https only (the listing's own
+site as served). Links come from `page_extract.anchors`, the one link reader
+the floor plans finder and `page_links` share. None found, or the page can't
 be read: the listing's page. A 404/410 is refused (off the market). The
 preview shows the rent, specials, address and leasing office phone as found.
 
@@ -222,7 +226,11 @@ An apartments brief's `near` ("Lady Bird Lake") is the anchor: found once per
 task by `phases.ensure_anchor` (Google Maps through the places provider, one
 provider call; else the US Census geocoder for a street address) and kept in the plan
 as `anchor` (`{name, lat, lng, source, label}`, or `{name, error}`, so a place
-that can't be found isn't looked up again). A finding's point: a Google Maps
+that can't be found isn't looked up again). A lookup that failed rather than
+found nothing (a provider error, a geocoder error, or no provider calls left)
+is kept with `transient` and `tries`, and the next step tries again, up to
+`ANCHOR_TRIES` (3) times in all; otherwise one rate limit would leave every
+distance Unconfirmed for the life of the task. A finding's point: a Google Maps
 result's point (`gps_coordinates`, or Places `location`: `ProviderItem.point`), its page's schema.org `geo`
 (`page_extract` adds `geo` to a listing or place only when the page has one),
 else its stored address through the Census geocoder (a street number needed).
@@ -269,7 +277,11 @@ floor plans page (`plans_link`, same site; viewed in the browser when the
 figures are drawn by JavaScript) are read by `building_rent`, which keeps each
 plan's `[low, high]` in `price.spans` (`high` None for "starting at") and shows
 "$1,123–$1,939+/mo". A building that only gives one figure is "From" it
-(`fields.starting_at`). A rent limit is met when any span overlaps it
+(`fields.starting_at`). A building has no rent (`_no_rent`) only when it has
+no price or every span is "starting at"; then its floor plans (and its own
+page, viewed) are read, and their rent replaces the one there only if it is a
+real one (`_take_rent`), never another "starting at". A figure that is the
+front of a bigger one ("$1,250,000", a sale price) is never a rent. A rent limit is met when any span overlaps it
 (`ranking._in_range`): a "starting at" below the range is Unconfirmed (dearer
 homes may fit), above it a violation.
 
@@ -307,7 +319,8 @@ homes may fit), above it a violation.
   finding shown): the model's, then the ranking's best it left out
   (`fill_top`).
 - **Budgets per round** (`Budgets`): 30 provider calls (searches and store
-  lookups), 100 page loads (a building costs two: its page and its floor
+  lookups; Google Places pages by token, so page n of a search is n calls:
+  `providers.calls_per_search`), 100 page loads (a building costs two: its page and its floor
   plans), 24 browser views, reserved with `chain.grant` before use and refunded after.
   80 findings per task, 120 once it searched more. Counters reset when a
   round starts.
@@ -319,7 +332,9 @@ homes may fit), above it a violation.
   - An enrich batch views one page at a time, because the browser worker has
     one slot and a view still queued after 20 s comes back busy. No view
     starts after `ENRICH_VIEW_SECONDS` (150 s), so the step ends inside its
-    420 s. A view not made goes back to the budget.
+    420 s. A view not made goes back to the budget. A row gives up its
+    enrich slot while it waits for the browser, so rows that only load a
+    page never queue behind views.
   - Measured 2026-10-15 on an Austin search: viewing the 22 buildings still
     without a rent took 32 views and about 2 minutes, and found 4 more rents
     from the buildings' own sites. 7 sites refused the browser too.

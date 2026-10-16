@@ -9,7 +9,7 @@ now" button, often on the building's leasing portal) and open it there.
   one that says "apply" (in its words, or in its path). A link with the words
   beats one with only the path; the listing's own site beats a leasing portal
   (RentCafe, Entrata, AppFolio, ...), which beats anything else. Job and
-  career links are skipped.
+  career links are skipped, and so is fine print ("Restrictions apply").
 * None found, or the page couldn't be read: the listing's page, so the person
   applies or contacts the leasing office there. A page that's gone (404/410)
   is refused: the home may be off the market.
@@ -22,12 +22,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from urllib.parse import urljoin, urlsplit
-
-from bs4 import BeautifulSoup
+from urllib.parse import urlsplit
 
 from app.core.services.safe_fetch import UnsafeURL, fetch_public
 from app.database import decode_jsonb
+from app.matcha.services.matcha_work.agent_card.page_extract import anchors, site_of
 
 from ..research import providers
 from .base import ActionContext, ActionError, ItemAction, Line, Proposal, outcome
@@ -40,6 +39,12 @@ MAX_LINKS = 400
 _APPLY_TEXT = re.compile(r"\bapply\b|\bapplication\b|\blease\s+(?:now|online|today)\b", re.I)
 _APPLY_PATH = re.compile(r"(?:^|[/_.-])(?:apply|application|applicant|onlineleasing)(?:[/_.?-]|$)", re.I)
 _NOT_A_HOME = re.compile(r"\b(?:jobs?|careers?|employment|hiring)\b", re.I)
+# Fine print says "apply" too ("Restrictions apply", "Terms and conditions may
+# apply"): it is dropped before the words are read, so a specials banner's
+# terms link never passes for the application.
+_FINE_PRINT = re.compile(
+    r"\b(?:restrictions?|terms|conditions|fees?|limitations?|exclusions?|exceptions?|rules?|charges?"
+    r"|requirements?|criteria|details)\b(?:\s+\w+){0,3}?\s+apply\b", re.I)
 # Where buildings send their applications.
 PORTALS = (
     "securecafe.com", "rentcafe.com", "entrata.com", "appfolio.com", "realpage.com", "on-site.com",
@@ -63,10 +68,6 @@ def available(ctx: ActionContext) -> str | None:
     return None
 
 
-def _site(host: str | None) -> str:
-    return (host or "").lower().rstrip(".").removeprefix("www.")
-
-
 def _within(host: str, domains: tuple[str, ...]) -> bool:
     return any(host == d or host.endswith("." + d) for d in domains)
 
@@ -74,21 +75,18 @@ def _within(host: str, domains: tuple[str, ...]) -> bool:
 def apply_links(html: bytes, base: str) -> list[dict]:
     """Links on the page that lead to an application, best first:
     `[{"url", "text", "site"}]`."""
-    soup = BeautifulSoup(html, "lxml")
-    home = _site(urlsplit(base).hostname)
+    home = site_of(urlsplit(base).hostname)
     found: list[tuple[tuple[int, int], int, dict]] = []
     seen: set[str] = set()
-    for n, anchor in enumerate(soup.find_all("a", href=True)[:MAX_LINKS]):
-        href = urljoin(base, str(anchor["href"]).strip()).split("#")[0]
-        parts = urlsplit(href)
-        site = _site(parts.hostname)
+    for n, (anchor, href, parts, site) in enumerate(anchors(html, base, limit=MAX_LINKS)):
         # The person's browser opens it: https, or the listing's own site as it is served.
         if not site or not (parts.scheme == "https" or (parts.scheme == "http" and site == home)):
             continue
         text = " ".join((anchor.get_text(" ", strip=True) or anchor.get("aria-label") or anchor.get("title") or "").split())[:80]
         if href in seen or _NOT_A_HOME.search(f"{text} {parts.path}"):
             continue
-        by_text, by_path = bool(_APPLY_TEXT.search(text)), bool(_APPLY_PATH.search(parts.path))
+        by_text = bool(_APPLY_TEXT.search(_FINE_PRINT.sub(" ", text)))
+        by_path = bool(_APPLY_PATH.search(parts.path))
         if not (by_text or by_path):
             continue
         seen.add(href)
@@ -132,7 +130,7 @@ async def prepare(ctx: ActionContext, params: dict, *, fetch=fetch_public) -> Pr
     if url is None:
         raise ActionError(available(ctx) or "There's no listing page to apply from.")
     title = ctx.item.get("title") or "this home"
-    listed_at = _site(urlsplit(url).hostname)
+    listed_at = site_of(urlsplit(url).hostname)
     links, status = await _application(url, fetch)
     if status in (404, 410):
         raise ActionError(f"{title}'s page is gone ({status}): it may be off the market.")

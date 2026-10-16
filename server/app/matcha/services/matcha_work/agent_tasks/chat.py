@@ -17,14 +17,15 @@ from uuid import UUID
 from app.database import decode_jsonb
 
 from . import items as items_mod
+from .research.model_phases import SUMMARY_TOP, TOP_PICKS
 
 logger = logging.getLogger(__name__)
 
 METADATA_KIND = "agent_task"
-# The summary's top picks ("find 5" shows five), in its order.
-TOP_ITEMS = 5
-# The summary picks from the best ten by rank (`research.model_phases.SUMMARY_TOP`).
-PICKED_FROM = 10
+# The summary's top picks ("find 5" shows five), in its order, chosen from the
+# best SUMMARY_TOP by rank.
+TOP_ITEMS = TOP_PICKS
+PICKED_FROM = SUMMARY_TOP
 
 
 def card_view(task: dict, *, summary: dict | None = None, top: list[dict] | None = None,

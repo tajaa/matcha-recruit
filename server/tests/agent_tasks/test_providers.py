@@ -236,6 +236,12 @@ def _places(handler):
     return P.GooglePlaces("gkey", transport=httpx.MockTransport(handler), sleep=_no_sleep, today=lambda: TODAY)
 
 
+def test_a_places_search_costs_a_call_per_page():
+    places = _places(lambda request: httpx.Response(200, json={}))
+    assert [P.calls_per_search(places, n) for n in (1, 2, P.MAX_PAGES, P.MAX_PAGES + 1)] == [1, 2, P.MAX_PAGES, 0]
+    assert P.calls_per_search(P.SearchApi("key"), 3) == 1  # the SERP APIs take the page number
+
+
 @pytest.mark.asyncio
 async def test_google_places_become_verified_findings_inside_the_map_box():
     seen = []

@@ -26,14 +26,12 @@ import time
 from dataclasses import dataclass, field, replace
 from datetime import date
 from typing import Any, Awaitable, Callable
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import urlsplit
 from uuid import UUID
-
-from bs4 import BeautifulSoup
 
 from app.core.services.safe_fetch import UnsafeURL, fetch_public
 from app.database import connection_or_direct, decode_jsonb
-from app.matcha.services.matcha_work.agent_card.page_extract import extract_page
+from app.matcha.services.matcha_work.agent_card.page_extract import anchors, extract_page, site_of
 from app.matcha.services.matcha_work.agent_card.schema import normalize_url
 from app.matcha.services.matcha_work.agent_runtime import chain
 from app.matcha.services.matcha_work.agent_runtime.chain import Budget, PhaseOutcome
@@ -57,6 +55,8 @@ PROVIDER_BUILDINGS = 30
 # each, within the round's provider budget alongside its searches).
 STORE_LOOKUPS = 20
 ENRICH_BATCH = 12
+# Looking up the place distances are measured from, when lookups fail.
+ANCHOR_TRIES = 3
 ENRICH_CONCURRENCY = 4
 # A batch's views run one at a time and none starts after this long, so the
 # last one (queued, loaded, screenshot stored: 90 s at most) and the photos
@@ -157,19 +157,26 @@ def brief_of(task: dict) -> dict:
 async def ensure_anchor(task: dict, deps: Deps, guard: chain.Guard) -> dict | None:
     """The place distances are measured from (the brief's `near`) on the map,
     found once per task and kept in the plan; None when there is none or it
-    can't be found. Finding it may spend one provider call."""
+    can't be found. Finding it may spend one provider call. A lookup that
+    failed (an outage, a rate limit, no calls left) rather than found nothing
+    is tried again by the next step, ANCHOR_TRIES times in all."""
     near = brief_of(task).get("near")
     if not near:
         return None
     plan = plan_of(task)
     anchor = plan.get("anchor")
-    if not (isinstance(anchor, dict) and anchor.get("name") == near):
+    same = isinstance(anchor, dict) and anchor.get("name") == near
+    tries = int(anchor.get("tries") or 1) if same and anchor.get("transient") else 0
+    if not same or (anchor.get("transient") and tries < ANCHOR_TRIES):
         provider = deps.provider("places")
         budget = Budget(left=await chain.grant(_chain(), task["id"], "provider_calls", 1, BUDGETS.provider_calls)
                         if provider is not None else 0)
+        asked = budget.take()
         anchor = await geo.resolve_anchor(near, brief_of(task).get("location"),
-                                          provider=provider if budget.take() else None, geocode=deps.geocode)
+                                          provider=provider if asked else None, geocode=deps.geocode)
         await chain.refund(_chain(), task["id"], "provider_calls", budget.left)
+        if "lat" not in anchor and (anchor.get("transient") or (provider is not None and not asked)):
+            anchor = {**anchor, "transient": True, "tries": tries + 1}
         async with connection_or_direct() as conn:
             await conn.execute(
                 """UPDATE mw_agent_tasks SET plan = COALESCE(plan, '{}'::jsonb) || jsonb_build_object('anchor', $3::jsonb),
@@ -325,13 +332,14 @@ async def run_providers(task: dict, deps: Deps, guard: chain.Guard) -> PhaseOutc
         searches = [(kind.area_query, ll) for ll in around] + [
             (q, None) for q in [q for q in plan.get("queries") or [] if q][:PROVIDER_QUERIES[source]]]
         page = int(cursor.get("provider_page") or 1)
-        budget = Budget(left=await chain.grant(_chain(), task["id"], "provider_calls", len(searches),
+        cost = providers.calls_per_search(provider, page)
+        budget = Budget(left=await chain.grant(_chain(), task["id"], "provider_calls", len(searches) * cost,
                                                BUDGETS.provider_calls))
         gate = asyncio.Semaphore(QUERY_CONCURRENCY)
         per_query: list[list[providers.ProviderItem]] = [[] for _ in searches]
 
         async def one(n: int, query: str, ll: str | None) -> None:
-            if not budget.take():
+            if not budget.take(cost):
                 return
             async with gate:
                 try:
@@ -394,12 +402,9 @@ _PLANS = re.compile(r"floor\s*-?\s*plans?|floorplans|pricing|availability|plans?
 def plans_link(html: bytes, base: str) -> str | None:
     """A building's floor plans page on its own site (where its rents are),
     from any link on the page, its menu included."""
-    soup = BeautifulSoup(html, "lxml")
-    site = (urlsplit(base).hostname or "").lower().removeprefix("www.")
-    for anchor in soup.find_all("a", href=True)[:400]:
-        href = urljoin(base, str(anchor["href"]).strip()).split("#")[0]
-        parts = urlsplit(href)
-        if parts.scheme not in ("http", "https") or (parts.hostname or "").lower().removeprefix("www.") != site:
+    site = site_of(urlsplit(base).hostname)
+    for anchor, href, parts, its_site in anchors(html, base, limit=400):
+        if parts.scheme not in ("http", "https") or its_site != site:
             continue
         if href.rstrip("/") != base.split("#")[0].rstrip("/") and (
                 _PLANS.search(anchor.get_text(" ", strip=True)) or _PLANS.search(parts.path)):
@@ -408,9 +413,19 @@ def plans_link(html: bytes, base: str) -> str | None:
 
 
 def _no_rent(fields: dict) -> bool:
-    """No rent yet, or only a "starting at" one."""
+    """No rent yet, or only "starting at" ones: a range that ends somewhere is a rent."""
     price = fields.get("price") or {}
-    return not price or any(end is None for _, end in price.get("spans") or [])
+    spans = price.get("spans") or []
+    return not price or (bool(spans) and all(end is None for _, end in spans))
+
+
+def _take_rent(found: dict, new: dict) -> dict:
+    """`found` with `new`'s facts. `new`'s rent replaces the one there only
+    when it is a real rent (a range that ends somewhere), so another "starting
+    at" never throws away a better one."""
+    if "price" in new and not _no_rent({"price": new["price"]}):
+        found = {**found, "price": new["price"]}
+    return F.merge(found, {k: v for k, v in new.items() if k != "price"} if "price" in found else new)
 
 
 async def view_scan(url: str, deps: Deps, views: Budget, *, prefix: str, today: date,
@@ -431,7 +446,7 @@ async def floor_plans(html: bytes, base: str, deps: Deps, fetches: Budget, views
                       today: date) -> dict:
     """A building's rents and specials from its floor plans page: loaded, or
     viewed in the browser when its prices are drawn by JavaScript."""
-    url = plans_link(html, base)
+    url = await asyncio.to_thread(plans_link, html, base)
     if url is None or not fetches.take():
         return {}
     try:
@@ -504,16 +519,13 @@ async def enrich_one(row: dict, deps: Deps, fetches: Budget, views: Budget, *, p
     if building and "price" in found and not found["price"].get("spans"):
         found["price"] = F.starting_at(found["price"])  # a building's one price is its cheapest home
     if building and _no_rent(found):
-        plans = await floor_plans(fetched.body, fetched.final_url, deps, fetches, views, prefix=prefix, today=today)
-        if "price" in plans:
-            found["price"] = plans.pop("price")  # its floor plans' rents beat a "starting at"
-        found = F.merge(found, plans)
+        # Its floor plans' rents beat a "starting at".
+        found = _take_rent(found, await floor_plans(fetched.body, fetched.final_url, deps, fetches, views,
+                                                    prefix=prefix, today=today))
     if building and _no_rent(found) and not viewed_own:
         # Some buildings draw their rents on their own page but not on their floor plans page.
-        seen = await view_scan(fetched.final_url, deps, views, prefix=prefix, today=today, building=True) or {}
-        if "price" in seen:
-            found["price"] = seen.pop("price")
-        found = F.merge(found, seen)
+        found = _take_rent(found, await view_scan(fetched.final_url, deps, views, prefix=prefix, today=today,
+                                                  building=True) or {})
     update["fields"] = F.merge(fields, found)
     update["status"] = "verified"
     point = geo.page_point(page, row.get("title") or "")
@@ -575,12 +587,17 @@ async def enrich(task: dict, deps: Deps, guard: chain.Guard) -> PhaseOutcome:
 
     async def view(url: str, where: str) -> dict:
         # One at a time: the browser worker has one slot, and a view queued
-        # behind this batch's others would give up as busy.
-        async with in_turn:
-            if time.monotonic() >= stop_viewing:
-                views.left += 1  # never made, so it goes back with the rest
-                return {"url": url, "error": "out of time"}
-            return await deps.view(url, where)
+        # behind this batch's others would give up as busy. The row gives up
+        # its slot meanwhile, so rows that only load a page don't wait on views.
+        gate.release()
+        try:
+            async with in_turn:
+                if time.monotonic() >= stop_viewing:
+                    views.left += 1  # never made, so it goes back with the rest
+                    return {"url": url, "error": "out of time"}
+                return await deps.view(url, where)
+        finally:
+            await gate.acquire()
 
     batch = replace(deps, view=view)
 

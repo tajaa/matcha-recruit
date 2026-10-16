@@ -492,6 +492,15 @@ class GooglePlaces:
         return None
 
 
+def calls_per_search(provider: Any, page: int) -> int:
+    """Paid calls one search for `page` makes. Google's Places API pages by
+    token, so its page n is n calls (none past MAX_PAGES); the SERP APIs take
+    the page number."""
+    if isinstance(provider, GooglePlaces):
+        return page if page <= MAX_PAGES else 0
+    return 1
+
+
 def _google_key() -> str | None:
     from app.config import get_settings
 

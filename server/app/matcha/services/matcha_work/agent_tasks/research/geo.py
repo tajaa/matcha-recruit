@@ -143,16 +143,18 @@ def anchor_query(near: str, location: str | None) -> str:
 
 
 async def resolve_anchor(near: str, location: str | None, *, provider: Any, geocode: Geocode) -> dict:
-    """`{name, lat, lng, source, label}`, or `{name, error}` when it can't be found."""
+    """`{name, lat, lng, source, label}`, or `{name, error}` when it can't be
+    found, with `transient` when a lookup failed rather than found nothing."""
     from .providers import ProviderError
 
     query = anchor_query(near, location)
+    transient = False
     if provider is not None:
         try:
             found = await provider.locate(query)
         except ProviderError as exc:
             logger.info("research anchor lookup failed: %s", exc)
-            found = None
+            found, transient = None, True
         if found is not None:
             label, point = found
             return {"name": near, "lat": point[0], "lng": point[1], "source": "google_maps", "label": label}
@@ -160,10 +162,11 @@ async def resolve_anchor(near: str, location: str | None, *, provider: Any, geoc
         point = await geocode(query)
     except Exception:
         logger.info("research anchor geocode failed", exc_info=True)
-        point = None
+        point, transient = None, True
     if point is not None:
         return {"name": near, "lat": point[0], "lng": point[1], "source": "census", "label": query}
-    return {"name": near, "error": f"Couldn't find {near} on a map, so distances from it are unknown."}
+    failed = {"name": near, "error": f"Couldn't find {near} on a map, so distances from it are unknown."}
+    return {**failed, "transient": True} if transient else failed
 
 
 async def from_address(fields: dict, anchor: dict, *, geocode: Geocode) -> dict:

@@ -464,7 +464,8 @@ def _rating(out: dict, rating: Any, *, url: str, today: date) -> None:
 
 # ── scanning a home listing's own text (conservative) ────────────────────────
 
-_DOLLARS_MO = r"\$\s?(\d{1,2},?\d{3})(?:\.\d{2})?"
+# A rent-sized figure, never the front of a bigger one ("$1,250,000" is a sale price, not $1,250).
+_DOLLARS_MO = r"\$\s?(\d{1,2},?\d{3})(?:\.\d{2})?(?!,?\d)"
 _PER_MONTH = r"\s*(?:/\s*|per\s+|a\s+)(?:mo\b|mon\b|month\b)"
 _RENT = re.compile(_DOLLARS_MO + _PER_MONTH, re.I)
 # A building's floor plans: "$1,449 - $1,464 /mo", "Starting at $1,125".

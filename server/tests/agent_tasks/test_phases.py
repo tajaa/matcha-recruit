@@ -61,6 +61,22 @@ async def test_item_room_grows_after_search_more():
 
 
 @pytest.mark.asyncio
+async def test_a_later_page_is_charged_every_call_it_makes(conn, monkeypatch):
+    provider = AsyncMock()
+    provider.search = AsyncMock(return_value=[])
+    monkeypatch.setattr(providers, "calls_per_search", lambda _provider, page: page)
+    monkeypatch.setattr(items_mod, "insert_items", AsyncMock(return_value=0))
+    conn.on("COUNT(*) FROM mw_agent_task_items", 0)
+    conn.on("RETURNING GREATEST(LEAST($2, $3 - cur.before), 0)", lambda row_id, want, limit: min(want, 5))
+    task = task_row(plan=json.dumps({**PLAN, "source": "places", "queries": ["a", "b", "c"]}),
+                    phase_cursor=json.dumps({"provider_page": 2}))
+    await phases.run_providers(task, _deps(provider=lambda *_: provider), _guard())
+    assert conn.ran("provider_calls AS before")[0][2][1] == 6  # three searches, two calls each
+    assert provider.search.await_count == 2  # five granted: room for two searches, not two and a half
+    assert conn.ran("SET provider_calls = GREATEST(provider_calls - $2, 0)")[-1][2][1] == 1
+
+
+@pytest.mark.asyncio
 async def test_providers_add_findings_then_hand_to_the_web(conn, monkeypatch):
     provider = AsyncMock()
     provider.search = AsyncMock(side_effect=[

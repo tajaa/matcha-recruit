@@ -30,6 +30,7 @@ MAX_LIVE = 2
 DAILY_CREATES = 10
 # A refine is free but can run a whole new search, so follow-ups are rate limited too.
 DAILY_ROUNDS = 30
+DAY_SECONDS = 86400
 MAX_BRIEF_BYTES = 8_000
 # Unset: Celery's default queue. A task is a chain of short worker tasks, so
 # on the single-slot main worker it interleaves with everything else.
@@ -65,20 +66,32 @@ def _limit_error(usage: dict, cost: int) -> HTTPException:
     })
 
 
+def _wait_words(seconds: int) -> str:
+    if seconds >= 3600:
+        hours = -(-seconds // 3600)
+        return f"in about {hours} hour{'s' if hours != 1 else ''}"
+    minutes = max(1, -(-seconds // 60))
+    return f"in about {minutes} minute{'s' if minutes != 1 else ''}"
+
+
 async def _daily(user_id: str, action: str, limit: int, what: str) -> None:
     """The per-day cap, refused in words the person (and Espresso, which
-    relays it) can act on, not a bare "Too many requests"."""
-    from app.core.services.redis_cache import check_rate_limit
+    relays it) can act on, not a bare "Too many requests". The day starts at
+    the first of them, so the refusal says when it ends (and `Retry-After`)."""
+    from app.core.services.redis_cache import check_rate_limit, get_rate_limit_state
 
     try:
-        await check_rate_limit(user_id, action, limit, 86400)
+        await check_rate_limit(user_id, action, limit, DAY_SECONDS)
     except HTTPException as exc:
         if exc.status_code != 429:
             raise
+        state = await get_rate_limit_state(user_id, action, limit, DAY_SECONDS)
+        wait = int((state or {}).get("resets_in_seconds") or 0)
+        when = _wait_words(wait) if wait else "within 24 hours"
         raise HTTPException(status_code=429, detail={
             "code": "daily_limit",
-            "message": f"That's {limit} {what} today, the most in a day. Try again tomorrow.",
-        }) from exc
+            "message": f"That's {limit} {what} in 24 hours, the most allowed. More can start {when}.",
+        }, headers={"Retry-After": str(wait or DAY_SECONDS)}) from exc
 
 
 def _live_error() -> HTTPException:
