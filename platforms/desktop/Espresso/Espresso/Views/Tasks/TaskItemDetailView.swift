@@ -2,8 +2,8 @@ import SwiftUI
 import AppKit
 
 /// One finding: its photos and page, every fact with the words and page it
-/// came from, why it fits (or why it's hidden), the person's notes, and what
-/// to do with it.
+/// came from, an apartment building's homes to let one by one, why it fits
+/// (or why it's hidden), the person's notes, and what to do with it.
 struct TaskItemDetailView: View {
     @Environment(AppState.self) private var appState
     let vm: TasksViewModel
@@ -11,6 +11,7 @@ struct TaskItemDetailView: View {
     @State private var notes = ""
     @State private var notesItemId: String?
     @State private var flow: TaskActionFlow?
+    @State private var allHomes = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -28,9 +29,10 @@ struct TaskItemDetailView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
                         heading(item)
-                        if !item.images.isEmpty { photos(item) }
+                        if !item.images.isEmpty || !item.screenshots.isEmpty { photos(item) }
                         doneSection(item)
                         facts(item)
+                        homesSection(item)
                         fitSection(item)
                         notesSection(item)
                         actions(item)
@@ -54,6 +56,7 @@ struct TaskItemDetailView: View {
         if notesItemId != item.id {
             notes = item.notes
             notesItemId = item.id
+            allHomes = false
         }
     }
 
@@ -153,24 +156,39 @@ struct TaskItemDetailView: View {
         .disabled(vm.busy)
     }
 
+    /// Its photos, then its page as the browser drew it (marked as such).
     private func photos(_ item: AgentTaskItem) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                ForEach(item.images, id: \.url) { image in
-                    if let url = TasksViewModel.webURL(image.url) {
-                        AsyncImage(url: url) { phase in
-                            if let picture = phase.image {
-                                picture.resizable().scaledToFill()
-                            } else {
-                                Color.gray.opacity(0.1)
-                            }
-                        }
-                        .frame(width: 150, height: 110)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                        .help(image.alt ?? "")
-                    }
+                ForEach(item.images, id: \.url) { image in picture(image, page: false) }
+                ForEach(item.screenshots, id: \.url) { image in picture(image, page: true) }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func picture(_ image: AgentTaskImage, page: Bool) -> some View {
+        if let url = TasksViewModel.webURL(image.url) {
+            AsyncImage(url: url) { phase in
+                if let picture = phase.image {
+                    picture.resizable().scaledToFill()
+                } else {
+                    Color.gray.opacity(0.1)
                 }
             }
+            .frame(width: 150, height: 110)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(alignment: .bottomLeading) {
+                if page {
+                    Text("Its page")
+                        .font(.system(size: 9, weight: .semibold))
+                        .padding(.horizontal, 5).padding(.vertical, 2)
+                        .background(Capsule().fill(.black.opacity(0.55)))
+                        .foregroundColor(.white)
+                        .padding(5)
+                }
+            }
+            .help(image.alt ?? "")
         }
     }
 
@@ -193,6 +211,30 @@ struct TaskItemDetailView: View {
                     .map { labels[$0] ?? TaskItemDetailView.label(for: $0) }.joined(separator: ", ") + ".")
                     .font(.system(size: 10))
                     .foregroundColor(appState.themeTextSecondary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func homesSection(_ item: AgentTaskItem) -> some View {
+        if !item.units.isEmpty {
+            let ordered = TaskItemDetailView.homesOrder(item.units)
+            let shown = allHomes ? ordered : Array(ordered.prefix(TaskItemDetailView.homesShown))
+            section("Homes to let") {
+                Text(item.homes?.line ?? "\(ordered.count) homes listed")
+                    .font(.system(size: 11, weight: .medium))
+                ForEach(shown) { unit in
+                    UnitRow(unit: unit, buildingUrl: item.url)
+                }
+                if ordered.count > TaskItemDetailView.homesShown {
+                    Button(allHomes ? "Show fewer" : "Show all \(ordered.count)") { allHomes.toggle() }
+                        .buttonStyle(.link)
+                        .font(.system(size: 11))
+                }
+                Text("From the building's leasing system. Net rent spreads a special's free weeks over the lease.")
+                    .font(.system(size: 10))
+                    .foregroundColor(appState.themeTextSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -262,6 +304,15 @@ struct TaskItemDetailView: View {
     }
 
     // MARK: Pure helpers (tested)
+
+    /// Homes shown before "Show all".
+    nonisolated static let homesShown = 6
+
+    /// The homes that meet every limit first, each group as the server sent
+    /// it (cheapest first).
+    nonisolated static func homesOrder(_ units: [AgentTaskUnit]) -> [AgentTaskUnit] {
+        units.filter { $0.fits == true } + units.filter { $0.fits != true }
+    }
 
     /// The plan's columns first, in its order, then any other fact.
     nonisolated static func factOrder(_ item: AgentTaskItem, columns: [AgentTaskColumn]) -> [String] {
@@ -340,5 +391,110 @@ private struct FactRow: View {
         }
         .padding(14)
         .frame(width: 320)
+    }
+}
+
+/// One home to let: its layout, rent (and net rent), move-in date, special,
+/// floor plan and tour.
+private struct UnitRow: View {
+    @Environment(AppState.self) private var appState
+    let unit: AgentTaskUnit
+    let buildingUrl: String?
+    @State private var showPlan = false
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            plan
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(unit.layoutLine)
+                        .font(.system(size: 11, weight: .semibold))
+                        .lineLimit(1)
+                    if unit.fits == true {
+                        Text("Fits")
+                            .font(.system(size: 9, weight: .semibold))
+                            .padding(.horizontal, 5).padding(.vertical, 1)
+                            .background(Capsule().fill(Color.green.opacity(0.15)))
+                            .foregroundColor(.green)
+                            .help("Meets every limit you set")
+                    }
+                }
+                HStack(spacing: 6) {
+                    Text("\(AgentTaskUnit.dollars(unit.rent))/mo")
+                        .font(.system(size: 12, weight: .medium))
+                    if let net = unit.netRent {
+                        Text("\(AgentTaskUnit.dollars(net))/mo net")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(.green)
+                            .help(unit.netNote ?? "")
+                    }
+                }
+                let terms = [unit.availableLabel().map { $0 == "Now" ? "Available now" : "Available \($0)" },
+                             unit.leaseMonths.map { "\($0)-month lease" }, unit.plan].compactMap { $0 }
+                if !terms.isEmpty {
+                    Text(terms.joined(separator: " · "))
+                        .font(.system(size: 10))
+                        .foregroundColor(appState.themeTextSecondary)
+                        .lineLimit(1)
+                }
+                if let special = unit.special {
+                    Label(special, systemImage: "tag")
+                        .font(.system(size: 10))
+                        .foregroundColor(.orange)
+                        .lineLimit(2)
+                }
+                HStack(spacing: 12) {
+                    if let tour = TasksViewModel.webURL(unit.tourUrl) {
+                        Link(destination: tour) { Label("3D tour", systemImage: "cube.transparent") }
+                    }
+                    if unit.url != buildingUrl, let page = TasksViewModel.webURL(unit.url) {
+                        Link(destination: page) { Label("Its page", systemImage: "arrow.up.right.square") }
+                    }
+                }
+                .font(.system(size: 10))
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 8)
+            .fill(unit.fits == true ? Color.green.opacity(0.06) : appState.themeText.opacity(0.03)))
+    }
+
+    @ViewBuilder
+    private var plan: some View {
+        if let url = TasksViewModel.webURL(unit.planImage) {
+            Button { showPlan.toggle() } label: {
+                AsyncImage(url: url) { phase in
+                    if let picture = phase.image {
+                        picture.resizable().scaledToFit()
+                    } else {
+                        Color.gray.opacity(0.1)
+                    }
+                }
+                .frame(width: 56, height: 56)
+                .background(Color.white)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+            .buttonStyle(.plain)
+            .help("Floor plan")
+            .popover(isPresented: $showPlan) {
+                AsyncImage(url: url) { phase in
+                    if let picture = phase.image {
+                        picture.resizable().scaledToFit()
+                    } else {
+                        ProgressView()
+                    }
+                }
+                .frame(width: 420, height: 420)
+                .background(Color.white)
+                .padding(10)
+            }
+        } else {
+            RoundedRectangle(cornerRadius: 6)
+                .fill(appState.themeText.opacity(0.05))
+                .frame(width: 56, height: 56)
+                .overlay(Image(systemName: "square.split.2x2").foregroundColor(appState.themeTextSecondary))
+                .help("No floor plan")
+        }
     }
 }

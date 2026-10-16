@@ -193,6 +193,7 @@ refine starts at `refine`, "search more" at `providers`.
 | Brief + intake fields (`ResearchBrief`, `ApartmentBrief`, `validator`) | `brief.py` |
 | Where a finding is: the anchor, distance and direction (`resolve_anchor`, `distance_fields`, `from_address`) | `geo.py` |
 | Kinds of search: products, apartments, places (data) | `kinds.py` |
+| An apartment building's homes one by one from its leasing system: SightMap, Avalon (pure, plus `find_units`) | `units.py` |
 
 ### Kinds of search (`research/kinds.py`)
 
@@ -285,6 +286,83 @@ front of a bigger one ("$1,250,000", a sale price) is never a rent. A rent limit
 (`ranking._in_range`): a "starting at" below the range is Unconfirmed (dearer
 homes may fit), above it a violation.
 
+### A building's homes, one by one (`research/units.py`, `agenttask05`)
+
+Where a building's site names its leasing system, `enrich_one` keeps every
+home to let in `mw_agent_task_items.units` (cheapest first, at most
+`MAX_UNITS` 80): number, floor, plan, beds, baths, sq ft, rent, move-in date,
+lease length, special, floor plan image, tour link, its own page. Two systems
+answer a plain request:
+
+- **SightMap**, the unit map embedded on many buildings' sites (Brookfield,
+  Essex, Jonah and others): `sightmap.com/embed/<id>` in the page (often
+  JSON-escaped), whose embed page names its API
+  (`sightmap.com/app/api/v1/<x>/sightmaps/<n>`). Two loads. A map with no
+  rents (AVA's) lists nothing. Its API always sends gzip, so it is loaded with
+  `fetch_public(gzip=True)`, which inflates a bounded amount at a time. Its
+  homes carry no page of their own (`url` None): the unit map is the building's.
+- **Avalon** (`avaloncommunities.com` pages only): `communityId: 'AVB-CA104'`
+  in the page, then `api.avalonbay.com/json/reply/ApartmentSearch`. One load;
+  its community promotions too. A home with no unit key in its id is known by
+  `<floor plan>#<number>` (no page link); one with neither is skipped.
+
+Its own page is tried first, then its floor plans page (`plans_page`), which a
+building now loads even when its own page gave a rent: the unit map is often
+only there. **A building's page loads are its own:** `BUILDING_LOADS` (4) is
+its site, its floor plans page and `LEASING_LOADS` (2) leasing-system loads,
+checked against a per-building `Budget` before the round's shared one, and a
+system already asked (`avalon:<code>`, `sightmap:<id>`, the shared `tried` set)
+is never asked again from the floor plans page, so an AVA-style building (an
+Avalon code with no homes plus a rentless unit map) can't spend other
+buildings' loads. A building whose system answered gets its price, soonest
+move-in and special from its homes (origin `leasing`, which outranks
+`jsonld` and a provider: the leasing system is the building's own current
+list), with the cheapest home as the quote; its floor plans text is not read
+and no view is made. Otherwise everything above applies unchanged. 403s to a server
+(Vara, Strata, OLUME, Hanover, Equity) and RentCafe/RealPage/AppFolio
+widgets are not read yet.
+
+- **A building with homes is judged on its homes.** A limit on rent, beds,
+  baths, sq ft or move-in date (`ranking.UNIT_FIELDS`) is met only when one
+  home meets all of them at once (`unit_verdict`), never one home's rent with
+  another's bedrooms. Every home breaking one limit names that limit ("From
+  $4,211/mo (18 homes)"); otherwise "No home here meets every limit at once".
+  A home missing a figure makes the building Unconfirmed, not hidden. A
+  building that breaks a limit of its own (no dogs) has no home that fits:
+  `units_fit` is empty. The homes that fit are `rank_explain.units_fit`; the app shows "3 of 18 homes
+  fit · from $X" (`items.homes_view`) and marks each home (`units_view`).
+- **Net rent comes only from free time a special states** (`units.net_rent`):
+  "6 weeks free", "1 month free", "first month free", over the lease the
+  special or the home states (12 months, said to be assumed, when neither
+  does). "Up to …" is a ceiling, so no net. Avalon's own net effective rent
+  is used when no special gives one. A rent limit is met when the net rent is
+  inside it (each home's price spans net to gross), as the person asked
+  ("if the promo makes it less than 3.1k that will count"). `units.lowest_rent`
+  is the one rule for a home's lowest rent (net, else gross); ranking, the
+  building's span, its cheapest home and `homes_view` all use it.
+- **Floor plans are ours or nothing.** A home keeps the leasing system's
+  plan as `plan_source` (stored, never sent to the app: `units_view` drops
+  it) and `plan_image` is our CDN copy or None. `rehost_plans` copies up to
+  `PLAN_IMAGES` (8) new plans a building a pass, the plans of homes that meet
+  the limits first, within `PLAN_IMAGE_SECONDS` (45 s), reusing copies a
+  re-read already has. A refine that makes other homes fit copies theirs
+  (`fill_plans`, `PLAN_FILL_SECONDS` 30 s, after the rerank; a failure never
+  fails the refine).
+- **A batch's photos and floor plans are copied at the same time**, the
+  photos within `IMAGE_SECONDS` (60 s) as a whole.
+- **A page the browser drew is kept apart from the photos**, in
+  `mw_agent_task_items.screenshots` (already on our CDN): it never counts
+  against the photo caps or stands in for a photo. The app shows it after
+  the photos, marked "Its page".
+- The model sees a building's `homes`: how many are listed and, before
+  ranking, up to 6 example lines; once ranked, how many meet every limit and
+  only those homes (`homes_that_fit`), or, when none does, the 3 cheapest as
+  `cheapest_not_fitting`, which the summary must never call a fit
+  (`items.view_for_model`). A document lists up to 8 homes, fitting first.
+- Live 2026-10-16, San Francisco: The George 18 homes, Canyon 26, AVA 55
+  Ninth 11, Solaire 19, 1190 Mission 11, Duboce 2, SoMa at 788 6; every one
+  with floor plans, four with 3D tours.
+
 ## Invariants
 
 - **Every fact carries its evidence and a status.** `verified`: structured
@@ -320,8 +398,9 @@ homes may fit), above it a violation.
   (`fill_top`).
 - **Budgets per round** (`Budgets`): 30 provider calls (searches and store
   lookups; Google Places pages by token, so page n of a search is n calls:
-  `providers.calls_per_search`), 100 page loads (a building costs two: its page and its floor
-  plans), 24 browser views, reserved with `chain.grant` before use and refunded after.
+  `providers.calls_per_search`), 160 page loads (a building may cost
+  `BUILDING_LOADS` four: its page, its floor plans page and its leasing system,
+  whose unit map is two), 24 browser views, reserved with `chain.grant` before use and refunded after.
   80 findings per task, 120 once it searched more. Counters reset when a
   round starts.
 - A page drawn by JavaScript is viewed in the browser only when the browser

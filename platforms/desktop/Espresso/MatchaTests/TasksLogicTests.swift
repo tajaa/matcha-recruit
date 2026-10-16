@@ -405,4 +405,56 @@ final class TasksLogicTests: XCTestCase {
         XCTAssertEqual(AssistantText.message(for: .httpError(500, #"{"other": 1}"#), fallback: "F"), "F")
         XCTAssertEqual(AssistantText.message(for: .unauthorized, fallback: "F"), "F")
     }
+
+    func testABuildingsHomesDecodeAndReadAsLines() throws {
+        let item = try decode(AgentTaskItem.self, """
+        {"id": "i", "title": "Park West", "images": [{"url": "https://cdn.test/p.webp"}],
+         "screenshots": [{"url": "https://cdn.test/shot.webp", "page_url": "https://parkwest.test/floor-plans/"}],
+         "homes": {"count": 18, "fit": 3, "from": 2949},
+         "units": [{"id": "sightmap:1", "number": "B201", "floor": "2", "beds": 2, "baths": 1, "sqft": 910,
+                    "rent": 3300, "net_rent": 2949, "net_note": "6 weeks free on a 13-month lease",
+                    "available": "2026-10-14", "lease_months": 13, "special": "6 weeks free",
+                    "plan_image": "https://cdn.test/b.webp", "tour_url": "https://my.matterport.test/x", "fits": true},
+                   {"id": "sightmap:2", "number": "A107", "beds": 0, "rent": "not a number", "fits": false},
+                   {"number": "C3", "rent": 5000, "available": "2027-01-25"}]}
+        """)
+        XCTAssertEqual(item.homes?.line, "3 of 18 homes fit · from $2,949/mo")
+        XCTAssertEqual(item.images.map(\.url), ["https://cdn.test/p.webp"])
+        XCTAssertEqual(item.screenshots.map(\.pageUrl), ["https://parkwest.test/floor-plans/"])
+        XCTAssertTrue(try decode(AgentTaskItem.self, #"{"id": "j"}"#).screenshots.isEmpty)  // older servers
+        XCTAssertEqual(item.units.count, 3)  // one odd figure never drops the rest
+        let b201 = item.units[0]
+        XCTAssertEqual(b201.layoutLine, "#B201 · Floor 2 · 2 bd · 1 ba · 910 sq ft")
+        XCTAssertEqual(b201.netRent, 2949)
+        XCTAssertEqual(item.units[1].layoutLine, "#A107 · Studio")
+        XCTAssertEqual(item.units[1].rent, 0)
+        XCTAssertEqual(item.units[2].id, "C3")
+        // The homes that fit first, then the rest as sent.
+        XCTAssertEqual(TaskItemDetailView.homesOrder([item.units[1], item.units[2], b201]).map(\.id),
+                       ["sightmap:1", "sightmap:2", "C3"])
+        XCTAssertNil(try decode(AgentTaskItem.self, #"{"id": "x", "title": "A shop"}"#).homes)
+    }
+
+    func testHomesInBriefAndMoveInDates() {
+        XCTAssertEqual(AgentTaskHomes(count: 18, fit: nil, from: 3300).line, "18 homes listed · from $3,300/mo")
+        XCTAssertEqual(AgentTaskHomes(count: 1, fit: nil, from: nil).line, "1 home listed")
+        XCTAssertEqual(AgentTaskHomes(count: 6, fit: 0, from: nil).line, "None of 6 homes fit")
+        let utc = TimeZone(identifier: "UTC")!
+        let today = ISO8601DateFormatter().date(from: "2026-10-14T12:00:00Z")!
+        func label(_ day: String) -> String? {
+            AgentTaskUnit(id: "u", rent: 1, available: day).availableLabel(today: today, zone: utc)
+        }
+        XCTAssertEqual(label("2026-10-14"), "Now")
+        XCTAssertEqual(label("2026-09-01"), "Now")
+        XCTAssertEqual(label("2026-11-04"), "Nov 4")
+        XCTAssertEqual(label("2027-01-25"), "Jan 25, 2027")
+        XCTAssertNil(label("soon"))
+        // Late on the 14th in Tokyo it is already the 15th there.
+        let tokyo = TimeZone(identifier: "Asia/Tokyo")!
+        XCTAssertEqual(AgentTaskUnit(id: "u", rent: 1, available: "2026-10-15").availableLabel(
+            today: ISO8601DateFormatter().date(from: "2026-10-14T16:00:00Z")!, zone: tokyo), "Now")
+        XCTAssertEqual(AgentTaskUnit.dollars(12345.6), "$12,346")
+        XCTAssertEqual(AgentTaskEvidence(quote: nil, url: nil, origin: "leasing").originLabel,
+                       "From the building's leasing system")
+    }
 }

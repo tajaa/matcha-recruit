@@ -30,7 +30,7 @@ from . import contracts, kinds, prompts
 from . import fields as F
 from .phases import (
     BUDGETS, DISCOVER, ENRICH, PROVIDERS, RANK, SCREEN, SUMMARIZE, Deps, _chain, count_items,
-    cursor_of, item_room, own_page, plan_of, rerank,
+    cursor_of, fill_plans, item_room, own_page, plan_of, rerank,
 )
 
 logger = logging.getLogger(__name__)
@@ -249,7 +249,7 @@ def _wrap(normalized: tuple[list[dict], list[str]]) -> tuple[dict, list[str]]:
 async def screen(task: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
     async with connection_or_direct() as conn:
         rows = await conn.fetch(
-            f"""SELECT id, title, subtitle, url, fields, fit_score, fit_reasons, rank_explain
+            f"""SELECT id, title, subtitle, url, fields, units, fit_score, fit_reasons, rank_explain
                 FROM mw_agent_task_items
                 WHERE task_id = $1 AND screened_at IS NULL AND status <> 'unavailable'
                 ORDER BY created_at, id LIMIT {SCREEN_BATCH}""",
@@ -298,7 +298,11 @@ async def screen(task: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
 # ── summarize ────────────────────────────────────────────────────────────────
 
 def _item_text(item: dict) -> str:
-    return " ".join([item.get("title") or "", item.get("subtitle") or "", F.check_text(item.get("fields") or {})])
+    homes = item.get("homes") or {}
+    return " ".join([item.get("title") or "", item.get("subtitle") or "", F.check_text(item.get("fields") or {}),
+                     *(homes.get("examples") or []), *(homes.get("homes_that_fit") or []),
+                     *(homes.get("cheapest_not_fitting") or []), str(homes.get("listed") or ""),
+                     str(homes.get("meet_every_limit") or "")])
 
 
 def fallback_summary(shown: list[dict], *, total: int, hidden: int, note: str | None) -> dict:
@@ -332,7 +336,7 @@ async def summarize(task: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
     cursor = cursor_of(task)
     async with connection_or_direct() as conn:
         rows = await conn.fetch(
-            f"""SELECT id, title, subtitle, url, fields, fit_score, fit_reasons, rank_explain
+            f"""SELECT id, title, subtitle, url, fields, units, fit_score, fit_reasons, rank_explain
                 FROM mw_agent_task_items WHERE task_id = $1 AND rank_band < 9
                 ORDER BY rank LIMIT {SUMMARY_TOP}""",
             task["id"],
@@ -420,6 +424,7 @@ async def refine(task: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
     old_fields = set(plan_.get("fields") or []) | {c["field"] for c in plan_.get("constraints") or []}
     new_keys = [k for k in dict.fromkeys([*changed["fields"], *(c["field"] for c in changed["constraints"])])
                 if k not in old_fields]
+    nxt = PhaseOutcome(status="running", phase=SUMMARIZE, cursor={"note": note}, progress={"note": note})
     async with connection_or_direct() as conn:
         written = await conn.fetchval(
             """UPDATE mw_agent_tasks SET plan = $3::jsonb WHERE id = $1 AND dispatch_token = $2 RETURNING 1""",
@@ -431,12 +436,12 @@ async def refine(task: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
         visible = await count_items(conn, task["id"], "AND rank_band < 9")
         room = await item_room(conn, task["id"])
         if (outcome.result["search_again"] or visible < MIN_SURVIVORS) and room > 0:
-            return PhaseOutcome(
+            nxt = PhaseOutcome(
                 status="running", phase=PROVIDERS,
                 cursor={"refine": True, "note": note, "provider_page": 1, "web_runs": 0},
                 progress={"note": f"{note} Searching again…"},
             )
-        if new_keys:
+        elif new_keys:
             rows = await conn.fetch(
                 f"""SELECT id, url, fields FROM mw_agent_task_items
                     WHERE task_id = $1 AND rank_band < 9 ORDER BY rank LIMIT {REENRICH}""",
@@ -449,6 +454,11 @@ async def refine(task: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
                        WHERE task_id = $1 AND id = ANY($2::uuid[])""",
                     task["id"], stale,
                 )
-                return PhaseOutcome(status="running", phase=ENRICH, cursor={"note": note},
-                                    progress={"note": f"{note} Checking {len(stale)} pages for it…"})
-    return PhaseOutcome(status="running", phase=SUMMARIZE, cursor={"note": note}, progress={"note": note})
+                nxt = PhaseOutcome(status="running", phase=ENRICH, cursor={"note": note},
+                                   progress={"note": f"{note} Checking {len(stale)} pages for it…"})
+    # Homes that fit only now: their floor plans, if they were never copied.
+    try:
+        await fill_plans(task, changed, deps, guard)
+    except Exception:
+        logger.warning("research floor plans after a refine failed task=%s", task["id"], exc_info=True)
+    return nxt

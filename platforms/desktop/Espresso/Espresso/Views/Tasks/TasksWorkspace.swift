@@ -535,6 +535,11 @@ struct TaskFindingRow: View {
                             }
                         }
                     }
+                    if let homes = item.homes {
+                        Label(homes.line, systemImage: "building.2")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(homes.fit == 0 ? appState.themeTextSecondary : appState.themeText)
+                    }
                     if let reason = item.hiddenReason {
                         Text(reason).font(.system(size: 10)).foregroundColor(.orange)
                     } else if !item.unconfirmed.isEmpty {

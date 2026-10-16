@@ -75,8 +75,9 @@ COMPUTED = frozenset({"distance", "direction"})
 PRESENCE = frozenset({"specials"})
 
 STATUS_RANK = {"verified": 2, "claimed": 1}
-# Among entries of the same status, structured data beats text, text beats a model.
-ORIGIN_RANK = {"provider": 3, "jsonld": 3, "page_text": 2, "browser": 2, "geocode": 2, "model": 1}
+# Among entries of the same status, structured data beats text, text beats a model;
+# a building's leasing system (its homes one by one, current) beats both.
+ORIGIN_RANK = {"leasing": 4, "provider": 3, "jsonld": 3, "page_text": 2, "browser": 2, "geocode": 2, "model": 1}
 
 _TAG_WORDS: dict[str, dict[str, tuple[str, ...]]] = {
     "pets": {

@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import socket
+import zlib
 from dataclasses import dataclass
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
@@ -133,6 +134,7 @@ async def fetch_public(
     max_redirects: int = 3,
     total_timeout: float = 30.0,
     client: httpx.AsyncClient | None = None,
+    gzip: bool = False,
 ) -> FetchedResponse:
     """GET `url` if (and only if) every hop resolves to a public address.
 
@@ -145,12 +147,15 @@ async def fetch_public(
 
     Responses are requested uncompressed and a compressed one is refused: the
     byte cap counts decoded bytes, so a small gzip/brotli bomb would inflate
-    past it inside a single chunk before the cap could act.
+    past it inside a single chunk before the cap could act. `gzip=True` is
+    for hosts that send gzip whatever is asked for (SightMap's API): a gzip
+    reply is then inflated here, never more than `max_bytes` at a time, so the
+    cap still holds. Any other encoding is refused either way.
     """
     async with asyncio.timeout(total_timeout):
         return await _fetch_public(
             url, max_bytes=max_bytes, timeout=timeout, accept=accept,
-            max_redirects=max_redirects, client=client,
+            max_redirects=max_redirects, client=client, gzip=gzip,
         )
 
 
@@ -162,6 +167,7 @@ async def _fetch_public(
     accept: str,
     max_redirects: int,
     client: httpx.AsyncClient | None,
+    gzip: bool = False,
 ) -> FetchedResponse:
     owns_client = client is None
     http = client or httpx.AsyncClient(follow_redirects=False, timeout=timeout)
@@ -174,7 +180,7 @@ async def _fetch_public(
                 "Host": host,
                 "User-Agent": _USER_AGENT,
                 "Accept": accept,
-                "Accept-Encoding": "identity",
+                "Accept-Encoding": "gzip" if gzip else "identity",
                 "Accept-Language": "en-US,en;q=0.8",
             }
             extensions = {"sni_hostname": host} if scheme == "https" else {}
@@ -191,17 +197,12 @@ async def _fetch_public(
                     current = urljoin(current, location)
                     continue
                 encoding = (response.headers.get("content-encoding") or "identity").strip().lower()
-                if encoding not in ("", "identity"):
+                if encoding not in ("", "identity") and not (gzip and encoding == "gzip"):
                     raise UnsafeURL("Compressed responses are not fetched")
-                body = bytearray()
-                truncated = False
-                async for chunk in response.aiter_bytes():
-                    remaining = max_bytes - len(body)
-                    if len(chunk) > remaining:
-                        body.extend(chunk[:remaining])
-                        truncated = True
-                        break
-                    body.extend(chunk)
+                if encoding == "gzip":
+                    body, truncated = await _inflate(response, max_bytes)
+                else:
+                    body, truncated = await _read(response, max_bytes)
                 return FetchedResponse(
                     url=url,
                     final_url=current,
@@ -216,3 +217,32 @@ async def _fetch_public(
     finally:
         if owns_client:
             await http.aclose()
+
+
+async def _read(response: httpx.Response, max_bytes: int) -> tuple[bytearray, bool]:
+    body = bytearray()
+    async for chunk in response.aiter_bytes():
+        remaining = max_bytes - len(body)
+        if len(chunk) > remaining:
+            body.extend(chunk[:remaining])
+            return body, True
+        body.extend(chunk)
+    return body, False
+
+
+async def _inflate(response: httpx.Response, max_bytes: int) -> tuple[bytearray, bool]:
+    """A gzip body, inflated a bounded amount at a time: a small bomb stops
+    at `max_bytes` instead of filling memory."""
+    inflater = zlib.decompressobj(wbits=31)
+    body = bytearray()
+    try:
+        async for chunk in response.aiter_raw():
+            remaining = max_bytes - len(body)
+            out = inflater.decompress(chunk, remaining + 1)
+            if len(out) > remaining:
+                body.extend(out[:remaining])
+                return body, True
+            body.extend(out)
+    except zlib.error as exc:
+        raise UnsafeURL("Unreadable compressed response") from exc
+    return body, False

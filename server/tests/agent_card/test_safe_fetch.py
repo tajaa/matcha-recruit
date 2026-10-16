@@ -1,3 +1,4 @@
+import gzip
 import socket
 
 import httpx
@@ -14,6 +15,16 @@ def _resolve_to(monkeypatch, mapping: dict[str, list[str]]):
         return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, 0)) for ip in mapping[host]]
 
     monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+
+
+class _Raw(httpx.AsyncByteStream):
+    """A body sent as it is: `content=` would have httpx decode it first."""
+
+    def __init__(self, data: bytes):
+        self.data = data
+
+    async def __aiter__(self):
+        yield self.data
 
 
 def _client(handler) -> httpx.AsyncClient:
@@ -150,6 +161,43 @@ async def test_identity_encoded_reply_is_fine(monkeypatch):
         client=_client(lambda r: httpx.Response(200, headers={"content-encoding": "identity"}, content=b"ok")),
     )
     assert result.body == b"ok"
+
+
+@pytest.mark.asyncio
+async def test_gzip_reply_is_inflated_when_asked_for(monkeypatch):
+    _resolve_to(monkeypatch, {"map.example": ["93.184.216.34"]})
+    seen = {}
+
+    def handler(request: httpx.Request):
+        seen["accept_encoding"] = request.headers["accept-encoding"]
+        return httpx.Response(200, headers={"content-encoding": "gzip", "content-type": "application/json"},
+                              stream=_Raw(gzip.compress(b'{"units": []}')))
+
+    result = await fetch_public("https://map.example/api", max_bytes=100, gzip=True, client=_client(handler))
+    assert seen["accept_encoding"] == "gzip"
+    assert result.body == b'{"units": []}' and not result.truncated
+
+
+@pytest.mark.asyncio
+async def test_a_gzip_bomb_stops_at_max_bytes(monkeypatch):
+    _resolve_to(monkeypatch, {"bomb.example": ["93.184.216.34"]})
+    bomb = gzip.compress(b"0" * 5_000_000)  # about 5 KB on the wire
+    result = await fetch_public(
+        "https://bomb.example/", max_bytes=1000, gzip=True,
+        client=_client(lambda r: httpx.Response(200, headers={"content-encoding": "gzip"}, stream=_Raw(bomb))),
+    )
+    assert len(result.body) == 1000 and result.truncated
+
+
+@pytest.mark.asyncio
+async def test_gzip_still_refuses_other_encodings_and_broken_gzip(monkeypatch):
+    _resolve_to(monkeypatch, {"x.example": ["93.184.216.34"]})
+    with pytest.raises(UnsafeURL, match="Compressed"):
+        await fetch_public("https://x.example/", max_bytes=100, gzip=True, client=_client(
+            lambda r: httpx.Response(200, headers={"content-encoding": "br"}, stream=_Raw(b"x"))))
+    with pytest.raises(UnsafeURL, match="Unreadable"):
+        await fetch_public("https://x.example/", max_bytes=100, gzip=True, client=_client(
+            lambda r: httpx.Response(200, headers={"content-encoding": "gzip"}, stream=_Raw(b"not gzip at all"))))
 
 
 @pytest.mark.asyncio

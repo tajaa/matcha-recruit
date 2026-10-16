@@ -255,6 +255,19 @@ async def test_refine_goes_to_the_summary_when_nothing_new_is_needed(refining, m
 
 
 @pytest.mark.asyncio
+async def test_refine_copies_floor_plans_for_homes_that_fit_only_now(refining, monkeypatch):
+    _model(monkeypatch, _refined())
+    fill = AsyncMock()
+    monkeypatch.setattr(M, "fill_plans", fill)
+    out = await M.refine(task_row(), _deps(), _guard())
+    assert out.phase == phases.SUMMARIZE
+    assert _refined()["constraints"][0] in fill.await_args.args[1]["constraints"]  # the plan as changed
+    # Copying them is a nicety: a failure never fails the refine.
+    fill.side_effect = RuntimeError("s3 down")
+    assert (await M.refine(task_row(), _deps(), _guard())).phase == phases.SUMMARIZE
+
+
+@pytest.mark.asyncio
 async def test_refine_rereads_pages_for_a_new_fact(refining, monkeypatch):
     refining.on("ORDER BY rank LIMIT", [item_row(), item_row(id=uuid4(), url="https://www.google.com/maps/x")])
     _model(monkeypatch, _refined(fields_add=["amenities"]))
