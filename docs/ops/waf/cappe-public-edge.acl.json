@@ -1,0 +1,440 @@
+{
+    "WebACL": {
+        "Name": "cappe-public-edge",
+        "Id": "22a33df3-77c4-492b-8a21-9c6b054a17d7",
+        "ARN": "arn:aws:wafv2:us-east-1:010438494410:global/webacl/cappe-public-edge/22a33df3-77c4-492b-8a21-9c6b054a17d7",
+        "DefaultAction": {
+            "Allow": {}
+        },
+        "Description": "Protects Cappe public sites and the AI booking suggestion endpoint.",
+        "Rules": [
+            {
+                "Name": "AWSManagedRulesKnownBadInputsRuleSet",
+                "Priority": 1,
+                "Statement": {
+                    "ManagedRuleGroupStatement": {
+                        "VendorName": "AWS",
+                        "Name": "AWSManagedRulesKnownBadInputsRuleSet"
+                    }
+                },
+                "OverrideAction": {
+                    "None": {}
+                },
+                "VisibilityConfig": {
+                    "SampledRequestsEnabled": true,
+                    "CloudWatchMetricsEnabled": true,
+                    "MetricName": "CappeKnownBadInputs"
+                }
+            },
+            {
+                "Name": "BlockOversizedBookingSuggestionBodies",
+                "Priority": 2,
+                "Statement": {
+                    "AndStatement": {
+                        "Statements": [
+                            {
+                                "RegexPatternSetReferenceStatement": {
+                                    "ARN": "arn:aws:wafv2:us-east-1:010438494410:global/regexpatternset/cappe-booking-suggestion-path/6fde9170-cf07-4662-8b9a-50bb4186b9a6",
+                                    "FieldToMatch": {
+                                        "UriPath": {}
+                                    },
+                                    "TextTransformations": [
+                                        {
+                                            "Priority": 0,
+                                            "Type": "NONE"
+                                        }
+                                    ]
+                                }
+                            },
+                            {
+                                "SizeConstraintStatement": {
+                                    "FieldToMatch": {
+                                        "Body": {
+                                            "OversizeHandling": "MATCH"
+                                        }
+                                    },
+                                    "ComparisonOperator": "GT",
+                                    "Size": 8192,
+                                    "TextTransformations": [
+                                        {
+                                            "Priority": 0,
+                                            "Type": "NONE"
+                                        }
+                                    ]
+                                }
+                            },
+                            {
+                                "ByteMatchStatement": {
+                                    "SearchString": "POST",
+                                    "FieldToMatch": {
+                                        "Method": {}
+                                    },
+                                    "TextTransformations": [
+                                        {
+                                            "Priority": 0,
+                                            "Type": "NONE"
+                                        }
+                                    ],
+                                    "PositionalConstraint": "EXACTLY"
+                                }
+                            }
+                        ]
+                    }
+                },
+                "Action": {
+                    "Block": {}
+                },
+                "VisibilityConfig": {
+                    "SampledRequestsEnabled": true,
+                    "CloudWatchMetricsEnabled": true,
+                    "MetricName": "CappeSuggestionBodyTooLarge"
+                }
+            },
+            {
+                "Name": "RateLimitBookingSuggestions",
+                "Priority": 3,
+                "Statement": {
+                    "RateBasedStatement": {
+                        "Limit": 20,
+                        "EvaluationWindowSec": 300,
+                        "AggregateKeyType": "IP",
+                        "ScopeDownStatement": {
+                            "AndStatement": {
+                                "Statements": [
+                                    {
+                                        "RegexPatternSetReferenceStatement": {
+                                            "ARN": "arn:aws:wafv2:us-east-1:010438494410:global/regexpatternset/cappe-booking-suggestion-path/6fde9170-cf07-4662-8b9a-50bb4186b9a6",
+                                            "FieldToMatch": {
+                                                "UriPath": {}
+                                            },
+                                            "TextTransformations": [
+                                                {
+                                                    "Priority": 0,
+                                                    "Type": "NONE"
+                                                }
+                                            ]
+                                        }
+                                    },
+                                    {
+                                        "ByteMatchStatement": {
+                                            "SearchString": "POST",
+                                            "FieldToMatch": {
+                                                "Method": {}
+                                            },
+                                            "TextTransformations": [
+                                                {
+                                                    "Priority": 0,
+                                                    "Type": "NONE"
+                                                }
+                                            ],
+                                            "PositionalConstraint": "EXACTLY"
+                                        }
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                },
+                "Action": {
+                    "Block": {}
+                },
+                "VisibilityConfig": {
+                    "SampledRequestsEnabled": true,
+                    "CloudWatchMetricsEnabled": true,
+                    "MetricName": "CappeSuggestionRateLimit"
+                }
+            },
+            {
+                "Name": "BlockOversizedBookingSuggestionAccessBodies",
+                "Priority": 4,
+                "Statement": {
+                    "AndStatement": {
+                        "Statements": [
+                            {
+                                "RegexPatternSetReferenceStatement": {
+                                    "ARN": "arn:aws:wafv2:us-east-1:010438494410:global/regexpatternset/cappe-booking-suggestion-access-path/7d11838f-010c-468f-8586-efb2a8dd362f",
+                                    "FieldToMatch": {
+                                        "UriPath": {}
+                                    },
+                                    "TextTransformations": [
+                                        {
+                                            "Priority": 0,
+                                            "Type": "NONE"
+                                        }
+                                    ]
+                                }
+                            },
+                            {
+                                "ByteMatchStatement": {
+                                    "SearchString": "POST",
+                                    "FieldToMatch": {
+                                        "Method": {}
+                                    },
+                                    "TextTransformations": [
+                                        {
+                                            "Priority": 0,
+                                            "Type": "NONE"
+                                        }
+                                    ],
+                                    "PositionalConstraint": "EXACTLY"
+                                }
+                            },
+                            {
+                                "SizeConstraintStatement": {
+                                    "FieldToMatch": {
+                                        "Body": {
+                                            "OversizeHandling": "MATCH"
+                                        }
+                                    },
+                                    "ComparisonOperator": "GT",
+                                    "Size": 8192,
+                                    "TextTransformations": [
+                                        {
+                                            "Priority": 0,
+                                            "Type": "NONE"
+                                        }
+                                    ]
+                                }
+                            }
+                        ]
+                    }
+                },
+                "Action": {
+                    "Block": {}
+                },
+                "VisibilityConfig": {
+                    "SampledRequestsEnabled": true,
+                    "CloudWatchMetricsEnabled": true,
+                    "MetricName": "CappeAccessBodyTooLarge"
+                }
+            },
+            {
+                "Name": "BlockOversizedMatchaIRChatBodies",
+                "Priority": 5,
+                "Statement": {
+                    "AndStatement": {
+                        "Statements": [
+                            {
+                                "RegexPatternSetReferenceStatement": {
+                                    "ARN": "arn:aws:wafv2:us-east-1:010438494410:global/regexpatternset/matcha-ir-chat-path/7efec52e-5bf2-47e3-9a06-5bef0a3c7977",
+                                    "FieldToMatch": {
+                                        "UriPath": {}
+                                    },
+                                    "TextTransformations": [
+                                        {
+                                            "Priority": 0,
+                                            "Type": "NONE"
+                                        }
+                                    ]
+                                }
+                            },
+                            {
+                                "SizeConstraintStatement": {
+                                    "FieldToMatch": {
+                                        "Body": {
+                                            "OversizeHandling": "MATCH"
+                                        }
+                                    },
+                                    "ComparisonOperator": "GT",
+                                    "Size": 8192,
+                                    "TextTransformations": [
+                                        {
+                                            "Priority": 0,
+                                            "Type": "NONE"
+                                        }
+                                    ]
+                                }
+                            },
+                            {
+                                "ByteMatchStatement": {
+                                    "SearchString": "POST",
+                                    "FieldToMatch": {
+                                        "Method": {}
+                                    },
+                                    "TextTransformations": [
+                                        {
+                                            "Priority": 0,
+                                            "Type": "NONE"
+                                        }
+                                    ],
+                                    "PositionalConstraint": "EXACTLY"
+                                }
+                            }
+                        ]
+                    }
+                },
+                "Action": {
+                    "Block": {}
+                },
+                "VisibilityConfig": {
+                    "SampledRequestsEnabled": true,
+                    "CloudWatchMetricsEnabled": true,
+                    "MetricName": "BlockOversizedMatchaIRChatBodies"
+                }
+            },
+            {
+                "Name": "RateLimitMatchaIRChat",
+                "Priority": 6,
+                "Statement": {
+                    "RateBasedStatement": {
+                        "Limit": 20,
+                        "EvaluationWindowSec": 300,
+                        "AggregateKeyType": "IP",
+                        "ScopeDownStatement": {
+                            "AndStatement": {
+                                "Statements": [
+                                    {
+                                        "RegexPatternSetReferenceStatement": {
+                                            "ARN": "arn:aws:wafv2:us-east-1:010438494410:global/regexpatternset/matcha-ir-chat-path/7efec52e-5bf2-47e3-9a06-5bef0a3c7977",
+                                            "FieldToMatch": {
+                                                "UriPath": {}
+                                            },
+                                            "TextTransformations": [
+                                                {
+                                                    "Priority": 0,
+                                                    "Type": "NONE"
+                                                }
+                                            ]
+                                        }
+                                    },
+                                    {
+                                        "ByteMatchStatement": {
+                                            "SearchString": "POST",
+                                            "FieldToMatch": {
+                                                "Method": {}
+                                            },
+                                            "TextTransformations": [
+                                                {
+                                                    "Priority": 0,
+                                                    "Type": "NONE"
+                                                }
+                                            ],
+                                            "PositionalConstraint": "EXACTLY"
+                                        }
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                },
+                "Action": {
+                    "Block": {}
+                },
+                "VisibilityConfig": {
+                    "SampledRequestsEnabled": true,
+                    "CloudWatchMetricsEnabled": true,
+                    "MetricName": "RateLimitMatchaIRChat"
+                }
+            },
+            {
+                "Name": "BlockOversizedMatchaSymlinkJsonBodies",
+                "Priority": 7,
+                "Statement": {
+                    "AndStatement": {
+                        "Statements": [
+                            {
+                                "RegexPatternSetReferenceStatement": {
+                                    "ARN": "arn:aws:wafv2:us-east-1:010438494410:global/regexpatternset/matcha-symlink-json-path/175ab28c-0a6f-43a0-9ac5-25db26d6c7bd",
+                                    "FieldToMatch": {
+                                        "UriPath": {}
+                                    },
+                                    "TextTransformations": [
+                                        {
+                                            "Priority": 0,
+                                            "Type": "NONE"
+                                        }
+                                    ]
+                                }
+                            },
+                            {
+                                "SizeConstraintStatement": {
+                                    "FieldToMatch": {
+                                        "Body": {
+                                            "OversizeHandling": "MATCH"
+                                        }
+                                    },
+                                    "ComparisonOperator": "GT",
+                                    "Size": 8192,
+                                    "TextTransformations": [
+                                        {
+                                            "Priority": 0,
+                                            "Type": "NONE"
+                                        }
+                                    ]
+                                }
+                            },
+                            {
+                                "ByteMatchStatement": {
+                                    "SearchString": "POST",
+                                    "FieldToMatch": {
+                                        "Method": {}
+                                    },
+                                    "TextTransformations": [
+                                        {
+                                            "Priority": 0,
+                                            "Type": "NONE"
+                                        }
+                                    ],
+                                    "PositionalConstraint": "EXACTLY"
+                                }
+                            }
+                        ]
+                    }
+                },
+                "Action": {
+                    "Block": {}
+                },
+                "VisibilityConfig": {
+                    "SampledRequestsEnabled": true,
+                    "CloudWatchMetricsEnabled": true,
+                    "MetricName": "BlockOversizedMatchaSymlinkJsonBodies"
+                }
+            },
+            {
+                "Name": "RateLimitMatchaSymlinkFlood",
+                "Priority": 8,
+                "Statement": {
+                    "RateBasedStatement": {
+                        "Limit": 2000,
+                        "EvaluationWindowSec": 300,
+                        "AggregateKeyType": "IP",
+                        "ScopeDownStatement": {
+                            "RegexPatternSetReferenceStatement": {
+                                "ARN": "arn:aws:wafv2:us-east-1:010438494410:global/regexpatternset/matcha-symlink-path/9f6b8759-b575-4902-b830-50cdc5310b89",
+                                "FieldToMatch": {
+                                    "UriPath": {}
+                                },
+                                "TextTransformations": [
+                                    {
+                                        "Priority": 0,
+                                        "Type": "NONE"
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                },
+                "Action": {
+                    "Block": {}
+                },
+                "VisibilityConfig": {
+                    "SampledRequestsEnabled": true,
+                    "CloudWatchMetricsEnabled": true,
+                    "MetricName": "RateLimitMatchaSymlinkFlood"
+                }
+            }
+        ],
+        "VisibilityConfig": {
+            "SampledRequestsEnabled": true,
+            "CloudWatchMetricsEnabled": true,
+            "MetricName": "CappePublicEdge"
+        },
+        "Capacity": 397,
+        "ManagedByFirewallManager": false,
+        "LabelNamespace": "awswaf:010438494410:webacl:cappe-public-edge:",
+        "RetrofittedByFirewallManager": false,
+        "OnSourceDDoSProtectionConfig": {
+            "ALBLowReputationMode": "ACTIVE_UNDER_DDOS"
+        }
+    }
+}
