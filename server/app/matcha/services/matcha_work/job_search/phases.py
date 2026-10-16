@@ -277,7 +277,7 @@ async def discover(search: dict, deps: Deps, guard: chain.Guard) -> PhaseOutcome
     await refund(search["id"], "provider_calls", budget.left)
     for result in results:
         if isinstance(result, providers.ProviderError) and result.fatal:
-            raise PhaseFailed("The job listings service refused our request.") from result
+            raise PhaseFailed(UNAVAILABLE) from result
         if isinstance(result, BaseException):
             raise result
     await _insert_leads(search, guard.token, list(records.values())[:room])
@@ -296,6 +296,10 @@ async def discover(search: dict, deps: Deps, guard: chain.Guard) -> PhaseOutcome
 
 
 NEXT_AFTER_DISCOVER = "screening"
+# Every listings API refused for good (a refused key, no searches left): not
+# the person's search, and retrying won't help. A failed search is free.
+UNAVAILABLE = ("Job listings aren't available right now, so the search stopped. "
+               "It didn't count against your allowance. Please try again later.")
 
 
 # ── enrich ───────────────────────────────────────────────────────────────────

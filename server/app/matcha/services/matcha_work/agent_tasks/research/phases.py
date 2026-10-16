@@ -353,15 +353,23 @@ async def run_providers(task: dict, deps: Deps, guard: chain.Guard) -> PhaseOutc
                                                BUDGETS.provider_calls))
         gate = asyncio.Semaphore(QUERY_CONCURRENCY)
         per_query: list[list[providers.ProviderItem]] = [[] for _ in searches]
+        refused: list[providers.ProviderError] = []
 
         async def one(n: int, query: str, ll: str | None) -> None:
-            if not budget.take(cost):
-                return
             async with gate:
+                # Nothing more once the API refused for good (it may have while this one waited).
+                if refused or not budget.take(cost):
+                    return
                 try:
                     per_query[n] = await provider.search(source, query, page=page, **({"ll": ll} if ll else {}))
                 except providers.ProviderError as exc:
-                    logger.info("research provider query failed task=%s: %s", task["id"], exc)
+                    if not exc.fatal:
+                        logger.info("research provider query failed task=%s: %s", task["id"], exc)
+                    elif not refused:
+                        # A refused key or no searches left: the web search still runs, but
+                        # someone has to fix the account, so it shows in Server Errors.
+                        refused.append(exc)
+                        logger.error("research listings refused task=%s: %s", task["id"], exc)
 
         await guard.note("Searching Google Shopping…" if source == "shopping" else "Searching Google Maps…")
         await asyncio.gather(*(one(n, q, ll) for n, (q, ll) in enumerate(searches)))

@@ -37,6 +37,7 @@ from urllib.parse import parse_qsl, quote_plus, urlsplit
 import httpx
 
 from app.matcha.services.matcha_work.agent_card.schema import normalize_url
+from app.matcha.services.matcha_work.job_search.providers import out_of_searches
 
 from . import fields as F
 from .geo import point_of
@@ -234,8 +235,9 @@ def _why(response: httpx.Response) -> str:
 
 async def _answer(name: str, send: SendFn, *, transport: httpx.AsyncBaseTransport | None,
                   sleep: SleepFn) -> dict:
-    """One JSON object from a listings API. A refused key is fatal; a 429, a
-    5xx or a dropped connection is tried once more after 2 s."""
+    """One JSON object from a listings API. A refused key or an account with
+    no searches left is fatal; any other 429, a 5xx or a dropped connection
+    is tried once more after 2 s."""
     last: Exception | None = None
     for attempt in range(2):
         try:
@@ -246,6 +248,9 @@ async def _answer(name: str, send: SendFn, *, transport: httpx.AsyncBaseTranspor
         else:
             if response.status_code in (401, 403):
                 raise ProviderError(f"{name} refused the API key{_why(response)}", fatal=True)
+            spent = out_of_searches(response)
+            if spent is not None:
+                raise ProviderError(f"{name} has no searches left ({spent})", fatal=True)
             if response.status_code == 429 or response.status_code >= 500:
                 last = ProviderError(f"{name} answered {response.status_code}{_why(response)}")
             elif response.status_code >= 400:

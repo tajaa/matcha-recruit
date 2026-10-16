@@ -321,11 +321,12 @@ async def test_google_places_errors_say_what_google_said():
 
 
 @pytest.mark.asyncio
-async def test_a_spent_search_api_says_so():
+async def test_a_spent_search_api_says_so_and_is_not_asked_again():
+    asked = []
     spent = httpx.Response(429, json={"error": "You have used all of the searches for the month."})
     with pytest.raises(P.ProviderError, match="used all of the searches") as exc:
-        await _api(lambda _r: spent).search("shopping", "x")
-    assert not exc.value.fatal
+        await _api(lambda r: asked.append(r) or spent).search("shopping", "x")
+    assert exc.value.fatal and len(asked) == 1
 
 
 def test_a_map_box_is_the_area_the_map_shows():

@@ -99,6 +99,22 @@ async def test_providers_add_findings_then_hand_to_the_web(conn, monkeypatch):
     assert out.phase == phases.DISCOVER and out.progress["note"] == "Searching the web…"
 
 
+@pytest.mark.asyncio
+async def test_a_listings_api_that_refuses_for_good_is_asked_no_more(conn, monkeypatch, caplog):
+    provider = AsyncMock()
+    provider.search = AsyncMock(side_effect=providers.ProviderError("SearchAPI has no searches left", fatal=True))
+    monkeypatch.setattr(items_mod, "insert_items", AsyncMock(return_value=0))
+    monkeypatch.setattr(phases, "QUERY_CONCURRENCY", 1)
+    conn.on("COUNT(*) FROM mw_agent_task_items", 0)
+    task = task_row(plan=json.dumps({**PLAN, "source": "shopping", "queries": ["a", "b", "c"]}))
+    with caplog.at_level("ERROR"):
+        out = await phases.run_providers(task, _deps(provider=lambda *_: provider), _guard())
+    assert provider.search.await_count == 1 and out.phase == phases.DISCOVER  # the web search still runs
+    assert [r.levelname for r in caplog.records if "refused" in r.message] == ["ERROR"]
+    # The calls it never made are given back.
+    assert conn.ran("SET provider_calls = GREATEST(provider_calls - $2, 0)")[-1][2][1] == 2
+
+
 GOOGLE = "https://www.google.com/search?ibp=oshop&q={q}&prds=productid:{n}"
 
 

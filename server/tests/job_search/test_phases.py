@@ -139,8 +139,9 @@ async def test_discover_failures(conn):
         await phases.discover(discover_search(["COO"]), phases.Deps(provider=lambda: None), guard())
 
     fatal = FakeProvider({"COO": [providers.ProviderError("bad key", fatal=True)]})
-    with pytest.raises(phases.PhaseFailed, match="refused"):
+    with pytest.raises(phases.PhaseFailed, match="aren't available right now") as failed:
         await phases.discover(discover_search(["COO"]), phases.Deps(provider=lambda: fatal), guard())
+    assert "allowance" in str(failed.value)  # a failed search is free
 
     conn.on("SELECT COUNT(*) FROM mw_job_leads", 0)
     flaky = FakeProvider({"COO": [providers.ProviderError("503")]})

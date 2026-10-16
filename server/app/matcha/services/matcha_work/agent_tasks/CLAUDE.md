@@ -212,7 +212,7 @@ refine starts at `refine`, "search more" at `providers`.
 | Field library, reading pages, checking claims (pure) | `fields.py` |
 | Hard constraints, bands, scores (pure) | `ranking.py` |
 | Finish contracts and their checks (pure) | `contracts.py` |
-| Google Maps from Google's Places API (New) Text Search (`GooglePlaces`, `GOOGLE_MAPS_API_KEY`, the key Tell-Us uses), else as Shopping is; Google Shopping via SearchAPI (`SEARCH_API_KEY`), else SerpApi (`SERP_API_KEY`); a Shopping product's stores (`stores`, `with_store`); `choose_provider(source)` picks | `providers.py` |
+| Google Maps from Google's Places API (New) Text Search (`GooglePlaces`, `GOOGLE_MAPS_API_KEY`, the key Tell-Us uses), else as Shopping is; Google Shopping via SearchAPI (`SEARCH_API_KEY`), else SerpApi (`SERP_API_KEY`); a Shopping product's stores (`stores`, `with_store`); `choose_provider(source)` picks. An API that refuses for good (a refused key, no searches left) is asked nothing more that round and logged once as an error; the web search still runs | `providers.py` |
 | The model's page loader: agent cards' page facts plus the page's same-site links | `fetch.py` |
 | No-model phases, `rerank`, `Deps` | `phases.py` |
 | Model phases | `model_phases.py` |
