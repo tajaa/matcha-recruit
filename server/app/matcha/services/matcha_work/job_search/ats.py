@@ -3,11 +3,14 @@
 A posting's apply link often points at one of these. Their public job-board
 APIs give the full description, structured pay (Lever `salaryRange`,
 Greenhouse pay ranges, Ashby salary/bonus/equity components) and, for
-Greenhouse, the application's actual questions.
+Greenhouse, the application's actual questions. When no link leads to one,
+`find_on_board` looks for the job on the employer's own board, its name
+guessed from the employer's.
 
-The API URL is built from tokens matched out of the apply link by a strict
-pattern, on a fixed host, and fetched through `safe_fetch.fetch_public`. A
-posting page never chooses where the server connects.
+The API URL is built from tokens matched out of the apply link (or the
+employer's name) by a strict pattern, on a fixed host, and fetched through
+`safe_fetch.fetch_public`. A posting page never chooses where the server
+connects.
 """
 from __future__ import annotations
 
@@ -83,11 +86,16 @@ class AtsPosting:
     ref: AtsRef
     url: str | None
     title: str = ""
+    company: str = ""  # Greenhouse names it; elsewhere the board's name stands in (`employer`)
     location: str = ""
     remote: bool | None = None
     description: str = ""
     findings: list[dict] = field(default_factory=list)
     questions: list[dict] = field(default_factory=list)
+
+    @property
+    def employer(self) -> str:
+        return self.company or self.ref.board
 
 
 def detect(url: str | None) -> AtsRef | None:
@@ -192,6 +200,7 @@ def parse_greenhouse(ref: AtsRef, data: dict) -> AtsPosting:
     return AtsPosting(
         ref=ref, url=url,
         title=normalize.clean_text(data.get("title"), 200),
+        company=normalize.clean_text(data.get("company_name"), 200),
         location=normalize.clean_text(location.get("name"), 200),
         remote=normalize.is_remote(location.get("name")),
         description=description,
@@ -249,24 +258,28 @@ def parse_ashby(ref: AtsRef, data: dict) -> AtsPosting | None:
 FetchFn = Callable[..., Awaitable[FetchedResponse]]
 
 
-async def fetch(ref: AtsRef, *, fetch_fn: FetchFn = fetch_public) -> AtsPosting | None:
-    """The posting from its ATS's public API; None when it is gone or unreadable."""
-    url = ref.api_url()
+async def _json(url: str, what: str, fetch_fn: FetchFn) -> Any:
+    """A public ATS API's JSON answer; None when it is missing or unreadable."""
     try:
         response = await fetch_fn(url, max_bytes=MAX_BYTES, accept="application/json",
                                   total_timeout=TOTAL_TIMEOUT)
     except (UnsafeURL, TimeoutError, OSError) as exc:
-        logger.info("ats fetch failed %s %s: %s", ref.provider, ref.board, type(exc).__name__)
+        logger.info("ats fetch failed %s: %s", what, type(exc).__name__)
         return None
     except Exception:
-        logger.warning("ats fetch failed %s %s", ref.provider, ref.board, exc_info=True)
+        logger.warning("ats fetch failed %s", what, exc_info=True)
         return None
     if response.status != 200 or response.truncated:
         return None
     try:
-        data = json.loads(response.body)
+        return json.loads(response.body)
     except ValueError:
         return None
+
+
+async def fetch(ref: AtsRef, *, fetch_fn: FetchFn = fetch_public) -> AtsPosting | None:
+    """The posting from its ATS's public API; None when it is gone or unreadable."""
+    data = await _json(ref.api_url(), f"{ref.provider} {ref.board}", fetch_fn)
     if not isinstance(data, dict):
         return None
     if ref.provider == "greenhouse":
@@ -274,3 +287,60 @@ async def fetch(ref: AtsRef, *, fetch_fn: FetchFn = fetch_public) -> AtsPosting 
     if ref.provider == "lever":
         return parse_lever(ref, data)
     return parse_ashby(ref, data)
+
+
+# ── the employer's own board ─────────────────────────────────────────────────
+
+_BOARD_LISTS = {
+    "greenhouse": "https://boards-api.greenhouse.io/v1/boards/{board}/jobs",
+    "lever": "https://api.lever.co/v0/postings/{board}?mode=json",
+    "ashby": "https://api.ashbyhq.com/posting-api/job-board/{board}?includeCompensation=true",
+}
+
+
+def board_names(company: str) -> list[str]:
+    """Board names to try for an employer ("Prompt Therapy Solutions" ->
+    prompttherapysolutions, prompt): its name run together, then its first
+    word when that word is distinctive on its own. None for a listing that
+    hides the employer."""
+    if not normalize.named_employer(company):
+        return []
+    words = normalize.company_key(company).split()
+    names = ["".join(words)]
+    if len(words) > 1 and words[0].isalpha() and words[0] in normalize.name_words(company):
+        names.append(words[0])
+    return [n for n in dict.fromkeys(names) if re.fullmatch(_TOKEN, n)]
+
+
+def _listed(provider: str, data: Any, title: str) -> dict | None:
+    """The board's job with this title: the same title first, then a close one."""
+    jobs = data if provider == "lever" else (data.get("jobs") if isinstance(data, dict) else None)
+    key = "text" if provider == "lever" else "title"
+    near = [j for j in (jobs if isinstance(jobs, list) else [])
+            if isinstance(j, dict) and normalize.same_title(title, str(j.get(key) or ""))]
+    same = [j for j in near if normalize.title_words(str(j.get(key) or "")) == normalize.title_words(title)]
+    return (same or near or [None])[0]
+
+
+async def find_on_board(company: str, title: str, *, take: Callable[[], bool],
+                        fetch_fn: FetchFn = fetch_public) -> AtsPosting | None:
+    """The job on the employer's own Greenhouse, Lever or Ashby board, for a
+    posting whose links lead nowhere readable: each guessed board's public job
+    list (`board_names`) searched for the title. Every call is paid for with
+    `take()` first; None once one is refused."""
+    for board in board_names(company):
+        for provider, list_url in _BOARD_LISTS.items():
+            if not take():
+                return None
+            data = await _json(list_url.format(board=board), f"{provider} board {board}", fetch_fn)
+            job = _listed(provider, data, title) if data is not None else None
+            job_id = str((job or {}).get("id") or "")
+            if provider == "greenhouse" and re.fullmatch(r"\d{1,20}", job_id):
+                if not take():
+                    return None
+                return await fetch(AtsRef("greenhouse", board, job_id), fetch_fn=fetch_fn)
+            if provider == "lever" and re.fullmatch(_UUID, job_id):
+                return parse_lever(AtsRef("lever", board, job_id.lower()), job)
+            if provider == "ashby" and re.fullmatch(_UUID, job_id):
+                return parse_ashby(AtsRef("ashby", board, job_id.lower()), data)
+    return None

@@ -2,7 +2,9 @@
 
   discover  Google Jobs, page by page, deduped into leads (no model)
   enrich    each lead's ATS API or the company's posting page: full text, pay
-            with evidence, application questions; then the ranking (no model)
+            with evidence, application questions; then the ranking (no model).
+            A posting is the lead's only when its title and employer match:
+            Google lists other employers' jobs among a posting's apply links
 
 `plan_from_criteria` is the plan when the model plan fails. The model phases
 (plan, screen, approach) are in `model_phases.py`; the order is in
@@ -49,7 +51,10 @@ MAX_PROVIDER_CALLS = 30
 MAX_LEADS = 120
 ENRICH_BATCH = 24
 ENRICH_CONCURRENCY = 4
-MAX_FETCHES = 60
+MAX_FETCHES = 240
+# One lead's share: a few links, then a guess at the employer's own board.
+LEAD_FETCHES = 10
+LINKS_PER_KIND = 2
 PAGE_BYTES = 2_000_000
 PAGE_SECONDS = 20.0
 # Boards that refuse servers or show the same posting without its details.
@@ -78,6 +83,7 @@ async def _default_fetch_page(url: str) -> tuple[dict, set[str]]:
 class Deps:
     provider: Callable[[], Any] = providers.choose_provider
     ats_fetch: Callable[..., Awaitable[Any]] = ats.fetch
+    ats_find: Callable[..., Awaitable[Any]] = ats.find_on_board
     page_fetch: Callable[..., Awaitable[Any]] = fetch_public
     # Model phases: the model client for a model id, and the model's fetch_page.
     client: Callable[[str], Any] = _default_client
@@ -321,6 +327,17 @@ def _pick_job(jobs: list[dict], title: str) -> dict | None:
     return best
 
 
+def _is_the_job(lead: dict, title: str, employer: str | None) -> bool:
+    """Whether a posting read from one of the lead's links is the lead's job.
+    Google Jobs lists other employers' jobs among a posting's apply links, so
+    the title must match, and so must the employer wherever the source names
+    one (Greenhouse's company, an ATS board's name, a page's hiring
+    organization)."""
+    if not normalize.same_title(lead.get("title") or "", title):
+        return False
+    return normalize.same_employer(lead.get("company") or "", employer or "") is not False
+
+
 class _NotTried:
     """`enrich_one` ran out of granted fetches before reading this lead."""
 
@@ -328,64 +345,86 @@ class _NotTried:
 NOT_TRIED = _NotTried()
 
 
+async def _read_page(url: str, lead: dict, update: dict, comp: dict, deps: Deps, take) -> dict | None:
+    """The lead's job from one company page (or the ATS it redirects to), or None."""
+    try:
+        fetched = await deps.page_fetch(url, max_bytes=PAGE_BYTES, accept="text/html,application/xhtml+xml",
+                                        total_timeout=PAGE_SECONDS)
+    except (UnsafeURL, TimeoutError, OSError):
+        return None
+    except Exception:
+        logger.info("job page fetch failed", exc_info=True)
+        return None
+    if fetched.status != 200 or "html" not in (fetched.content_type or ""):
+        return None
+    # A careers page that redirected to an ATS: read the ATS instead.
+    ref = ats.detect(fetched.final_url)
+    if ref is not None and take():
+        posting = await deps.ats_fetch(ref)
+        if posting is not None and _is_the_job(lead, posting.title, posting.employer):
+            update["comp"] = _apply_ats(update, posting, comp)
+            return update
+    try:
+        jobs = await asyncio.to_thread(job_postings, fetched.body, fetched.final_url)
+    except Exception:
+        return None
+    job = _pick_job(jobs, lead.get("title") or "")
+    if job is None or not _is_the_job(lead, job.get("title") or "", job.get("company") or None):
+        return None
+    url_final = normalize.http_url(job.get("url")) or fetched.final_url
+    findings = comp_mod.from_jsonld(job.get("base_salary"), url=url_final)
+    findings += comp_mod.scan_text(job.get("description") or "", origin="jsonld", url=url_final)
+    if job.get("description") and len(job["description"]) >= len(update["description"]):
+        update["description"] = job["description"]
+    update["source"] = "web"
+    update["source_url"] = url_final
+    if job.get("remote"):
+        update["remote"] = True
+    update["comp"] = comp_mod.combine(findings, comp)
+    return update
+
+
 async def enrich_one(lead: dict, deps: Deps, budget: Budget) -> dict | None | _NotTried:
     """The changes for one lead; None when nothing could be read; NOT_TRIED
-    when the budget ran out first (the lead stays unread for a later batch)."""
+    when the budget ran out first (the lead stays unread for a later batch).
+
+    Its ATS links first, then company pages, a few of each; a posting that is
+    another job is passed over. When none is the job, the employer's own
+    board is looked up (`ats.find_on_board`). At most `LEAD_FETCHES` calls."""
     links = decode_jsonb(lead.get("apply_links"), []) or []
     comp = decode_jsonb(lead.get("comp"), {}) or {}
     update: dict = {"description": lead.get("description") or ""}
     urls = [normalize.http_url(link.get("url")) for link in links if isinstance(link, dict)]
     urls = [u for u in urls if u]
-    for url in urls:
-        ref = ats.detect(url)
-        if ref is None:
-            continue
-        if not budget.take():
-            return NOT_TRIED
-        posting = await deps.ats_fetch(ref)
-        if posting is not None:
+    spent = 0
+
+    def take() -> bool:
+        nonlocal spent
+        if spent >= LEAD_FETCHES or not budget.take():
+            return False
+        spent += 1
+        return True
+
+    for url in [u for u in urls if ats.detect(u) is not None][:LINKS_PER_KIND]:
+        if not take():
+            return NOT_TRIED if spent == 0 else None
+        posting = await deps.ats_fetch(ats.detect(url))
+        if posting is not None and _is_the_job(lead, posting.title, posting.employer):
             update["comp"] = _apply_ats(update, posting, comp)
             return update
-        break
     company_pages = [u for u in urls if not _aggregator(u) and ats.detect(u) is None]
-    for url in company_pages[:1]:
-        if not budget.take():
-            return NOT_TRIED
-        try:
-            fetched = await deps.page_fetch(url, max_bytes=PAGE_BYTES, accept="text/html,application/xhtml+xml",
-                                            total_timeout=PAGE_SECONDS)
-        except (UnsafeURL, TimeoutError, OSError):
-            return None
-        except Exception:
-            logger.info("job page fetch failed", exc_info=True)
-            return None
-        if fetched.status != 200 or "html" not in (fetched.content_type or ""):
-            return None
-        # A careers page that redirected to an ATS: read the ATS instead.
-        ref = ats.detect(fetched.final_url)
-        if ref is not None and budget.take():
-            posting = await deps.ats_fetch(ref)
-            if posting is not None:
-                update["comp"] = _apply_ats(update, posting, comp)
-                return update
-        try:
-            jobs = await asyncio.to_thread(job_postings, fetched.body, fetched.final_url)
-        except Exception:
-            return None
-        job = _pick_job(jobs, lead.get("title") or "")
-        if job is None:
-            return None
-        url_final = normalize.http_url(job.get("url")) or fetched.final_url
-        findings = comp_mod.from_jsonld(job.get("base_salary"), url=url_final)
-        findings += comp_mod.scan_text(job.get("description") or "", origin="jsonld", url=url_final)
-        if job.get("description") and len(job["description"]) >= len(update["description"]):
-            update["description"] = job["description"]
-        update["source"] = "web"
-        update["source_url"] = url_final
-        if job.get("remote"):
-            update["remote"] = True
-        update["comp"] = comp_mod.combine(findings, comp)
+    for url in company_pages[:LINKS_PER_KIND]:
+        if not take():
+            return NOT_TRIED if spent == 0 else None
+        found = await _read_page(url, lead, update, comp, deps, take)
+        if found is not None:
+            return found
+    posting = await deps.ats_find(lead.get("company") or "", lead.get("title") or "", take=take)
+    if posting is not None and _is_the_job(lead, posting.title, posting.employer):
+        update["comp"] = _apply_ats(update, posting, comp)
         return update
+    if spent == 0 and budget.exhausted:
+        return NOT_TRIED
     return None
 
 
@@ -419,13 +458,12 @@ async def _save_enrichment(conn, search_id: UUID, token: UUID, lead_id, update: 
 async def enrich(search: dict, deps: Deps, guard: chain.Guard) -> PhaseOutcome:
     async with connection_or_direct() as conn:
         leads = await conn.fetch(
-            f"""SELECT id, title, apply_links, comp, description FROM mw_job_leads
+            f"""SELECT id, title, company, apply_links, comp, description FROM mw_job_leads
                 WHERE search_id = $1 AND enriched_at IS NULL AND screen_status <> 'irrelevant'
                 ORDER BY fit_score DESC NULLS LAST, created_at, id LIMIT {ENRICH_BATCH}""",
             search["id"],
         )
-    # A lead can take two fetches (a careers page that redirects into an ATS).
-    budget = Budget(left=await grant(search["id"], "fetch_calls", 2 * len(leads), MAX_FETCHES))
+    budget = Budget(left=await grant(search["id"], "fetch_calls", LEAD_FETCHES * len(leads), MAX_FETCHES))
     if leads and budget.left <= 0:
         budget.exhausted = True
     gate = asyncio.Semaphore(ENRICH_CONCURRENCY)

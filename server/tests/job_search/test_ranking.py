@@ -132,3 +132,36 @@ def test_duplicate_postings_under_two_employer_names():
     assert not normalize.same_posting("COO", "Brightline Health", "COO", "Northwind Health")
     assert not normalize.same_posting("COO", "Acme Group", "COO", "Beta Group")
     assert normalize.name_words("Truenorth Executive Search") == {"truenorth"}
+
+
+def test_same_title_spells_out_abbreviations_and_allows_a_little_more():
+    from app.matcha.services.matcha_work.job_search import normalize
+
+    assert normalize.same_title("COO", "Chief Operating Officer")
+    assert normalize.same_title("VP of Ops", "Vice President, Operations")
+    assert normalize.same_title("Chief Operating Officer - Austin", "Chief Operating Officer")
+    assert normalize.same_title("Chief Operating Officer (Remote)", "COO")
+    # Real mix-ups from Google Jobs' apply links (2026-10-15 audit).
+    assert not normalize.same_title("Founding COO / Head of Operations [Full-Time]",
+                                    "Operations Associate / Head of Operations")
+    assert not normalize.same_title("Chief of Staff (Executive Office) and VP of Strategy",
+                                    "Director, Chief of Staff – R&D")
+    assert not normalize.same_title("COO, Chief Operating Officer / President of Operations",
+                                    "Divisional President / Chief Credit Officer")
+    assert not normalize.same_title("", "COO") and not normalize.same_title("of the", "COO")
+
+
+def test_same_employer():
+    from app.matcha.services.matcha_work.job_search import normalize
+
+    assert normalize.same_employer("Backpack Healthcare", "hellobackpack") is True
+    assert normalize.same_employer("Nametag", "Nametag") is True
+    assert normalize.same_employer("Flex", "headway") is False
+    assert normalize.same_employer("Go Fractional", "lucidcomputing") is False
+    # A name with nothing distinctive on its own is compared whole.
+    assert normalize.same_employer("BMW Group", "bmwgroup") is True
+    assert normalize.same_employer("BMW", "Mini Cooper") is False
+    # Nothing to compare: the listing hides the employer, or the source names nobody.
+    assert normalize.same_employer("Confidential", "acme") is None
+    assert normalize.same_employer("Nametag", "") is None
+    assert normalize.named_employer("Confidential Company") == ""

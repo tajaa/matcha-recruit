@@ -184,3 +184,86 @@ def test_page_salary_data_is_bounded_before_the_model_sees_it():
         html = f'<script type="application/ld+json">{json.dumps(node)}</script>'.encode()
         got = extract_page(html, "https://e.test")["jobs"][0]["base_salary"]
         assert got in (None, {"currency": "USD", "value": {}})
+
+
+def test_greenhouse_names_the_employer_and_a_board_name_stands_in_elsewhere():
+    posting = ats.parse_greenhouse(ats.AtsRef("greenhouse", "acme", "123"), {**GREENHOUSE, "company_name": "Acme"})
+    assert posting.company == "Acme" and posting.employer == "Acme"
+    assert ats.parse_lever(ats.AtsRef("lever", "beta", LEVER_ID), {"text": "COO"}).employer == "beta"
+
+
+def test_board_names():
+    assert ats.board_names("Prompt Therapy Solutions Inc") == ["prompttherapysolutions", "prompt"]
+    assert ats.board_names("Nametag") == ["nametag"]
+    # "American" alone names nobody in particular; digits are no board name either.
+    assert ats.board_names("American Alchemy") == ["americanalchemy"]
+    assert ats.board_names("0839 Deutsche Bank") == ["0839deutschebank"]
+    assert ats.board_names("Confidential") == [] and ats.board_names("") == []
+    assert ats.board_names("Acme, Inc.") == ["acme"]
+
+
+def by_url(answers: dict):
+    """A fetcher answering by URL prefix (first match wins), 404 otherwise."""
+    async def fetch(url, **_kw):
+        for prefix, result in answers.items():
+            if url.startswith(prefix):
+                return result
+        return response({}, status=404)
+    return AsyncMock(side_effect=fetch)
+
+
+def taker(n: int):
+    left = {"n": n}
+
+    def take() -> bool:
+        if left["n"] <= 0:
+            return False
+        left["n"] -= 1
+        return True
+    return take
+
+
+@pytest.mark.asyncio
+async def test_find_on_board_reads_the_job_from_the_employers_greenhouse():
+    fetch = by_url({
+        "https://boards-api.greenhouse.io/v1/boards/nametag/jobs/4386013009": response(
+            {**GREENHOUSE, "company_name": "Nametag", "title": "VP of Operations"}),
+        "https://boards-api.greenhouse.io/v1/boards/nametag/jobs": response(
+            {"jobs": [{"id": 9, "title": "Account Executive"}, {"id": 4386013009, "title": "VP of Operations"}]}),
+    })
+    posting = await ats.find_on_board("Nametag", "VP of Operations", take=taker(5), fetch_fn=fetch)
+    assert posting.ref == ats.AtsRef("greenhouse", "nametag", "4386013009") and posting.company == "Nametag"
+    assert fetch.await_count == 2
+    # The list is read but the job itself can't be paid for.
+    assert await ats.find_on_board("Nametag", "VP of Operations", take=taker(1), fetch_fn=fetch) is None
+
+
+@pytest.mark.asyncio
+async def test_find_on_board_reads_lever_and_ashby_lists_directly():
+    lever = by_url({"https://api.lever.co/v0/postings/arootah": response(
+        [{"id": "x", "text": "Chief Operating Officer"},  # not a Lever id
+         {"id": LEVER_ID, "text": "Chief Operating Officer – Alternative Investments",
+          "hostedUrl": f"https://jobs.lever.co/arootah/{LEVER_ID}"}])})
+    posting = await ats.find_on_board("Arootah", "Chief Operating Officer - Alternative Investments",
+                                      take=taker(9), fetch_fn=lever)
+    assert posting.ref == ats.AtsRef("lever", "arootah", LEVER_ID) and posting.employer == "arootah"
+
+    ashby = by_url({"https://api.ashbyhq.com/posting-api/job-board/prompt?": response({"jobs": [
+        {"id": ASHBY_ID, "title": "Vice President, Revenue & Business Operations"}]})})
+    posting = await ats.find_on_board("Prompt Therapy Solutions Inc", "Vice President, Revenue & Business Operations",
+                                      take=taker(9), fetch_fn=ashby)
+    # The full name's three boards, then the first word's Greenhouse and Lever, then its Ashby.
+    assert posting.ref == ats.AtsRef("ashby", "prompt", ASHBY_ID) and ashby.await_count == 6
+
+
+@pytest.mark.asyncio
+async def test_find_on_board_finds_nothing_politely():
+    none = by_url({"https://boards-api.greenhouse.io/v1/boards/acme/jobs": response(
+        {"jobs": [{"id": 1, "title": "Office Manager"}]})})
+    assert await ats.find_on_board("Acme", "Chief Operating Officer", take=taker(9), fetch_fn=none) is None
+    assert none.await_count == 3  # one list per ATS
+    unpaid = AsyncMock()
+    assert await ats.find_on_board("Acme", "COO", take=taker(0), fetch_fn=unpaid) is None
+    unpaid.assert_not_awaited()
+    assert await ats.find_on_board("Confidential", "COO", take=taker(9), fetch_fn=unpaid) is None
+    unpaid.assert_not_awaited()
