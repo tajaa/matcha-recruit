@@ -25,6 +25,30 @@ def test_plan():
     assert "weights" not in contracts.normalize_plan({"result": {"queries": [{"q": "COO"}], "weights": None}})[0]
 
 
+def test_discover_keeps_links_the_run_saw():
+    seen = {"https://jobs.lever.co/a/1", "https://boards.greenhouse.io/b/jobs/2", "ftp://files.test/x"}
+    out, warnings = contracts.normalize_postings({"result": {"postings": [
+        {"url": "https://jobs.lever.co/a/1", "title": " Chief People\x07 Officer ", "company": "A", "location": "SD"},
+        {"url": "https://jobs.lever.co/a/1", "title": "Again", "company": "A", "location": "SD"},
+        {"url": "https://invented.test/job", "title": "CPO", "company": "X", "location": ""},
+        {"url": "ftp://files.test/x", "title": "CPO", "company": "X", "location": ""},
+        {"url": "https://boards.greenhouse.io/b/jobs/2", "title": "", "company": "B", "location": ""},
+        "junk",
+    ]}}, citable=seen)
+    assert out == {"postings": [{"url": "https://jobs.lever.co/a/1", "title": "Chief People Officer",
+                                 "company": "A", "location": "SD"}]}
+    assert len(warnings) == 2 and "invented.test" in warnings[0]
+    # Nothing current is a fine answer; only untraceable links get a repair.
+    assert contracts.normalize_postings({"result": {"postings": []}}, citable=seen) == ({"postings": []}, [])
+    with pytest.raises(ValueError, match="exactly as a search"):
+        contracts.normalize_postings({"result": {"postings": [{"url": "https://x.test/1", "title": "T"}]}},
+                                     citable=seen)
+    many = {f"https://jobs.lever.co/a/{i}" for i in range(50)}
+    out, _ = contracts.normalize_postings({"result": {"postings": [
+        {"url": url, "title": "T", "company": "", "location": ""} for url in sorted(many)]}}, citable=many)
+    assert len(out["postings"]) == contracts.MAX_POSTINGS
+
+
 def test_screen():
     verdicts, warnings = contracts.normalize_screen({"result": {"verdicts": [
         {"id": "j1", "relevant": True, "fit": 7, "reasons": ["Right level", "", "SaaS"], "deal_breaker": None},

@@ -23,7 +23,6 @@ async def test_routes_pass_the_caller(monkeypatch):
     monkeypatch.setattr(routes.enqueue, "create_search", AsyncMock(return_value={"id": "new"}))
     monkeypatch.setattr(routes.enqueue, "consent_granted", AsyncMock(return_value=False))
     monkeypatch.setattr(routes.quota, "job_search_usage", AsyncMock(return_value={"limit": 4}))
-    monkeypatch.setattr(routes.providers, "configured", lambda: True)
 
     listed = await routes.list_job_searches(USER)
     assert listed["usage"] == {"limit": 4} and listed["available"] is True

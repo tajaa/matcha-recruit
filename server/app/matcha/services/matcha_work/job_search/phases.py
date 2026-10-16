@@ -1,14 +1,15 @@
-"""The deterministic phases of one job search. Each runs inside one worker task.
+"""The deterministic parts of one job search. Each runs inside one worker task.
 
-  discover  Google Jobs, page by page, deduped into leads (no model)
+  listings  Google Jobs, page by page, deduped into leads (no model), when a
+            listings API is set up: the first step of `discovery.discover`
   enrich    each lead's ATS API or the company's posting page: full text, pay
             with evidence, application questions; then the ranking (no model).
             A posting is the lead's only when its title and employer match:
             Google lists other employers' jobs among a posting's apply links
 
 `plan_from_criteria` is the plan when the model plan fails. The model phases
-(plan, screen, approach) are in `model_phases.py`; the order is in
-`orchestrator.PHASES`.
+(plan, the web search in discover, screen, approach) are in `model_phases.py`
+and `discovery.py`; the order is in `orchestrator.PHASES`.
 
 Every write checks the search's dispatch token (`Guard`), so a cancelled
 search, or a chain a reconcile replaced, stops writing at the next check.
@@ -18,8 +19,8 @@ BEFORE they are made (`grant`), and only what went unused is given back
 (`refund`). A task killed mid-phase gives nothing back, so its retry works
 from what is left and can never spend a second budget.
 
-`Guard`, `grant`, `refund`, `Budget`, `PhaseOutcome` and `PhaseFailed` are the
-chain engine's (`agent_runtime/chain.py`); the first three are bound here to
+`Guard`, `grant`, `refund`, `Budget` and `PhaseOutcome` are the chain
+engine's (`agent_runtime/chain.py`); the first three are bound here to
 the search row (`orchestrator.JOB_CHAIN`).
 """
 from __future__ import annotations
@@ -35,7 +36,7 @@ from app.core.services.safe_fetch import UnsafeURL, fetch_public
 from app.database import connection_or_direct, decode_jsonb
 from app.matcha.services.matcha_work.agent_card.page_extract import job_postings
 from app.matcha.services.matcha_work.agent_runtime import chain
-from app.matcha.services.matcha_work.agent_runtime.chain import Budget, PhaseFailed, PhaseOutcome
+from app.matcha.services.matcha_work.agent_runtime.chain import Budget, PhaseOutcome
 
 from . import ats, normalize, providers, ranking
 from . import comp as comp_mod
@@ -51,7 +52,10 @@ MAX_PROVIDER_CALLS = 30
 MAX_LEADS = 120
 ENRICH_BATCH = 24
 ENRICH_CONCURRENCY = 4
-MAX_FETCHES = 240
+# Shared, first come: discovery's reads on the web (`discovery.py`: at most
+# 160 a web run, usually far fewer), then enrich (240 when discovery read
+# nothing).
+MAX_FETCHES = 400
 # One lead's share: a few links, then a guess at the employer's own board.
 LEAD_FETCHES = 10
 LINKS_PER_KIND = 2
@@ -63,7 +67,7 @@ AGGREGATOR_HOSTS = (
     "simplyhired.com", "careerbuilder.com", "talent.com", "jooble.org", "adzuna.com",
     "lensa.com", "google.com", "bebee.com", "learn4good.com", "jobrapido.com",
 )
-_NATIONWIDE = {"united states", "us", "usa", "u.s.", "nationwide", "anywhere",
+NATIONWIDE = {"united states", "us", "usa", "u.s.", "nationwide", "anywhere",
                "across the country", "across the us", "the us", "america"}
 
 
@@ -133,7 +137,7 @@ def plan_from_criteria(ask: str, criteria: dict) -> dict:
     for title in titles:
         for location in locations:
             key = location.strip().lower()
-            if key in _NATIONWIDE:
+            if key in NATIONWIDE:
                 q, loc = title, "United States"
             elif key == "remote":
                 q, loc = f"{title} remote", "United States"
@@ -184,19 +188,28 @@ def lead_record(posting: providers.Posting) -> dict:
     }
 
 
-def keep_posting(posting: providers.Posting, criteria: dict) -> bool:
+def keep_job(company: str, remote: bool | None, criteria: dict) -> bool:
+    """Not an employer they excluded, and remote the way they asked."""
     excluded = {normalize.company_key(c) for c in criteria.get("exclude_companies") or []}
-    if normalize.company_key(posting.company) in excluded:
+    if normalize.company_key(company) in excluded:
         return False
-    remote = criteria.get("remote")
-    if remote == "remote_only" and posting.remote is not True:
+    wanted = criteria.get("remote")
+    if wanted == "remote_only" and remote is not True:
         return False
-    if remote == "onsite_only" and posting.remote is True:
+    if wanted == "onsite_only" and remote is True:
         return False
     return True
 
 
-async def _insert_leads(search: dict, token: UUID, records: list[dict]) -> int:
+def keep_posting(posting: providers.Posting, criteria: dict) -> bool:
+    return keep_job(posting.company, posting.remote, criteria)
+
+
+async def insert_leads(search: dict, token: UUID, records: list[dict]) -> int:
+    """New leads, under the chain's token; a lead already found is kept as it
+    was. A record's `source` defaults to Google Jobs; one discovery already
+    read from its own posting (`enriched`) carries its `ats` and is not read
+    again by enrich."""
     if not records:
         return 0
     async with connection_or_direct() as conn:
@@ -205,18 +218,21 @@ async def _insert_leads(search: dict, token: UUID, records: list[dict]) -> int:
                    INSERT INTO mw_job_leads
                        (search_id, user_id, dedupe_key, title, company, location, state_code,
                         remote, schedule_type, posted_text, source, provider_job_id, source_url,
-                        apply_links, description, highlights, comp, comp_status,
-                        comp_annual_min, comp_annual_max, comp_currency)
+                        apply_links, ats, description, highlights, comp, comp_status,
+                        comp_annual_min, comp_annual_max, comp_currency, enriched_at)
                    SELECT $1, $2, r.dedupe_key, r.title, r.company, r.location, r.state_code,
-                          r.remote, r.schedule_type, r.posted_text, 'google_jobs', r.provider_job_id,
-                          r.source_url, r.apply_links, r.description, r.highlights, r.comp,
-                          r.comp_status, r.comp_annual_min, r.comp_annual_max, r.comp_currency
+                          r.remote, r.schedule_type, r.posted_text, COALESCE(r.source, 'google_jobs'),
+                          r.provider_job_id, r.source_url, r.apply_links, COALESCE(r.ats, '{}'::jsonb),
+                          r.description, r.highlights, r.comp, r.comp_status, r.comp_annual_min,
+                          r.comp_annual_max, r.comp_currency,
+                          CASE WHEN r.enriched THEN NOW() END
                    FROM jsonb_to_recordset($3::jsonb) AS r(
                        dedupe_key text, title text, company text, location text, state_code text,
-                       remote boolean, schedule_type text, posted_text text, provider_job_id text,
-                       source_url text, apply_links jsonb, description text, highlights jsonb,
-                       comp jsonb, comp_status text, comp_annual_min numeric,
-                       comp_annual_max numeric, comp_currency text)
+                       remote boolean, schedule_type text, posted_text text, source text,
+                       provider_job_id text, source_url text, apply_links jsonb, ats jsonb,
+                       description text, highlights jsonb, comp jsonb, comp_status text,
+                       comp_annual_min numeric, comp_annual_max numeric, comp_currency text,
+                       enriched boolean)
                    WHERE EXISTS (SELECT 1 FROM mw_job_searches
                                  WHERE id = $1 AND dispatch_token = $4)
                    ON CONFLICT (search_id, dedupe_key) DO NOTHING
@@ -227,17 +243,31 @@ async def _insert_leads(search: dict, token: UUID, records: list[dict]) -> int:
     return int(inserted or 0)
 
 
-async def discover(search: dict, deps: Deps, guard: chain.Guard) -> PhaseOutcome:
+async def lead_count(search_id: UUID) -> int:
+    async with connection_or_direct() as conn:
+        return int(await conn.fetchval(
+            "SELECT COUNT(*) FROM mw_job_leads WHERE search_id = $1", search_id,
+        ) or 0)
+
+
+# How the Google Jobs step went (`listings`).
+LISTED = "ok"            # it ran (it may have found nothing)
+NO_LISTINGS = "none"     # no listings API is set up
+REFUSED = "refused"      # every API refused for good: a refused key, no searches left
+LISTINGS_FAILED = "failed"  # every query failed, for now
+
+
+async def listings(search: dict, deps: Deps, guard: chain.Guard) -> str:
+    """Google Jobs, when a listings API is set up: up to 3 pages per query, 3
+    queries at a time, deduped and saved as leads. Returns how it went
+    (`LISTED`, `NO_LISTINGS`, `REFUSED`, `LISTINGS_FAILED`); none of those
+    stops the search, since the web is searched next (`discovery.py`)."""
     provider = deps.provider()
     if provider is None:
-        raise PhaseFailed("Job search isn't set up on this server.")
+        return NO_LISTINGS
     criteria = decode_jsonb(search.get("criteria"), {}) or {}
     queries = ((decode_jsonb(search.get("plan"), {}) or {}).get("queries") or [])[:MAX_QUERIES]
-    async with connection_or_direct() as conn:
-        existing = int(await conn.fetchval(
-            "SELECT COUNT(*) FROM mw_job_leads WHERE search_id = $1", search["id"],
-        ) or 0)
-    room = max(0, MAX_LEADS - existing)
+    room = max(0, MAX_LEADS - await lead_count(search["id"]))
     budget = Budget(left=await grant(search["id"], "provider_calls",
                                      len(queries) * PAGES_PER_QUERY, MAX_PROVIDER_CALLS))
     state = {"errors": 0, "refused": False}
@@ -282,33 +312,17 @@ async def discover(search: dict, deps: Deps, guard: chain.Guard) -> PhaseOutcome
     for result in results:
         if isinstance(result, BaseException):
             raise result
-    await _insert_leads(search, guard.token, list(records.values())[:room])
-    async with connection_or_direct() as conn:
-        total = int(await conn.fetchval(
-            "SELECT COUNT(*) FROM mw_job_leads WHERE search_id = $1", search["id"],
-        ) or 0)
-    if total == 0:
-        if state["refused"]:
-            raise PhaseFailed(UNAVAILABLE)
-        if state["errors"] and state["errors"] >= budget.used:
-            raise RuntimeError("every job listing query failed")  # retried
-        raise PhaseFailed("No postings matched. Try broader titles or more locations.")
-    return PhaseOutcome(
-        status=NEXT_AFTER_DISCOVER,
-        progress={"note": f"Found {total} jobs. Reading the postings for pay…", "found": total},
-    )
-
-
-NEXT_AFTER_DISCOVER = "screening"
-# Every listings API refused for good (a refused key, no searches left): not
-# the person's search, and retrying won't help. A failed search is free.
-UNAVAILABLE = ("Job listings aren't available right now, so the search stopped. "
-               "It didn't count against your allowance. Please try again later.")
+    await insert_leads(search, guard.token, list(records.values())[:room])
+    if state["refused"]:
+        return REFUSED
+    if state["errors"] and state["errors"] >= budget.used:
+        return LISTINGS_FAILED
+    return LISTED
 
 
 # ── enrich ───────────────────────────────────────────────────────────────────
 
-def _aggregator(url: str) -> bool:
+def aggregator(url: str) -> bool:
     host = normalize.host_of(url)
     return any(host == h or host.endswith("." + h) for h in AGGREGATOR_HOSTS)
 
@@ -325,7 +339,7 @@ def _apply_ats(update: dict, posting: ats.AtsPosting, comp: dict) -> dict:
     return comp_mod.combine(posting.findings, comp)
 
 
-def _pick_job(jobs: list[dict], title: str) -> dict | None:
+def pick_job(jobs: list[dict], title: str) -> dict | None:
     words = set(normalize._words(title))
     best, best_overlap = None, -1
     for job in jobs:
@@ -353,8 +367,19 @@ class _NotTried:
 NOT_TRIED = _NotTried()
 
 
-async def _read_page(url: str, lead: dict, update: dict, comp: dict, deps: Deps, take) -> dict | None:
-    """The lead's job from one company page (or the ATS it redirects to), or None."""
+@dataclass
+class JobPage:
+    """A company page, read: where it ended up, the ATS posting it redirected
+    into (read when there was budget for it), and its JobPosting data."""
+
+    url: str
+    posting: ats.AtsPosting | None
+    jobs: list[dict]
+
+
+async def read_job_page(url: str, deps: Deps, take: Callable[[], bool]) -> JobPage | None:
+    """One company page; None when it can't be read. The page itself is paid
+    for by the caller, a redirect into an ATS with `take()`."""
     try:
         fetched = await deps.page_fetch(url, max_bytes=PAGE_BYTES, accept="text/html,application/xhtml+xml",
                                         total_timeout=PAGE_SECONDS)
@@ -365,23 +390,35 @@ async def _read_page(url: str, lead: dict, update: dict, comp: dict, deps: Deps,
         return None
     if fetched.status != 200 or "html" not in (fetched.content_type or ""):
         return None
-    # A careers page that redirected to an ATS: read the ATS instead.
+    # A careers page that redirected to an ATS: the ATS has the posting.
     ref = ats.detect(fetched.final_url)
-    if ref is not None and take():
-        posting = await deps.ats_fetch(ref)
-        if posting is not None and _is_the_job(lead, posting.title, posting.employer):
-            update["comp"] = _apply_ats(update, posting, comp)
-            return update
+    posting = await deps.ats_fetch(ref) if ref is not None and take() else None
     try:
         jobs = await asyncio.to_thread(job_postings, fetched.body, fetched.final_url)
     except Exception:
+        jobs = []
+    return JobPage(url=fetched.final_url, posting=posting, jobs=jobs)
+
+
+def page_findings(job: dict, url: str) -> list[dict]:
+    """Pay from a page's JobPosting: its `baseSalary`, then its text."""
+    findings = comp_mod.from_jsonld(job.get("base_salary"), url=url)
+    return findings + comp_mod.scan_text(job.get("description") or "", origin="jsonld", url=url)
+
+
+async def _read_page(url: str, lead: dict, update: dict, comp: dict, deps: Deps, take) -> dict | None:
+    """The lead's job from one company page (or the ATS it redirects to), or None."""
+    page = await read_job_page(url, deps, take)
+    if page is None:
         return None
-    job = _pick_job(jobs, lead.get("title") or "")
+    if page.posting is not None and _is_the_job(lead, page.posting.title, page.posting.employer):
+        update["comp"] = _apply_ats(update, page.posting, comp)
+        return update
+    job = pick_job(page.jobs, lead.get("title") or "")
     if job is None or not _is_the_job(lead, job.get("title") or "", job.get("company") or None):
         return None
-    url_final = normalize.http_url(job.get("url")) or fetched.final_url
-    findings = comp_mod.from_jsonld(job.get("base_salary"), url=url_final)
-    findings += comp_mod.scan_text(job.get("description") or "", origin="jsonld", url=url_final)
+    url_final = normalize.http_url(job.get("url")) or page.url
+    findings = page_findings(job, url_final)
     if job.get("description") and len(job["description"]) >= len(update["description"]):
         update["description"] = job["description"]
     update["source"] = "web"
@@ -420,7 +457,7 @@ async def enrich_one(lead: dict, deps: Deps, budget: Budget) -> dict | None | _N
         if posting is not None and _is_the_job(lead, posting.title, posting.employer):
             update["comp"] = _apply_ats(update, posting, comp)
             return update
-    company_pages = [u for u in urls if not _aggregator(u) and ats.detect(u) is None]
+    company_pages = [u for u in urls if not aggregator(u) and ats.detect(u) is None]
     for url in company_pages[:LINKS_PER_KIND]:
         if not take():
             return NOT_TRIED if spent == 0 else None

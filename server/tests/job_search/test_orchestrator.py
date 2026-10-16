@@ -8,7 +8,7 @@ import pytest
 
 from app.matcha.services.matcha_work.agent_runtime import chain
 from app.matcha.services.matcha_work.job_search import orchestrator
-from app.matcha.services.matcha_work.job_search.phases import PhaseFailed, PhaseOutcome
+from app.matcha.services.matcha_work.agent_runtime.chain import PhaseFailed, PhaseOutcome
 from tests.agent_runtime.helpers import FakeConn, connection
 
 from ._fixtures import LEAD, SEARCH, TOKEN, search_row

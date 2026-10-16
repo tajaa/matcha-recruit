@@ -250,9 +250,6 @@ async def test_entitlements_say_what_the_workspace_has_switched_on(monkeypatch):
     monkeypatch.setattr(entitlements_service, "resolve_plan_for_user", AsyncMock(return_value="pro"))
     monkeypatch.setattr(quota, "assistant_usage", AsyncMock(return_value={"limit": 30, "used": 2, "remaining": 28}))
     from app.matcha.services.matcha_work.agent_tasks import allowance
-    from app.matcha.services.matcha_work.job_search import providers as job_providers
-
-    monkeypatch.setattr(job_providers, "configured", lambda: True)
     monkeypatch.setattr(allowance, "task_usage", AsyncMock(return_value={"limit": 60, "used": 45, "remaining": 15}))
     enabled = AsyncMock(return_value=True)
     monkeypatch.setattr(enqueue, "workspace_enabled", enabled)
@@ -279,10 +276,7 @@ async def test_entitlements_say_what_the_workspace_has_switched_on(monkeypatch):
     enabled.side_effect = RuntimeError("db down")
     assert (await entitlements_service.resolve_entitlements(uuid4(), company))["workspace"] == off
 
-    # A personal workspace on a server with no listings key: no job search.
     enabled.side_effect = None
-    monkeypatch.setattr(job_providers, "configured", lambda: False)
-    assert (await entitlements_service.resolve_entitlements(uuid4(), company))["workspace"]["job_search"] is False
     # Tasks: an admin always; anyone else once ESPRESSO_TASKS_ENABLED is set.
     admin = await entitlements_service.resolve_entitlements(uuid4(), company, role="admin")
     assert admin["workspace"]["agent_tasks"] is True

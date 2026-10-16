@@ -294,14 +294,9 @@ async def resolve_entitlements(user_id: UUID | str, company_id: Optional[UUID] =
             # Informational, like the quotas above.
             pass
     if workspace["espresso_assistant"]:
-        # Job search rides the same personal-account rule, and needs a
-        # listings provider key on the server.
-        try:
-            from ..matcha_work.job_search import providers as job_providers
-
-            workspace["job_search"] = job_providers.configured()
-        except Exception:
-            pass
+        # Job search rides the same personal-account rule. It needs no
+        # listings key: without one it searches the web alone.
+        workspace["job_search"] = True
         try:
             from types import SimpleNamespace
 

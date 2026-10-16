@@ -18,7 +18,7 @@ from uuid import UUID
 from pydantic import ValidationError
 
 from app.matcha.models.matcha_work.job_search import JobWeights, LeadPatch
-from app.matcha.services.matcha_work.job_search import providers, ranking
+from app.matcha.services.matcha_work.job_search import ranking
 from app.matcha.services.matcha_work.job_search import service as store
 
 from .. import consent
@@ -232,7 +232,6 @@ def build() -> Ability:
                    "required": ["search_id", "base", "bonus", "equity", "fit"]}, _rank),
         ),
         prompt_block=lambda _ctx: _PROMPT,
-        env_ready=providers.configured,
         private_only=True,
         consent_version=consent.current_version(KEY),
         session_factory=lambda _ctx: JobsSession(),

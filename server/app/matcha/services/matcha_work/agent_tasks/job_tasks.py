@@ -158,17 +158,11 @@ async def _no_rerank(_conn, _task: dict) -> int:
     return 0
 
 
-def _ready() -> bool:
-    from app.matcha.services.matcha_work.job_search import providers
-
-    return providers.configured()
-
-
 PLAYBOOK = Playbook(
     key=KEY,
     label="Job search",
     description=(
-        "Find jobs to apply for: live postings from Google Jobs and company job boards, each one's "
+        "Find jobs to apply for: live postings from employers' own job boards and the web, each one's "
         "pay (only what it posts) and application questions, ranked by what the person cares about, "
         "with drafted approaches for the best. For anyone looking for a job or a role."
     ),
@@ -182,7 +176,6 @@ PLAYBOOK = Playbook(
     round_phases={},
     rerank=_no_rerank,
     consent="jobs",
-    env_ready=_ready,
 )
 
 

@@ -14,7 +14,7 @@ from uuid import UUID
 from app.database import connection_or_direct
 from app.matcha.services.matcha_work.agent_runtime import chain
 
-from . import model_phases, phases
+from . import discovery, model_phases, phases
 from .agent_phase import USAGE_FEATURE
 from .enqueue import dispatch
 from .phases import Deps, PhaseOutcome
@@ -34,7 +34,7 @@ IDLE_INTERVAL = "2 minutes"
 # The order a search goes through: each status names the phase that runs in it.
 PHASES = {
     "planning": model_phases.plan,
-    "discovering": phases.discover,
+    "discovering": discovery.discover,
     "screening": model_phases.screen,
     "enriching": phases.enrich,
     "approaching": model_phases.approach,
