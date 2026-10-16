@@ -16,7 +16,7 @@ from app.database import connection_or_direct
 from app.matcha.services.matcha_work.agent_runtime import chain
 from app.matcha.services.matcha_work.agent_runtime.chain import PhaseOutcome
 
-from . import chat, notify, playbooks, service
+from . import chat, mail, notify, playbooks, service
 from .enqueue import dispatch
 from .research.phases import Deps
 
@@ -54,8 +54,9 @@ async def _ending(task: dict, message: str) -> PhaseOutcome:
 
 async def _stopped(conn, task_id: UUID) -> None:
     """Once a task stops (done, failed, waiting): settle its round, tell the
-    person, and post the card in the conversation it came from."""
-    await service.close_round(conn, task_id)
+    person, post the card in the conversation it came from, and email what
+    it found (once a round, so only when this call settled it)."""
+    settled = await service.close_round(conn, task_id)
     await notify.task_stopped(conn, task_id)
     try:
         message = await chat.post_stopped(conn, task_id)
@@ -65,6 +66,8 @@ async def _stopped(conn, task_id: UUID) -> None:
             await broadcast_espresso_message(message)
     except Exception:
         logger.warning("task card could not be posted task=%s", task_id, exc_info=True)
+    if settled:
+        await mail.round_finished(conn, task_id)
 
 
 TASK_CHAIN = chain.ChainSpec(

@@ -293,7 +293,7 @@ extension FeatureGuide {
         Page(stage: .expect, icon: "clock.fill",
              title: "What to expect",
              points: [
-                "A task takes a few minutes. You can leave: you'll get a notification when it's done or needs you.",
+                "A task takes a few minutes and runs on our servers, so you can close Espresso. When it's done you get a notification and an email with what it found; if it needs you, a notification.",
                 "It never pays, orders, books, applies or contacts anyone on its own. Buy takes you to the store's checkout and Apply to the application; you review, fill in and pay there.",
                 "Distances are straight-line miles from where Google Maps or the US Census puts each place. A home it couldn't place is Unconfirmed, not ruled out.",
                 "Only a fact it verified can rule a finding out. One it couldn't check is marked Unconfirmed and ranked after the confirmed ones.",
@@ -353,7 +353,7 @@ extension FeatureGuide {
              title: "Give it a few minutes",
              points: [
                 "It searches Google Jobs and company job boards, drops what doesn't fit, reads the postings and ranks them.",
-                "You can leave while it works. The list fills in as it goes, Cancel stops it, and you get a notification when it's done.",
+                "You can close Espresso while it works. The list fills in as it goes, Cancel stops it, and when it's done you get a notification and an email with the top jobs.",
                 "Ranking follows What matters. Change the weights to re-rank anytime.",
              ]),
         Page(stage: .expect, icon: "dollarsign.circle.fill",
