@@ -82,13 +82,15 @@ type Draft = {
   max_headcount: string
   navOrder: string[]
   onboarding_kind: '' | 'sc'
+  /** The product's updated_at when editing began (null for a new product). */
+  version: string | null
 }
 
 function emptyDraft(): Draft {
   return {
     slug: '', name: '', description: '', features: {}, gate_feature: '',
     pricing_model: 'per_seat', price_dollars: '', block_size: '10',
-    min_headcount: '1', max_headcount: '300', navOrder: [], onboarding_kind: '',
+    min_headcount: '1', max_headcount: '300', navOrder: [], onboarding_kind: '', version: null,
   }
 }
 
@@ -109,6 +111,7 @@ function toDraft(p: Product): Draft {
     // reorder controls always have something to work with.
     navOrder: p.nav?.length ? p.nav.map((n) => n.feature) : enabled,
     onboarding_kind: p.onboarding_kind ?? '',
+    version: p.updated_at,
   }
 }
 
@@ -226,8 +229,10 @@ export default function Products() {
       onboarding_kind: draft.onboarding_kind || null,
     }
     try {
+      // The price is also set on /admin/pricing; sending the version this
+      // draft started from makes the server refuse to put an older price back.
       const saved = selected
-        ? await api.put<Product>(`/admin/products/${selected.id}`, body)
+        ? await api.put<Product>(`/admin/products/${selected.id}`, { ...body, expected_updated_at: draft.version })
         : await api.post<Product>('/admin/products', body)
       await reload()
       setSelectedId(saved.id)

@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { Check, X } from 'lucide-react'
 import type { PlanRequiredDetail } from '../../../api/client'
-import { startPersonalCheckout } from '../../api/matchaWork/billing'
+import { listPersonalPlans, startPersonalCheckout } from '../../api/matchaWork/billing'
+import { formatPrice } from '../../../utils/format'
 
 type CheckoutPlan = 'lite' | 'pro'
 
@@ -18,6 +19,9 @@ const copy: Record<string, string> = {
   assistant: 'The Espresso assistant needs Pro',
 }
 
+// `price` is only the fallback while the live price loads (or if it can't):
+// the real number is set at /admin/pricing and read from /billing/plans, the
+// same row the checkout charges.
 const plans: { plan: CheckoutPlan; price: string; features: string[] }[] = [
   {
     plan: 'lite',
@@ -46,7 +50,19 @@ const plans: { plan: CheckoutPlan; price: string; features: string[] }[] = [
 export default function PaywallModal({ detail, onClose }: { detail: PlanRequiredDetail; onClose: () => void }) {
   const [opening, setOpening] = useState<CheckoutPlan | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [livePrices, setLivePrices] = useState<Partial<Record<CheckoutPlan, string>>>({})
   const closeButton = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    listPersonalPlans()
+      .then((list) => {
+        if (cancelled) return
+        setLivePrices(Object.fromEntries(list.map((p) => [p.plan, `${formatPrice(p.amount_cents / 100)}/mo`])))
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [])
   const dialog = useRef<HTMLElement>(null)
 
   useEffect(() => {
@@ -134,7 +150,7 @@ export default function PaywallModal({ detail, onClose }: { detail: PlanRequired
               <div key={plan} className={`flex flex-col rounded-xl border p-4 ${plan === 'pro' ? 'border-w-accent/50' : 'border-w-line'}`}>
                 <div className="flex items-baseline gap-2">
                   <h3 className="font-semibold capitalize">{plan}</h3>
-                  <span className="text-sm text-w-dim">{price}</span>
+                  <span className="text-sm text-w-dim">{livePrices[plan] ?? price}</span>
                 </div>
                 <ul className="my-4 flex-1 space-y-2">
                   {features.map((feature) => (

@@ -5,7 +5,9 @@ import { Reveal } from '../../../../components/marketing/kit/motion'
 import { WRAP, display, glassChip, glassPane, mono } from '../../../../components/marketing/kit/styles'
 import { AMBER, INK, INK_SOFT, PAPER, SERIF, STAMP, hexA } from '../../../../components/marketing/kit/theme'
 import { Accent, CellLabel, Glows, PrimaryButton } from '../sections/Chrome'
+import { formatPrice } from '../../../../utils/format'
 import { SCHEDULING_SIGNUP_PATH } from '../signup'
+import type { SchedulingPrice } from '../useSchedulingPrice'
 
 export function BuyerHeading({ label, eyebrow, title, children, dark = false }: { label: string; eyebrow: string; title: ReactNode; children: ReactNode; dark?: boolean }) {
   return (
@@ -50,12 +52,16 @@ export function BuyerTopBar() {
   )
 }
 
-export function BuyerGuide() {
+export function BuyerGuide({ livePrice = null }: { livePrice?: SchedulingPrice | null }) {
   return (
     <div style={{ borderBottom: `1px solid ${hexA(INK, 0.12)}` }}>
       <div className={`${WRAP} py-7`}>
         <div className="flex flex-wrap items-center justify-between gap-5">
-          <a href="#pricing" className="sched-link sched-focus rounded text-base font-medium">Plans from $49 / location / month <span className="ml-2 text-xs font-normal" style={{ color: INK_SOFT }}>Pricing preview</span></a>
+          <a href="#pricing" className="sched-link sched-focus rounded text-base font-medium">
+            {livePrice
+              ? <>Start at {formatPrice(livePrice.perLocation)} / location / month</>
+              : <>Plans from $49 / location / month <span className="ml-2 text-xs font-normal" style={{ color: INK_SOFT }}>Pricing preview</span></>}
+          </a>
           <nav aria-label="Explore scheduling" className="flex flex-wrap gap-x-6 gap-y-3" style={mono('10px')}>
             <a href="#draft" className="sched-link sched-focus rounded">How it works</a>
             <a href="#setup" className="sched-link sched-focus rounded">Connect &amp; switch</a>

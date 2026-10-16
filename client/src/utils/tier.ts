@@ -100,22 +100,24 @@ export function isCustomProductPending(profile: MeClientProfile | null | undefin
   return false // free — active at signup
 }
 
-/** Monthly price in dollars for the configured billing quantity. */
+/** Monthly price in dollars for the configured billing quantity. Exact, not
+ *  rounded: the server charges these cents (product_definitions.
+ *  compute_product_price_cents), so a $9.50 price must not display as $10. */
 export function productPriceDollars(
-  product: ProductDefinition,
+  product: Pick<ProductDefinition, 'pricing_model' | 'price_cents' | 'block_size' | 'min_headcount' | 'max_headcount'>,
   headcount: number,
   locationCount?: number,
 ): number | null {
   if (product.pricing_model === 'free' || product.pricing_model === 'contact_sales') return null
   if (headcount < product.min_headcount || headcount > product.max_headcount) return null
   const cents = product.price_cents ?? 0
-  if (product.pricing_model === 'flat') return Math.round(cents / 100)
-  if (product.pricing_model === 'per_seat') return Math.round((cents * headcount) / 100)
+  if (product.pricing_model === 'flat') return cents / 100
+  if (product.pricing_model === 'per_seat') return (cents * headcount) / 100
   if (product.pricing_model === 'per_location') {
     return locationCount && locationCount > 0
       ? (cents * locationCount) / 100
       : null
   }
   const blockSize = product.block_size || 1
-  return Math.round((Math.ceil(headcount / blockSize) * cents) / 100)
+  return (Math.ceil(headcount / blockSize) * cents) / 100
 }

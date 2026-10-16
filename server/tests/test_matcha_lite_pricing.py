@@ -1,10 +1,16 @@
 """Pure-function tests for the admin-configurable Matcha Lite pricing engine."""
 
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
 from app.core.services.matcha_lite_pricing import (
+    FLAT_PRODUCT_CODES,
     PRODUCT_CODES,
     MatchaLitePricing,
     _FALLBACK_DEFAULTS,
     compute_matcha_lite_price_cents,
+    get_matcha_lite_pricings,
 )
 
 
@@ -68,6 +74,8 @@ def test_product_codes_has_standard_and_essentials():
         "addon_hris_sync",
         "addon_handbook_watch",
         "tellus_brand",
+        "espresso_lite",
+        "espresso_pro",
     )
 
 
@@ -102,3 +110,31 @@ def test_addon_fallback_defaults_are_flat_pepm():
         assert compute_matcha_lite_price_cents(pricing, 1) == per_head
         assert compute_matcha_lite_price_cents(pricing, 25) == 25 * per_head
         assert compute_matcha_lite_price_cents(pricing, 301) is None
+
+
+def test_espresso_fallback_defaults_are_the_launch_plan_prices():
+    # No seed migration: until an admin saves at /admin/pricing, checkout
+    # charges these. One unit; anything above it is out of range.
+    for code, cents in (("espresso_lite", 900), ("espresso_pro", 2000)):
+        assert code in FLAT_PRODUCT_CODES
+        pricing = _pricing(**_FALLBACK_DEFAULTS[code])
+        assert compute_matcha_lite_price_cents(pricing, 1) == cents
+        assert compute_matcha_lite_price_cents(pricing, 2) is None
+
+
+@pytest.mark.asyncio
+async def test_batch_lookup_reads_once_and_falls_back_per_code():
+    conn = MagicMock()
+    conn.fetch = AsyncMock(return_value=[{
+        "product_code": "espresso_pro", "price_per_block_cents": 1900, "block_size": 1,
+        "sale_price_per_block_cents": None, "sale_active": False, "min_headcount": 1,
+        "max_headcount": 1, "updated_at": None, "updated_by": "admin@example.com",
+    }])
+
+    prices = await get_matcha_lite_pricings(["espresso_lite", "espresso_pro"], conn=conn)
+
+    conn.fetch.assert_awaited_once()
+    assert conn.fetch.await_args.args[1] == ["espresso_lite", "espresso_pro"]
+    assert prices["espresso_pro"].price_per_block_cents == 1900
+    # No saved row yet: the launch default, exactly as the single lookup does.
+    assert prices["espresso_lite"].price_per_block_cents == 900

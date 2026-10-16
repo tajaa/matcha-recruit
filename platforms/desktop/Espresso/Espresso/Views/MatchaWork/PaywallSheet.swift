@@ -9,6 +9,9 @@ struct PaywallSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var isOpeningCheckout = false
     @State private var checkoutError: String?
+    /// Live prices by plan raw value; the built-in `PlanColumn.price` shows
+    /// until they arrive (or if the fetch fails).
+    @State private var livePrices: [String: String] = [:]
 
     /// Contextual headline per locked feature (falls back to the generic one).
     private var headline: String {
@@ -90,6 +93,10 @@ struct PaywallSheet: View {
         .frame(width: 560)
         .background(appState.themeBg)
         .onExitCommand { dismiss() }
+        .task {
+            guard let plans = try? await MatchaWorkService.shared.listPersonalPlans() else { return }
+            livePrices = Dictionary(plans.map { ($0.plan, $0.monthlyLabel) }, uniquingKeysWith: { first, _ in first })
+        }
     }
 
     private var header: some View {
@@ -128,7 +135,7 @@ struct PaywallSheet: View {
                 Text(col.plan.displayName)
                     .font(.system(size: 15, weight: .bold))
                     .foregroundColor(appState.themeText)
-                Text(col.price)
+                Text(livePrices[col.plan.rawValue] ?? col.price)
                     .font(.system(size: 12, weight: .medium))
                     .foregroundColor(accented ? appState.themeAccent : appState.themeTextSecondary)
                 Spacer(minLength: 0)

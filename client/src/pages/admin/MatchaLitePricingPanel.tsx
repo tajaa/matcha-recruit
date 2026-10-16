@@ -1,11 +1,14 @@
 import { useEffect, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import {
+  FLAT_PLAN_CODES,
+  computeLitePriceDollars,
   fetchMatchaLitePricingAdmin,
   saveMatchaLitePricingAdmin,
   type MatchaLiteProductCode,
   type MatchaLitePricingAdminConfig,
 } from '../../api/billing/matchaLitePricing'
+import { formatPrice } from '../../utils/format'
 
 const PRODUCT_TABS: { code: MatchaLiteProductCode; label: string }[] = [
   { code: 'matcha_lite', label: 'Standard Lite' },
@@ -42,7 +45,8 @@ export default function MatchaLitePricingPanel() {
   )
 }
 
-function PricingForm({ productCode }: { productCode: MatchaLiteProductCode }) {
+// Also rendered by /admin/pricing (pages/admin/Pricing.tsx), one per product.
+export function PricingForm({ productCode }: { productCode: MatchaLiteProductCode }) {
   const [config, setConfig] = useState<MatchaLitePricingAdminConfig | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -64,6 +68,9 @@ function PricingForm({ productCode }: { productCode: MatchaLiteProductCode }) {
   // changing price_per_block).
   const isFlatRate =
     productCode === 'matcha_compliance' || productCode === 'tellus_brand' || productCode.startsWith('addon_')
+  // A flat monthly plan (Espresso) has no block size or headcount at all —
+  // one unit, one price.
+  const isFlatPlan = FLAT_PLAN_CODES.includes(productCode)
   // The table's columns say "headcount" everywhere — Tell-Us reuses them to
   // mean store count. Swap the unit word in the UI only.
   const unit = productCode === 'tellus_brand' ? 'store' : 'employee'
@@ -106,11 +113,13 @@ function PricingForm({ productCode }: { productCode: MatchaLiteProductCode }) {
       const updated = await saveMatchaLitePricingAdmin(
         {
           price_per_block_cents: Math.round(priceNum * 100),
-          block_size: isFlatRate ? 1 : blockSizeNum,
+          block_size: isFlatRate || isFlatPlan ? 1 : blockSizeNum,
           sale_price_per_block_cents: salePriceNum !== null ? Math.round(salePriceNum * 100) : null,
           sale_active: saleActive,
-          min_headcount: minNum,
-          max_headcount: maxNum,
+          min_headcount: isFlatPlan ? 1 : minNum,
+          max_headcount: isFlatPlan ? 1 : maxNum,
+          // This row is also editable on the other pricing page.
+          expected_updated_at: config?.updated_at ?? null,
         },
         productCode,
       )
@@ -139,13 +148,25 @@ function PricingForm({ productCode }: { productCode: MatchaLiteProductCode }) {
     !isNaN(effectivePriceNum) && !isNaN(blockSizeNum) && blockSizeNum > 0
       ? (effectivePriceNum / blockSizeNum).toFixed(2)
       : null
+  // What the next checkout charges, with the same formula the signup pages
+  // use (the server's compute_matcha_lite_price_cents).
+  const sampleQuantity = isFlatPlan ? 1 : Math.min(Math.max(25, minNum || 1), maxNum || 25)
+  const nextCharge =
+    !isNaN(effectivePriceNum) && effectivePriceNum > 0 && blockSizeNum > 0
+      ? computeLitePriceDollars(sampleQuantity, {
+          block_size: isFlatRate || isFlatPlan ? 1 : blockSizeNum,
+          effective_price_per_block_cents: Math.round(effectivePriceNum * 100),
+        })
+      : null
 
   return (
     <div className="max-w-lg">
       <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 mb-4 space-y-4">
         <div className="grid grid-cols-2 gap-4">
           <label className="block">
-            <span className="text-xs text-zinc-400 uppercase tracking-wide">Price per block ($)</span>
+            <span className="text-xs text-zinc-400 uppercase tracking-wide">
+              {isFlatPlan ? 'Price per month ($)' : 'Price per block ($)'}
+            </span>
             <input
               type="number"
               min={0}
@@ -155,7 +176,7 @@ function PricingForm({ productCode }: { productCode: MatchaLiteProductCode }) {
               className="mt-1 w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-emerald-700"
             />
           </label>
-          <label className="block">
+          {!isFlatPlan && <label className="block">
             <span className="text-xs text-zinc-400 uppercase tracking-wide">Block size (employees)</span>
             <input
               type="number"
@@ -167,9 +188,9 @@ function PricingForm({ productCode }: { productCode: MatchaLiteProductCode }) {
               className="mt-1 w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed"
             />
             {isFlatRate && <span className="block mt-1 text-xs text-zinc-500">Fixed at 1 — priced flat per {unit}</span>}
-          </label>
+          </label>}
         </div>
-        {perHeadEquivalent && <p className="text-xs text-zinc-500">≈ ${perHeadEquivalent}/{unit}/month</p>}
+        {perHeadEquivalent && !isFlatPlan && <p className="text-xs text-zinc-500">≈ ${perHeadEquivalent}/{unit}/month</p>}
         {productCode === 'tellus_brand' && (
           <p className="text-xs text-amber-500">
             Checkout mints an inline Stripe price at signup time — changing this only affects new
@@ -178,7 +199,7 @@ function PricingForm({ productCode }: { productCode: MatchaLiteProductCode }) {
           </p>
         )}
 
-        <div className="grid grid-cols-2 gap-4">
+        {!isFlatPlan && <div className="grid grid-cols-2 gap-4">
           <label className="block">
             <span className="text-xs text-zinc-400 uppercase tracking-wide">
               Min {productCode === 'tellus_brand' ? 'stores' : 'headcount'}
@@ -205,7 +226,7 @@ function PricingForm({ productCode }: { productCode: MatchaLiteProductCode }) {
               className="mt-1 w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-emerald-700"
             />
           </label>
-        </div>
+        </div>}
 
         <div className="border-t border-zinc-800 pt-4">
           <label className="flex items-center gap-2 mb-3 cursor-pointer">
@@ -218,7 +239,9 @@ function PricingForm({ productCode }: { productCode: MatchaLiteProductCode }) {
             <span className="text-sm text-zinc-300">Sale active</span>
           </label>
           <label className="block">
-            <span className="text-xs text-zinc-400 uppercase tracking-wide">Sale price per block ($)</span>
+            <span className="text-xs text-zinc-400 uppercase tracking-wide">
+              {isFlatPlan ? 'Sale price per month ($)' : 'Sale price per block ($)'}
+            </span>
             <input
               type="number"
               min={0}
@@ -230,10 +253,18 @@ function PricingForm({ productCode }: { productCode: MatchaLiteProductCode }) {
               className="mt-1 w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-emerald-700 disabled:opacity-40"
             />
           </label>
-          {saleActive && effectivePerHead && (
+          {saleActive && effectivePerHead && !isFlatPlan && (
             <p className="mt-1 text-xs text-emerald-400">≈ ${effectivePerHead}/{unit}/month while the sale is active</p>
           )}
         </div>
+
+        {nextCharge !== null && (
+          <p className="text-xs text-zinc-400">
+            Next checkout charges{' '}
+            <span className="font-medium text-zinc-100">{formatPrice(nextCharge)}/month</span>
+            {!isFlatPlan && ` for ${sampleQuantity} ${unit}s`}
+          </p>
+        )}
 
         {error && <p className="text-sm text-red-400">{error}</p>}
 

@@ -20,7 +20,7 @@ Differentiated at signup via `companies.signup_source` and routed in the UI by `
 | **Matcha-lite** | `pages/auth/MatchaLiteSignup.tsx` | `matcha_lite` | `matcha_lite` | `IrSidebar` once paid; `MatchaLitePendingSidebar` while pending | `/ir/*` | Stripe sub, headcount-based |
 | **Matcha Compliance** | `pages/auth/ComplianceSignup.tsx` | `matcha_compliance` | `matcha_compliance` | `ComplianceSidebar` once paid; `CompliancePendingSidebar` while pending | `/app/compliance*` | Stripe sub, headcount + jurisdictions |
 | **Matcha (platform)** | `pages/BetaRegister.tsx` (token) or admin-created post-sale | n/a | `bespoke` (default) / `invite` | `ClientSidebar` (full nav) | `/app/*` | Contract / invoice |
-| **Matcha-work** | `pages/BetaRegister.tsx` (personal token) → `/espresso`; or inside Matcha company | n/a | `bespoke` (personal: `is_personal=true`) | `ClientSidebar` AI group; macOS app | `/espresso/*` personal; `/work/*` business | Stripe `matcha_work_personal` $20/mo or business token packs |
+| **Matcha-work** | `pages/BetaRegister.tsx` (personal token) → `/espresso`; or inside Matcha company | n/a | `bespoke` (personal: `is_personal=true`) | `ClientSidebar` AI group; macOS app | `/espresso/*` personal; `/work/*` business | Stripe personal Lite / Pro (`matcha_work_lite` / `matcha_work_personal`, priced at `/admin/pricing`) or business token packs |
 
 Sidebar dispatch in `client/src/components/sidebars/TenantSidebar.tsx`. Tier-check helpers (`isIrOnlyTier`, `isMatchaLitePending`, `isResourcesFreeTier`) in `client/src/utils/tier.ts`.
 
@@ -42,6 +42,8 @@ Web `/work/*` (business) + `/espresso/*` (personal) and macOS **Espresso** (`pla
 
 ### Custom products — the admin product builder (`/admin/products`)
 Data-driven alternative to the ~10-touchpoint hardcoded products above — composed at `/admin/products`, live at `/p/<slug>/signup`. Materialized (not overlaid) grants, `product:<slug>` signup_source namespacing, per-seat/block/flat/free/contact-sales pricing.
+
+**Prices** for Lite/Essentials, the scheduling products and the Espresso plans are edited on one admin page, `/admin/pricing`. Every checkout builds its Stripe price inline from the database row, so a save there is what the next checkout charges; current subscribers keep their price. → `docs/PRODUCTS.md` §Pricing
 
 Full mechanics (routers, endpoints, migrations, invariants) for every product above: `docs/PRODUCTS.md`.
 

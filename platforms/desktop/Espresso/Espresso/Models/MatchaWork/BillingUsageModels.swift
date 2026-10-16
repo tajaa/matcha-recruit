@@ -74,6 +74,25 @@ struct MWSubscription: Codable {
     }
 }
 
+/// A personal plan's live price — set at /admin/pricing, the same number the
+/// checkout charges. The paywall shows it instead of a built-in string.
+struct MWPersonalPlanPrice: Codable {
+    let plan: String
+    let amountCents: Int
+
+    /// "$20/mo", or "$9.50/mo" when the price has cents.
+    var monthlyLabel: String {
+        let dollars = amountCents / 100
+        let cents = amountCents % 100
+        return cents == 0 ? "$\(dollars)/mo" : String(format: "$%d.%02d/mo", dollars, cents)
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case plan
+        case amountCents = "amount_cents"
+    }
+}
+
 struct MWCheckoutResponse: Codable {
     let checkoutUrl: String
     let stripeSessionId: String?

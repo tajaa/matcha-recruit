@@ -226,21 +226,21 @@ class StripeService:
         except Exception as exc:
             raise StripeServiceError(f"Failed to create Stripe subscription session: {exc}") from exc
 
-    # Personal Werk plans (Lite $9 / Pro $20). Pro keeps the pre-existing
-    # `matcha_work_personal` pack id so current subscribers grandfather in.
+    # Personal Werk plans. Pro keeps the pre-existing `matcha_work_personal`
+    # pack id so current subscribers grandfather in. Prices are not here: they
+    # are the `espresso_lite` / `espresso_pro` rows of matcha_lite_pricing,
+    # edited at /admin/pricing and resolved by the caller.
     # tokens_per_cycle drives the monthly company-budget reset in the webhook;
     # both plans keep the free-tier 1M — the per-user rolling quota
     # (entitlements_service.PLAN_QUOTAS) is the real tier differentiator.
     PERSONAL_PLANS = {
         "lite": {
             "pack_id": "matcha_work_lite",
-            "amount_cents": 900,
             "name": "Werk Lite",
             "description": "Solo projects, full journals, and email AI drafting",
         },
         "pro": {
             "pack_id": "matcha_work_personal",
-            "amount_cents": 2000,
             "name": "Werk Pro",
             "description": "Pro AI model, collab projects, Go Live, and creator tools",
         },
@@ -250,17 +250,20 @@ class StripeService:
         self,
         company_id: UUID,
         user_id: UUID,
+        amount_cents: int,
         success_url: Optional[str] = None,
         cancel_url: Optional[str] = None,
         plan: str = "pro",
         upgrade_from_subscription_id: Optional[str] = None,
     ):
-        """Create a personal Werk plan checkout (Lite $9 / Pro $20) for an
+        """Create a personal Werk plan checkout (Lite or Pro) for an
         individual user.
 
-        Entitlements resolve from the recorded pack_id (entitlements_service);
-        this reuses the existing subscription webhook path with a per-plan
-        pack_id.
+        `amount_cents` is resolved by the caller from the plan's
+        matcha_lite_pricing row, so this module stays DB-free (the same rule as
+        create_custom_product_checkout). Entitlements resolve from the recorded
+        pack_id (entitlements_service); this reuses the existing subscription
+        webhook path with a per-plan pack_id.
         """
         self._ensure_secret_key()
 
@@ -277,7 +280,7 @@ class StripeService:
             "pack_id": plan_cfg["pack_id"],
             "billing_type": "token_budget",
             "tokens_per_cycle": "1000000",
-            "amount_cents": str(plan_cfg["amount_cents"]),
+            "amount_cents": str(amount_cents),
             "mode": "subscription",
         }
         if upgrade_from_subscription_id:
@@ -295,7 +298,7 @@ class StripeService:
                     {
                         "price_data": {
                             "currency": "usd",
-                            "unit_amount": plan_cfg["amount_cents"],
+                            "unit_amount": amount_cents,
                             "recurring": {"interval": "month"},
                             "product_data": {
                                 "name": plan_cfg["name"],

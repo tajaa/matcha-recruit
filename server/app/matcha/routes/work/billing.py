@@ -12,6 +12,12 @@ from pydantic import BaseModel, Field
 
 from app.core.models.auth import CurrentUser
 from app.core.dependencies import require_admin as require_platform_admin
+from app.core.services.matcha_lite_pricing import (
+    MatchaLitePricing,
+    compute_matcha_lite_price_cents,
+    get_matcha_lite_pricing,
+    get_matcha_lite_pricings,
+)
 from app.core.services.stripe_service import StripeService, StripeServiceError
 from app.database import get_connection
 from app.matcha.dependencies import get_client_company_id, require_admin_or_client
@@ -71,10 +77,38 @@ class CheckoutRequest(BaseModel):
     cancel_url: Optional[str] = Field(default=None, max_length=2000)
 
 
+PersonalPlan = Literal["lite", "pro"]
+
+# Each personal plan's price is a matcha_lite_pricing row (flat, one unit),
+# edited at /admin/pricing. Checkout and both paywalls read the same row, so a
+# price change reaches the next Stripe checkout with no Stripe-side sync.
+PERSONAL_PLAN_PRICE_CODES: dict[str, str] = {"lite": "espresso_lite", "pro": "espresso_pro"}
+
+
 class PersonalCheckoutRequest(CheckoutRequest):
     # Personal Werk plan ladder. Defaults to "pro" so pre-tier clients that
-    # don't send a plan keep buying the original $20 SKU.
-    plan: Literal["lite", "pro"] = "pro"
+    # don't send a plan keep buying the original Pro SKU.
+    plan: PersonalPlan = "pro"
+
+
+class PersonalPlanResponse(BaseModel):
+    plan: PersonalPlan
+    name: str
+    description: str
+    amount_cents: int
+    currency: str = "usd"
+
+
+def _plan_amount_cents(pricing: MatchaLitePricing) -> int:
+    amount = compute_matcha_lite_price_cents(pricing, 1)
+    if amount is None:  # the admin PUT pins flat plans to one unit
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="This plan's price is misconfigured")
+    return amount
+
+
+async def personal_plan_price_cents(plan: str) -> int:
+    """What the next checkout for `plan` charges, sale price included."""
+    return _plan_amount_cents(await get_matcha_lite_pricing(product_code=PERSONAL_PLAN_PRICE_CODES[plan]))
 
 
 class CheckoutResponse(BaseModel):
@@ -128,6 +162,23 @@ async def list_packs(
     ]
 
 
+@router.get("/plans", response_model=list[PersonalPlanResponse])
+async def list_personal_plans(
+    _: CurrentUser = Depends(require_admin_or_client),
+):
+    """Personal plan prices for the web and macOS paywalls (one query)."""
+    pricings = await get_matcha_lite_pricings(list(PERSONAL_PLAN_PRICE_CODES.values()))
+    return [
+        PersonalPlanResponse(
+            plan=plan,
+            name=cfg["name"],
+            description=cfg["description"],
+            amount_cents=_plan_amount_cents(pricings[PERSONAL_PLAN_PRICE_CODES[plan]]),
+        )
+        for plan, cfg in StripeService.PERSONAL_PLANS.items()
+    ]
+
+
 @router.post("/checkout", response_model=CheckoutResponse)
 async def create_checkout_session(
     body: CheckoutRequest,
@@ -171,7 +222,8 @@ async def create_personal_checkout_session(
     body: PersonalCheckoutRequest,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    """Start a personal Werk plan checkout — Lite ($9/mo) or Pro ($20/mo).
+    """Start a personal Werk plan checkout — Lite or Pro, at the price set on
+    /admin/pricing (see personal_plan_price_cents).
 
     Only individual accounts (or admins for testing) can subscribe — business
     users get Werk through their company. A Lite→Pro upgrade keeps Lite active
@@ -197,6 +249,8 @@ async def create_personal_checkout_session(
             status_code=status.HTTP_409_CONFLICT,
             detail="You already have this plan",
         )
+    # Priced after the duplicate check, so a pricing problem can't hide the 409.
+    amount_cents = await personal_plan_price_cents(body.plan)
 
     stripe_service = StripeService()
 
@@ -213,6 +267,7 @@ async def create_personal_checkout_session(
         session = await stripe_service.create_personal_subscription_checkout(
             company_id=company_id,
             user_id=current_user.id,
+            amount_cents=amount_cents,
             success_url=body.success_url,
             cancel_url=body.cancel_url,
             plan=body.plan,
@@ -234,7 +289,7 @@ async def create_personal_checkout_session(
         stripe_session_id=stripe_session_id,
         credit_pack_id=plan_cfg["pack_id"],
         credits_to_add=0,
-        amount_cents=plan_cfg["amount_cents"],
+        amount_cents=amount_cents,
     )
 
     return CheckoutResponse(checkout_url=checkout_url, stripe_session_id=stripe_session_id)

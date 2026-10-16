@@ -6,6 +6,7 @@ what customers are charged.
 """
 import json
 import logging
+import math
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -14,11 +15,13 @@ from pydantic import BaseModel, Field
 from app.database import get_connection
 from app.core.dependencies import require_admin
 from app.core.services.matcha_lite_pricing import (
+    FLAT_PRODUCT_CODES,
     PRODUCT_CODES,
     SELECT_COLUMNS,
     get_matcha_lite_pricing,
     row_to_pricing,
 )
+from app.core.services.product_definitions import STRIPE_MIN_CHARGE_CENTS
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -48,6 +51,10 @@ class MatchaLitePricingUpdate(BaseModel):
     sale_active: bool
     min_headcount: int = Field(gt=0)
     max_headcount: int = Field(gt=0)
+    # The `updated_at` the editor loaded (null for a row not saved yet). When
+    # sent, a save over a newer change is refused instead of silently undoing
+    # it — the same row is editable from /admin/pricing and Signup Links.
+    expected_updated_at: Optional[str] = None
 
 
 @router.get("/matcha-lite-pricing", response_model=MatchaLitePricingConfig)
@@ -72,10 +79,24 @@ async def update_matcha_lite_pricing(
     current_user=Depends(require_admin),
 ):
     product_code = _validate_product_code(product_code)
+    if product_code in FLAT_PRODUCT_CODES:
+        # A flat plan is one unit; anything else here would only make the
+        # checkout's headcount-of-1 price lookup refuse.
+        body = body.model_copy(update={"block_size": 1, "min_headcount": 1, "max_headcount": 1})
     if body.min_headcount > body.max_headcount:
         raise HTTPException(status_code=400, detail="min_headcount cannot exceed max_headcount")
     if body.sale_active and body.sale_price_per_block_cents is None:
         raise HTTPException(status_code=400, detail="sale_price_per_block_cents is required when sale_active is true")
+    # The cheapest checkout is the minimum headcount; Stripe refuses it under
+    # $0.50, so a lower price would save and then 400 every checkout.
+    min_blocks = math.ceil(body.min_headcount / body.block_size)
+    for per_block in (body.price_per_block_cents, body.sale_price_per_block_cents if body.sale_active else None):
+        if per_block is not None and min_blocks * per_block < STRIPE_MIN_CHARGE_CENTS:
+            raise HTTPException(
+                status_code=400,
+                detail="Stripe can't charge less than $0.50 — raise the price so the smallest checkout reaches it",
+            )
+    new_values = body.model_dump(exclude={"expected_updated_at"})
 
     updated_by = getattr(current_user, "email", None) or str(getattr(current_user, "id", ""))
 
@@ -84,12 +105,19 @@ async def update_matcha_lite_pricing(
             old_row = await conn.fetchrow(
                 """
                 SELECT price_per_block_cents, block_size, sale_price_per_block_cents,
-                       sale_active, min_headcount, max_headcount
+                       sale_active, min_headcount, max_headcount, updated_at
                 FROM matcha_lite_pricing WHERE product_code = $1
                 FOR UPDATE
                 """,
                 product_code,
             )
+            if "expected_updated_at" in body.model_fields_set:
+                current = old_row["updated_at"].isoformat() if old_row and old_row["updated_at"] else None
+                if current != body.expected_updated_at:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="This price changed since you opened it. Reload to see the latest before saving.",
+                    )
 
             # Upsert rather than requiring a pre-existing row: product_code is
             # already validated against the known PRODUCT_CODES enum, so a
@@ -128,10 +156,10 @@ async def update_matcha_lite_pricing(
                 VALUES ($1, $2::jsonb, $3::jsonb)
                 """,
                 updated_by,
-                json.dumps(dict(old_row)) if old_row else "null",
-                json.dumps({**body.model_dump(), "product_code": product_code}),
+                json.dumps({k: v for k, v in dict(old_row).items() if k != "updated_at"}) if old_row else "null",
+                json.dumps({**new_values, "product_code": product_code}),
             )
 
-    logger.info("Matcha Lite pricing (%s) updated by %s: %s", product_code, updated_by, body.model_dump())
+    logger.info("Matcha Lite pricing (%s) updated by %s: %s", product_code, updated_by, new_values)
     pricing = row_to_pricing(new_row)
     return MatchaLitePricingConfig(**pricing.__dict__)

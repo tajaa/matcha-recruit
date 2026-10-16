@@ -2,6 +2,21 @@
 
 Moved verbatim from root `CLAUDE.md`'s Products section. Root keeps the signup/tier/sidebar/routes/billing table and a one-line-per-product summary.
 
+### Pricing — `/admin/pricing`
+One admin page (`client/src/pages/admin/Pricing.tsx`) for every price we are still testing:
+- **Incident reporting** (Matcha Lite, Lite Essentials) and **Espresso** (Lite, Pro): rows of `matcha_lite_pricing`, edited through `PUT /api/admin/matcha-lite-pricing?product_code=…` (history in `matcha_lite_pricing_history`). The same form also lives under Signup Links → Pricing, which keeps Compliance, the Lite add-ons and Tell-Us.
+- **Scheduling** (and any other published, Stripe-billed product-builder product): `product_definitions.price_cents`, edited through the price-only `PUT /api/admin/products/{id}/price` (snapshots to `product_definition_history`; refuses free / contact-sales products).
+
+How a price reaches Stripe:
+- **No stored Stripe Prices.** Every checkout session builds an inline `price_data` from the row when the session is created, so an admin save is what the next checkout charges. Nothing is synced or archived in Stripe.
+- **Existing subscribers keep the amount they signed up at.** Nothing reprices a live subscription.
+- **`espresso_lite` / `espresso_pro` are flat** (`FLAT_PRODUCT_CODES`): one unit, no headcount. The admin PUT pins `block_size`, `min_headcount` and `max_headcount` to 1. With no row, the code fallback is the launch price ($9 / $20), so they need no seed migration.
+- **Every buyer-facing price reads the same row:**
+  - The Espresso paywalls (web `PaywallModal`, macOS `PaywallSheet`) read `GET /api/matcha-work/billing/plans`.
+  - The scheduling landing page's "Start now" band and value estimate read `GET /api/products/schedule-comm` (`pages/landing/scheduling/useSchedulingPrice.ts`). Its three Basic/Pro/Autopilot cards are still marked as proposed.
+  - The Lite signup reads `GET /api/resources/matcha-lite/pricing`.
+- **Not on the page:** Matcha-X (`stripe_service.matcha_x_price_cents`) and the business token subscription (`stripe_service` literal 4000) are still hardcoded.
+
 ### Free — resources hub
 - Marketing/upgrade landing for self-serve signups. No paid features.
 - All `enabled_features` off; gated by `<RequireBusinessAccount>` (`client/src/components/`).
@@ -37,7 +52,7 @@ Moved verbatim from root `CLAUDE.md`'s Products section. Root keeps the signup/t
 - Web surfaces: `client/src/work/pages/*` + `client/src/work/layout/WorkLayout.tsx`. Mounted at `/work/*` for business users and `/espresso/*` for personal users in `App.tsx`; legacy `/werk/*` links redirect to `/espresso/*`.
 - Backend: `server/app/matcha/routes/matcha_work/` (package, split 2026-07-03), `server/app/matcha/services/matcha_work/project_service/`. Tables prefixed `mw_*`.
 - macOS desktop client (**Espresso**): `platforms/desktop/Espresso/` (SwiftUI). Xcode project name is still `Matcha.xcodeproj` and bundle ID `com.ahnimal.matcha` — App Store identity is unchanged; only the working directory and conceptual product name differ. `AppState.isPlusActive` from `Subscription.isPersonalPlus` controls Plus features.
-- **Personal mode**: user `role='individual'`. Signup via `BetaRegister.tsx` (`/auth/beta?token=…`) → redirected to `/espresso`. Stripe sub `matcha_work_personal` ($20/mo) via `POST /api/checkout/personal` (`server/app/matcha/routes/work/billing.py`).
+- **Personal mode**: user `role='individual'`. Signup via `BetaRegister.tsx` (`/auth/beta?token=…`) → redirected to `/espresso`. Stripe sub Lite (`matcha_work_lite`) or Pro (`matcha_work_personal`), priced by the `espresso_lite` / `espresso_pro` rows of `matcha_lite_pricing` (see §Pricing), via `POST /api/matcha-work/billing/checkout/personal` (`server/app/matcha/routes/work/billing.py`).
 - **Business mode**: user `role='client'` inside a Matcha company. Token packs purchased via `POST /api/checkout`. Sidebar entry in `ClientSidebar.tsx` AI group → `/work`.
 - Surfaces inside: projects, threads, channels (real-time WebSocket), inbox (DMs), people/connections, anonymous incident report intake.
 - Stripe-gated sub-features: `paid_channel_creator`, `channel_job_postings` in `server/app/core/feature_flags.py`.

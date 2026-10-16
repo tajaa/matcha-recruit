@@ -34,6 +34,9 @@ describe('productPriceDollars', () => {
     expect(productPriceDollars(product(), 25)).toBe(75)
     expect(productPriceDollars(product({ pricing_model: 'flat', price_cents: 19900 }), 25)).toBe(199)
     expect(productPriceDollars(product({ pricing_model: 'block', price_cents: 5000, block_size: 10 }), 11)).toBe(100)
+    // Charged in exact cents, so shown in exact cents: never rounded to a dollar.
+    expect(productPriceDollars(product({ pricing_model: 'flat', price_cents: 950 }), 25)).toBe(9.5)
+    expect(productPriceDollars(product({ pricing_model: 'per_seat', price_cents: 250 }), 3)).toBe(7.5)
     expect(productPriceDollars(product({ pricing_model: 'free', price_cents: null, gate_feature: null }), 25)).toBeNull()
     expect(productPriceDollars(product({ pricing_model: 'contact_sales', price_cents: null, gate_feature: null }), 25)).toBeNull()
   })

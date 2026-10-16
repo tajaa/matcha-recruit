@@ -26,6 +26,11 @@ describe('scheduling cost estimate', () => {
     expect(result.breakEvenMinutes).toBeGreaterThan(60)
     expect(result.coversItself).toBe(false)
   })
+  it('prices the live self-serve plan when given one', () => {
+    const result = estimateSchedulingCost({ locations: 3, managerRate: 25, hoursPerWeek: 4 }, 50)!
+    expect(result.subscription).toBe(150)
+    expect(result.breakEvenMinutes).toBeCloseTo(50 / (25 * 52 / 12) * 60, 5)
+  })
   it('has no break-even without a wage', () => {
     const result = estimateSchedulingCost({ locations: 2, managerRate: 0, hoursPerWeek: 4 })!
     expect(result.currentMonthly).toBe(0)

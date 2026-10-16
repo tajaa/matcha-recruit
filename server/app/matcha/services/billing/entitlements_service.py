@@ -9,9 +9,11 @@ maps it to a feature/quota set. Consumed by:
 
 Plans:
   free      — non-AI collaboration (channels/DMs/people) + basic journals + AI taste
-  lite      — $9/mo `matcha_work_lite`: solo projects, full journals, email AI, flash
-  pro       — $20/mo `matcha_work_personal` (grandfathered): pro model, collab
+  lite      — `matcha_work_lite`: solo projects, full journals, email AI, flash
+  pro       — `matcha_work_personal` (grandfathered): pro model, collab
               projects + kanban, Go Live, paid-channel creation, big quota
+  (Lite and Pro prices are the espresso_lite / espresso_pro rows set at
+  /admin/pricing.)
   business  — role=client on a non-personal company with the `matcha_work`
               feature: pro-level + business modes; billed via company contract
               and token packs, never via personal SKUs.
@@ -44,8 +46,8 @@ PRO_PACK_ID = "matcha_work_personal"
 # Business metered token pack ($40/5M) — orthogonal to the personal ladder.
 TOKEN_PACK_ID = "matcha_work_pro"
 
-LITE_AMOUNT_CENTS = 900
-PRO_AMOUNT_CENTS = 2000
+# Prices are not here: they are the espresso_lite / espresso_pro rows of
+# matcha_lite_pricing, edited at /admin/pricing.
 
 # Per-user rolling-window quota defaults by plan: (token_limit, window_hours).
 # Explicit mw_token_quotas rows always override these (admin grants).
