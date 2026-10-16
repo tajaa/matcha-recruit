@@ -55,7 +55,7 @@ export default function InventoryWaste() {
       void getWasteInsight({ start, end }).then(setInsight).catch(() => setInsight(null))
     } catch { toast('Failed to load inventory waste', 'error') } finally { setLoading(false) }
   }
-  useEffect(() => { void load() }, [periodDays]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { void load() }, [periodDays]) // eslint-disable-line react-hooks/exhaustive-deps, react-hooks/set-state-in-effect
 
   async function submitWaste() {
     const quantity = Number(wasteQuantity)
