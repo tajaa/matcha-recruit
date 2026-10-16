@@ -230,6 +230,75 @@ async def test_enrich_one_gives_up_quietly():
         assert await phases.enrich_one(lead(["https://delta.test/coo"]), deps, phases.Budget(left=5)) is None
 
 
+def no_board():
+    return AsyncMock(return_value=None)
+
+
+@pytest.mark.asyncio
+async def test_enrich_one_passes_over_another_employers_posting():
+    # Google listed Headway's job among Flex's apply links (2026-10-15 audit).
+    headway = ats_posting(ref=ats.AtsRef("ashby", "headway", "1"), title="Director, Chief of Staff – R&D")
+    flex = ats_posting(ref=ats.AtsRef("greenhouse", "flex", "7"), title="Chief of Staff and VP of Strategy",
+                       company="Flex")
+    deps = phases.Deps(ats_fetch=AsyncMock(side_effect=[headway, flex]), page_fetch=AsyncMock(), ats_find=no_board())
+    links = [f"https://jobs.ashbyhq.com/headway/{'1' * 8}-1111-4111-8111-{'1' * 12}", GH_URL]
+    update = await phases.enrich_one(lead(links, title="Chief of Staff and VP of Strategy", company="Flex"),
+                                     deps, phases.Budget(left=9))
+    assert update["ats"]["board"] == "flex"
+
+    # The same title at another employer is not the job either.
+    other = ats_posting(company="VVater")
+    deps = phases.Deps(ats_fetch=AsyncMock(return_value=other), page_fetch=AsyncMock(), ats_find=no_board())
+    assert await phases.enrich_one(lead([GH_URL], company="American Alchemy"), deps,
+                                   phases.Budget(left=9)) is None
+    deps.ats_find.assert_awaited_once()
+
+
+SPECIAL_PROJECTS = JSONLD_PAGE.replace('"title": "Chief Operating Officer"', '"title": "Special Projects Lead"')
+
+
+@pytest.mark.asyncio
+async def test_enrich_one_skips_a_page_about_another_job():
+    deps = phases.Deps(ats_fetch=AsyncMock(), ats_find=no_board(),
+                       page_fetch=AsyncMock(side_effect=[page(SPECIAL_PROJECTS), page(JSONLD_PAGE)]))
+    update = await phases.enrich_one(lead(["https://talents.example.test/x", "https://careers.delta.test/coo"]),
+                                     deps, phases.Budget(left=9))
+    assert update["source_url"] == "https://careers.delta.test/coo"
+    # A careers page redirecting into another employer's ATS is passed over too.
+    deps = phases.Deps(ats_fetch=AsyncMock(return_value=ats_posting(company="Headway")), ats_find=no_board(),
+                       page_fetch=AsyncMock(return_value=page("<html></html>", final_url=GH_URL)))
+    assert await phases.enrich_one(lead(["https://delta.test/careers/coo"], company="Delta"), deps,
+                                   phases.Budget(left=9)) is None
+
+
+@pytest.mark.asyncio
+async def test_enrich_one_looks_on_the_employers_own_board():
+    found = ats_posting(company="Nametag")
+    deps = phases.Deps(ats_fetch=AsyncMock(), page_fetch=AsyncMock(), ats_find=AsyncMock(return_value=found))
+    update = await phases.enrich_one(lead(["https://www.linkedin.com/jobs/1"], company="Nametag"), deps,
+                                     phases.Budget(left=9))
+    assert update["source"] == "greenhouse"
+    company, title = deps.ats_find.await_args.args
+    assert (company, title) == ("Nametag", "Chief Operating Officer")
+
+    # One lead spends at most LEAD_FETCHES, however many guesses it could make.
+    budget = phases.Budget(left=50)
+
+    async def greedy(_company, _title, *, take):
+        while take():
+            pass
+    deps = phases.Deps(ats_fetch=AsyncMock(), page_fetch=AsyncMock(), ats_find=AsyncMock(side_effect=greedy))
+    assert await phases.enrich_one(lead([], company="Acme"), deps, budget) is None
+    assert budget.used == phases.LEAD_FETCHES and not budget.exhausted
+
+    # No budget at all: not tried, so it stays unread for a later batch.
+    budget = phases.Budget(left=0)
+    deps = phases.Deps(ats_fetch=AsyncMock(), page_fetch=AsyncMock(), ats_find=AsyncMock(side_effect=greedy))
+    assert await phases.enrich_one(lead([], company="Acme"), deps, budget) is phases.NOT_TRIED
+    budget = phases.Budget(left=0)
+    assert await phases.enrich_one(lead(["https://delta.test/coo"]), deps, budget) is phases.NOT_TRIED
+
+
 @pytest.mark.asyncio
 async def test_enrich_phase_batches_then_ranks(conn, monkeypatch):
     rerank = AsyncMock(return_value=2)
@@ -246,7 +315,8 @@ async def test_enrich_phase_batches_then_ranks(conn, monkeypatch):
     assert out.status == "enriching"  # more to read
     saves = conn.ran("enriched_at = NOW()")
     assert len(saves) == 2 and all(s[2][2] == TOKEN for s in saves)
-    assert conn.ran("SET fetch_calls = cur.before")[0][2] == (SEARCH, 4, phases.MAX_FETCHES)
+    assert conn.ran("SET fetch_calls = cur.before")[0][2] == (SEARCH, 2 * phases.LEAD_FETCHES,
+                                                           phases.MAX_FETCHES)
     assert conn.ran("SET fetch_calls = GREATEST(fetch_calls - $2, 0)")[0][2] == (SEARCH, 3)
     rerank.assert_not_awaited()
 

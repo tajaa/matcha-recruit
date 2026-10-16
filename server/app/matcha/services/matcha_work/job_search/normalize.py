@@ -71,6 +71,62 @@ def same_posting(a_title: str, a_company: str, b_title: str, b_company: str) -> 
     return bool(name_words(a_company) & name_words(b_company))
 
 
+# Title abbreviations, spelled out so "VP of Ops" and "Vice President,
+# Operations" are the same title.
+_TITLE_ABBREVIATIONS = {
+    "vp": "vice president", "svp": "senior vice president", "evp": "executive vice president",
+    "avp": "assistant vice president", "coo": "chief operating officer", "ceo": "chief executive officer",
+    "cfo": "chief financial officer", "cto": "chief technology officer", "cmo": "chief marketing officer",
+    "cro": "chief revenue officer", "cpo": "chief product officer", "ops": "operations", "sr": "senior",
+    "jr": "junior", "mgr": "manager", "dir": "director", "gm": "general manager",
+}
+# Words a board adds around a title without changing the job.
+_TITLE_FILLER = {"of", "and", "the", "for", "a", "an", "to", "at", "in", "remote", "hybrid", "onsite", "on",
+                 "site", "full", "part", "time", "us", "usa"}
+# Employer names that hide the employer.
+_UNNAMED_EMPLOYERS = {"confidential", "undisclosed", "stealth", "anonymous"}
+
+
+def title_words(title: str) -> set[str]:
+    words: list[str] = []
+    for word in _words(title):
+        words += _TITLE_ABBREVIATIONS.get(word, word).split()
+    return {w for w in words if w not in _TITLE_FILLER}
+
+
+def same_title(a: str, b: str) -> bool:
+    """Whether two titles name the same job. Abbreviations are spelled out and
+    one side may add a little (a city, a team): "COO - Austin" is "Chief
+    Operating Officer", but "Operations Associate / Head of Operations" is not
+    "Founding COO / Head of Operations"."""
+    x, y = title_words(a), title_words(b)
+    if not x or not y:
+        return False
+    both = len(x & y)
+    return x == y or (both / len(x) >= 0.75 and both / len(y) >= 0.6)
+
+
+def named_employer(company: str) -> str:
+    """The employer's name run together for comparing ("BMW Group" -> bmw), or
+    "" when the listing hides it ("Confidential")."""
+    words = [w for w in company_key(company).split() if w not in _UNNAMED_EMPLOYERS]
+    return "".join(w for w in words if w not in _GENERIC_NAME_WORDS) or "".join(words)
+
+
+def same_employer(company: str, other: str) -> bool | None:
+    """Whether `other` (an ATS board's name for itself, "hellobackpack", or a
+    page's hiring organization) is `company`'s employer: it contains one of
+    the name's distinctive words, or the whole short name. None when either
+    side names nobody, so there is nothing to compare."""
+    there = "".join(_words(other))
+    if not there or not named_employer(company):
+        return None
+    words = name_words(company) - _UNNAMED_EMPLOYERS
+    if words:
+        return any(w in there for w in words)
+    return named_employer(company) in there
+
+
 def state_of(location: str) -> str | None:
     """A two-letter US state code from "Austin, TX", "Austin, Texas" or "Texas"."""
     if not location:

@@ -19,7 +19,7 @@ costs 5 units of Pro's 60 / Business's 150, so 12 searches with nothing else;
 | Piece | File | What it owns |
 |---|---|---|
 | Listings | `providers.py` | Google Jobs via SearchAPI (`SEARCH_API_KEY`) or SerpApi (`SERP_API_KEY`). Only query + location leave the server |
-| ATS | `ats.py` | Greenhouse / Lever / Ashby detection from apply links, their public APIs, application questions |
+| ATS | `ats.py` | Greenhouse / Lever / Ashby detection from apply links, their public APIs, application questions; `find_on_board`, the employer's own board found by name |
 | Pay | `comp.py` (pure) | Text scanning, structured mappers, `combine`, claim checks (`verify_quote`, `numbers_supported`) |
 | Ranking | `ranking.py` (pure) | Weighted score inside bands; `comp_line` |
 | Helpers | `normalize.py` (pure) | Dedupe key, state, remote, URL checks, posted age |
@@ -39,6 +39,15 @@ Worker: `workers/tasks/job_search.py`. Migration: `mwjobs01`
 
 ## Invariants
 
+- **A posting is the lead's only when it is the same job.** Google Jobs lists
+  other employers' jobs among a posting's apply links. In a 2026-10-15 dev audit
+  of 116 leads, 6 of the 60 postings enrich read belonged to another job. One
+  was Flex shown at Headway's $230–300K, when Flex's own posting says
+  $320–400K. So every read must pass `normalize.same_title`, which spells out
+  abbreviations, so COO equals Chief Operating Officer. Wherever the source
+  names an employer, it must also pass `normalize.same_employer`: Greenhouse's
+  `company_name`, an ATS board's name, or a page's hiring organization. A
+  posting that fails is passed over and the next link tried, never kept.
 - **No pay figure without evidence.** Every base/bonus/equity value carries
   `evidence {quote, origin, url}`. From text, the quote is a slice of the text
   it came from; from a structured field (Lever `salaryRange`, Greenhouse pay
@@ -76,6 +85,8 @@ Worker: `workers/tasks/job_search.py`. Migration: `mwjobs01`
   keeps a blanked row for that reason. Re-ranking never counts.
 - **The server chooses where it connects.** ATS API URLs are built from tokens
   matched by strict patterns, on fixed hosts, through `safe_fetch.fetch_public`.
+  The tokens come from an apply link, or from a board name guessed from the
+  employer's name (`ats.board_names`).
   Company pages go through the same fetcher; aggregators (LinkedIn, Indeed, …)
   are skipped, not scraped.
 
@@ -115,8 +126,8 @@ replacing `JOB_CHAIN` (`dataclasses.replace(..., dispatch=...)`).
   (main-worker start, next to the sales reconcile) give an idle live search a
   new token and dispatch it. Celery does not redeliver a killed task.
 
-Budgets per search, across retries: 30 provider calls, 120 leads, 60 page/API
-fetches. Calls are reserved on the search row before they are made
+Budgets per search, across retries: 30 provider calls, 120 leads, 240 page/API
+fetches (`MAX_FETCHES`), at most `LEAD_FETCHES` (10) for one lead. Calls are reserved on the search row before they are made
 (`phases.grant` → `chain.grant`, one statement under a row lock) and only the unused part is
 given back (`refund`). A task killed mid-phase gives nothing back, so a retry
 works from what is left: it can never buy a second budget. A lead the budget
@@ -129,7 +140,7 @@ ran out before is left unread (`NOT_TRIED`), not marked read.
 | `queued` → `planning` | `model_phases.plan` | Model: queries (≤8), titles, deal-breakers, profile summary, weights (applied only while `weights_source='default'`). Falls back to `plan_from_criteria`; what the person typed is always searched. Google's `location` only takes Google place names, so a city goes in the query text |
 | `discovering` | `discover` | Up to 3 pages per query, 3 at a time; dedupe on company + title + city; exclusions and remote preference applied |
 | `screening` | `model_phases.screen` | Model, batches of 40 by short id (J1…): relevant, fit 0-5, reasons, deal-breaker. A failed batch stays in (unranked fit) |
-| `enriching` | `enrich` | Batches of 24: ATS API first, then the company page's JSON-LD `JobPosting` (a careers page that redirects into an ATS reads the ATS). Then `service.rerank` and the top 8 are queued (`phase_cursor.approach_queue`) |
+| `enriching` | `enrich` | Batches of 24. Reads up to 2 ATS links (via the API), then up to 2 company pages (their JSON-LD `JobPosting`); a careers page that redirects into an ATS is read as that ATS. Only the lead's own job counts, see Invariants. If no link is it, `ats.find_on_board` looks the title up on the employer's Greenhouse, Lever and Ashby boards, by name. Then `service.rerank` and the top 8 are queued (`phase_cursor.approach_queue`) |
 | `approaching` | `model_phases.approach` | Model with web search + `fetch_page`, 2 jobs per task. A failed batch is `approach_status='failed'`; the person can redraft |
 | `done` / `failed` / `cancelled` | | |
 
