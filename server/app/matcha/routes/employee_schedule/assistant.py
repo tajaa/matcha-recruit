@@ -79,7 +79,7 @@ async def create_schedule_assistant_session(
         anthropic_configured=anthropic_messages.anthropic_configured(),
     )
     session["default_model"] = (
-        await anthropic_messages.claude_override(agent_surfaces.MATCHA_SCHEDULING) or LUNA
+        await anthropic_messages.claude_default(agent_surfaces.MATCHA_SCHEDULING) or LUNA
     )
     return session
 

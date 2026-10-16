@@ -141,12 +141,9 @@ async def test_the_row_stores_the_model_the_run_will_use(wired, monkeypatch):
 
     await enqueue.enqueue_assistant_run(**_kwargs(_user()), skip_preflight=True, model="claude-sonnet-5-5")
     assert stored() == "claude-sonnet-5-5"
-    # An explicit Luna pick wins over an admin setting that routes to Claude.
+    # No pick, or one this server does not offer (Luna, once Claude is configured): the admin's model.
     override.return_value = "claude-haiku-5-5"
-    await enqueue.enqueue_assistant_run(**_kwargs(_user()), skip_preflight=True, model="gpt-5.6-luna")
-    assert stored() == "gpt-5.6-luna"
-    # No pick, or one this server does not offer: the admin's model.
-    for pick in (None, "gpt-4o", ""):
+    for pick in (None, "gpt-4o", "", "gpt-5.6-luna"):
         await enqueue.enqueue_assistant_run(**_kwargs(_user()), skip_preflight=True, model=pick)
         assert stored() == "claude-haiku-5-5"
     # Without an Anthropic key only Luna is offered, whatever was picked.

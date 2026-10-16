@@ -94,6 +94,18 @@ async def claude_override(surface: str) -> Optional[str]:
     return choice if choice in CLAUDE_MODELS else None
 
 
+async def claude_default(surface: str) -> Optional[str]:
+    """For a surface whose built-in provider was OpenAI Luna: the Claude model
+    the setting routes it to, else Claude Haiku whenever this server has an
+    Anthropic key. None, which sends the caller down its Luna path, only on a
+    server with no Anthropic key: we run on Claude, and Luna is the safety net.
+
+    Surfaces whose built-in is Gemini (voice, Google-grounded research) keep
+    `claude_override`, where "default" still means Gemini.
+    """
+    return await claude_override(surface) or (CLAUDE_HAIKU if anthropic_configured() else None)
+
+
 def image_block(data: bytes, mime_type: str | None) -> dict[str, Any] | None:
     """Image bytes as a Messages block, or None for a type Messages rejects."""
     mime = (mime_type or "").lower()

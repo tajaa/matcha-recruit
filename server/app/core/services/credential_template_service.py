@@ -51,7 +51,7 @@ async def _text_model() -> tuple[str, str] | None:
     key lives in the shared Anthropic client, so `api_key` is empty); else the
     configured Luna key and model, or None when neither is available.
     """
-    claude_model = await anthropic_messages.claude_override(agent_surfaces.MATCHA_CREDENTIALS)
+    claude_model = await anthropic_messages.claude_default(agent_surfaces.MATCHA_CREDENTIALS)
     if claude_model:
         return "", claude_model
     return _luna_credentials()

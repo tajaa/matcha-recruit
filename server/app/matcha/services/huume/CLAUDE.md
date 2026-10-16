@@ -158,7 +158,12 @@ that isn't there, or if a row is never used. Until the map is first saved, the l
 `agent_model` row seeds the Matcha and Espresso defaults, so the split changed nothing on deploy.
 
 One function decides: `core/services/anthropic_messages.claude_override(surface)` (never raises — no
-key, an unreadable setting or a non-Claude value all mean "default"). Matcha's products: Huume
+key, an unreadable setting or a non-Claude value all mean "default"). **We run on Claude, not Luna:**
+a surface whose built-in was OpenAI Luna (Huume, Scheduler's Huume, Credentials, agent cards,
+projects, task drafts, Sym-chat, inventory insight/waste, the Espresso assistant, Job search, Tasks)
+calls `claude_default(surface)` instead, which turns "default" into Claude Haiku whenever the
+server has an Anthropic key; Luna runs only on a server with no key. Surfaces whose built-in is
+Gemini keep `claude_override`. Matcha's products: Huume
 (`matcha.huume`), Scheduler (Schedule Pilot, channel shift edits, state rule extraction), IR,
 Handbooks, Ops channels (classify + the ask loop), Inventory, Sym-link, Credentials, and Matcha Work
 chat / agent cards / projects / Sym-chat. Espresso's: Chat (the personal picker follows it, web and
@@ -166,15 +171,17 @@ Mac), Purchase agent (agent cards), Assistant, Projects. Matcha Work and Espress
 so those call sites pick `matcha.work_*` or `espresso.*` per account
 (`matcha_work/app_surface.work_surface`, from `companies.is_personal`). Voice dictation, ER and
 Google-Search-grounded research stay on Gemini. Callers import the MODULE and call through it so
-tests patch `anthropic_messages.claude_override`; `tests/conftest.py` blanks `ANTHROPIC_API_KEY` so
-no test reaches the setting unless it opts in.
+tests patch `anthropic_messages.claude_override`; `tests/conftest.py` blanks `ANTHROPIC_API_KEY`,
+`OPENAI_API_KEY` and `OPENAI_API_1` so no test reaches the setting or a provider unless it opts in
+(until 2026-10-16 a full run made 9 real Luna calls through HRIS sync's job-title classification).
 
-**Schedule panel:** its dropdown (**Luna**, **Claude Haiku 5.5**, **Claude Sonnet 5.5**) overrides
-the platform setting per turn. The registry is `routing.SCHEDULE_MODEL_CHOICES`; the client sends
+**Schedule panel:** its dropdown (**Claude Haiku 5.5**, **Claude Sonnet 5.5**; **Luna** alone on a
+server with no Anthropic key, `routing.schedule_choices`) overrides the platform setting per turn. The registry is `routing.SCHEDULE_MODEL_CHOICES`; the client sends
 the id as `SendMessageRequest.huume_model` (a `Literal` kept in step by
 `tests/huume/test_schedule_model_picker.py`), `turn_pipeline` puts it on `HuumeSurfaceContext.model`,
-and `agent.run_huume_turn` resolves explicit pick → platform setting → Luna. The pick is honored on
-the schedule surface only. The session endpoint returns `default_model` (the platform choice) so a
+and `agent.run_huume_turn` resolves explicit pick (only one this server offers,
+`routing.honored_pick`, so a manager's remembered Luna is dropped) → platform setting → Haiku. The
+pick is honored on the schedule surface only. The session endpoint returns `default_model` (the platform choice) so a
 manager who never picked starts there.
 
 - `claude_client.ClaudeSession` is the Anthropic SDK twin of `LunaSession`: same

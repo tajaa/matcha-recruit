@@ -30,14 +30,14 @@ SearchProgress = NoteProgress
 
 
 async def default_model() -> str:
-    """The model a new search uses: the admin's choice for Job search, else Luna."""
-    return await anthropic_messages.claude_override(agent_surfaces.ESPRESSO_JOB_SEARCH) or LUNA
+    """The model a new search uses: the admin's choice for Job search, else Claude Haiku."""
+    return await anthropic_messages.claude_default(agent_surfaces.ESPRESSO_JOB_SEARCH) or LUNA
 
 
 def model_for(search: dict) -> str:
     """The search's model, if this server still offers it."""
     model = search.get("model")
-    return model if model in models.offered() else LUNA
+    return model if model in models.offered() else models.fallback()
 
 
 async def _count_run(search_id: UUID, stats: dict) -> None:

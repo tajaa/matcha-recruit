@@ -36,6 +36,11 @@ from types import ModuleType
 # carries a real key (load_dotenv never overrides an existing variable), so
 # blank it here: no test reaches the setting or Anthropic unless it opts in.
 os.environ["ANTHROPIC_API_KEY"] = ""
+# Same for OpenAI: with the real key loaded by an earlier test, HRIS sync's
+# job-title classification made real Luna calls in a full run (9 a run, each
+# logged to the dev database's ai_usage_log).
+os.environ["OPENAI_API_KEY"] = ""
+os.environ["OPENAI_API_1"] = ""
 
 
 class _Permissive:

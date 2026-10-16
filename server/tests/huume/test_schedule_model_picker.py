@@ -46,8 +46,17 @@ def test_claude_is_only_offered_with_a_key():
     without = routing.schedule_model_options(anthropic_configured=False)
     assert [m["id"] for m in without] == [routing.LUNA]
     with_key = routing.schedule_model_options(anthropic_configured=True)
-    assert [m["id"] for m in with_key] == [routing.LUNA, routing.CLAUDE_HAIKU, routing.CLAUDE_SONNET]
-    assert with_key[1]["label"] == "Claude Haiku 5.5"
+    # With a key, Claude only: Luna is the no-key safety net, never a choice.
+    assert [m["id"] for m in with_key] == [routing.CLAUDE_HAIKU, routing.CLAUDE_SONNET]
+    assert with_key[0]["label"] == "Claude Haiku 5.5"
+
+
+def test_a_pick_counts_only_when_this_server_offers_it():
+    assert routing.honored_pick(routing.CLAUDE_SONNET, anthropic_configured=True) == routing.CLAUDE_SONNET
+    assert routing.honored_pick(routing.LUNA, anthropic_configured=True) is None
+    assert routing.honored_pick(routing.CLAUDE_HAIKU, anthropic_configured=False) is None
+    assert routing.honored_pick(routing.LUNA, anthropic_configured=False) == routing.LUNA
+    assert routing.honored_pick(None, anthropic_configured=True) is None
 
 
 def test_rate_limiter_has_an_anthropic_bucket(monkeypatch):
@@ -346,6 +355,7 @@ async def _run(monkeypatch, surface_context):
 
 @pytest.mark.asyncio
 async def test_schedule_turn_runs_on_the_picked_claude_model(monkeypatch):
+    monkeypatch.setattr(anthropic_messages, "anthropic_configured", lambda: True)
     result, luna, claude = await _run(monkeypatch, _schedule_context(routing.CLAUDE_SONNET))
     luna.create_response.assert_not_awaited()
     assert claude.create_response.await_args.kwargs["model"] == routing.CLAUDE_SONNET
@@ -355,7 +365,7 @@ async def test_schedule_turn_runs_on_the_picked_claude_model(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_default_schedule_turn_stays_on_luna(monkeypatch):
+async def test_without_an_anthropic_key_a_schedule_turn_runs_on_luna(monkeypatch):
     result, luna, claude = await _run(monkeypatch, _schedule_context(None))
     claude.create_response.assert_not_awaited()
     assert luna.create_response.await_args.kwargs["model"] == routing.LUNA
@@ -375,7 +385,7 @@ async def test_picker_is_ignored_off_the_schedule_surface(monkeypatch):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("key, ids", [
     (None, [routing.LUNA]),
-    ("sk-test", [routing.LUNA, routing.CLAUDE_HAIKU, routing.CLAUDE_SONNET]),
+    ("sk-test", [routing.CLAUDE_HAIKU, routing.CLAUDE_SONNET]),
 ])
 async def test_session_endpoint_lists_available_models(monkeypatch, key, ids):
     from app.matcha.routes.employee_schedule import assistant as route
@@ -405,12 +415,27 @@ async def test_platform_setting_routes_every_surface_to_claude(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_a_schedule_pick_beats_the_platform_setting(monkeypatch):
+    monkeypatch.setattr(anthropic_messages, "anthropic_configured", lambda: True)
     override = AsyncMock(return_value=routing.CLAUDE_SONNET)
     monkeypatch.setattr(anthropic_messages, "claude_override", override)
-    _result, luna, claude = await _run(monkeypatch, _schedule_context(routing.LUNA))
-    claude.create_response.assert_not_awaited()
-    luna.create_response.assert_awaited()
+    _result, luna, claude = await _run(monkeypatch, _schedule_context(routing.CLAUDE_HAIKU))
+    luna.create_response.assert_not_awaited()
+    assert claude.create_response.await_args.kwargs["model"] == routing.CLAUDE_HAIKU
     override.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_stale_luna_pick_runs_claude_haiku_once_claude_is_configured(monkeypatch):
+    # A manager's browser still holds "gpt-5.6-luna" from the old dropdown, and
+    # the admin setting says "default": the turn runs Haiku, not Luna.
+    monkeypatch.setattr(anthropic_messages, "anthropic_configured", lambda: True)
+    override = AsyncMock(return_value=None)
+    monkeypatch.setattr(anthropic_messages, "claude_override", override)
+    result, luna, claude = await _run(monkeypatch, _schedule_context(routing.LUNA))
+    luna.create_response.assert_not_awaited()
+    assert claude.create_response.await_args.kwargs["model"] == routing.CLAUDE_HAIKU
+    assert result["token_usage"]["model"] == routing.CLAUDE_HAIKU
+    override.assert_awaited_once_with(agent_surfaces.MATCHA_SCHEDULING)
 
 
 @pytest.mark.asyncio

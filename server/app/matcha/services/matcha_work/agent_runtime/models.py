@@ -4,8 +4,8 @@ Espresso's assistant menu sends a pick with each message (`assistant_model` on
 the socket frame). `resolve` keeps it only when this server offers it, so a
 stale or hand-written value runs the default instead of failing. The default
 is what Admin → Settings → *AI models* routes `espresso.assistant` to, else
-OpenAI Luna. An explicit pick wins over that setting, as the thread chat's
-Claude pick does.
+Claude Haiku (OpenAI Luna only on a server with no Anthropic key). An explicit
+pick wins over that setting, as the thread chat's Claude pick does.
 
 No plan check here: Sonnet's gate (`ai_model_pro`) and the assistant's own
 (`assistant`) are both Pro and up, so anyone who can run the assistant may
@@ -25,14 +25,20 @@ LABELS: dict[str, str] = {
 
 
 def offered() -> tuple[str, ...]:
-    """The models a run can use on this server, in menu order."""
+    """The models a run can use on this server, in menu order: Claude with an
+    Anthropic key; OpenAI Luna only on a server without one (the safety net)."""
     if anthropic_messages.anthropic_configured():
-        return (LUNA, *CLAUDE_MODELS)
+        return tuple(CLAUDE_MODELS)
     return (LUNA,)
 
 
+def fallback() -> str:
+    """What a run whose model is no longer offered uses: Haiku with a key, else Luna."""
+    return offered()[0]
+
+
 async def default_model() -> str:
-    return await anthropic_messages.claude_override(agent_surfaces.ESPRESSO_ASSISTANT) or LUNA
+    return await anthropic_messages.claude_default(agent_surfaces.ESPRESSO_ASSISTANT) or LUNA
 
 
 async def picker() -> tuple[list[dict], str]:

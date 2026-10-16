@@ -82,7 +82,7 @@ async def run_repo_question(
     started = time.monotonic()
     # Luna unless the admin "AI models" setting routes projects to Claude
     # (Matcha Work for a business account, Espresso for a personal one).
-    claude_model = await anthropic_messages.claude_override(await work_surface(company_id, "projects"))
+    claude_model = await anthropic_messages.claude_default(await work_surface(company_id, "projects"))
     model = claude_model or LUNA
     client = get_claude_client() if claude_model else get_luna_client()
     if claude_model:

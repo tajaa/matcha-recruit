@@ -152,11 +152,11 @@ async def test_create_notification_can_use_the_callers_connection(monkeypatch):
 async def test_a_tasks_model_runs_are_its_own(monkeypatch):
     from app.matcha.services.matcha_work.agent_runtime import models, phase_run
 
-    monkeypatch.setattr(models, "offered", lambda: {"luna", "claude-x"})
+    monkeypatch.setattr(models, "offered", lambda: ("claude-x", "luna"))
     owner = model_run.run_owner(task_row(model="claude-x"))
     assert (owner.kind, owner.fk_column, owner.surface) == ("agent_task", "agent_task_id", "agent_task")
     assert owner.usage_feature == "matcha.espresso.tasks.research" and owner.model == "claude-x"
-    assert model_run.model_for({"model": "gone"}) == model_run.LUNA
+    assert model_run.model_for({"model": "gone"}) == "claude-x"  # the server's first offered model
     conn = FakeConn()
     monkeypatch.setattr(model_run, "connection_or_direct", connection(conn))
     await owner.account({"token_usage": {"total_tokens": 40}})

@@ -135,7 +135,7 @@ async def run_card_agent(
 
     # Luna unless the admin "AI models" setting routes agent cards to Claude
     # (Matcha Work for a business account, Espresso's purchase agent for a personal one).
-    claude_model = await anthropic_messages.claude_override(await work_surface(company_id, "agent_cards"))
+    claude_model = await anthropic_messages.claude_default(await work_surface(company_id, "agent_cards"))
     if claude_model:
         await store.set_run_model(run_id, claude_model)
     ctx = RunContext(

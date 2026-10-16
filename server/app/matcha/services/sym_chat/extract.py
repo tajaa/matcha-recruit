@@ -249,7 +249,7 @@ async def _call_luna(prompt: str) -> dict:
     When the admin "AI models" setting routes agent workloads to Claude,
     the same prompt goes to that model instead, with the same contract.
     """
-    claude_model = await anthropic_messages.claude_override(agent_surfaces.MATCHA_SYM_CHAT)
+    claude_model = await anthropic_messages.claude_default(agent_surfaces.MATCHA_SYM_CHAT)
     if claude_model:
         with feature_scope("sym_chat"):
             text = await anthropic_messages.generate_text(

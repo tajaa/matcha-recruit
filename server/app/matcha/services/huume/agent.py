@@ -821,14 +821,18 @@ async def run_huume_turn(
         surface_context = HuumeSurfaceContext()
     allowed_tool_names = surface_context.allowed_tools
 
-    # The schedule panel's own pick wins; otherwise the admin "AI models"
-    # setting for this surface decides (Scheduler on the schedule panel,
-    # Huume everywhere else; Luna unless routed to Claude). The per-turn pick
-    # is a schedule-surface feature only; anywhere else the field is ignored.
-    explicit_model = surface_context.model if surface_context.is_schedule else None
+    # The schedule panel's own pick wins when this server offers it; otherwise
+    # the admin "AI models" setting for this surface decides (Scheduler on the
+    # schedule panel, Huume everywhere else), Claude Haiku when it says
+    # "default". Luna runs only on a server with no Anthropic key. The per-turn
+    # pick is a schedule-surface feature only; anywhere else it is ignored.
+    explicit_model = (
+        routing.honored_pick(surface_context.model, anthropic_configured=anthropic_messages.anthropic_configured())
+        if surface_context.is_schedule else None
+    )
     surface_key = agent_surfaces.MATCHA_SCHEDULING if surface_context.is_schedule else agent_surfaces.MATCHA_HUUME
     model_choice = routing.resolve_model_choice(
-        explicit_model or await anthropic_messages.claude_override(surface_key)
+        explicit_model or await anthropic_messages.claude_default(surface_key)
     )
     # Each provider counts in its own bucket. Sharing Gemini's meant Huume
     # turns spent the Gemini allowance and a Gemini-heavy sweep could 429 a

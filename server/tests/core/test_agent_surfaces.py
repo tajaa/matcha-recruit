@@ -74,8 +74,31 @@ def test_registry_payload_lists_every_app_and_its_rows_in_order():
 # --- Call sites ------------------------------------------------------------------
 
 def test_every_claude_override_call_names_a_surface():
-    bare = [_rel(p) for p, call in _calls("claude_override") if not call.args and not call.keywords]
-    assert bare == [], f"claude_override() with no surface: {bare}"
+    calls = [*_calls("claude_override"), *_calls("claude_default")]
+    bare = [_rel(p) for p, call in calls if not call.args and not call.keywords]
+    assert bare == [], f"claude_override()/claude_default() with no surface: {bare}"
+
+
+@pytest.mark.asyncio
+async def test_claude_default_is_haiku_with_a_key_and_none_without(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from app.core.services import anthropic_messages as am
+
+    override = AsyncMock(return_value=None)
+    monkeypatch.setattr(am, "claude_override", override)
+    monkeypatch.setattr(am, "anthropic_configured", lambda: True)
+    assert await am.claude_default(reg.ESPRESSO_TASKS) == am.CLAUDE_HAIKU
+    override.return_value = am.CLAUDE_SONNET
+    assert await am.claude_default(reg.ESPRESSO_TASKS) == am.CLAUDE_SONNET
+    override.return_value = None
+    monkeypatch.setattr(am, "anthropic_configured", lambda: False)
+    assert await am.claude_default(reg.ESPRESSO_TASKS) is None  # the caller's Luna path
+    override.assert_awaited_with(reg.ESPRESSO_TASKS)
+
+
+def test_no_surface_offers_luna_as_its_default():
+    assert not [s.key for s in reg.SURFACES if "Luna" in s.builtin]
 
 
 def test_every_routed_gemini_call_names_its_surface():

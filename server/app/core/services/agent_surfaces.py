@@ -4,7 +4,9 @@ Admin → Settings → *AI models* stores one choice per app (the app default)
 and one per surface (a product inside an app), in the `agent_models`
 platform setting. A surface set to `inherit` follows its app. A choice is
 `default` (the surface's built-in provider, `builtin` below) or a Claude
-model id. `anthropic_messages.claude_override(surface)` resolves it.
+model id. `anthropic_messages.claude_override(surface)` resolves it. A surface
+that ran on OpenAI Luna reads `claude_default` instead: its `default` is Claude
+Haiku, and Luna runs only on a server with no Anthropic key.
 
 This registry is the single list: the admin page renders it from the GET
 payload, the PUT validates against it, and `test_agent_surfaces` fails when a
@@ -90,16 +92,17 @@ GUMMFIT_BOOKING = "gummfit.booking"
 # ── Tell-Us ──
 TELLUS_FLYER_AI = "tellus.flyer_ai"
 
-_LUNA = "OpenAI Luna"
+# What `default` runs on the surfaces that were OpenAI Luna (`claude_default`).
+_HAIKU = "Claude Haiku 5.5"
 _GEMINI = "Gemini"
 
 SURFACES: tuple[SurfaceDef, ...] = (
-    SurfaceDef(MATCHA_HUUME, MATCHA, "Huume", "The Huume agent in Matcha Work threads.", _LUNA),
+    SurfaceDef(MATCHA_HUUME, MATCHA, "Huume", "The Huume agent in Matcha Work threads.", _HAIKU),
     SurfaceDef(
         MATCHA_SCHEDULING, MATCHA, "Scheduler",
         "Schedule Pilot's Huume (its own dropdown still wins per chat), shift edits asked for in "
         "Ops channels, and state schedule-rule extraction.",
-        f"{_LUNA} · {_GEMINI} for channel edits",
+        f"{_HAIKU} · {_GEMINI} for channel edits",
     ),
     SurfaceDef(
         MATCHA_IR, MATCHA, "Incidents (IR)",
@@ -114,12 +117,13 @@ SURFACES: tuple[SurfaceDef, ...] = (
         _GEMINI,
     ),
     SurfaceDef(MATCHA_OPS, MATCHA, "Ops channels", "@huume in channels: event logging and questions.",
-               f"{_GEMINI} · {_LUNA} for questions"),
+               f"{_GEMINI} · {_HAIKU} for questions"),
     SurfaceDef(MATCHA_INVENTORY, MATCHA, "Inventory",
-               "Stock updates from channels, receipt reading, forecast and waste insights.", _GEMINI),
+               "Stock updates from channels, receipt reading, forecast and waste insights.",
+               f"{_GEMINI} · {_HAIKU} for forecast and waste insights"),
     SurfaceDef(MATCHA_SYMLINK, MATCHA, "Sym-link", "The guided chat on a sym-link.", _GEMINI),
     SurfaceDef(MATCHA_CREDENTIALS, MATCHA, "Credentials",
-               "Credential requirement research and role classification.", _LUNA),
+               "Credential requirement research and role classification.", _HAIKU),
     SurfaceDef(
         MATCHA_WORK_CHAT, MATCHA, "Matcha Work chat",
         "Business thread chat. A Gemini pick in the chat picker runs this model; an explicit "
@@ -127,10 +131,10 @@ SURFACES: tuple[SurfaceDef, ...] = (
         f"{_GEMINI} (the picker)",
     ),
     SurfaceDef(MATCHA_WORK_AGENT_CARDS, MATCHA, "Matcha Work agent cards",
-               "Kanban agent cards: product research and the purchase flow.", _LUNA),
+               "Kanban agent cards: product research and the purchase flow.", _HAIKU),
     SurfaceDef(MATCHA_WORK_PROJECTS, MATCHA, "Matcha Work projects",
-               "@espresso repository questions and task drafts in business projects.", _LUNA),
-    SurfaceDef(MATCHA_SYM_CHAT, MATCHA, "Sym-chat", "Scheduling and decision micro-chats.", _LUNA),
+               "@espresso repository questions and task drafts in business projects.", _HAIKU),
+    SurfaceDef(MATCHA_SYM_CHAT, MATCHA, "Sym-chat", "Scheduling and decision micro-chats.", _HAIKU),
     SurfaceDef(
         ESPRESSO_CHAT, ESPRESSO, "Chat",
         "Personal thread chat, on web and the Mac app. A Gemini pick in the chat picker runs this "
@@ -138,17 +142,17 @@ SURFACES: tuple[SurfaceDef, ...] = (
         f"{_GEMINI} (the picker)",
     ),
     SurfaceDef(ESPRESSO_AGENT_CARDS, ESPRESSO, "Purchase agent",
-               "Agent cards: finding the product. The purchase itself uses no AI.", _LUNA),
+               "Agent cards: finding the product. The purchase itself uses no AI.", _HAIKU),
     SurfaceDef(ESPRESSO_ASSISTANT, ESPRESSO, "Assistant",
-               "The assistant you start from chat: flights, browsing, purchases.", _LUNA),
+               "The assistant you start from chat: flights, browsing, purchases.", _HAIKU),
     SurfaceDef(ESPRESSO_PROJECTS, ESPRESSO, "Projects",
-               "@espresso repository questions and task drafts in personal projects.", _LUNA),
+               "@espresso repository questions and task drafts in personal projects.", _HAIKU),
     SurfaceDef(ESPRESSO_JOB_SEARCH, ESPRESSO, "Job search",
                "Planning the search, screening jobs and drafting how to approach each one. "
-               "Applies to searches started after the change.", _LUNA),
+               "Applies to searches started after the change.", _HAIKU),
     SurfaceDef(ESPRESSO_TASKS, ESPRESSO, "Tasks",
                "Background tasks: planning the research, finding and screening what fits, and the "
-               "summary. Applies to tasks started after the change.", _LUNA),
+               "summary. Applies to tasks started after the change.", _HAIKU),
     SurfaceDef(
         GUMMFIT_MERLIN, GUMMFIT, "Merlin (single-step edits)",
         "Every Lite turn and other one-shot edits. The tier still sets how hard it thinks "

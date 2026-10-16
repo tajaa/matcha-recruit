@@ -38,7 +38,7 @@ async def _narrate_with_luna(*, question: str, sources: dict) -> Optional[str]:
         f"Question: {question[:1000]}\n\n"
         f"Tool results: {json.dumps(sources, default=str, separators=(',', ':'))}"
     )
-    claude_model = await anthropic_messages.claude_override(agent_surfaces.MATCHA_INVENTORY)
+    claude_model = await anthropic_messages.claude_default(agent_surfaces.MATCHA_INVENTORY)
     if claude_model:
         try:
             text = await anthropic_messages.generate_text(

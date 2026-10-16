@@ -30,9 +30,10 @@ from .tools import TOOLS, HuumeTool
 # canonical, auditable model id.
 LUNA = "gpt-5.6-luna"
 
-# The schedule assistant's model picker. Luna stays the default everywhere;
-# the schedule panel may opt a turn into Claude instead. Ids are the exact
-# provider model ids, and they are what the client sends as `huume_model`.
+# The schedule assistant's model picker. Ids are the exact provider model ids,
+# and they are what the client sends as `huume_model`. A server with an
+# Anthropic key offers Claude only; Luna is offered (and run) only on a server
+# without one.
 from app.core.services.anthropic_messages import CLAUDE_HAIKU, CLAUDE_SONNET  # noqa: E402
 
 
@@ -56,15 +57,25 @@ def resolve_model_choice(model: Optional[str]) -> HuumeModelChoice:
     return _CHOICES_BY_ID.get(model or "", _CHOICES_BY_ID[LUNA])
 
 
+def schedule_choices(*, anthropic_configured: bool) -> tuple[HuumeModelChoice, ...]:
+    """The picker's entries on this server: Claude with an Anthropic key, Luna
+    only without one, so it never offers a model every turn would fail on."""
+    return tuple(c for c in SCHEDULE_MODEL_CHOICES if (c.provider == "anthropic") == anthropic_configured)
+
+
 def schedule_model_options(*, anthropic_configured: bool) -> list[dict[str, Any]]:
-    """What the schedule panel's dropdown offers. Claude entries are listed
-    only when an Anthropic key is configured, so the picker can never offer a
-    model every turn would fail on."""
+    """What the schedule panel's dropdown offers (`schedule_choices`)."""
     return [
         {"id": choice.id, "label": choice.label, "provider": choice.provider}
-        for choice in SCHEDULE_MODEL_CHOICES
-        if choice.provider != "anthropic" or anthropic_configured
+        for choice in schedule_choices(anthropic_configured=anthropic_configured)
     ]
+
+
+def honored_pick(model: Optional[str], *, anthropic_configured: bool) -> Optional[str]:
+    """A panel pick this server still offers, else None (the surface default).
+    A manager's stored Luna pick is dropped once Claude is configured."""
+    offered = {c.id for c in schedule_choices(anthropic_configured=anthropic_configured)}
+    return model if model in offered else None
 
 
 @dataclass(frozen=True)

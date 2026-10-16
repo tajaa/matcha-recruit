@@ -145,7 +145,7 @@ Request:
     # the Claude model the admin "AI models" setting routes projects to
     # (Matcha Work or Espresso by `company_id`; none → Matcha Work). Both
     # sessions take the same call, JSON mode included.
-    claude_model = await anthropic_messages.claude_override(await work_surface(company_id, "projects"))
+    claude_model = await anthropic_messages.claude_default(await work_surface(company_id, "projects"))
     model = claude_model or LUNA
     client = get_claude_client() if claude_model else get_luna_client()
     with feature_scope(_AI_USAGE_FEATURE):

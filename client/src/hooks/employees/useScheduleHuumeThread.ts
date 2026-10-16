@@ -42,10 +42,12 @@ export function relativeChatTime(value: string, now = Date.now()): string {
   return days < 7 ? `${days}d ago` : new Date(at).toLocaleDateString()
 }
 
-/** Luna — what a turn runs on when nothing else was picked. */
-export const DEFAULT_SCHEDULE_HUUME_MODEL = 'gpt-5.6-luna'
+/** What a turn asks for until the session loads: Claude Haiku. The session's
+ *  own list and default (the admin "AI models" setting) replace it; a server
+ *  with no Anthropic key offers, and runs, Luna instead. */
+export const DEFAULT_SCHEDULE_HUUME_MODEL = 'claude-haiku-5-5'
 const MODEL_STORAGE_KEY = 'matcha.scheduleAssistant.model'
-const LUNA_ONLY: ScheduleHuumeModel[] = [{ id: DEFAULT_SCHEDULE_HUUME_MODEL, label: 'Luna', provider: 'openai' }]
+const HAIKU_ONLY: ScheduleHuumeModel[] = [{ id: DEFAULT_SCHEDULE_HUUME_MODEL, label: 'Claude Haiku 5.5', provider: 'anthropic' }]
 
 /** The manager's last pick — a per-browser convenience, so storage that is
  *  blocked or empty just means "no pick" (the server's default applies). */
@@ -178,13 +180,16 @@ export function useScheduleHuumeThread({ locationId, weekStart, selectedShifts, 
   const [sessionAttempt, setSessionAttempt] = useState(0)
   const [steps, setSteps] = useState<HuumeStep[]>([])
   const [busy, setBusy] = useState(false)
-  const [models, setModels] = useState<ScheduleHuumeModel[]>(LUNA_ONLY)
+  const [models, setModels] = useState<ScheduleHuumeModel[]>(HAIKU_ONLY)
   const [pickedModel, setPickedModel] = useState(readStoredModel)
   const [defaultModel, setDefaultModel] = useState(DEFAULT_SCHEDULE_HUUME_MODEL)
-  // The manager's pick, else the server's default (the platform "Agent model"
-  // setting). Anything the server no longer offers (no Anthropic key) is Luna.
+  // The manager's pick, else the server's default (the platform "AI models"
+  // setting). A pick the server no longer offers (a remembered Luna, once
+  // Claude is configured) falls to that default, else the first model offered.
   const offered = (id: string | null) => !!id && models.some((option) => option.id === id)
-  const model = offered(pickedModel) ? pickedModel as string : offered(defaultModel) ? defaultModel : DEFAULT_SCHEDULE_HUUME_MODEL
+  const model = offered(pickedModel)
+    ? pickedModel as string
+    : offered(defaultModel) ? defaultModel : models[0]?.id ?? DEFAULT_SCHEDULE_HUUME_MODEL
   const setModel = useCallback((next: string) => {
     setPickedModel(next)
     storeModel(next)
@@ -276,7 +281,7 @@ export function useScheduleHuumeThread({ locationId, weekStart, selectedShifts, 
         setSessionId(session.session_id)
         setMessages(session.messages)
         setCurrentState(session.current_state || {})
-        setModels(session.available_models?.length ? session.available_models : LUNA_ONLY)
+        setModels(session.available_models?.length ? session.available_models : HAIKU_ONLY)
         setDefaultModel(session.default_model || DEFAULT_SCHEDULE_HUUME_MODEL)
         setStatus('')
         refreshSessions()

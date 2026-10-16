@@ -23,14 +23,14 @@ USAGE_PREFIX = "matcha.espresso.tasks"
 
 
 async def default_model() -> str:
-    """The model a new task uses: the admin's choice for Tasks, else Luna."""
-    return await anthropic_messages.claude_override(agent_surfaces.ESPRESSO_TASKS) or LUNA
+    """The model a new task uses: the admin's choice for Tasks, else Claude Haiku."""
+    return await anthropic_messages.claude_default(agent_surfaces.ESPRESSO_TASKS) or LUNA
 
 
 def model_for(task: dict) -> str:
     """The task's model, if this server still offers it."""
     model = task.get("model")
-    return model if model in models.offered() else LUNA
+    return model if model in models.offered() else models.fallback()
 
 
 async def _count_run(task_id: UUID, stats: dict) -> None:

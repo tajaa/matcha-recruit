@@ -178,7 +178,7 @@ async def run_task_draft(
     started = time.monotonic()
     # Luna unless the admin "AI models" setting routes projects to Claude
     # (Matcha Work for a business account, Espresso for a personal one).
-    claude_model = await anthropic_messages.claude_override(await work_surface(company_id, "projects"))
+    claude_model = await anthropic_messages.claude_default(await work_surface(company_id, "projects"))
     client = get_claude_client() if claude_model else get_luna_client()
     files_read: set[str] = set()
     model_calls = 0
