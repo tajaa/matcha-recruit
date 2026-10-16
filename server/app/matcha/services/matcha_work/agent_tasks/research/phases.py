@@ -287,13 +287,16 @@ def interleave(lists: list[list]) -> list:
     return out
 
 
-def store_lookups(found: list[providers.ProviderItem], known: set[tuple[str, str]], limit: int) -> list[int]:
+def store_lookups(found: list[providers.ProviderItem], known: set[tuple[str, str]], limit: int,
+                  asks: Callable[[str], bool] = lambda _token: True) -> list[int]:
     """Which findings to ask the stores for, best first: on Google's page, with a
-    token, and new (not a name and seller the task has, or already picked)."""
+    token the provider still `asks` with, and new (not a name and seller the
+    task has, or already picked)."""
     picked, seen = [], set(known)
     for n, item in enumerate(found):
         name = (items_mod.title_key(item.title), items_mod.title_key(item.subtitle))
-        if not item.offers_token or not providers.is_google(item.url) or not name[0] or name in seen:
+        if (not item.offers_token or not asks(item.offers_token) or not providers.is_google(item.url)
+                or not name[0] or name in seen):
             continue
         seen.add(name)
         picked.append(n)
@@ -308,21 +311,25 @@ async def with_stores(task: dict, provider: Any, found: list[providers.ProviderI
     """Shopping findings at a store's own page, for as many as the budget and
     `limit` (at most `STORE_LOOKUPS` a round, never more than the task has room
     to keep) allow; the rest keep Google's link."""
-    picks = store_lookups(found, known, limit)
+    picks = store_lookups(found, known, limit, asks=lambda token: providers.asks(provider, token))
     if not picks:
         return found
     budget = Budget(left=await chain.grant(_chain(), task["id"], "provider_calls", len(picks),
                                            BUDGETS.provider_calls))
     gate = asyncio.Semaphore(QUERY_CONCURRENCY)
     out = list(found)
+    refused: list[providers.ProviderError] = []
 
     async def one(n: int) -> None:
-        if not budget.take():
-            return
         async with gate:
+            # Nothing more once every API refused for good (it may have while this one waited).
+            if refused or not budget.take():
+                return
             try:
                 out[n] = providers.with_store(found[n], await provider.stores(found[n].offers_token), today=today)
             except providers.ProviderError as exc:
+                if exc.fatal:
+                    refused.append(exc)
                 logger.info("research store lookup failed task=%s: %s", task["id"], exc)
 
     await asyncio.gather(*(one(n) for n in picks))
@@ -357,19 +364,17 @@ async def run_providers(task: dict, deps: Deps, guard: chain.Guard) -> PhaseOutc
 
         async def one(n: int, query: str, ll: str | None) -> None:
             async with gate:
-                # Nothing more once the API refused for good (it may have while this one waited).
+                # Nothing more once every API refused for good (it may have while this one waited).
                 if refused or not budget.take(cost):
                     return
                 try:
                     per_query[n] = await provider.search(source, query, page=page, **({"ll": ll} if ll else {}))
                 except providers.ProviderError as exc:
-                    if not exc.fatal:
-                        logger.info("research provider query failed task=%s: %s", task["id"], exc)
-                    elif not refused:
-                        # A refused key or no searches left: the web search still runs, but
-                        # someone has to fix the account, so it shows in Server Errors.
+                    if exc.fatal:
+                        # Every API refused for good (the provider logged it as an error):
+                        # the web search still runs, and no store is asked either.
                         refused.append(exc)
-                        logger.error("research listings refused task=%s: %s", task["id"], exc)
+                    logger.info("research provider query failed task=%s: %s", task["id"], exc)
 
         await guard.note("Searching Google Shopping…" if source == "shopping" else "Searching Google Maps…")
         await asyncio.gather(*(one(n, q, ll) for n, (q, ll) in enumerate(searches)))
@@ -380,8 +385,9 @@ async def run_providers(task: dict, deps: Deps, guard: chain.Guard) -> PhaseOutc
             if plan.get("item_kind") == "listing":
                 room = min(room, PROVIDER_BUILDINGS)
             # Paid lookups only for findings the task still has room to keep.
-            known = await items_mod.known_names(conn, task["id"]) if source == "shopping" and found and room else set()
-        if source == "shopping" and found and room:
+            look_up = source == "shopping" and bool(found) and room > 0 and not refused
+            known = await items_mod.known_names(conn, task["id"]) if look_up else set()
+        if look_up:
             found = await with_stores(task, provider, found, known, deps.today(), limit=min(STORE_LOOKUPS, room))
         async with connection_or_direct() as conn:
             added = await items_mod.insert_items(conn, task, guard.token, int(task["current_round"]),

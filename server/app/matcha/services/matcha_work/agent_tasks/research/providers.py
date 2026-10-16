@@ -12,9 +12,11 @@ place search uses), else from a search API as Shopping does. Google has no
 public API for Shopping results, so those come through SearchAPI
 (`SEARCH_API_KEY`) when set, else SerpApi (`SERP_API_KEY`), the same keys job
 search uses: both serve Google's results as JSON with nearly the same fields.
-`choose_provider(source)` picks. Only the query text (and, for an area, its
-map box) leaves the server. Every call counts against the round's provider
-budget (`chain.grant`).
+`choose_provider(source)` puts the ones with keys in order (`Listings`): one
+that refuses for good or is down is passed over for the next, by
+`search_apis`' rules, which job search follows too. Only the query text (and,
+for an area, its map box) leaves the server. Every call counts against the
+round's provider budget (`chain.grant`).
 
 A Shopping result links to Google's own product page, not a store's: neither
 provider gives the store's link in the results. A second call per product
@@ -31,31 +33,23 @@ import math
 import re
 from dataclasses import dataclass, field, replace
 from datetime import date
-from typing import Any, Awaitable, Callable
+from typing import Any, Callable
 from urllib.parse import parse_qsl, quote_plus, urlsplit
 
 import httpx
 
+from app.matcha.services.matcha_work import search_apis
 from app.matcha.services.matcha_work.agent_card.schema import normalize_url
-from app.matcha.services.matcha_work.job_search.providers import out_of_searches
+from app.matcha.services.matcha_work.search_apis import ProviderError, SleepFn
 
 from . import fields as F
 from .geo import point_of
 
 logger = logging.getLogger(__name__)
 
-TIMEOUT_SECONDS = 20.0
 MAX_RESULTS = 20
 MAX_STORES = 13
 KINDS = {"shopping": "product", "places": "place"}
-
-
-class ProviderError(Exception):
-    """A search that could not be done. `fatal` when retrying cannot help."""
-
-    def __init__(self, message: str, *, fatal: bool = False):
-        super().__init__(message)
-        self.fatal = fatal
 
 
 @dataclass
@@ -217,57 +211,6 @@ def place_item(raw: dict, *, today: date) -> ProviderItem | None:
     )
 
 
-SleepFn = Callable[[float], Awaitable[None]]
-SendFn = Callable[[httpx.AsyncClient], Awaitable[httpx.Response]]
-
-
-def _why(response: httpx.Response) -> str:
-    """What an API said was wrong, briefly: SerpApi's `error` text or Google's error status."""
-    try:
-        body = response.json()
-    except ValueError:
-        return ""
-    error = body.get("error") if isinstance(body, dict) else None
-    if isinstance(error, dict):
-        error = error.get("status") or error.get("message")
-    return f" ({F.clean_text(error, 160)})" if error else ""
-
-
-async def _answer(name: str, send: SendFn, *, transport: httpx.AsyncBaseTransport | None,
-                  sleep: SleepFn) -> dict:
-    """One JSON object from a listings API. A refused key or an account with
-    no searches left is fatal; any other 429, a 5xx or a dropped connection
-    is tried once more after 2 s."""
-    last: Exception | None = None
-    for attempt in range(2):
-        try:
-            async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS, transport=transport) as client:
-                response = await send(client)
-        except httpx.HTTPError as exc:
-            last = exc
-        else:
-            if response.status_code in (401, 403):
-                raise ProviderError(f"{name} refused the API key{_why(response)}", fatal=True)
-            spent = out_of_searches(response)
-            if spent is not None:
-                raise ProviderError(f"{name} has no searches left ({spent})", fatal=True)
-            if response.status_code == 429 or response.status_code >= 500:
-                last = ProviderError(f"{name} answered {response.status_code}{_why(response)}")
-            elif response.status_code >= 400:
-                raise ProviderError(f"{name} answered {response.status_code}{_why(response)}")
-            else:
-                try:
-                    data = response.json()
-                except ValueError as exc:
-                    raise ProviderError(f"{name} returned something other than JSON") from exc
-                if not isinstance(data, dict):
-                    raise ProviderError(f"{name} returned an unexpected shape")
-                return data
-        if attempt == 0:
-            await sleep(2.0)
-    raise ProviderError(f"{name} did not answer: {last if isinstance(last, ProviderError) else type(last).__name__}")
-
-
 class _Api:
     name = ""
     base_url = ""
@@ -288,12 +231,12 @@ class _Api:
         return {**params, "ll": ll} if ll and params.get("engine") == "google_maps" else params
 
     async def _get(self, params: dict) -> dict:
-        data = await _answer(
+        data = await search_apis.answer(
             self.name, lambda client: client.get(self.base_url, params={**params, "api_key": self._key}),
             transport=self._transport, sleep=self._sleep,
         )
-        error = str(data.get("error") or "")
-        if error and "hasn't returned any results" not in error and "no results" not in error.lower():
+        error = search_apis.result_error(data)
+        if error:
             raise ProviderError(f"{self.name}: {error[:200]}")
         return data
 
@@ -456,8 +399,8 @@ class GooglePlaces:
 
     async def _post(self, body: dict, mask: str) -> dict:
         headers = {"X-Goog-Api-Key": self._key, "X-Goog-FieldMask": mask}
-        return await _answer(self.name, lambda client: client.post(PLACES_URL, json=body, headers=headers),
-                             transport=self._transport, sleep=self._sleep)
+        return await search_apis.answer(self.name, lambda client: client.post(PLACES_URL, json=body, headers=headers),
+                                        transport=self._transport, sleep=self._sleep)
 
     async def search(self, source: str, query: str, *, page: int = 1, ll: str | None = None) -> list[ProviderItem]:
         """One page of places for the query text, kept inside the map area
@@ -497,10 +440,30 @@ class GooglePlaces:
         return None
 
 
+class Listings(search_apis.Fallback):
+    """The APIs for a source, in order (`search_apis.Fallback`). A Shopping
+    product's `offers_token` is marked with the API that gave it."""
+
+    label = "research listings"
+
+    async def search(self, source: str, query: str, *, page: int = 1, ll: str | None = None) -> list[ProviderItem]:
+        at, items = await self.call(lambda api, _token: api.search(source, query, page=page, ll=ll))
+        return [replace(item, offers_token=self.tag(at, item.offers_token)) for item in items]
+
+    async def locate(self, query: str) -> tuple[str, tuple[float, float]] | None:
+        return (await self.call(lambda api, _token: api.locate(query)))[1]
+
+    async def stores(self, token: str) -> list[Store]:
+        answered = await self.call(lambda api, raw: api.stores(raw), token)
+        return answered[1] if answered is not None else []
+
+
 def calls_per_search(provider: Any, page: int) -> int:
-    """Paid calls one search for `page` makes. Google's Places API pages by
-    token, so its page n is n calls (none past MAX_PAGES); the SERP APIs take
-    the page number."""
+    """Paid calls one search for `page` makes, on the API asked first. Google's
+    Places API pages by token, so its page n is n calls (none past MAX_PAGES);
+    the SERP APIs take the page number."""
+    if isinstance(provider, Listings):
+        provider = provider.first()
     if isinstance(provider, GooglePlaces):
         return page if page <= MAX_PAGES else 0
     return 1
@@ -528,17 +491,19 @@ def configured() -> bool:
         return False
 
 
+def asks(provider: Any, token: str) -> bool:
+    """Whether a store lookup with `token` would still be asked: not once the
+    API that gave it has been dropped (its token means nothing to another)."""
+    return not isinstance(provider, Listings) or provider.holds(token)
+
+
 def choose_provider(source: str | None = None, *, transport: httpx.AsyncBaseTransport | None = None,
-                    sleep: SleepFn = asyncio.sleep) -> _Api | GooglePlaces | None:
-    """The API for a `source`: Google's own for `places` when its key is set,
-    else (and for `shopping`) SearchAPI, else SerpApi; None with none of them."""
-    if source == "places":
-        google = _google_key()
-        if google:
-            return GooglePlaces(google, transport=transport, sleep=sleep)
+                    sleep: SleepFn = asyncio.sleep) -> Listings | None:
+    """The APIs for a `source`, in order: Google's own for `places` when its
+    key is set, then SearchAPI, then SerpApi; None with none of them."""
+    google = _google_key() if source == "places" else None
     search_api, serp_api = _keys()
-    if search_api:
-        return SearchApi(search_api, transport=transport, sleep=sleep)
-    if serp_api:
-        return SerpApi(serp_api, transport=transport, sleep=sleep)
-    return None
+    apis = ([GooglePlaces(google, transport=transport, sleep=sleep)] if google else []) + (
+        [SearchApi(search_api, transport=transport, sleep=sleep)] if search_api else []) + (
+        [SerpApi(serp_api, transport=transport, sleep=sleep)] if serp_api else [])
+    return Listings(apis) if apis else None

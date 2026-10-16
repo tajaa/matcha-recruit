@@ -100,11 +100,15 @@ async def test_serpapi_pages_by_offset_and_asks_maps_for_a_search():
     assert hours.fields["hours"]["value"] == "monday: 9–5"
 
 
+def _order(listings):
+    return [type(api) for api in listings.apis]
+
+
 def test_configured_and_choose(monkeypatch):
     monkeypatch.setattr(P, "_keys", lambda: ("k", "s"))
-    assert P.configured() and isinstance(P.choose_provider(), P.SearchApi)
+    assert P.configured() and _order(P.choose_provider("shopping")) == [P.SearchApi, P.SerpApi]
     monkeypatch.setattr(P, "_keys", lambda: (None, "s"))
-    assert P.configured() and isinstance(P.choose_provider(), P.SerpApi)
+    assert P.configured() and _order(P.choose_provider()) == [P.SerpApi]
     monkeypatch.setattr(P, "_keys", lambda: (None, None))
     assert not P.configured() and P.choose_provider() is None
 
@@ -342,10 +346,10 @@ def test_a_map_box_is_the_area_the_map_shows():
 def test_places_come_from_google_when_its_key_is_set(monkeypatch):
     monkeypatch.setattr(P, "_keys", lambda: ("k", None))
     monkeypatch.setattr(P, "_google_key", lambda: "g")
-    assert isinstance(P.choose_provider("places"), P.GooglePlaces)
-    assert isinstance(P.choose_provider("shopping"), P.SearchApi) and isinstance(P.choose_provider(), P.SearchApi)
+    assert _order(P.choose_provider("places")) == [P.GooglePlaces, P.SearchApi]
+    assert _order(P.choose_provider("shopping")) == [P.SearchApi] and _order(P.choose_provider()) == [P.SearchApi]
     monkeypatch.setattr(P, "_google_key", lambda: None)
-    assert isinstance(P.choose_provider("places"), P.SearchApi)
+    assert _order(P.choose_provider("places")) == [P.SearchApi]
     monkeypatch.setattr(P, "_keys", lambda: (None, None))
     assert P.choose_provider("places") is None
 
@@ -357,3 +361,57 @@ def test_the_google_key_is_the_maps_platform_key(monkeypatch):
     assert P._google_key() == "maps-key"
     monkeypatch.setattr(config, "get_settings", lambda: SimpleNamespace(google_maps_api_key=""))
     assert P._google_key() is None
+
+
+SPENT = httpx.Response(429, json={"error": "You have used all of the searches for the month. "
+                                          "Please upgrade your plan on SearchApi.io."})
+
+
+@pytest.mark.asyncio
+async def test_shopping_moves_to_serpapi_when_searchapi_is_spent(caplog):
+    seen = []
+
+    def searchapi(request):
+        seen.append(("SearchAPI", request.url.params["engine"]))
+        return SPENT
+
+    def serpapi(request):
+        seen.append(("SerpApi", request.url.params["engine"]))
+        return httpx.Response(200, json={"google_shopping": SERP_SHOP, "google_immersive_product": SERP_STORES}[
+            request.url.params["engine"]])
+
+    listings = P.Listings([_api(searchapi), _api(serpapi, cls=P.SerpApi)])
+    with caplog.at_level("ERROR"):
+        [balm] = await listings.search("shopping", "organic lip balm")
+    assert seen == [("SearchAPI", "google_shopping"), ("SerpApi", "google_shopping")]
+    assert "research listings" in caplog.text and "using SerpApi instead" in caplog.text
+    # Its stores come from the API that gave its token.
+    assert balm.offers_token == "1:serp-token" and P.asks(listings, balm.offers_token)
+    assert [s.name for s in await listings.stores(balm.offers_token)] == ["Dr. Bronner's", "Target"]
+    assert seen[-1] == ("SerpApi", "google_immersive_product")
+    # A token from the spent API is never asked with.
+    assert not P.asks(listings, "0:searchapi-token") and await listings.stores("0:searchapi-token") == []
+    assert len(seen) == 3 and P.asks(object(), "anything")
+    assert P.calls_per_search(listings, 2) == 1
+
+
+@pytest.mark.asyncio
+async def test_places_move_on_when_google_is_down_and_locate_follows():
+    asked = []
+
+    def google(_request):
+        asked.append("google")
+        return httpx.Response(503)
+
+    def searchapi(request):
+        asked.append("searchapi")
+        return httpx.Response(200, json=MAPS if request.url.params.get("q") == "ramen" else {
+            "place_results": {"title": "Lady Bird Lake", "gps_coordinates": {"latitude": 30.25, "longitude": -97.72}}})
+
+    listings = P.Listings([_places(google), _api(searchapi)])
+    assert P.calls_per_search(listings, 2) == 2  # Google, asked first, pages by token
+    assert len(await listings.search("places", "ramen")) == 2
+    assert asked == ["google", "google", "searchapi"]  # down after its retry: the next API
+    assert P.calls_per_search(listings, 2) == 1
+    assert await listings.locate("Lady Bird Lake") == ("Lady Bird Lake", (30.25, -97.72))
+    assert asked[-1] == "searchapi"

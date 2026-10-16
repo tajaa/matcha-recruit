@@ -114,15 +114,17 @@ SPENT_SEARCHAPI = {"error": "You have used all of the searches for the month. "
 
 @pytest.mark.asyncio
 async def test_an_account_with_no_searches_left_is_fatal_and_not_retried():
-    for status, body in ((429, SPENT_SEARCHAPI), (429, {"error": "Your account has run out of searches."}),
-                         (402, {}), (429, {"error": {"status": "RESOURCE_EXHAUSTED", "message": "Quota exceeded"}})):
+    for status, body in ((429, SPENT_SEARCHAPI), (429, {"error": "Your account has run out of searches."}), (402, {})):
         seen = []
         api = providers.SearchApiJobs("k", transport=transport((status, body), seen=seen), sleep=no_sleep)
         with pytest.raises(providers.ProviderError, match="has no searches left") as exc:
             await api.search("COO")
         assert exc.value.fatal and len(seen) == 1, body
-    # Too many at once, or a 429 with no JSON: tried again, not fatal.
-    for body in ({"error": "Too many requests per second"}, "slow down"):
+    # Too many at once, a per-minute quota, an hourly limit or a 429 with no JSON: tried again, not fatal.
+    for body in ({"error": "Too many requests per second"}, "slow down",
+                 {"error": {"code": 429, "status": "RESOURCE_EXHAUSTED",
+                            "message": "Quota exceeded for quota metric 'Requests' per minute"}},
+                 {"error": "You have exceeded the hourly searches limit. Please upgrade your plan."}):
         seen = []
         api = providers.SearchApiJobs("k", transport=transport((429, body), (200, SEARCHAPI_PAGE), seen=seen),
                                       sleep=no_sleep)
@@ -143,33 +145,28 @@ class Api:
 
 
 @pytest.mark.asyncio
-async def test_a_refusing_api_is_dropped_for_the_next(caplog):
+async def test_a_refusing_api_is_dropped_for_the_next():
     spent = providers.ProviderError("SearchAPI has no searches left (…)", fatal=True)
-    first = Api("SearchAPI", spent, spent)
-    second = Api("SerpApi", ([], "p2"), ([], None), ([], None))
+    first = Api("SearchAPI", ([], "p1"), spent)
+    second = Api("SerpApi", ([], "p2"), ([], None))
     jobs = providers.FallbackJobs([first, second])
-    # Two queries at once: both find SearchAPI spent; it is dropped (and logged) once.
-    with caplog.at_level("ERROR"):
-        results = await asyncio.gather(jobs.search("COO"), jobs.search("CFO"))
-    assert results == [([], "1:p2"), ([], None)] and jobs.name == "SerpApi"
-    assert [r.levelname for r in caplog.records if "job listings" in r.message] == ["ERROR"]
-    assert "using SerpApi instead" in caplog.text
-    # The next page goes to the API that gave its token, without the tag.
-    assert await jobs.search("COO", page_token="1:p2") == ([], None) and second.calls[-1] == ("COO", "p2")
-    # A token from the API that was dropped ends that query.
-    assert await jobs.search("COO", page_token="0:t") == ([], None)
-    # Every API spent: its error, fatal.
-    alone = providers.FallbackJobs([Api("SearchAPI", spent)])
-    with pytest.raises(providers.ProviderError) as exc:
-        await alone.search("COO")
-    assert exc.value is spent
-    with pytest.raises(providers.ProviderError):
-        await alone.search("COO")  # already dropped: no call
-    # A passing failure is the query's own, and nothing is dropped.
-    flaky = providers.FallbackJobs([Api("SearchAPI", providers.ProviderError("503")), Api("SerpApi")])
-    with pytest.raises(providers.ProviderError, match="503"):
-        await flaky.search("COO")
-    assert flaky.name == "SearchAPI"
+    # A page token is marked with the API that gave it.
+    assert await jobs.search("COO") == ([], "0:p1")
+    assert await jobs.search("CFO") == ([], "1:p2") and jobs.first() is second
+    # The next page goes to the API that gave its token, without the mark.
+    assert await jobs.search("CFO", page_token="1:p2") == ([], None) and second.calls[-1] == ("CFO", "p2")
+    # A token from the API that was dropped ends that query: nothing is asked.
+    assert await jobs.search("COO", page_token="0:p1") == ([], None) and len(first.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_an_api_that_is_down_hands_over_to_the_next():
+    down = providers.ProviderError("SearchAPI did not answer: SearchAPI answered 503", down=True)
+    first = Api("SearchAPI", down)
+    second = Api("SerpApi", ([], None), ([], None))
+    jobs = providers.FallbackJobs([first, second])
+    assert await asyncio.gather(jobs.search("COO"), jobs.search("CFO")) == [([], None), ([], None)]
+    assert len(first.calls) == 1 and len(second.calls) == 2
 
 
 def test_provider_choice(monkeypatch):
@@ -181,7 +178,7 @@ def test_provider_choice(monkeypatch):
     settings("a", "b")
     chosen = providers.choose_provider()
     assert [type(api) for api in chosen.apis] == [providers.SearchApiJobs, providers.SerpApiJobs]
-    assert chosen.name == "SearchAPI" and providers.configured()
+    assert providers.configured()
     settings(None, "b")
     assert [type(api) for api in providers.choose_provider().apis] == [providers.SerpApiJobs]
     settings(None, None)
