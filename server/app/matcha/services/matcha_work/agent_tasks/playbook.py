@@ -99,7 +99,7 @@ class Budgets:
 
     provider_calls: int = 30
     fetch_calls: int = 100
-    browser_views: int = 6
+    browser_views: int = 24  # a building without a rent may take two
     model_runs: int = 8
     items: int = 80
     items_after_more: int = 120

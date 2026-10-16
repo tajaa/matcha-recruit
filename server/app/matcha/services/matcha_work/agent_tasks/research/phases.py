@@ -22,6 +22,7 @@ import asyncio
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass, field, replace
 from datetime import date
 from typing import Any, Awaitable, Callable
@@ -57,6 +58,10 @@ PROVIDER_BUILDINGS = 30
 STORE_LOOKUPS = 20
 ENRICH_BATCH = 12
 ENRICH_CONCURRENCY = 4
+# A batch's views run one at a time and none starts after this long, so the
+# last one (queued, loaded, screenshot stored: 90 s at most) and the photos
+# still end inside the step's 420 s.
+ENRICH_VIEW_SECONDS = 150.0
 PAGE_BYTES = 2_000_000
 PAGE_SECONDS = 20.0
 # Below this much text with no schema.org data, a page is drawn by JavaScript.
@@ -408,6 +413,20 @@ def _no_rent(fields: dict) -> bool:
     return not price or any(end is None for _, end in price.get("spans") or [])
 
 
+async def view_scan(url: str, deps: Deps, views: Budget, *, prefix: str, today: date,
+                    building: bool) -> dict | None:
+    """A home's facts from a page as the browser draws it: {} when the view
+    failed, None when none was made (no browser worker, or no views left)."""
+    if not deps.browser_ready() or not views.take():
+        return None
+    viewed = await deps.view(url, f"{prefix}/views")
+    if not isinstance(viewed, dict) or viewed.get("error"):
+        return {}
+    return {k: {**v, "evidence": {**v["evidence"], "origin": "browser"}}
+            for k, v in F.scan_listing_text(str(viewed.get("text") or ""), url=url, today=today,
+                                             building=building).items()}
+
+
 async def floor_plans(html: bytes, base: str, deps: Deps, fetches: Budget, views: Budget, *, prefix: str,
                       today: date) -> dict:
     """A building's rents and specials from its floor plans page: loaded, or
@@ -425,12 +444,9 @@ async def floor_plans(html: bytes, base: str, deps: Deps, fetches: Budget, views
         logger.info("research floor plans fetch failed", exc_info=True)
         return {}
     found = F.scan_listing_text(str(page.get("text") or ""), url=fetched.final_url, today=today, building=True)
-    if "price" not in found and deps.browser_ready() and views.take():
-        viewed = await deps.view(fetched.final_url, f"{prefix}/views")
-        if isinstance(viewed, dict) and not viewed.get("error"):
-            found = {k: {**v, "evidence": {**v["evidence"], "origin": "browser"}}
-                     for k, v in F.scan_listing_text(str(viewed.get("text") or ""), url=fetched.final_url,
-                                                      today=today, building=True).items()}
+    if "price" not in found:
+        seen = await view_scan(fetched.final_url, deps, views, prefix=prefix, today=today, building=True)
+        found = F.merge(found, seen or {})
     return found
 
 
@@ -478,14 +494,13 @@ async def enrich_one(row: dict, deps: Deps, fetches: Budget, views: Budget, *, p
     structured = any(page.get(k) for k in ("products", "listings", "places", "events", "offers"))
     # An apartment building from Google Maps: many homes, rents on its floor plans.
     building = row.get("kind") == "listing" and row.get("origin") == "provider"
+    viewed_own = False
     if row.get("kind") == "listing":
         found = F.merge(F.scan_listing_text(text, url=fetched.final_url, today=today, building=building), found)
-        if not structured and len(text) < THIN_PAGE_CHARS and deps.browser_ready() and views.take():
-            viewed = await deps.view(fetched.final_url, f"{prefix}/views")
-            if isinstance(viewed, dict) and not viewed.get("error"):
-                found = F.merge(found, {k: {**v, "evidence": {**v["evidence"], "origin": "browser"}}
-                                        for k, v in F.scan_listing_text(str(viewed.get("text") or ""),
-                                                                        url=fetched.final_url, today=today).items()})
+        if not structured and len(text) < THIN_PAGE_CHARS:
+            seen = await view_scan(fetched.final_url, deps, views, prefix=prefix, today=today, building=building)
+            viewed_own = seen is not None
+            found = F.merge(found, seen or {})
     if building and "price" in found and not found["price"].get("spans"):
         found["price"] = F.starting_at(found["price"])  # a building's one price is its cheapest home
     if building and _no_rent(found):
@@ -493,6 +508,12 @@ async def enrich_one(row: dict, deps: Deps, fetches: Budget, views: Budget, *, p
         if "price" in plans:
             found["price"] = plans.pop("price")  # its floor plans' rents beat a "starting at"
         found = F.merge(found, plans)
+    if building and _no_rent(found) and not viewed_own:
+        # Some buildings draw their rents on their own page but not on their floor plans page.
+        seen = await view_scan(fetched.final_url, deps, views, prefix=prefix, today=today, building=True) or {}
+        if "price" in seen:
+            found["price"] = seen.pop("price")
+        found = F.merge(found, seen)
     update["fields"] = F.merge(fields, found)
     update["status"] = "verified"
     point = geo.page_point(page, row.get("title") or "")
@@ -541,18 +562,32 @@ async def enrich(task: dict, deps: Deps, guard: chain.Guard) -> PhaseOutcome:
                                             BUDGETS.fetch_calls))
     if own and fetches.left <= 0:
         fetches.exhausted = True
-    views = Budget(left=await chain.grant(_chain(), task["id"], "browser_views", max(1, buildings),
+    # A building may take two views: its floor plans page, then its own.
+    views = Budget(left=await chain.grant(_chain(), task["id"], "browser_views", max(1, 2 * buildings),
                                           BUDGETS.browser_views)
                    if any(r["kind"] == "listing" for r in own) and deps.browser_ready() else 0)
     gate = asyncio.Semaphore(ENRICH_CONCURRENCY)
     updates: dict = {}
     prefix = f"matcha-work/{task['company_id']}/agent-tasks/{task['id']}"
     anchor = await ensure_anchor(task, deps, guard)
+    in_turn = asyncio.Lock()
+    stop_viewing = time.monotonic() + ENRICH_VIEW_SECONDS
+
+    async def view(url: str, where: str) -> dict:
+        # One at a time: the browser worker has one slot, and a view queued
+        # behind this batch's others would give up as busy.
+        async with in_turn:
+            if time.monotonic() >= stop_viewing:
+                views.left += 1  # never made, so it goes back with the rest
+                return {"url": url, "error": "out of time"}
+            return await deps.view(url, where)
+
+    batch = replace(deps, view=view)
 
     async def one(row) -> None:
         async with gate:
             try:
-                update = await enrich_one(dict(row), deps, fetches, views, prefix=prefix)
+                update = await enrich_one(dict(row), batch, fetches, views, prefix=prefix)
                 if anchor is not None and isinstance(update, dict) and update["status"] != "unavailable":
                     await locate(update, anchor, deps)
                 updates[row["id"]] = update

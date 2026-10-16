@@ -308,11 +308,21 @@ homes may fit), above it a violation.
   (`fill_top`).
 - **Budgets per round** (`Budgets`): 30 provider calls (searches and store
   lookups), 100 page loads (a building costs two: its page and its floor
-  plans), 6 browser views, reserved with `chain.grant` before use and refunded after.
+  plans), 24 browser views, reserved with `chain.grant` before use and refunded after.
   80 findings per task, 120 once it searched more. Counters reset when a
   round starts.
 - A page drawn by JavaScript is viewed in the browser only when the browser
   worker exists (`AGENT_BROWSER_QUEUE`) and the view budget allows.
+  - A building with no rent may take two views: its floor plans page, then
+    its own page (some sites draw rents only there). Its own page is never
+    viewed twice.
+  - An enrich batch views one page at a time, because the browser worker has
+    one slot and a view still queued after 20 s comes back busy. No view
+    starts after `ENRICH_VIEW_SECONDS` (150 s), so the step ends inside its
+    420 s. A view not made goes back to the budget.
+  - Measured 2026-10-15 on an Austin search: viewing the 22 buildings still
+    without a rent took 32 views and about 2 minutes, and found 4 more rents
+    from the buildings' own sites. 7 sites refused the browser too.
 - The model never writes: phases store what the contracts let through, under
   the chain's token.
 - **A research finish tool's arguments are the answer's own fields**, not one

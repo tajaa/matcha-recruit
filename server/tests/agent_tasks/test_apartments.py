@@ -1,7 +1,9 @@
 """Apartments: a rent range, move-in specials, distance from a named place, and Apply."""
+import asyncio
 import json
 from dataclasses import replace
 from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import pytest
 
@@ -556,6 +558,77 @@ async def test_a_buildings_one_price_is_where_its_rents_start():
         assert ranking.check({"field": "price", "op": "between", "value": [1600, 2000]}, price) == "unknown"
     assert F.starting_at({"value": 1500, "display": "$1,500/mo"}) == {
         "value": 1500, "display": "From $1,500/mo", "spans": [[1500, None]]}
+
+
+@pytest.mark.asyncio
+async def test_floor_plans_keep_what_their_page_said_when_the_view_adds_nothing():
+    plans = b"<html><body><p>Up to 6 weeks free! Call for pricing.</p></body></html>"
+    fetch = AsyncMock(return_value=_fetched(plans, final="https://www.bldg.test/floorplans/"))
+    view = AsyncMock(return_value={"url": "https://www.bldg.test/floorplans/", "text": "Loading"})
+    found = await phases.floor_plans(HOME, "https://www.bldg.test/", _deps(page_fetch=fetch, view=view,
+                                     browser_ready=lambda: True), Budget(left=1), Budget(left=1), prefix="p", today=TODAY)
+    view.assert_awaited_once()
+    assert "price" not in found and found["specials"]["value"] == "Up to 6 weeks free"
+
+
+# A building's site, too long to be "drawn by JavaScript", with no rent on it.
+SITE = ("<html><body><a href='/floorplans/'>Floor Plans</a><p>"
+        + "Resort-style pool, fitness center and a clubhouse. " * 12 + "</p></body></html>").encode()
+BLANK_PLANS = _fetched(b"<html><body><div id=app>Loading</div></body></html>", final="https://www.bldg.test/floorplans/")
+
+
+@pytest.mark.asyncio
+async def test_a_building_whose_floor_plans_show_no_rent_is_viewed_on_its_own_page():
+    row = dict(item_row(fields="{}", origin="provider", url="https://www.bldg.test/", title="Bldg"))
+    fetch = AsyncMock(side_effect=[_fetched(SITE, final="https://www.bldg.test/"), BLANK_PLANS])
+    view = AsyncMock(side_effect=[{"text": "Schedule a tour"}, {"text": "A1 $1,119 - $1,293 /mo. Up to 4 weeks free!"}])
+    update = await phases.enrich_one(row, _deps(page_fetch=fetch, view=view, browser_ready=lambda: True),
+                                     Budget(left=2), Budget(left=2), prefix="p")
+    assert [c.args[0] for c in view.await_args_list] == ["https://www.bldg.test/floorplans/", "https://www.bldg.test/"]
+    price = update["fields"]["price"]
+    assert price["spans"] == [[1119, 1293]] and price["evidence"]["origin"] == "browser"
+    assert update["fields"]["specials"]["value"] == "Up to 4 weeks free"
+    # Its own page was viewed already (drawn by JavaScript): not twice.
+    thin = _fetched(b"<html><body><a href='/floorplans/'>Floor Plans</a></body></html>", final="https://www.bldg.test/")
+    view = AsyncMock(return_value={"text": "Schedule a tour"})
+    update = await phases.enrich_one(row, _deps(page_fetch=AsyncMock(side_effect=[thin, BLANK_PLANS]), view=view,
+                                     browser_ready=lambda: True), Budget(left=2), Budget(left=5), prefix="p")
+    assert view.await_count == 2 and "price" not in update["fields"]
+    # No views left: none made.
+    view = AsyncMock()
+    await phases.enrich_one(row, _deps(page_fetch=AsyncMock(side_effect=[_fetched(SITE), BLANK_PLANS]), view=view,
+                            browser_ready=lambda: True), Budget(left=2), Budget(left=0), prefix="p")
+    view.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_batch_views_one_page_at_a_time_and_stops_in_time(conn, monkeypatch):
+    rows = [item_row(id=uuid4(), origin="provider", url=f"https://www.bldg{n}.test/", fields="{}", status="candidate")
+            for n in range(3)]
+    conn.on("WHERE task_id = $1 AND enriched_at IS NULL AND status IN", rows)
+    conn.on("COALESCE(SUM(jsonb_array_length(images)), 0)", 0)
+    conn.on("COUNT(*) FROM mw_agent_task_items WHERE task_id = $1 AND enriched_at IS NULL", 0)
+    thin = AsyncMock(side_effect=lambda url, **_: _fetched(b"<html><body>Loading</body></html>", final=url))
+    live = {"now": 0, "most": 0}
+
+    async def view(url, where):
+        live["now"] += 1
+        live["most"] = max(live["most"], live["now"])
+        await asyncio.sleep(0.01)
+        live["now"] -= 1
+        return {"url": url, "text": "Schedule a tour"}
+
+    viewer = AsyncMock(side_effect=view)
+    deps = _deps(page_fetch=thin, view=viewer, browser_ready=lambda: True, rehost=AsyncMock(return_value=([], [])))
+    await phases.enrich(task_row(), deps, _guard())
+    assert viewer.await_count == 3 and live["most"] == 1  # each building's own page, one at a time
+    assert conn.ran("browser_views AS before")[0][2][1] == 6  # two a building
+    # Past the batch's viewing time: none made, all given back.
+    monkeypatch.setattr(phases, "ENRICH_VIEW_SECONDS", 0)
+    viewer.reset_mock()
+    await phases.enrich(task_row(), deps, _guard())
+    viewer.assert_not_awaited()
+    assert conn.ran("SET browser_views = GREATEST(browser_views - $2, 0)")[-1][2][1] == 6
 
 
 def test_a_finding_with_specials_ranks_higher():
