@@ -34,6 +34,7 @@ routes are `/matcha-work/agent-tasks`.
 | Model runs | `model_run.py` | The task as a `phase_run.RunOwner` (kind `agent_task`, usage `matcha.espresso.tasks.<playbook>`) |
 | Document | `document.py` | Fixed Markdown (no model) saved as a journal note via `journal_service.create_note_direct` |
 | Telling | `notify.py` | Bell + live push when a task finishes, stops or needs the person |
+| Emailing | `mail.py` | The account's email gets the headline, summary and top picks when a task ends (once a round) |
 | Intake | `intake.py` | Field values, the `ask_form` form (built from the playbook only), submitting it (`answer_form`) |
 | Chat cards | `chat.py` | The `agent_task` card posted where a task started, and when it ends |
 | From chat | `../agent_runtime/abilities/tasks.py` | The `tasks` ability: list, read, start, follow up, cancel, mark findings; the `task` block |
@@ -175,6 +176,31 @@ daily limit counts by `decided_at`.
   when the task failed, the phase said `round_failed`, or a "search more" added
   nothing. Cancelled counts (like job search).
 - A deleted task keeps its row and rounds (blanked), so it still counts.
+
+## Telling the person (`notify.py`, `mail.py`)
+
+A task runs entirely in the worker chain, so the person can start one and
+close Espresso; nothing waits on the app (opening it only nudges a stalled
+chain sooner than the main worker's hourly `reconcile`).
+
+- **Bell + live push** (`notify.py`) when a task is done, stopped or waiting.
+- **Email** (`mail.py`) to the account's address (`users.email`; none for an
+  inactive or suspended account) when a round ends `done` or `failed`: the
+  headline, the summary or why it stopped, and the top picks (`chat.picks`,
+  the same ones as the chat card) with up to 4 facts in the plan's column
+  order (unconfirmed ones left out), the homes that fit, the summary's "why"
+  and the finding's link (http(s) only; everything HTML-escaped). Sent as
+  "Espresso" through `send_email_with_fallback`, so reserved test domains are
+  never sent to.
+  - **Once a round:** `close_round` returns True only for the call that
+    settled the round, and `_stopped` emails only then. A waiting task's round
+    stays open, so it sends nothing.
+  - **Not while the person is there:** a round settled within `EMAIL_AFTER`
+    (60 s) of being asked (a refine that only re-sorts, a document) sends none.
+  - **Job searches** are emailed their top `TOP_LEADS` jobs once, when
+    `search_stopped` completes the pointer.
+  - Best effort: a failed email never fails the task. There is no opt-out
+    setting yet.
 
 ## Research (`research/`)
 

@@ -73,7 +73,7 @@ def test_the_card_shows_the_summarys_picks_in_its_order():
 async def test_a_stopped_task_posts_its_card(monkeypatch):
     from app.matcha.services.matcha_work.project_agent import chat as espresso_chat
 
-    monkeypatch.setattr(orchestrator.service, "close_round", AsyncMock())
+    monkeypatch.setattr(orchestrator.service, "close_round", AsyncMock(return_value=False))
     monkeypatch.setattr(orchestrator.notify, "task_stopped", AsyncMock())
     monkeypatch.setattr(orchestrator.chat, "post_stopped", AsyncMock(return_value={"id": "m"}))
     broadcast = AsyncMock()

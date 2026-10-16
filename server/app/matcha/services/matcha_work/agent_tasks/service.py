@@ -348,12 +348,13 @@ async def patch_item(task_id: UUID, item_id: UUID, user_id: UUID, *, user_state:
         return await _detail(conn, task, row, user_id, user)
 
 
-async def close_round(conn, task_id: UUID) -> None:
+async def close_round(conn, task_id: UUID) -> bool:
     """Settle the current round once its task stops: failed (free) when the
     task failed, the round was called off, or a "search more" found nothing
     new; cancelled when the task was; done otherwise. A task now waiting keeps
-    its round open and starts its wait."""
-    await conn.execute(
+    its round open and starts its wait. True when this call settled the round
+    (once a round: a settled round is never settled again)."""
+    settled = await conn.execute(
         """UPDATE mw_agent_task_rounds r
            SET status = CASE
                    WHEN t.status = 'failed' THEN 'failed'
@@ -377,6 +378,7 @@ async def close_round(conn, task_id: UUID) -> None:
            WHERE id = $1 AND status = 'waiting'""",
         task_id,
     )
+    return isinstance(settled, str) and settled.startswith("UPDATE ") and settled.split()[-1] != "0"
 
 
 async def cancel_task(task_id: UUID, user_id: UUID) -> dict:

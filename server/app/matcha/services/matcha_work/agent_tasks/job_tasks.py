@@ -222,11 +222,12 @@ async def start(user, company_id: UUID, body, brief: dict, *,
 # ── when one stops ───────────────────────────────────────────────────────────
 
 async def search_stopped(conn, search_id: UUID) -> None:
-    """A search reached a resting status: tell the person once, and post the
-    card where it was started from. Best effort, like a task's."""
+    """A search reached a resting status: tell the person once, email them
+    the top jobs, and post the card where it was started from. Best effort,
+    like a task's."""
     from app.matcha.services.matcha_work.job_search.service import lead_summary
 
-    from . import chat, notify
+    from . import chat, mail, notify
 
     try:
         row = await conn.fetchrow(
@@ -241,8 +242,6 @@ async def search_stopped(conn, search_id: UUID) -> None:
             return
         await conn.execute("UPDATE mw_agent_tasks SET completed_at = NOW() WHERE id = $1", task["id"])
         await notify.tell(conn, task)
-        if task.get("origin_channel_id") is None:
-            return
         top = [lead_item(lead_summary(r)) for r in await conn.fetch(
             f"""SELECT * FROM mw_job_leads WHERE search_id = $1 AND screen_status <> 'irrelevant'
                 ORDER BY rank NULLS LAST, created_at LIMIT {TOP_LEADS}""",
@@ -250,6 +249,9 @@ async def search_stopped(conn, search_id: UUID) -> None:
         )] if task["status"] == "done" else []
         progress = decode_jsonb(task.get("progress"), {}) or {}
         task = {**task, "progress": progress}
+        await mail.search_finished(conn, task, top)
+        if task.get("origin_channel_id") is None:
+            return
         message = await chat.post_card(conn, task, company_id=task["company_id"],
                                        channel_id=task["origin_channel_id"], top=top)
         if message is not None:
