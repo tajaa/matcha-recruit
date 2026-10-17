@@ -26,18 +26,29 @@ escape hatch: it overrides the label for every wrapped call issued inside the
 Use sparingly (each distinct label is a permanent row in "by feature"); the
 default stack-derived label is right for the other ~100 call sites.
 
+Paid APIs that bill per request rather than per token (Brave, SearchAPI,
+SerpApi, Google Places, through `matcha_work/search_apis.answer`) log here too,
+one row per request: `record_api_call`, priced from `API_PRICING`. Claude's
+hosted web search bills per search on top of the tokens, so each one Anthropic
+reports is its own `anthropic / web_search` row. Quota a provider reports on its
+responses (Brave's monthly window) is kept as the latest snapshot in
+`platform_settings` (`save_api_quota`, key `api_quota.<provider>`), which
+/admin/ai-usage reads back.
+
 Set AI_USAGE_LOGGING=0 to disable (read once at import; the client is then
 returned unwrapped).
 """
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import sys
 import time
 from contextlib import contextmanager
 from contextvars import ContextVar
+from datetime import datetime, timedelta, timezone
 from typing import Any, Iterator, Optional
 
 logger = logging.getLogger(__name__)
@@ -93,6 +104,38 @@ _CACHED_INPUT_PRICING: dict[tuple[str, str], float] = {
 _ANTHROPIC_LONG_CONTEXT: dict[str, tuple[int, float, float]] = {
     "claude-haiku-5-5": (100_000, 5.0, 5.0),
 }
+
+# USD per successful request, for APIs that bill by the request. Keyed
+# (provider, model) like PRICING; "model" is the endpoint or SKU. A request
+# that failed is not billed and logs 0. A provider absent here logs NULL:
+# SearchAPI and SerpApi sell monthly plans, not a per-request price, so the
+# admin page shows their plan and searches left from their account APIs
+# instead of a made-up rate.
+API_PRICING: dict[tuple[str, str], float] = {
+    # Brave Search API: $5 per 1,000 at list price. Brave's price is the
+    # account's plan (the Free plan's 2,000 a month cost nothing), so
+    # BRAVE_SEARCH_USD_PER_1000 overrides it; see `api_price`.
+    ("brave", "web_search"): 0.005,
+    # Google Places API (New) Text Search, first volume tier. The SKU is the
+    # dearest field the request's mask asks for: research/providers.py's
+    # SEARCH_MASK (website, phone, rating, hours) is Enterprise, LOCATE_MASK
+    # (name and location) is Pro. Google's free monthly calls per SKU (1,000
+    # Enterprise, 5,000 Pro) are not netted out, so this overstates a quiet month.
+    ("google_places", "text_search_enterprise"): 0.035,
+    ("google_places", "text_search_pro"): 0.032,
+    # Claude's hosted web search: $10 per 1,000 searches, on top of tokens.
+    ("anthropic", "web_search"): 0.01,
+}
+
+# Modules that only carry a call to a provider. The feature label is the
+# first frame past them, so a search shows the code that asked for it.
+_TRANSPORT_MODULES = frozenset({
+    __name__,
+    "app.matcha.services.matcha_work.search_apis",
+    "app.matcha.services.matcha_work.brave_search",
+})
+
+QUOTA_KEY_PREFIX = "api_quota."
 
 # Overrides `_feature_label()`'s stack-derived label for every wrapped call
 # made inside a `feature_scope(...)` block — see that function and the module
@@ -182,8 +225,9 @@ def _feature_label() -> str:
     """Best-effort caller attribution via stack inspection.
 
     Walks frames outward from the wrapper looking for the first frame whose
-    module lives under `app.` and isn't this module — that's the service/route/
-    task that actually issued the call. Must run at CALL time, not when the
+    module lives under `app.` and isn't this module or another transport
+    (`_TRANSPORT_MODULES`) — that's the service/route/task that actually
+    issued the call. Must run at CALL time, not when the
     client was built: several callers cache one client in a module-level
     singleton and reuse it across requests for different features.
 
@@ -203,7 +247,7 @@ def _feature_label() -> str:
     try:
         while frame is not None and depth < 30:
             name = frame.f_globals.get("__name__", "")
-            if name.startswith("app.") and name != __name__:
+            if name.startswith("app.") and name not in _TRANSPORT_MODULES:
                 segs = name.split(".")
                 if (len(segs) > 3 and segs[1] == "matcha" and segs[2] == "services"
                         and segs[3] in _SERVICES_DOMAINS):
@@ -382,7 +426,7 @@ def _record(row: dict[str, Any]) -> None:
 
 
 def _build_row(*, provider: str, model: str, method: str, feature: str,
-                latency_ms: int, status: str, error: Optional[str] = None,
+                latency_ms: Optional[int], status: str, error: Optional[str] = None,
                 usage: tuple[Optional[int], Optional[int], Optional[int], Optional[int], Optional[int]] = (None, None, None, None, None),
                 provider_response_id: Optional[str] = None,
                 provider_status: Optional[str] = None,
@@ -494,9 +538,10 @@ async def record_anthropic_response(
     actual_model = actual_model if isinstance(actual_model, str) and actual_model else model
     response_id = payload.get("id")
     stop_reason = payload.get("stop_reason")
+    feature = _feature_label()
     row = _build_row(
         provider="anthropic", model=actual_model, method="messages.create",
-        feature=_feature_label(), latency_ms=latency_ms,
+        feature=feature, latency_ms=latency_ms,
         status=status if status in {"ok", "error", "timeout"} else ("error" if error else "ok"),
         error=error,
         usage=(
@@ -510,6 +555,103 @@ async def record_anthropic_response(
         cache_write_1h_tokens=cache_write_1h,
     )
     await _record_async(row)
+    # Hosted searches bill per search whatever became of the message, so a
+    # timed-out stream that searched still logs them.
+    server_tools = usage.get("server_tool_use")
+    searches = server_tools.get("web_search_requests") if isinstance(server_tools, dict) else None
+    if isinstance(searches, int) and searches > 0:
+        for _ in range(min(searches, 50)):
+            await _record_async(_api_row(
+                provider="anthropic", model="web_search", method="server_tool_use",
+                feature=feature, latency_ms=None, status="ok",
+            ))
+
+
+# --- Request-priced APIs ----------------------------------------------------
+
+# The env var that sets Brave's price for this account's plan, in USD per
+# 1,000 searches (0 on Brave's Free plan).
+BRAVE_PRICE_ENV = "BRAVE_SEARCH_USD_PER_1000"
+
+
+def api_price(provider: str, model: str) -> Optional[float]:
+    """USD per request, or None for a provider with no per-request price.
+    Brave's comes from BRAVE_SEARCH_USD_PER_1000 when that is set to a
+    number, read per call so the worker needs no restart to pick it up."""
+    price = API_PRICING.get((provider, model))
+    if price is not None and provider == "brave":
+        given = os.getenv(BRAVE_PRICE_ENV, "").strip()
+        try:
+            override = float(given) if given else None
+        except ValueError:
+            override = None
+        if override is not None and override >= 0:
+            return override / 1000
+    return price
+
+
+def api_cost(provider: str, model: str, status: str) -> Optional[float]:
+    """USD for one request: its price (`api_price`) when it succeeded, 0 when
+    it failed (not billed), None for a provider with no per-request price."""
+    price = api_price(provider, model)
+    if price is None:
+        return None
+    return price if status == "ok" else 0.0
+
+
+def _api_row(*, provider: str, model: str, method: str, feature: str,
+             latency_ms: Optional[int], status: str, error: Optional[str] = None) -> dict[str, Any]:
+    row = _build_row(provider=provider, model=model, method=method, feature=feature,
+                     latency_ms=latency_ms, status=status, error=error)
+    row["cost_usd"] = api_cost(provider, model, status)
+    return row
+
+
+async def record_api_call(*, provider: str, model: str, method: str, latency_ms: int,
+                          status: str, error: Optional[str] = None) -> None:
+    """Record one request to an API that bills by the request (see
+    `API_PRICING`). Never raises."""
+    if not LOGGING_ENABLED:
+        return
+    await _record_async(_api_row(
+        provider=provider, model=model, method=method, feature=_feature_label(),
+        latency_ms=latency_ms, status=status if status in {"ok", "error", "timeout"} else "error",
+        error=error,
+    ))
+
+
+async def _save_quota(key: str, value: dict[str, Any]) -> None:
+    try:
+        from ...database import connection_or_direct
+        async with connection_or_direct() as conn:
+            await conn.execute(
+                """
+                INSERT INTO platform_settings (key, value, updated_at)
+                VALUES ($1, $2::jsonb, NOW())
+                ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+                """,
+                key, json.dumps(value),
+            )
+    except Exception:  # noqa: BLE001 — telemetry must never break a search
+        logger.warning("ai_usage: failed to save %s", key, exc_info=True)
+
+
+async def save_api_quota(provider: str, *, limit: Optional[int], remaining: Optional[int],
+                         reset_seconds: Optional[float], window_seconds: Optional[int] = None) -> None:
+    """Keep the quota a provider reported on its latest response, for
+    /admin/ai-usage. Only the latest matters, so it is one row per provider.
+    Never raises."""
+    if not LOGGING_ENABLED:
+        return
+    now = datetime.now(timezone.utc)
+    resets_at = now + timedelta(seconds=reset_seconds) if reset_seconds is not None else None
+    await _save_quota(f"{QUOTA_KEY_PREFIX}{provider}", {
+        "limit": limit,
+        "remaining": remaining,
+        "window_seconds": window_seconds,
+        "resets_at": resets_at.isoformat() if resets_at else None,
+        "observed_at": now.isoformat(),
+    })
 
 
 # --- Client proxy -----------------------------------------------------------

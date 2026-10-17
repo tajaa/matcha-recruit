@@ -17,6 +17,10 @@ and research follow), plus Brave's own quota headers:
   connection: asked once more. Failing again, or any other 4xx, fails this
   search only.
 
+The monthly quota each response reports (`quota`: the day-or-longer window in
+its rate-limit headers) is saved as the latest snapshot, which Admin → AI Usage
+shows as searches left; every request is a row in the usage ledger.
+
 Out means `available` is False and `search` raises `Unavailable(out=True)`
 without a request. Going out is logged as an error once, so it shows in
 Admin → Server Errors. It is remembered per process, not shared: a worker that
@@ -130,6 +134,42 @@ def _windows(policy: str | None) -> list[int | None]:
     return found
 
 
+def quota(headers: httpx.Headers) -> dict | None:
+    """The longest day-or-longer window Brave reports (the plan's monthly
+    quota): its `limit`, what is `remaining`, its length and the seconds until
+    it resets. None when the response names no such window (a per-second rate
+    alone, or no headers)."""
+    windows = _windows(headers.get("x-ratelimit-policy"))
+    limits = _parts(headers.get("x-ratelimit-limit"))
+    remaining = _parts(headers.get("x-ratelimit-remaining"))
+    resets = _parts(headers.get("x-ratelimit-reset"))
+    best = None
+    for n, window in enumerate(windows):
+        if window is None or window < _QUOTA_WINDOW or (best is not None and window <= best[1]):
+            continue
+        best = (n, window)
+    if best is None:
+        return None
+    n, window = best
+
+    def at(values: list[int | None]) -> int | None:
+        return values[n] if n < len(values) else None
+
+    return {"limit": at(limits), "remaining": at(remaining), "window_seconds": window,
+            "reset_seconds": at(resets)}
+
+
+async def _keep_quota(response: httpx.Response) -> None:
+    """Save the quota this response reported, for Admin → AI Usage."""
+    found = quota(response.headers)
+    if found is None:
+        return
+    from app.core.services.ai_usage import save_api_quota
+
+    await save_api_quota("brave", limit=found["limit"], remaining=found["remaining"],
+                         reset_seconds=found["reset_seconds"], window_seconds=found["window_seconds"])
+
+
 def spent_quota(headers: httpx.Headers) -> float | None:
     """Seconds until a spent quota resets, when a day-or-longer window has
     nothing left; None otherwise (a per-second limit is a rate, not a quota)."""
@@ -204,7 +244,8 @@ async def search(query: str, *, freshness: Any = None,
         return response
 
     try:
-        body = await search_apis.answer("Brave", send, transport=transport, sleep=sleep, timeout=TIMEOUT_SECONDS)
+        body = await search_apis.answer("Brave", send, transport=transport, sleep=sleep,
+                                        timeout=TIMEOUT_SECONDS, sku="web_search")
     except _Spent as exc:
         mark_out("Brave has no searches left this period", exc.seconds, clock=clock)
         raise Unavailable(_out_reason, out=True) from None
@@ -213,6 +254,9 @@ async def search(query: str, *, freshness: Any = None,
             mark_out(str(exc), REFUSED_SECONDS, clock=clock)
             raise Unavailable(_out_reason, out=True) from None
         raise Unavailable(str(exc)) from None
+    finally:
+        if answered:
+            await _keep_quota(answered[-1])
     spent = spent_quota(answered[-1].headers)
     if spent is not None:
         # That was the last one: the next search would be refused.

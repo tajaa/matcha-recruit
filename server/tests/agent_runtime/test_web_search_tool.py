@@ -208,6 +208,26 @@ async def test_a_run_counts_searches_and_the_models_search_tokens(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_a_tools_paid_calls_are_logged_under_the_runs_feature(monkeypatch):
+    from app.core.services import ai_usage
+
+    wire_store(monkeypatch)
+    labels = []
+
+    async def search(query, *, freshness=None):
+        labels.append(ai_usage._feature_override.get())
+        return BRAVE_RESULTS
+
+    monkeypatch.setattr(brave_search, "search", search)
+    client = FakeClient([response(call("web_search", {"query": "one"})), response(call("finish", {"answer": "ok"}))])
+    await runner.run_agent(
+        context(model=CLAUDE_HAIKU), client=client, abilities=[ability(web.brave_tool(), key="web")],
+        contract=contract(), instructions="sys", first_input=[{"role": "user", "content": []}],
+    )
+    assert labels == ["matcha.test"]
+
+
+@pytest.mark.asyncio
 async def test_the_runner_holds_brave_searches_to_the_hosted_limits(monkeypatch):
     record, _, _ = wire_store(monkeypatch)
     asked = _brave_answers(monkeypatch, BRAVE_RESULTS, BRAVE_RESULTS, BRAVE_RESULTS)

@@ -233,7 +233,7 @@ class _Api:
     async def _get(self, params: dict) -> dict:
         data = await search_apis.answer(
             self.name, lambda client: client.get(self.base_url, params={**params, "api_key": self._key}),
-            transport=self._transport, sleep=self._sleep,
+            transport=self._transport, sleep=self._sleep, sku=params.get("engine"),
         )
         error = search_apis.result_error(data)
         if error:
@@ -399,8 +399,10 @@ class GooglePlaces:
 
     async def _post(self, body: dict, mask: str) -> dict:
         headers = {"X-Goog-Api-Key": self._key, "X-Goog-FieldMask": mask}
+        # The mask sets the SKU Google bills (ai_usage.API_PRICING).
+        sku = "text_search_pro" if mask == LOCATE_MASK else "text_search_enterprise"
         return await search_apis.answer(self.name, lambda client: client.post(PLACES_URL, json=body, headers=headers),
-                                        transport=self._transport, sleep=self._sleep)
+                                        transport=self._transport, sleep=self._sleep, sku=sku)
 
     async def search(self, source: str, query: str, *, page: int = 1, ll: str | None = None) -> list[ProviderItem]:
         """One page of places for the query text, kept inside the map area

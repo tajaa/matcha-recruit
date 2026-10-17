@@ -182,7 +182,9 @@ async def run_agent(
         assert tool.handler is not None
         left = remaining()
         budget = left if tool.timeout_seconds is None else min(tool.timeout_seconds, left)
-        return await asyncio.wait_for(tool.handler(ctx, state, args, left), timeout=max(1.0, budget))
+        # A tool's paid calls (Brave, a search API) count toward this run's feature.
+        with feature_scope(ctx.usage_feature):
+            return await asyncio.wait_for(tool.handler(ctx, state, args, left), timeout=max(1.0, budget))
 
     def label_for(tool: AgentTool, args: dict, output: ToolOutput | None = None) -> str:
         if output is not None and output.label:

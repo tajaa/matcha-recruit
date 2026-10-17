@@ -1,7 +1,18 @@
 import { useState } from 'react'
 import { AlertCircle, Bot, ChevronDown, ChevronRight, Cpu, Image, RefreshCw, X } from 'lucide-react'
 import { useAsync } from '../../hooks/useAsync'
-import { getAiUsageCalls, getAiUsageSummary, getAiUsageTimeseries } from '../../api/admin/aiUsage'
+import {
+  getAiUsageCalls,
+  getAiUsageSummary,
+  getAiUsageTimeseries,
+  getApiQuotas,
+  getEspressoUsage,
+} from '../../api/admin/aiUsage'
+import { ESPRESSO_FEATURE_PREFIX, SEARCH_PROVIDERS } from '../../components/admin/ai-usage/constants'
+import { EspressoPanel } from '../../components/admin/ai-usage/EspressoPanel'
+import { SearchApisPanel } from '../../components/admin/ai-usage/SearchApisPanel'
+import { StatCard } from '../../components/admin/ai-usage/StatCard'
+import { fmtCost, fmtMs, fmtPct, fmtTokens, relTime } from '../../components/admin/ai-usage/format'
 import type {
   AiUsageCall,
   AiUsageFeatureRollup,
@@ -10,6 +21,7 @@ import type {
   AiUsagePoint,
   AiUsageStatus,
   AiUsageSummary,
+  ApiQuota,
 } from '../../types/aiUsage'
 
 const RANGES: { label: string; hours: number }[] = [
@@ -26,7 +38,7 @@ const STATUS_CHIPS: { label: string; value: AiUsageStatus | '' }[] = [
   { label: 'timeout', value: 'timeout' },
 ]
 
-type Selection = { kind: 'feature' | 'model'; value: string } | null
+type Selection = { kind: 'feature' | 'model' | 'provider'; value: string } | null
 
 // Every image-generation model this codebase has ever called — the current
 // GA name (core.services.image_gen.IMAGE_MODEL) plus the "-preview" name it
@@ -68,73 +80,10 @@ function sumRollupMetrics(rows: AiUsageMetrics[]) {
   }
 }
 
-function fmtCost(v: number | null): string {
-  if (v == null) return '—'
-  return v >= 1 ? `$${v.toFixed(2)}` : `$${v.toFixed(4)}`
-}
-
-function fmtTokens(v: number | null): string {
-  if (v == null) return '—'
-  if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(2)}M`
-  if (v >= 1_000) return `${(v / 1_000).toFixed(1)}k`
-  return String(v)
-}
-
-function fmtMs(v: number | null): string {
-  if (v == null) return '—'
-  return `${Math.round(v)}ms`
-}
-
-function fmtPct(v: number): string {
-  return `${(v * 100).toFixed(1)}%`
-}
-
-function relTime(iso: string): string {
-  const ms = Date.now() - new Date(iso).getTime()
-  const s = Math.floor(ms / 1000)
-  if (s < 60) return `${s}s ago`
-  const m = Math.floor(s / 60)
-  if (m < 60) return `${m}m ago`
-  const h = Math.floor(m / 60)
-  if (h < 24) return `${h}h ago`
-  const d = Math.floor(h / 24)
-  return `${d}d ago`
-}
-
 const STATUS_BADGE: Record<AiUsageStatus, string> = {
   ok: 'bg-zinc-700/40 text-zinc-300 border-zinc-600/40',
   timeout: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
   error: 'bg-red-500/15 text-red-300 border-red-500/30',
-}
-
-function StatCard({
-  label,
-  value,
-  sub,
-  onClick,
-  active,
-}: {
-  label: string
-  value: string
-  sub?: string
-  onClick?: () => void
-  active?: boolean
-}) {
-  const Tag = onClick ? 'button' : 'div'
-  return (
-    <Tag
-      onClick={onClick}
-      className={`text-left p-3 rounded-lg border transition-colors ${
-        active
-          ? 'bg-zinc-800 border-zinc-600'
-          : 'border-zinc-800 bg-zinc-900/40' + (onClick ? ' hover:border-zinc-700' : '')
-      }`}
-    >
-      <p className="text-[10px] uppercase tracking-wider text-zinc-500">{label}</p>
-      <p className="text-2xl font-semibold mt-0.5 text-zinc-100">{value}</p>
-      {sub && <p className="text-[11px] text-zinc-500 mt-0.5">{sub}</p>}
-    </Tag>
-  )
 }
 
 function Bars({ points }: { points: AiUsagePoint[] }) {
@@ -312,6 +261,33 @@ export default function AiUsage() {
   // embedded matcha.huume.legal_pilot / .handbook_pilot sub-features).
   const huumeRows = summary?.by_feature.filter((r) => r.feature.startsWith(HUUME_FEATURE_PREFIX)) ?? []
   const huumeTotals = huumeRows.length ? sumRollupMetrics(huumeRows) : null
+  // Espresso's own feature labels (assistant, tasks.<playbook>, job_search, …)
+  // for the chips that filter the call log.
+  const espressoFeatures = summary?.by_feature.filter((r) => r.feature.startsWith(ESPRESSO_FEATURE_PREFIX)) ?? []
+  // The paid search APIs log under their own provider; their calls are
+  // per-request rows, not tokens, so they get their own panel.
+  const searchProviders = summary?.by_provider.filter((r) => SEARCH_PROVIDERS.includes(r.provider)) ?? []
+  // SearchAPI/SerpApi requests are covered by a monthly plan and carry no
+  // per-request cost on purpose, so they don't belong in the unpriced warning.
+  const unpricedCalls = totals
+    ? totals.unknown_cost_calls - searchProviders.reduce((n, r) => n + r.unknown_cost_calls, 0)
+    : 0
+
+  // Espresso's runs and tools come from its own tables, joined to the ledger
+  // by feature label; the quota check asks two providers' account APIs live,
+  // so it is fetched once and on Refresh, not on every range change.
+  const {
+    data: espresso,
+    loading: espressoLoading,
+    error: espressoError,
+    reload: reloadEspresso,
+  } = useAsync(() => getEspressoUsage(sinceHours), [sinceHours], null)
+  const {
+    data: quotas,
+    loading: quotasLoading,
+    error: quotasError,
+    reload: reloadQuotas,
+  } = useAsync(() => getApiQuotas().then((r) => r.providers), [], [] as ApiQuota[])
 
   // Separate fetch for the call log: it's interaction-driven (selection,
   // status, page) rather than page-level, so it doesn't belong in the
@@ -327,6 +303,7 @@ export default function AiUsage() {
         sinceHours,
         feature: selection?.kind === 'feature' ? selection.value : undefined,
         model: selection?.kind === 'model' ? selection.value : undefined,
+        provider: selection?.kind === 'provider' ? selection.value : undefined,
         status: statusFilter || undefined,
         limit: PAGE_SIZE,
         offset: page * PAGE_SIZE,
@@ -343,6 +320,10 @@ export default function AiUsage() {
     setPage(0)
     setSelection((s) => (s?.kind === 'model' && s.value === model ? null : { kind: 'model', value: model }))
   }
+  function selectProvider(provider: string) {
+    setPage(0)
+    setSelection((s) => (s?.kind === 'provider' && s.value === provider ? null : { kind: 'provider', value: provider }))
+  }
   function toggleStatus(status: AiUsageStatus | '') {
     setPage(0)
     setStatusFilter((s) => (s === status ? '' : status))
@@ -358,7 +339,10 @@ export default function AiUsage() {
   function refreshAll() {
     reload()
     reloadCallLog()
+    reloadEspresso()
+    reloadQuotas()
   }
+  const refreshing = loading || callLogLoading || espressoLoading || quotasLoading
 
   const totalPages = Math.max(1, Math.ceil(callLog.total / PAGE_SIZE))
 
@@ -371,15 +355,16 @@ export default function AiUsage() {
             <h1 className="text-xl font-semibold text-zinc-100">AI Usage</h1>
           </div>
           <p className="text-sm text-zinc-500 mt-0.5">
-            Exact provider-reported usage, attributed to the Matcha feature that made each call.
+            Exact provider-reported usage and paid search API requests, attributed to the Matcha feature that
+            made each call.
           </p>
         </div>
         <button
           onClick={refreshAll}
-          disabled={loading || callLogLoading}
+          disabled={refreshing}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800 text-zinc-200 text-xs font-medium hover:bg-zinc-700 disabled:opacity-50 transition-colors"
         >
-          <RefreshCw size={12} className={loading || callLogLoading ? 'animate-spin' : ''} />
+          <RefreshCw size={12} className={refreshing ? 'animate-spin' : ''} />
           Refresh
         </button>
       </div>
@@ -424,13 +409,31 @@ export default function AiUsage() {
         </div>
       )}
 
-      {totals && totals.unknown_cost_calls > 0 && (
+      {unpricedCalls > 0 && (
         <p className="mb-4 text-xs text-amber-300/90 flex items-center gap-1.5">
           <AlertCircle size={12} />
-          {totals.unknown_cost_calls} call(s) have no locally attributed cost. Any recorded tokens are
+          {unpricedCalls} call(s) have no locally attributed cost. Any recorded tokens are
           provider-reported; provider billing remains the dollar source of truth.
         </p>
       )}
+
+      <SearchApisPanel
+        quotas={quotas}
+        providers={searchProviders}
+        loading={quotasLoading}
+        error={quotasError}
+        selectedProvider={selection?.kind === 'provider' ? selection.value : null}
+        onSelectProvider={selectProvider}
+      />
+
+      <EspressoPanel
+        usage={espresso}
+        features={espressoFeatures}
+        loading={espressoLoading}
+        error={espressoError}
+        selectedFeature={selection?.kind === 'feature' ? selection.value : null}
+        onSelectFeature={selectFeature}
+      />
 
       {/* Image generation — the editor's Generate button + Merlin's agent-loop
           generate_image tool, both routed through core.services.image_gen and

@@ -328,3 +328,35 @@ def test_budget_counts_what_it_hands_out():
     budget = chain.Budget(left=3)
     assert budget.take(2) is True and budget.take(2) is False and budget.take(0) is True
     assert (budget.left, budget.used, budget.exhausted) == (1, 2, True)
+
+
+@pytest.mark.asyncio
+async def test_a_phases_paid_calls_are_logged_under_the_specs_label(wired):
+    from app.core.services import ai_usage
+
+    conn, _ = wired
+    seen = []
+
+    async def plan(row, deps, guard):
+        await asyncio.sleep(0)
+        seen.append(ai_usage._feature_override.get())
+        return PhaseOutcome("running", {"note": "Planned"}, phase="act")
+
+    spec = make_spec(phases={"plan": plan}, usage_feature=lambda row: f"matcha.espresso.tasks.{row['phase']}")
+    conn.on("attempts = attempts + 1", task_row())
+    await chain.run_phase(spec, TASK, TOKEN)
+    assert seen == ["matcha.espresso.tasks.plan"]
+    assert ai_usage._feature_override.get() is None
+    # Without a label the calling module's is used, as before.
+    seen.clear()
+    await chain.run_phase(make_spec(phases={"plan": plan}), TASK, TOKEN)
+    assert seen == [None]
+
+
+def test_the_owners_label_their_phases():
+    from app.matcha.services.matcha_work.agent_tasks import orchestrator as tasks
+    from app.matcha.services.matcha_work.job_search import orchestrator as jobs
+
+    assert jobs.JOB_CHAIN.usage_feature({}) == "matcha.espresso.job_search"
+    assert tasks.TASK_CHAIN.usage_feature({"playbook": "apartments"}) == "matcha.espresso.tasks.apartments"
+    assert tasks.TASK_CHAIN.usage_feature({"playbook": None}) == "matcha.espresso.tasks.research"
