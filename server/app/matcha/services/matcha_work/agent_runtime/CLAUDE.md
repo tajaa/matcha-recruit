@@ -411,6 +411,14 @@ submitting it starts the task with no run (`POST /agent-tasks/prompts/{id}/answe
 and a typed reply answers it like `ask_user`. An ask tool may parse its own
 question (`AgentTool.parse_ask`); without one it is `ask_user`'s.
 
+**The latest message sets the work and answer scope.** Replayed requests, answers
+and action receipts are context, not unfinished tasks. The base prompt applies
+this to tool calls and all result fields: an email question after a calendar
+add must not re-check or mention the event, including unsolicited corrections.
+Explicit follow-ups and requested recaps still use the full relevant history;
+do not discard it or filter abilities by topic. The same server rule serves
+web and macOS Espresso, within the existing runner.
+
 What carries over from earlier runs, besides their words (`history.py`):
 
 - **A run record.** Each replayed `agent_result` (the 5 newest) ends with a
