@@ -79,6 +79,7 @@ _TITLE_ABBREVIATIONS = {
     "cfo": "chief financial officer", "cto": "chief technology officer", "cmo": "chief marketing officer",
     "cro": "chief revenue officer", "cpo": "chief product officer", "ops": "operations", "sr": "senior",
     "jr": "junior", "mgr": "manager", "dir": "director", "gm": "general manager",
+    "hr": "human resources", "chro": "chief human resources officer",
 }
 # Words a board adds around a title without changing the job.
 _TITLE_FILLER = {"of", "and", "the", "for", "a", "an", "to", "at", "in", "remote", "hybrid", "onsite", "on",
@@ -104,6 +105,32 @@ def same_title(a: str, b: str) -> bool:
         return False
     both = len(x & y)
     return x == y or (both / len(x) >= 0.75 and both / len(y) >= 0.6)
+
+
+# Words that say how senior a title is, not what the job is.
+_SENIORITY = {"chief", "head", "vice", "president", "senior", "executive", "director", "officer", "lead",
+              "global", "principal", "staff", "manager", "assistant", "associate", "junior", "general",
+              "group", "deputy", "interim", "acting", "founding", "first", "sr", "team", "leader"}
+
+
+def _stems(words: set[str]) -> set[str]:
+    return {w[:5] for w in words}
+
+
+def related_title(title: str, wanted: list[str]) -> bool:
+    """Whether a posting's title is about the work one of the wanted titles
+    is ("Director of Operations" for "Chief Operating Officer", "HR Business
+    Partner" for "Head of HR"), so a board posting that only names a wanted
+    title somewhere ("Software Engineer") isn't read as a lead. Level is the
+    screen's to judge; True when nothing is wanted."""
+    if not any(w for w in wanted):
+        return True
+    words = _stems(title_words(title))
+    for want in wanted:
+        core = title_words(want) - _SENIORITY or title_words(want)
+        if _stems(core) & words:
+            return True
+    return False
 
 
 def named_employer(company: str) -> str:

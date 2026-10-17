@@ -1,33 +1,39 @@
-"""The `discovering` phase: postings from Google Jobs and from the open web.
+"""The `discovering` phase: postings from Google Jobs, employers' own boards and the web.
 
-Three steps, each its own worker task (the step is `phase_cursor.step`):
+Four steps, each its own worker task (the step is `phase_cursor.step`):
 
   listings  Google Jobs, when a listings API is set up (`phases.listings`).
-            No API, or one with no searches left, is not fatal: the web is
-            searched either way.
+            No API, or one with no searches left, is not fatal: the boards
+            and the web are searched either way.
+  boards    code's own Brave searches for each title on Greenhouse, Lever and
+            Ashby, and in each place the person named (`boards.find`). Every
+            board job link in the answers waits in the cursor to be read. No
+            model chooses: the posting's own API says whether it is open.
   web       one model run with web search (no page loads: code reads every
-            posting anyway) looks for current postings on employers' own
-            boards (Greenhouse, Lever, Ashby, careers pages) and hands back
-            their links. A link must be one the run's searches returned
-            (`contracts.normalize_postings`). The links wait in the cursor.
+            posting anyway) looks further (careers pages, other boards,
+            search firms) and hands back links. A link must be one the run's
+            searches returned (`contracts.normalize_postings`).
   read      code reads each link: an ATS posting through the ATS's public API
             (`ats.fetch`), any other page through its JobPosting data, and a
             careers page that can't be read through the employer's own
             Greenhouse, Lever or Ashby board (`ats.find_on_board`). A posting
-            that is gone, expired or unreadable is dropped, so a model can't
-            add a job that isn't there. What is kept is a lead already read
-            (pay with its evidence, the application's questions), which
-            enrich doesn't read again.
+            that is gone, expired or unreadable is dropped, so neither a stale
+            index nor a model can add a job that isn't there. So is one whose
+            title is about other work (`normalize.related_title`), or whose
+            own location isn't in a place the person named (`places.fits`).
+            What is kept is a lead already read (pay with its evidence, the
+            application's questions), which enrich doesn't read again.
 
-The web step runs at most `WEB_RUNS` times, each handed its share of the
-searches code writes (`web_searches`): again when the search is still short of
-`WEB_TARGET` and the last run added jobs or searches are left. Only the ask, what the
-person set and the planned titles go to the web run (`prompts.discover_turn`),
-never their résumé.
+`read` follows `boards` and each web run. The web step runs at most
+`WEB_RUNS` times, each handed its share of the searches code writes
+(`web_searches`): first when the boards found fewer than `WEB_TARGET`, again
+when the search is still short and the last run added jobs or searches are
+left. Only the ask, what the person set and the planned titles go to the web
+run (`prompts.discover_turn`), never their résumé.
 
 A search with no jobs at the end fails, which is free: `UNAVAILABLE` when no
 source could be searched (no listings API, or it refused or failed, and the
-web run failed too), else "No postings matched".
+board searches and the web run failed too), else "No postings matched".
 """
 from __future__ import annotations
 
@@ -44,14 +50,14 @@ from app.matcha.services.matcha_work.agent_runtime.chain import Budget, PhaseFai
 from app.matcha.services.matcha_work.agent_runtime.context import RunLimits
 from app.matcha.services.matcha_work.agent_runtime.registry import Ability
 
-from . import ats, contracts, normalize, phases, prompts
+from . import ats, boards, contracts, normalize, phases, prompts
 from . import comp as comp_mod
 from .agent_phase import SearchProgress, run_model_phase
 from .phases import MAX_LEADS, Deps
 
 logger = logging.getLogger(__name__)
 
-LISTINGS, WEB, READ = "listings", "web", "read"
+LISTINGS, BOARDS, WEB, READ = "listings", "boards", "web", "read"
 WEB_RUNS = 2
 WEB_TARGET = 30
 WEB_LIMITS = RunLimits(max_model_calls=8, wall_seconds=300.0, max_hosted_per_response=4,
@@ -64,8 +70,9 @@ READS_PER_POSTING = 4
 READ_SECONDS = 240.0
 # Jobs already found, shown to a web run so it looks for others.
 FOUND_LIST = 60
-# The boards a web run is pointed at: their postings can always be read.
-BOARDS = ("jobs.lever.co", "job-boards.greenhouse.io", "jobs.ashbyhq.com")
+# Where a web run looks, past the boards code searched (`boards.py`): other
+# boards whose posting pages carry JobPosting data.
+OTHER_BOARDS = ("apply.workable.com", "jobs.smartrecruiters.com")
 SEARCH_TITLES = 3
 MAX_SEARCHES = 14
 # A run handed 14 searches ran 5 and finished: each run gets its own share.
@@ -87,11 +94,24 @@ async def discover(search: dict, deps: Deps, guard: chain.Guard) -> PhaseOutcome
         how = await phases.listings(search, deps, guard)
         found = await phases.lead_count(search["id"])
         note = (f"Found {found} on Google Jobs. " if found else "") + "Searching employers' job boards…"
-        return PhaseOutcome(status="discovering", cursor={"step": WEB, "listings": how},
+        return PhaseOutcome(status="discovering", cursor={"step": BOARDS, "listings": how},
                             progress={"note": note, "found": found})
+    if step == BOARDS:
+        return await _search_boards(search, deps, guard, cursor)
     if step == WEB:
         return await _search_web(search, deps, guard, cursor)
     return await _read(search, deps, guard, cursor)
+
+
+async def _search_boards(search: dict, deps: Deps, guard: chain.Guard, cursor: dict) -> PhaseOutcome:
+    titles, criteria = _titles_and_criteria(search)
+    postings, worked = await boards.find(search, titles, criteria, deps, guard)
+    cursor = {**cursor, "boards_ok": worked}
+    if postings:
+        return PhaseOutcome(status="discovering", cursor={**cursor, "step": READ, "postings": postings},
+                            progress={"note": f"Reading {len(postings)} postings on employers' job boards…"})
+    return PhaseOutcome(status="discovering", cursor={**cursor, "step": WEB},
+                        progress={"note": "Searching the web…"})
 
 
 async def _search_web(search: dict, deps: Deps, guard: chain.Guard, cursor: dict) -> PhaseOutcome:
@@ -112,7 +132,7 @@ async def _search_web(search: dict, deps: Deps, guard: chain.Guard, cursor: dict
                             progress={"note": f"Reading {len(postings)} postings…"})
     if runs + 1 < WEB_RUNS and searches_for(search, runs + 1):
         return PhaseOutcome(status="discovering", cursor={**cursor, "step": WEB},
-                            progress={"note": "Searching more job boards…"})
+                            progress={"note": "Searching the web for more…"})
     return await _finish(search, cursor)
 
 
@@ -158,7 +178,7 @@ async def web_run(search: dict, deps: Deps, guard: chain.Guard, found: list[str]
                                             searches_for(search, run), found),
             limits=WEB_LIMITS, progress=SearchProgress(note_fn=lambda text: guard.note(text)),
             client_factory=deps.client, reasoning_effort="medium",
-            first_note="Searching employers' job boards…",
+            first_note="Searching the web…",
         )
         return list(outcome.result.get("postings") or []), True
     except runner.AgentRunError as exc:
@@ -168,17 +188,18 @@ async def web_run(search: dict, deps: Deps, guard: chain.Guard, found: list[str]
 
 def web_searches(titles: list[str], criteria: dict) -> list[str]:
     """The searches a web run starts from. A model left to choose ran one
-    and stopped (dev, 2026-10-16), and postings are thin at the top: each
-    title on each board, then each title in each place. A board search names
-    the place only when there is one; with several, the run keeps those in
-    the places it was given."""
-    places = [p.strip() for p in criteria.get("locations") or [] if p and p.strip()]
-    remote = criteria.get("remote") == "remote_only" or any(p.lower() == "remote" for p in places)
-    places = [p for p in places if p.lower() not in phases.NATIONWIDE and p.lower() != "remote"]
-    where = places[0] if len(places) == 1 else ("remote" if remote and not places else "")
-    searches = [" ".join(filter(None, (f'"{title}"', f'"{where}"' if where else "", f"site:{board}")))
-                for title in titles[:SEARCH_TITLES] for board in BOARDS]
-    searches += [f'"{title}" "{place}" job' for title in titles[:SEARCH_TITLES] for place in places[:3]]
+    and stopped (dev, 2026-10-16). Greenhouse, Lever and Ashby are code's
+    (`boards.py`), so these look elsewhere: each title in each place, then
+    each title on the other boards, named with the place when there is one."""
+    named = [p.strip() for p in criteria.get("locations") or [] if p and p.strip()]
+    remote = criteria.get("remote") == "remote_only" or any(p.lower() == "remote" for p in named)
+    named = [p for p in named if p.lower() not in phases.NATIONWIDE and p.lower() != "remote"]
+    where = named[0] if len(named) == 1 else ("remote" if remote and not named else "")
+    searches = [f'"{title}" "{place}" job' for title in titles[:SEARCH_TITLES] for place in named[:3]]
+    if not named:
+        searches += [f'"{title}"{" remote" if remote else ""} job opening' for title in titles[:SEARCH_TITLES]]
+    searches += [" ".join(filter(None, (f'"{title}"', f'"{where}"' if where else "", f"site:{board}")))
+                 for title in titles[:SEARCH_TITLES] for board in OTHER_BOARDS]
     return list(dict.fromkeys(searches))[:MAX_SEARCHES]
 
 
@@ -197,19 +218,21 @@ async def _read(search: dict, deps: Deps, guard: chain.Guard, cursor: dict) -> P
 async def _finish(search: dict, cursor: dict) -> PhaseOutcome:
     total = await phases.lead_count(search["id"])
     if total == 0:
-        if not cursor.get("web_ok") and cursor.get("listings") != phases.LISTED:
+        searched = cursor.get("web_ok") or cursor.get("boards_ok") or cursor.get("listings") == phases.LISTED
+        if not searched:
             raise PhaseFailed(UNAVAILABLE)
         raise PhaseFailed(NO_MATCH)
     return PhaseOutcome(status=NEXT, cursor={},
                         progress={"note": f"Found {total} jobs. Reading the postings for pay…", "found": total})
 
 
-# ── reading what the web run found ───────────────────────────────────────────
+# ── reading what the boards and the web run found ────────────────────────────
 
 async def read_postings(search: dict, deps: Deps, guard: chain.Guard, postings: list[dict]) -> int:
-    """Read each posting the web run found and save the live, new ones as
-    leads. Returns how many were added."""
-    criteria = decode_jsonb(search.get("criteria"), {}) or {}
+    """Read each posting the boards or a web run found and save the live,
+    new ones with a related title, where the person wants them, as leads.
+    Returns how many were added."""
+    titles, criteria = _titles_and_criteria(search)
     async with connection_or_direct() as conn:
         rows = await conn.fetch(
             "SELECT dedupe_key, title, company, source_url, apply_links FROM mw_job_leads WHERE search_id = $1",
@@ -223,8 +246,9 @@ async def read_postings(search: dict, deps: Deps, guard: chain.Guard, postings: 
             and p["url"] not in known and not phases.aggregator(p["url"])]
     if room <= 0 or not todo:
         return 0
-    budget = Budget(left=await phases.grant(search["id"], "fetch_calls", READS_PER_POSTING * len(todo),
-                                            phases.MAX_FETCHES))
+    # A board posting is one API read; a page may take a few (`read_posting`).
+    want = sum(1 if ats.detect(p["url"]) is not None else READS_PER_POSTING for p in todo)
+    budget = Budget(left=await phases.grant(search["id"], "fetch_calls", want, phases.MAX_FETCHES))
     gate = asyncio.Semaphore(READ_CONCURRENCY)
     today = datetime.now(timezone.utc).date()
 
@@ -249,7 +273,9 @@ async def read_postings(search: dict, deps: Deps, guard: chain.Guard, postings: 
     kept = [(row["dedupe_key"], row["title"], row["company"]) for row in rows]
     new = []
     for record in records:
-        if record is None or not phases.keep_job(record["company"], record["remote"], criteria):
+        if record is None or not normalize.related_title(record["title"], titles):
+            continue
+        if not phases.keep_job(record["company"], record["remote"], criteria, record["location"]):
             continue
         if any(record["dedupe_key"] == key or normalize.same_posting(record["title"], record["company"], title, company)
                for key, title, company in kept):
@@ -260,10 +286,10 @@ async def read_postings(search: dict, deps: Deps, guard: chain.Guard, postings: 
 
 
 async def read_posting(posting: dict, deps: Deps, take, *, today: date) -> dict | None:
-    """The lead record for one posting the web run found, read from the ATS's
-    public API, the page's JobPosting data or the employer's own board; None
-    when it is gone, expired, can't be read, or the budget ran out. At most
-    `READS_PER_POSTING` fetches."""
+    """The lead record for one posting the boards or a web run found, read
+    from the ATS's public API, the page's JobPosting data or the employer's
+    own board; None when it is gone, expired, can't be read, or the budget ran
+    out. At most `READS_PER_POSTING` fetches."""
     spent = 0
 
     def take_one() -> bool:

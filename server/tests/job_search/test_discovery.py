@@ -70,13 +70,49 @@ async def test_google_jobs_first_then_the_web(conn, monkeypatch):
     monkeypatch.setattr(phases, "listings", listings)
     conn.on("SELECT COUNT(*) FROM mw_job_leads", 0)
     out = await discovery.discover(search_row(status="discovering"), phases.Deps(), guard())
-    assert out.status == "discovering" and out.cursor == {"step": "web", "listings": "refused"}
+    assert out.status == "discovering" and out.cursor == {"step": "boards", "listings": "refused"}
     assert out.progress == {"note": "Searching employers' job boards…", "found": 0}
 
     listings.return_value = phases.LISTED
     conn.on("SELECT COUNT(*) FROM mw_job_leads", 12)
     out = await discovery.discover(search_row(status="discovering"), phases.Deps(), guard())
     assert out.progress["note"] == "Found 12 on Google Jobs. Searching employers' job boards…"
+
+
+@pytest.mark.asyncio
+async def test_the_boards_are_searched_by_code_then_read(conn, monkeypatch):
+    find = AsyncMock(return_value=([claim(GH, title="", company="", location="")], True))
+    monkeypatch.setattr(discovery.boards, "find", find)
+    out = await discovery.discover(places_search("boards", listings="refused"), phases.Deps(), guard())
+    assert out.status == "discovering" and out.cursor["step"] == "read" and out.cursor["boards_ok"] is True
+    assert [p["url"] for p in out.cursor["postings"]] == [GH] and out.cursor["listings"] == "refused"
+    assert out.progress["note"] == "Reading 1 postings on employers' job boards…"
+    titles, criteria = find.await_args.args[1:3]
+    assert titles[0] == "Chief People Officer" and criteria["locations"][0] == "Orange County, CA"
+
+    # Nothing on the boards: on to the web.
+    find.return_value = ([], False)
+    out = await discovery.discover(places_search("boards", listings="refused"), phases.Deps(), guard())
+    assert out.cursor["step"] == "web" and out.cursor["boards_ok"] is False
+
+    # Read: fewer than the target found, so the web next; enough, and it is skipped.
+    conn.on("SELECT dedupe_key, title, company, source_url, apply_links FROM mw_job_leads", [])
+    out = await discovery.discover(at_step("read", listings="refused", boards_ok=True, postings=[]), phases.Deps(), guard())
+    assert out.cursor["step"] == "web"
+    conn.on("SELECT COUNT(*) FROM mw_job_leads", 30)
+    out = await discovery.discover(at_step("read", listings="refused", boards_ok=True, web_added=30, postings=[]),
+                                   phases.Deps(), guard())
+    assert out.status == "screening"
+
+
+@pytest.mark.asyncio
+async def test_boards_that_answered_count_as_searched(conn, monkeypatch):
+    monkeypatch.setattr(discovery, "run_model_phase", AsyncMock(side_effect=runner.AgentRunError("down")))
+    conn.on("SELECT COUNT(*) FROM mw_job_leads", 0)
+    with pytest.raises(PhaseFailed, match="No postings matched"):
+        await discovery.discover(at_step("web", listings="refused", boards_ok=True), phases.Deps(), guard())
+    with pytest.raises(PhaseFailed, match="aren't available right now"):
+        await discovery.discover(at_step("web", listings="refused", boards_ok=False), phases.Deps(), guard())
 
 
 @pytest.mark.asyncio
@@ -100,7 +136,7 @@ async def test_a_web_run_hands_back_only_links_it_saw(conn):
     # The ask, settings, titles and searches go out, and what was already found; never the résumé.
     sent = json.dumps(client.calls[0]["input"], ensure_ascii=False)
     assert "Titles to look for: Chief People Officer" in sent and "COO — Beta" in sent
-    assert "Run these searches first" in sent and '\\"Chief People Officer\\" site:jobs.lever.co' in sent
+    assert "Run these searches first" in sent and '\\"Chief People Officer\\" site:apply.workable.com' in sent
     assert "<resume>" not in sent
     # Search only: code reads every posting, so the run loads no pages.
     tools = client.calls[0]["tools"]
@@ -162,16 +198,16 @@ async def test_each_web_run_gets_its_share_of_the_searches(conn, monkeypatch):
     # The first run found nothing, and searches are left: search again.
     out = await discovery.discover(places_search("web", listings="refused"), phases.Deps(), guard())
     assert out.status == "discovering" and out.cursor["step"] == "web" and out.cursor["web_runs"] == 1
-    assert out.progress["note"] == "Searching more job boards…"
+    assert out.progress["note"] == "Searching the web for more…"
     first = model.await_args.kwargs["user_text"]
-    assert '"Chief People Officer" site:jobs.lever.co' in first
-    assert '"VP People" site:job-boards.greenhouse.io' not in first
+    assert '"Chief People Officer" "Orange County, CA" job' in first
+    assert '"VP People" site:apply.workable.com' not in first
     with pytest.raises(PhaseFailed, match="No postings matched"):
         await discovery.discover(places_search("web", listings="refused", web_runs=1, web_ok=True),
                                  phases.Deps(), guard())
     second = model.await_args.kwargs["user_text"]
-    assert '"VP People" site:job-boards.greenhouse.io' in second
-    assert '"Chief People Officer" site:jobs.lever.co' not in second
+    assert '"VP People" site:apply.workable.com' in second
+    assert '"Chief People Officer" "Orange County, CA" job' not in second
 
     # After reading: a second run while searches are left, even when this one added nothing.
     conn.on("SELECT dedupe_key, title, company, source_url, apply_links FROM mw_job_leads", [])
@@ -181,17 +217,21 @@ async def test_each_web_run_gets_its_share_of_the_searches(conn, monkeypatch):
 
 
 def test_web_searches():
+    """Greenhouse, Lever and Ashby are code's (`boards.py`): a web run looks
+    in each place, then on the other boards."""
     titles = ["Chief People Officer", "CHRO", "VP People", "Head of People"]
     three = discovery.web_searches(titles, {"locations": ["Orange County, CA", "San Diego, CA", "Los Angeles, CA"]})
-    assert three[:3] == ['"Chief People Officer" site:jobs.lever.co', '"Chief People Officer" site:job-boards.greenhouse.io',
-                         '"Chief People Officer" site:jobs.ashbyhq.com']
-    assert three[9] == '"Chief People Officer" "Orange County, CA" job'
+    assert three[:3] == ['"Chief People Officer" "Orange County, CA" job', '"Chief People Officer" "San Diego, CA" job',
+                         '"Chief People Officer" "Los Angeles, CA" job']
+    assert three[9] == '"Chief People Officer" site:apply.workable.com'
     assert len(three) == discovery.MAX_SEARCHES and not any("Head of People" in q for q in three)
+    assert not any(board in q for q in three for board in ("lever.co", "greenhouse.io", "ashbyhq.com"))
     assert discovery.web_searches(["COO"], {"locations": ["Austin, TX"]}) == [
-        '"COO" "Austin, TX" site:jobs.lever.co', '"COO" "Austin, TX" site:job-boards.greenhouse.io',
-        '"COO" "Austin, TX" site:jobs.ashbyhq.com', '"COO" "Austin, TX" job']
-    assert discovery.web_searches(["COO"], {"locations": ["Remote", "United States"], "remote": "remote_only"})[0] == \
-        '"COO" "remote" site:jobs.lever.co'
+        '"COO" "Austin, TX" job', '"COO" "Austin, TX" site:apply.workable.com',
+        '"COO" "Austin, TX" site:jobs.smartrecruiters.com']
+    assert discovery.web_searches(["COO"], {"locations": ["Remote", "United States"], "remote": "remote_only"}) == [
+        '"COO" remote job opening', '"COO" "remote" site:apply.workable.com',
+        '"COO" "remote" site:jobs.smartrecruiters.com']
     assert discovery.web_searches([], {"locations": ["Austin, TX"]}) == []
 
 
@@ -259,8 +299,10 @@ async def test_reading_keeps_live_new_postings_as_read_leads(conn):
     assert out.status == "discovering" and out.cursor["step"] == "web"
     assert out.cursor["web_added"] == 4 and out.cursor["postings"] == []
     assert out.progress == {"note": "Found 5 jobs so far; looking for more…", "found": 5}
-    # A known link and an aggregator are never read; four reads reserved for each of the other eight.
-    assert conn.ran("SET fetch_calls = cur.before")[0][2] == (SEARCH, 32, phases.MAX_FETCHES)
+    # A known link and an aggregator are never read; one API read reserved
+    # for each of the six board links, four for each of the two pages.
+    assert conn.ran("SET fetch_calls = cur.before")[0][2] == (SEARCH, 6 + 2 * discovery.READS_PER_POSTING,
+                                                              phases.MAX_FETCHES)
     assert all(c.args[0] not in (KNOWN, LINKEDIN) for c in deps.page_fetch.await_args_list)
 
     records = {r["company"]: r for r in json.loads(conn.ran("INSERT INTO mw_job_leads")[0][2][2])}
@@ -281,6 +323,36 @@ async def test_reading_keeps_live_new_postings_as_read_leads(conn):
     search["phase_cursor"] = json.dumps({**json.loads(search["phase_cursor"]), "web_runs": 2})
     out = await discovery.discover(search, deps, guard())
     assert out.status == "screening" and out.cursor == {}
+
+
+@pytest.mark.asyncio
+async def test_reading_keeps_only_related_titles_in_the_places_named(conn):
+    """A board search turns up any job that names a wanted title, anywhere:
+    each is kept only for a related title, in or near a place named."""
+    conn.on(GRANT, lambda _id, want, _limit: want)
+    conn.on("INSERT INTO mw_job_leads", lambda *args: len(json.loads(args[2])))
+    jobs = {
+        "1": ("Chief People Officer", "Irvine, CA", None),        # 9 miles from Orange County
+        "2": ("VP, People Operations", "Remote - US", True),      # remote, which they'd take
+        "3": ("Chief People Officer", "Austin, TX", False),        # nowhere they named
+        "4": ("Senior Software Engineer", "San Diego, CA", False),  # other work
+        "5": ("Chief People Officer", "Remote - Canada", True),    # remote abroad
+        "6": ("Head of HR", "", False),                            # no location
+    }
+
+    async def fetch(ref):
+        title, location, remote = jobs[ref.job_id]
+        return ats_found(ref, f"https://job-boards.greenhouse.io/co{ref.job_id}/jobs/{ref.job_id}", title=title,
+                         company=f"Co {ref.job_id}", location=location, remote=remote)
+
+    deps = phases.Deps(ats_find=NO_BOARD, ats_fetch=AsyncMock(side_effect=fetch), page_fetch=AsyncMock())
+    postings = [{"url": f"https://job-boards.greenhouse.io/co{i}/jobs/{i}", "title": "", "company": "", "location": ""}
+                for i in jobs]
+    assert await discovery.read_postings(places_search("read"), deps, guard(), postings) == 2
+    records = json.loads(conn.ran("INSERT INTO mw_job_leads")[0][2][2])
+    assert [r["company"] for r in records] == ["Co 1", "Co 2"]
+    # One API read reserved for each board link.
+    assert conn.ran("SET fetch_calls = cur.before")[0][2] == (SEARCH, 6, phases.MAX_FETCHES)
 
 
 @pytest.mark.asyncio
@@ -307,7 +379,7 @@ async def test_a_read_that_breaks_skips_that_posting(conn):
         return await ats_fetch(ref)
 
     deps = phases.Deps(ats_find=NO_BOARD, ats_fetch=AsyncMock(side_effect=flaky), page_fetch=AsyncMock())
-    assert await discovery.read_postings(search_row(), deps, guard(), [claim(GH), claim(LEVER)]) == 1
+    assert await discovery.read_postings(at_step("read"), deps, guard(), [claim(GH), claim(LEVER)]) == 1
     records = json.loads(conn.ran("INSERT INTO mw_job_leads")[0][2][2])
     assert [r["source_url"] for r in records] == [GH]
 
@@ -388,11 +460,15 @@ async def test_reads_still_loading_at_the_deadline_are_dropped(conn, monkeypatch
             await asyncio.sleep(5)
         return await ats_fetch(ref)
 
-    deps = phases.Deps(ats_find=NO_BOARD, ats_fetch=AsyncMock(side_effect=slow), page_fetch=AsyncMock())
-    assert await discovery.read_postings(search_row(), deps, guard(), [claim(GH), claim(LEVER)]) == 1
+    async def slow_page(_url, **_kwargs):
+        await asyncio.sleep(5)
+
+    deps = phases.Deps(ats_find=NO_BOARD, ats_fetch=AsyncMock(side_effect=slow),
+                       page_fetch=AsyncMock(side_effect=slow_page))
+    assert await discovery.read_postings(at_step("read"), deps, guard(), [claim(GH), claim(LEVER), claim(PAGE)]) == 1
     assert [r["source_url"] for r in json.loads(conn.ran("INSERT INTO mw_job_leads")[0][2][2])] == [GH]
-    # The slow read's unused reservation goes back with the rest.
-    assert conn.ran(REFUND)[0][2] == (SEARCH, 2 * discovery.READS_PER_POSTING - 2)
+    # The slow page's unused reservation goes back with the rest.
+    assert conn.ran(REFUND)[0][2] == (SEARCH, discovery.READS_PER_POSTING - 1)
 
 
 @pytest.mark.asyncio

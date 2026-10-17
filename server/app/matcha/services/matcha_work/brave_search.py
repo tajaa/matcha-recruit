@@ -44,6 +44,8 @@ logger = logging.getLogger(__name__)
 
 URL = "https://api.search.brave.com/res/v1/web/search"
 COUNT = 10
+# Brave answers at most 20 results a request (code's board searches ask for that).
+MAX_COUNT = 20
 TIMEOUT_SECONDS = 10.0
 # How long Brave stays out after a refused key or a 402: long enough not to
 # ask on every search, short enough that a fixed key or a paid bill is used
@@ -198,10 +200,10 @@ def _clean(text: Any, limit: int) -> str:
     return " ".join(html.unescape(_TAGS.sub("", str(text or ""))).split())[:limit]
 
 
-def results(body: dict) -> list[dict]:
+def results(body: dict, count: int = COUNT) -> list[dict]:
     """The web results, as the model sees them: title, URL, how old, what it says."""
     out = []
-    for item in ((body.get("web") or {}).get("results") or [])[:COUNT]:
+    for item in ((body.get("web") or {}).get("results") or [])[:count]:
         if not isinstance(item, dict):
             continue
         url = item.get("url")
@@ -218,16 +220,18 @@ def results(body: dict) -> list[dict]:
     return out
 
 
-async def search(query: str, *, freshness: Any = None,
+async def search(query: str, *, freshness: Any = None, count: int = COUNT,
                  transport: httpx.AsyncBaseTransport | None = None,
                  sleep: SleepFn = asyncio.sleep, clock: Clock = time.monotonic) -> list[dict]:
-    """Up to `COUNT` web results for `query`, under the rules in the docstring."""
+    """Up to `count` (`COUNT` unless asked, at most `MAX_COUNT`) web results
+    for `query`, under the rules in the docstring."""
+    count = max(1, min(int(count), MAX_COUNT))
     key = _key()
     if key is None:
         raise Unavailable("Brave search has no key", out=True)
     if clock() < _out_until:
         raise Unavailable(f"Brave search is out ({_out_reason})", out=True)
-    params: dict[str, Any] = {"q": query[:400], "count": COUNT, "extra_snippets": "true",
+    params: dict[str, Any] = {"q": query[:400], "count": count, "extra_snippets": "true",
                               "result_filter": "web", "text_decorations": "false"}
     if isinstance(freshness, str) and freshness in FRESHNESS:
         params["freshness"] = FRESHNESS[freshness]
@@ -261,4 +265,4 @@ async def search(query: str, *, freshness: Any = None,
     if spent is not None:
         # That was the last one: the next search would be refused.
         mark_out("Brave has no searches left this period", spent, clock=clock)
-    return results(body)
+    return results(body, count)

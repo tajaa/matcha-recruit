@@ -18,12 +18,14 @@ costs 5 units of Pro's 60 / Business's 150, so 12 searches with nothing else;
 
 | Piece | File | What it owns |
 |---|---|---|
-| Discovery | `discovery.py` | The `discovering` phase in three steps: Google Jobs (`phases.listings`), a model web search for postings on employers' own boards, then reading each one (ATS API or JSON-LD) into an already-read lead. Works with no listings key |
+| Discovery | `discovery.py` | The `discovering` phase in four steps: Google Jobs (`phases.listings`), code's Brave searches of Greenhouse, Lever and Ashby (`boards.py`), a model web search for postings elsewhere, then reading each one (ATS API or JSON-LD) into an already-read lead. Works with no listings key |
+| Boards | `boards.py` | Code's board searches: Brave (`Deps.web_search`, 20 results each) for each title on each board host and in each place named, ≤24 a search, 1 a second; every Greenhouse/Lever/Ashby job link in the answers goes to the read step. No model chooses |
+| Places | `places.py` (pure) + `data/us_places.tsv.gz` | Whether a job is in a place the person named (`fits`): its location text split into places, put on the map with the US Census gazetteer (offline, built by `server/scripts/build_job_places.py`), kept within 50 miles of one of theirs, or remote when they'd take it |
 | Listings | `providers.py` | Google Jobs via SearchAPI (`SEARCH_API_KEY`), then SerpApi (`SERP_API_KEY`) (`FallbackJobs`), as extra coverage: with neither, the web alone. Requests and moving between them are `matcha_work/search_apis.py`'s, shared with research tasks: one that refuses for good (a refused key, or no searches left: a 402, or a 429 in the API's own words, `out_of_searches`; never a per-minute quota) is dropped for the rest of the search and logged as an error (Admin → Server Errors); one still down after its retry is passed over when another follows. Only query + location leave the server |
 | ATS | `ats.py` | Greenhouse / Lever / Ashby detection from apply links, their public APIs, application questions; `find_on_board`, the employer's own board found by name |
 | Pay | `comp.py` (pure) | Text scanning, structured mappers, `combine`, claim checks (`verify_quote`, `numbers_supported`) |
 | Ranking | `ranking.py` (pure) | Weighted score inside bands; `comp_line` |
-| Helpers | `normalize.py` (pure) | Dedupe key, state, remote, URL checks, posted age |
+| Helpers | `normalize.py` (pure) | Dedupe key, state, remote, URL checks, posted age, `related_title` |
 | Data | `service.py` | Owner-scoped reads/writes, re-rank, cancel, tombstone delete |
 | Allowance | `quota.py` | The monthly count |
 | Start | `enqueue.py` | `preflight`, `create_search`, `dispatch`, `queue_for` |
@@ -55,7 +57,26 @@ Worker: `workers/tasks/job_search.py`. Migration: `mwjobs01`
   the ATS's public API or the page's JobPosting data. A posting the ATS no
   longer has, one past its `validThrough`, or a page with no posting on it is
   dropped. So a model can't add a job that isn't there, and the title, the
-  pay and the questions come from the posting, never from the model.
+  pay and the questions come from the posting, never from the model. The
+  same goes for code's own board searches: Brave's index is months behind (10
+  of 45 board links in a 2026-10-17 prod run were still posted), so a link is
+  only a job once its board's API still has it.
+- **A job is kept only where the person wants it.** When they named places
+  (other than Remote and the nationwide words), every job, from Google Jobs,
+  the boards or the web, is kept only when a place its own posting names is
+  within 50 miles of one of theirs (`places.NEAR_MILES`), in a state they
+  named, or matched by name abroad, or when it is remote and they'd take
+  remote (`phases.keep_job` → `places.fits`). A location code can't place is
+  dropped, not guessed at, and so is a remote job open only outside the
+  country of every place they named. Code decides from the posting's text and
+  the Census gazetteer, never a model: a model given Brave results with no
+  location in their snippets kept one of six that fit (prod, 2026-10-17).
+- **A board or web posting is kept only for a related title.** A board search
+  for "Chief People Officer" turns up any job that names it somewhere, so a
+  posting read from the boards or the web is kept only when its title shares
+  a core word with a wanted title (`normalize.related_title`: "HR Business
+  Partner" for "Head of HR", never "Software Engineer"). Level is the
+  screen's to judge.
 - **No pay figure without evidence.** Every base/bonus/equity value carries
   `evidence {quote, origin, url}`. From text, the quote is a slice of the text
   it came from; from a structured field (Lever `salaryRange`, Greenhouse pay
@@ -146,7 +167,7 @@ replacing `JOB_CHAIN` (`dataclasses.replace(..., dispatch=...)`).
   (main-worker start, next to the sales reconcile) give an idle live search a
   new token and dispatch it. Celery does not redeliver a killed task.
 
-Budgets per search, across retries: 30 provider calls, 120 leads, 400 page/API
+Budgets per search, across retries: 48 provider calls (Google Jobs ≤24, Brave's board searches ≤24), 120 leads, 400 page/API
 fetches (`MAX_FETCHES`, shared: discovery's reads first, then enrich), at most `LEAD_FETCHES` (10) for one lead. Calls are reserved on the search row before they are made
 (`phases.grant` → `chain.grant`, one statement under a row lock) and only the unused part is
 given back (`refund`). A task killed mid-phase gives nothing back, so a retry
@@ -158,7 +179,7 @@ ran out before is left unread (`NOT_TRIED`), not marked read.
 | Status | Phase | Notes |
 |---|---|---|
 | `queued` → `planning` | `model_phases.plan` | Model: queries (≤8), titles, deal-breakers, profile summary, weights (applied only while `weights_source='default'`). Falls back to `plan_from_criteria`; what the person typed is always searched. Google's `location` only takes Google place names, so a city goes in the query text |
-| `discovering` | `discovery.discover` | Three steps, each its own task (`phase_cursor.step`). `listings`: Google Jobs when a key is set, up to 3 pages per query, 3 at a time; dedupe on company + title + city; exclusions and remote preference applied. No key, a refusal or failing queries never stop the search. `web`: one model run with web search only (no page loads: code reads every posting; with them a run spent its turns re-checking pages), ≤300 s, ≤16 searches, finds ≤40 postings on Greenhouse, Lever, Ashby and careers pages; the links wait in the cursor. Code writes the searches it starts from (`web_searches`: each of 3 titles on each board, then each title in each place, ≤14), half to each run, because a model left to choose ran one search and stopped. Workday isn't asked for: its pages are scripts with no posting data, and its API refuses servers (checked 2026-10-16). `read`: each is read (4 fetches reserved each, 6 at a time, 240 s; what's still loading then is dropped). A careers page that can't be read (a bot check, a script page) is looked up on the employer's own board (`ats.find_on_board`, same title and employer). Known links and aggregators are skipped, and duplicates of a lead are dropped (`dedupe_key`, `same_posting`). Kept leads are `enriched_at` set with `source` greenhouse/lever/ashby/web and their `ats` questions. The web runs a second time when fewer than 30 came from the web and the first added jobs or searches are left. Nothing found: `UNAVAILABLE` (free) when no source could be searched, else "No postings matched" |
+| `discovering` | `discovery.discover` | Four steps, each its own task (`phase_cursor.step`). `listings`: Google Jobs when a key is set, up to 3 pages per query, 3 at a time; dedupe on company + title + city; exclusions, remote preference and places applied. No key, a refusal or failing queries never stop the search. `boards`: code's Brave searches (`boards.board_searches`: each of 4 titles on each of the 4 board hosts, interleaved with each of 2 titles in each of 5 places, ≤24, one a second for Brave's free plan; a Brave that is out stops them, and the unused searches go back). Every board job link waits in the cursor (`boards_ok` when any search answered). `web`: one model run with web search only (no page loads: code reads every posting; with them a run spent its turns re-checking pages), ≤300 s, ≤16 searches, finds ≤40 postings on careers pages, other boards and search firms; the links wait in the cursor. Code writes the searches it starts from (`web_searches`: each of 3 titles in each place, then on Workable and SmartRecruiters, ≤14), half to each run, because a model left to choose ran one search and stopped. Workday isn't asked for: its pages are scripts with no posting data, and its API refuses servers (checked 2026-10-16). `read` (after the boards and after each web run): each is read (1 fetch reserved for a board link, 4 for a page, 6 at a time, 240 s; what's still loading then is dropped), and kept only for a related title in a place named (Invariants). A careers page that can't be read (a bot check, a script page) is looked up on the employer's own board (`ats.find_on_board`, same title and employer). Known links and aggregators are skipped, and duplicates of a lead are dropped (`dedupe_key`, `same_posting`). Kept leads are `enriched_at` set with `source` greenhouse/lever/ashby/web and their `ats` questions. The web runs when fewer than 30 came from the boards, and a second time when the search is still short and the first added jobs or searches are left. Nothing found: `UNAVAILABLE` (free) when no source could be searched (listings, boards and web all failed), else "No postings matched" |
 | `screening` | `model_phases.screen` | Model, batches of 40 by short id (J1…): relevant, fit 0-5, reasons, deal-breaker. A failed batch stays in (unranked fit) |
 | `enriching` | `enrich` | Batches of 24. Reads up to 2 ATS links (via the API), then up to 2 company pages (their JSON-LD `JobPosting`); a careers page that redirects into an ATS is read as that ATS. Only the lead's own job counts, see Invariants. If no link is it, `ats.find_on_board` looks the title up on the employer's Greenhouse, Lever and Ashby boards, by name. Only jobs at the fit floor (Invariants); the floor is written token-guarded before the re-rank reads it. Then `service.rerank` and the top 8 matches are queued (`phase_cursor.approach_queue`). A widen ends here, drafting nothing |
 | `approaching` | `model_phases.approach` | Model with web search + `fetch_page`, 2 jobs per task. A failed batch is `approach_status='failed'`; the person can redraft |

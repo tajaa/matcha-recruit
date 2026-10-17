@@ -129,6 +129,18 @@ async def test_listings_respect_remote_preference_and_budget(conn):
     assert not phases.keep_posting(posting("COO", "Remote Co", remote=True), {"remote": "onsite_only"})
 
 
+def test_a_job_is_kept_only_in_the_places_named():
+    criteria = {"locations": ["Austin, TX"], "remote": "any"}
+    assert phases.keep_posting(posting("COO", "Acme", location="Round Rock, TX"), criteria)  # 17 miles
+    assert not phases.keep_posting(posting("COO", "Acme", location="Dallas, TX"), criteria)
+    assert phases.keep_posting(posting("COO", "Acme", location="Remote", remote=True), criteria)
+    assert not phases.keep_posting(posting("COO", "Acme", location="Remote", remote=True),
+                                   {**criteria, "remote": "onsite_only"})
+    # No places, or only nationwide ones: anywhere.
+    assert phases.keep_job("Acme", False, {"locations": []}, "Dallas, TX")
+    assert phases.keep_job("Acme", False, {"locations": ["United States"]}, "Dallas, TX")
+
+
 @pytest.mark.asyncio
 async def test_listings_never_stop_the_search(conn):
     """No API, one that refused for good, or every query failing: each is
