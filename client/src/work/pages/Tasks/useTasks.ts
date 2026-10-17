@@ -4,7 +4,7 @@ import {
   startAgentTaskRound, updateAgentTaskItem, type AgentTaskRoundKind,
 } from '../../api/matchaWork/agentTasks'
 import type { AgentTask, AgentTaskDetail, AgentTaskItemDetail, AgentTaskList } from '../../types'
-import { documentJournalId, errorText, isLive, pollMs, statusChanged } from '../../components/tasks/tasksLogic'
+import { documentJournalId, errorText, isJobSearch, isLive, pollMs, statusChanged } from '../../components/tasks/tasksLogic'
 
 /** The list refreshes on this slower beat, for tasks other than the open one. */
 const LIST_MS = 30_000
@@ -80,11 +80,15 @@ export function useTasks(taskId: string | undefined, itemId: string | null) {
     const seq = ++listSeq.current
     return listAgentTasks().then(
       (loaded) => {
-        if (seq !== listSeq.current) return
+        if (seq !== listSeq.current) return null
         setList({ ...loaded, tasks: loaded.tasks.map((t) => (t.id === taskRef.current ? { ...t, unseen: false } : t)) })
         setListError(null)
+        return loaded
       },
-      (e: unknown) => { if (seq === listSeq.current) setListError(errorText(e, "Couldn't load your tasks.")) },
+      (e: unknown) => {
+        if (seq === listSeq.current) setListError(errorText(e, "Couldn't load your tasks."))
+        return null
+      },
     )
   }, [])
 
@@ -139,13 +143,17 @@ export function useTasks(taskId: string | undefined, itemId: string | null) {
     if (taskId) void loadDetail(taskId)
   }, [taskId, loadDetail])
 
+  // Job searches load their leads through useJobSearch. The generic item
+  // endpoint refuses them, so wait until we know which engine owns this task.
+  const open = detail ?? list?.tasks.find((task) => task.id === taskId)
+  const canLoadItem = !!open && !isJobSearch(open)
   useEffect(() => {
-    if (itemId && taskId) void refreshItem(itemId)
-  }, [taskId, itemId, refreshItem])
+    if (itemId && taskId && canLoadItem) void refreshItem(itemId)
+  }, [taskId, itemId, canLoadItem, refreshItem])
 
   // The poll: a live task's cheap status, a full reload only on a change; the
   // list on its slower beat. One timer, re-armed for the open task's pace.
-  const live = !!detail && isLive(detail)
+  const live = !!detail && !isJobSearch(detail) && isLive(detail)
   useEffect(() => {
     let polling = false
     let sinceList = 0
@@ -156,7 +164,7 @@ export function useTasks(taskId: string | undefined, itemId: string | null) {
       try {
         const current = detailRef.current
         const id = taskRef.current
-        if (id && current && current.id === id && isLive(current)) {
+        if (id && current && current.id === id && !isJobSearch(current) && isLive(current)) {
           const asked = detailSeq.current
           const status = await getAgentTaskStatus(id)
           // Something newer than this status landed while it was out: the next tick looks again.

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { AlertTriangle, ArrowLeft, FileCheck2, ListFilter, Loader2, SlidersHorizontal, Trash2, X } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, BookOpen, FileCheck2, ListFilter, Loader2, SlidersHorizontal, Trash2, X } from 'lucide-react'
 import type { JobLeadSummary, JobSearchDetail, JobWeights } from '../../api/matchaWork/jobSearch'
 import {
   DEFAULT_WEIGHTS, FILTERS, GMAIL_DRAFTS_URL, PHASES, anyWeightAboveZero, compBadge, displayTitle, filterLeads, fitText,
@@ -19,7 +19,7 @@ function readCollapsed(): boolean {
  * open job shows beside it (`LeadPane`). Mirrors the macOS app's job search view.
  */
 export default function SearchDetail({
-  detail, busy, error, onDismissError, selectedLeadId, onSelectLead, onRerank, onWiden, onCancel, onDelete, onBack,
+  detail, busy, error, onDismissError, selectedLeadId, onSelectLead, onRerank, onWiden, onCancel, onDelete, onBack, onHelp,
 }: {
   detail: JobSearchDetail
   busy: boolean
@@ -31,8 +31,9 @@ export default function SearchDetail({
   onWiden: () => void
   onCancel: () => void
   onDelete: () => void
-  /** Small screens: back to the list of searches. */
+  /** Small screens: back to Tasks. */
   onBack: () => void
+  onHelp: () => void
 }) {
   const [filter, setFilter] = useState<JobFilter>('All')
   const [showWeaker, setShowWeaker] = useState(false)
@@ -53,10 +54,13 @@ export default function SearchDetail({
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <header className="space-y-2 border-b border-w-line px-5 py-4">
         <div className="flex items-start gap-2">
-          <button type="button" onClick={onBack} aria-label="All searches" className="-ml-1 rounded-md p-1 text-w-dim hover:bg-w-surface2 hover:text-w-text md:hidden">
+          <button type="button" onClick={onBack} aria-label="All tasks" className="-ml-1 rounded-md p-1 text-w-dim hover:bg-w-surface2 hover:text-w-text md:hidden">
             <ArrowLeft size={16} />
           </button>
           <h1 className="min-w-0 flex-1 truncate text-lg font-semibold text-w-text">{displayTitle(detail)}</h1>
+          <button type="button" onClick={onHelp} aria-label="How Job search works" title="How it works" className="rounded-md p-1.5 text-w-dim hover:bg-w-surface2 hover:text-w-text">
+            <BookOpen size={14} />
+          </button>
           <div className="relative">
             <button
               type="button"

@@ -1,5 +1,5 @@
 import { act, renderHook } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '../../../api/client'
 import { useJobSearch } from './useJobSearch'
 import type { JobLeadDetail, JobSearchDetail, JobSearchList } from '../../api/matchaWork/jobSearch'
@@ -216,5 +216,23 @@ describe('useJobSearch Edit draft', () => {
     expect(draft).toBe('r-2')
     expect(result.current.emailDraftGone).toBe(false)
     expect(result.current.lead?.email_draft_id).toBe('r-2')
+  })
+})
+
+describe('useJobSearch inside Tasks', () => {
+  afterEach(() => vi.useRealTimers())
+
+  it('loads and polls the search without loading the unused searches list', async () => {
+    vi.useFakeTimers()
+    mock.get.mockResolvedValueOnce(search({ status: 'discovering' })).mockResolvedValue(search())
+    mock.status.mockResolvedValue({ id: 's1', status: 'done', fingerprint: 'f2', lead_count: 1 })
+    const { result } = renderHook(() => useJobSearch('s1', null, { list: false }))
+    await act(async () => {})
+    expect(result.current.detail?.status).toBe('discovering')
+    expect(mock.list).not.toHaveBeenCalled()
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000) })
+    expect(mock.status).toHaveBeenCalledTimes(1)
+    expect(result.current.detail?.status).toBe('done')
+    expect(mock.list).not.toHaveBeenCalled()
   })
 })

@@ -9,7 +9,7 @@ import type {
 // reading, screening and ranking what fits) and keeps every fact with the
 // quote and page it came from; the page shows the tasks and their findings and
 // sends follow-ups. Personal Espresso accounts only. A job search is a task
-// too (`engine: 'job_search'`): it opens in Job search's own page.
+// too (`engine: 'job_search'`): its own view opens inside Tasks.
 //
 // Every field the server may leave out is optional, so an older or newer
 // server never breaks the page.

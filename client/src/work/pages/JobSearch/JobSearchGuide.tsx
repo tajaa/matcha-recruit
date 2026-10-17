@@ -1,8 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Briefcase, ChevronLeft, ChevronRight, Clock, DollarSign, FileText, Lock, PlusCircle, X, type LucideIcon } from 'lucide-react'
 
-export const JOB_SEARCH_GUIDE_SEEN_KEY = 'espresso-job-search-guide-seen'
-
 type Page = { stage: string; icon: LucideIcon; title: string; body?: string; points?: string[]; numbered?: boolean }
 
 // The macOS app's Job search guide (`FeatureGuides.swift`), worded for the web page.
@@ -15,16 +13,18 @@ const PAGES: Page[] = [
   {
     stage: 'How to use it', icon: PlusCircle, title: 'Start a search', numbered: true,
     points: [
-      'Click New search. Your searches are listed on the left.',
+      'In Tasks, click New job search. Your searches are listed there with your other tasks.',
       'Describe the job in your own words. Add titles, places, remote or on-site, and a minimum base if you have one.',
       'Choose whether Espresso may use your saved résumé to judge fit and write the drafts.',
       'Read what’s shared and where, tick I agree, then Start search.',
+      'If you have Tasks, you can also ask Espresso in its chat. It asks for what it needs with a short form.',
     ],
   },
   {
     stage: 'What to expect', icon: Clock, title: 'Give it a few minutes',
     points: [
       'It searches the web and employers’ own job boards, scores each job’s fit out of 5 and drops what doesn’t fit.',
+      'It keeps only jobs that are still posted. If you named places, a job must be within 50 miles of one of them, or remote if you’ll take remote.',
       'It reads and ranks your strongest matches first: 4/5 and 5/5 (3/5 if nothing scores that high). Show more at 3/5 adds the next tier for free, once a search, and Show weaker matches lists the rest.',
       'You can close this page while it works. The list fills in as it goes, Cancel stops it, and when it’s done you get an email with the top jobs.',
       'Ranking follows What matters. Change the weights to re-rank anytime.',
@@ -42,6 +42,7 @@ const PAGES: Page[] = [
     points: [
       'The top jobs get an approach plan, an outreach email, answers to the application’s questions and a cover letter.',
       'Draft email puts a job’s outreach email in your Gmail drafts. Fill in anything in [brackets], then send it from Gmail. The job shows when it’s sent.',
+      'Edit draft finds the existing draft in Gmail. If you already sent or deleted it in Gmail itself, the job says so and makes nothing. Click Draft email if you want a new one.',
       'Nothing is ever sent, applied for or submitted for you.',
       'Work authorization, sponsorship, clearance, demographic and upload questions are left for you to answer.',
       'Once a search finishes, Draft or Redraft any job from its page. Re-ranking and redrafting don’t use up a search.',
@@ -50,7 +51,7 @@ const PAGES: Page[] = [
   {
     stage: 'What to expect', icon: Lock, title: 'Limits and privacy',
     points: [
-      'Each new search uses units from your monthly allowance, shown under New search.',
+      'Each new search uses units from your monthly allowance, shown at the bottom of Tasks.',
       'Search terms go to the job listing services. Your résumé is used only by Espresso’s AI models, never sent to job sites.',
       'Deleting a search removes its jobs and drafts, but it still counts for the month.',
     ],

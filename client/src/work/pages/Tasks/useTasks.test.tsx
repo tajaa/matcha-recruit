@@ -1,5 +1,5 @@
 import { act, renderHook } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '../../../api/client'
 import { useTasks } from './useTasks'
 import type { AgentTaskDetail, AgentTaskItemDetail } from '../../types'
@@ -128,5 +128,30 @@ describe('useTasks finding errors', () => {
     await act(async () => { await result.current.startRound('more') })
     expect(result.current.error).toBe('No units left this month.')
     expect(result.current.itemError).toBeNull()
+  })
+})
+
+describe('useTasks polling', () => {
+  afterEach(() => vi.useRealTimers())
+
+  it('leaves a job-search detail and its leads to useJobSearch, while refreshing the Tasks list', async () => {
+    vi.useFakeTimers()
+    mock.get.mockResolvedValue(task({ engine: 'job_search', job_search_id: 's1', status: 'running' }))
+    const { result } = await opened('l1')
+    expect(result.current.detail?.job_search_id).toBe('s1')
+    expect(mock.item).not.toHaveBeenCalled()
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000) })
+    expect(mock.status).not.toHaveBeenCalled()
+    expect(mock.get).toHaveBeenCalledTimes(1)
+    expect(mock.list).toHaveBeenCalledTimes(2)
+  })
+
+  it('still polls ordinary running tasks at their usual pace', async () => {
+    vi.useFakeTimers()
+    mock.get.mockResolvedValue(task({ status: 'running' }))
+    mock.status.mockResolvedValue({ id: 't1', status: 'running', fingerprint: 'f1' })
+    await opened(null)
+    await act(async () => { await vi.advanceTimersByTimeAsync(4_000) })
+    expect(mock.status).toHaveBeenCalledWith('t1')
   })
 })

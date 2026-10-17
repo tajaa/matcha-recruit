@@ -10,6 +10,8 @@ import type {
 /** Gmail's drafts folder: where Draft email puts a job's first message. */
 export const GMAIL_DRAFTS_URL = 'https://mail.google.com/mail/u/0/#drafts'
 
+export const JOB_SEARCH_GUIDE_SEEN_KEY = 'espresso-job-search-guide-seen'
+
 export const DEFAULT_WEIGHTS: JobWeights = { base: 0.45, bonus: 0.2, equity: 0.2, fit: 0.15 }
 
 export const sameWeights = (a: JobWeights, b: JobWeights) =>

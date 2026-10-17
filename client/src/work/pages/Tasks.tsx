@@ -1,20 +1,23 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { AlertTriangle, BookOpen, Briefcase, ClipboardList, Loader2 } from 'lucide-react'
 import { useMe } from '../../hooks/useMe'
 import { useWorkBase } from '../routes/WorkSurfaceContext'
 import { useEntitlements } from '../hooks/useEntitlements'
 import { notifyTasksChanged } from '../hooks/useTasksSummary'
 import type { AgentTask, AgentTaskAction, AgentTaskItemDetail, AgentTaskList } from '../types'
+import type { JobSearchSummary } from '../api/matchaWork/jobSearch'
 import {
   askEspressoPrompt, canFollowUp, displayTitle, groupTasks, isJobSearch, isLive, isWaiting, rowMeta, statusLabel,
-  usageLine,
+  taskForSearch, usageLine,
 } from '../components/tasks/tasksLogic'
 import { useTasks } from './Tasks/useTasks'
 import TaskDetail from './Tasks/TaskDetail'
 import ItemPane from './Tasks/ItemPane'
 import ActionModal from './Tasks/ActionModal'
 import TasksGuide, { TASKS_GUIDE_SEEN_KEY } from './Tasks/TasksGuide'
+import JobSearchPane from './Tasks/JobSearchPane'
+import NewJobSearch from './Tasks/NewJobSearch'
 import type { AssistantDraftState } from './Assistant'
 
 function guideSeen(): boolean {
@@ -29,7 +32,7 @@ const wide = () => typeof window !== 'undefined' && window.matchMedia('(min-widt
  * you, running, done), the open task's findings in the middle, and the open
  * finding on the right, each fact with the words and page it came from. The
  * same tasks, API and rules as the macOS app's Tasks section. A job search is
- * a task too; its row opens Job search. Personal accounts only.
+ * a task too; its own view opens here, with its ranked jobs. Personal accounts only.
  */
 export default function Tasks() {
   const { isPersonal } = useMe()
@@ -48,10 +51,13 @@ function TasksPage() {
   const t = useTasks(taskId, itemId)
   const { tasksEnabled, jobSearchEnabled } = useEntitlements()
   const [helpOpen, setHelpOpen] = useState(false)
+  const [creating, setCreating] = useState(false)
   const [guideDone, setGuideDone] = useState(guideSeen)
   const [journalId, setJournalId] = useState<string | null>(null)
   const [acting, setActing] = useState<{ item: AgentTaskItemDetail; action: AgentTaskAction } | null>(null)
   const { detail, list } = t
+  const open = detail ?? list?.tasks.find((task) => task.id === taskId)
+  const jobSearchId = open && isJobSearch(open) ? open.job_search_id : null
   const guideOpen = helpOpen || (list !== null && !guideDone)
 
   // The sidebar's count follows what this page has just seen, when that changes.
@@ -61,7 +67,7 @@ function TasksPage() {
   // Nothing open on a wide screen: open the first task, as the Mac does.
   useEffect(() => {
     if (taskId || !list || !wide()) return
-    const first = groupTasks(list.tasks.filter((task) => !isJobSearch(task)))[0]?.[1][0]
+    const first = groupTasks(list.tasks)[0]?.[1][0]
     if (first) navigate(`${base}/tasks/${encodeURIComponent(first.id)}`, { replace: true })
   }, [taskId, list, base, navigate])
 
@@ -76,7 +82,7 @@ function TasksPage() {
 
   // A finding that is no longer in the task (a stale link) closes.
   useEffect(() => {
-    if (detail && itemId && !(detail.items ?? []).some((i) => i.id === itemId)) setItemParam(null)
+    if (detail && !isJobSearch(detail) && itemId && !(detail.items ?? []).some((i) => i.id === itemId)) setItemParam(null)
   }, [detail, itemId, setItemParam])
 
   function closeGuide() {
@@ -87,8 +93,7 @@ function TasksPage() {
 
   function openTask(task: AgentTask) {
     setJournalId(null)
-    if (isJobSearch(task)) navigate(`${base}/jobs/${encodeURIComponent(task.job_search_id ?? '')}`)
-    else navigate(`${base}/tasks/${encodeURIComponent(task.id)}`)
+    navigate(`${base}/tasks/${encodeURIComponent(task.id)}`)
   }
 
   /** The words go to Espresso's chat, ready to send: it asks for anything
@@ -99,20 +104,23 @@ function TasksPage() {
   }
 
   async function removeTask() {
-    if (!detail) return
-    if (!window.confirm("Delete this task? What it found is removed. It still counts toward this month's units.")) return
-    if (await t.remove(detail.id)) navigate(`${base}/tasks`, { replace: true })
+    if (!open) return
+    const message = isJobSearch(open)
+      ? "Delete this task? Its jobs and drafts are removed. It still counts toward this month's units."
+      : "Delete this task? What it found is removed. It still counts toward this month's units."
+    if (!window.confirm(message)) return
+    if (await t.remove(open.id)) navigate(`${base}/tasks`, { replace: true })
+  }
+
+  async function searchCreated(search: JobSearchSummary) {
+    setCreating(false)
+    const loaded = await t.loadList()
+    const task = taskForSearch(search.id, loaded?.tasks ?? [])
+    navigate(task ? `${base}/tasks/${encodeURIComponent(task.id)}` : `${base}/tasks`)
   }
 
   async function makeDocument() {
     setJournalId(await t.startRound('document'))
-  }
-
-  // A job search's link (a chat card, a notification) opens Job search, on the
-  // job it named: a job search's findings are its jobs.
-  if (detail && isJobSearch(detail)) {
-    const job = itemId ? `?job=${encodeURIComponent(itemId)}` : ''
-    return <Navigate to={`${base}/jobs/${encodeURIComponent(detail.job_search_id ?? '')}${job}`} replace />
   }
 
   return (
@@ -126,14 +134,28 @@ function TasksPage() {
         canSearchJobs={jobSearchEnabled}
         onOpen={openTask}
         onAsk={askEspresso}
-        onNewJobSearch={() => navigate(`${base}/jobs`)}
+        onNewJobSearch={() => setCreating(true)}
         onHelp={() => setHelpOpen(true)}
         onRetry={() => void t.loadList()}
       />
 
       <main className={`min-h-0 min-w-0 flex-1 flex-col ${taskId ? 'flex' : 'hidden md:flex'}`}>
         {!taskId ? (
-          <EmptyState list={list} error={t.listError} tasksEnabled={tasksEnabled} />
+          <EmptyState list={list} error={t.listError} tasksEnabled={tasksEnabled} onNewJobSearch={jobSearchEnabled ? () => setCreating(true) : undefined} />
+        ) : jobSearchId ? (
+          <JobSearchPane
+            key={jobSearchId}
+            searchId={jobSearchId}
+            leadId={itemId}
+            onSelectLead={setItemParam}
+            onBack={() => navigate(`${base}/tasks`)}
+            onDelete={() => void removeTask()}
+            onChanged={t.loadList}
+            guideBlocked={guideOpen || !list || creating}
+            deleting={t.busy}
+            deleteError={t.error}
+            onDismissDeleteError={() => t.setError(null)}
+          />
         ) : detail ? (
           <TaskDetail
             key={detail.id}
@@ -167,7 +189,7 @@ function TasksPage() {
         )}
       </main>
 
-      {itemId && detail && (
+      {itemId && detail && !jobSearchId && (
         <ItemPane
           item={t.item}
           loadError={t.itemLoadError}
@@ -186,7 +208,7 @@ function TasksPage() {
         />
       )}
 
-      {acting && detail && (
+      {acting && detail && !jobSearchId && (
         <ActionModal
           taskId={detail.id}
           itemId={acting.item.id}
@@ -198,6 +220,7 @@ function TasksPage() {
           }}
         />
       )}
+      {creating && <NewJobSearch onCreated={(search) => void searchCreated(search)} onClose={() => setCreating(false)} />}
       {guideOpen && <TasksGuide onClose={closeGuide} />}
     </div>
   )
@@ -211,7 +234,7 @@ function TaskList({
   selectedId: string | null
   hiddenOnSmall: boolean
   tasksEnabled: boolean
-  /** The account has Job search, which starts on its own page. */
+  /** The account can start a job-search task. */
   canSearchJobs: boolean
   onOpen: (task: AgentTask) => void
   onAsk: (directive: string) => void
@@ -328,7 +351,9 @@ function TaskRow({ task, selected, onOpen }: { task: AgentTask; selected: boolea
   )
 }
 
-function EmptyState({ list, error, tasksEnabled }: { list: AgentTaskList | null; error: string | null; tasksEnabled: boolean }) {
+function EmptyState({ list, error, tasksEnabled, onNewJobSearch }: {
+  list: AgentTaskList | null; error: string | null; tasksEnabled: boolean; onNewJobSearch?: () => void
+}) {
   if (!list) {
     // Never the empty state while it can't load: someone with tasks would think they were gone.
     return error ? (
@@ -350,6 +375,9 @@ function EmptyState({ list, error, tasksEnabled }: { list: AgentTaskList | null;
           + 'Espresso finds the postings, reads each one for pay and what the application asks, ranks them by what you '
           + 'care about, and drafts how to approach the best ones. Nothing is sent or submitted for you.'}
         footnote={usage}
+        action={onNewJobSearch && (
+          <button type="button" onClick={onNewJobSearch} className="rounded-md bg-w-accent px-3 py-1.5 text-xs font-semibold text-white hover:bg-w-accent-hi">New job search</button>
+        )}
       />
     )
   }
@@ -365,12 +393,15 @@ function EmptyState({ list, error, tasksEnabled }: { list: AgentTaskList | null;
   )
 }
 
-function Message({ icon, title, text, footnote }: { icon: React.ReactNode; title: string; text: string; footnote?: string | null }) {
+function Message({ icon, title, text, footnote, action }: {
+  icon: React.ReactNode; title: string; text: string; footnote?: string | null; action?: React.ReactNode
+}) {
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-2.5 px-6 text-center">
       {icon}
       <p className="text-sm font-semibold text-w-text">{title}</p>
       <p className="max-w-md text-xs leading-5 text-w-dim">{text}</p>
+      {action}
       {footnote && <p className="text-[10px] text-w-dim">{footnote}</p>}
     </div>
   )

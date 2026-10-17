@@ -11,8 +11,8 @@ import { errorCode, errorLead, errorText, isLive, needsPolling, statusChanged } 
 const POLL_MS = 5_000
 
 /**
- * The Job search page's state: the person's searches, the open search and its
- * ranked jobs, and the open job. Like the macOS app, a live search polls its
+ * A job-search task's state: the optional searches list, the open search and
+ * its ranked jobs, and the open job. Like the macOS app, a live search polls its
  * cheap status every few seconds and reloads the jobs only when its
  * fingerprint, status or job count changes. The URL owns which search and job
  * are open; every answer is dropped if the person has moved on by the time it
@@ -29,7 +29,7 @@ const POLL_MS = 5_000
  * list has no beat of its own here, so a change that lands while a list read
  * is out asks for the list again instead of leaving it unread.
  */
-export function useJobSearch(searchId: string | undefined, leadId: string | null) {
+export function useJobSearch(searchId: string | undefined, leadId: string | null, { list: withList = true } = {}) {
   const [list, setList] = useState<JobSearchList | null>(null)
   const [listError, setListError] = useState<string | null>(null)
   const [loadedDetail, setDetail] = useState<JobSearchDetail | null>(null)
@@ -86,6 +86,7 @@ export function useJobSearch(searchId: string | undefined, leadId: string | null
   }, [])
 
   const loadList = useCallback(() => {
+    if (!withList) return Promise.resolve()
     const seq = ++listSeq.current
     listOut.current = seq
     const landed = () => { if (listOut.current === seq) listOut.current = 0 }
@@ -101,7 +102,7 @@ export function useJobSearch(searchId: string | undefined, leadId: string | null
         if (seq === listSeq.current) setListError(errorText(e, "Couldn't load your job searches."))
       },
     )
-  }, [])
+  }, [withList])
 
   /** A search as the server has it now: on screen if it's still the open one,
    *  and in the list either way. */
