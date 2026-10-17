@@ -52,6 +52,7 @@ import {
   type InventoryOrder,
   type InventorySuggestion,
   type POSConnection,
+  type SalesImport,
 } from '../api/inventory'
 import { listChannelLocations, type ChannelLocation } from '../api/channels'
 import { useWorkBase } from '../routes/WorkSurfaceContext'
@@ -81,8 +82,9 @@ export default function InventoryHub() {
   const [receiveOpen, setReceiveOpen] = useState(false)
   const [salesOpen, setSalesOpen] = useState(false)
   const [mappingsOpen, setMappingsOpen] = useState(searchParams.get('setup') === 'sales')
-  const [draftCount, setDraftCount] = useState(0)
-  const [reviewImportId, setReviewImportId] = useState<string | null>(null)
+  const [draftImports, setDraftImports] = useState<SalesImport[]>([])
+  const [reviewImport, setReviewImport] = useState<SalesImport | null>(null)
+  const [mappingsRevision, setMappingsRevision] = useState(0)
   const [salesWizardOpen, setSalesWizardOpen] = useState(false)
   const [inventoryGuideOpen, setInventoryGuideOpen] = useState(false)
   const [help, setHelp] = useState<InventorySectionHelp | null>(null)
@@ -101,7 +103,7 @@ export default function InventoryHub() {
       .then(([itemsRes, ordersRes, salesRes, movementsRes, suggestionsRes]) => {
         setItems(itemsRes.items)
         setOrders(ordersRes.orders)
-        setDraftCount(salesRes.imports.length)
+        setDraftImports(salesRes.imports)
         setMovements(movementsRes.movements)
         setSuggestions(suggestionsRes)
       })
@@ -140,6 +142,11 @@ export default function InventoryHub() {
     return filtered
   }, [items, locFilter, search])
   const catalogIsFiltered = locFilter !== 'all' || search.trim() !== ''
+  const selectedLocationId = locFilter !== 'all' && locFilter !== 'none' ? locFilter : undefined
+  const salesItems = items.filter((item) => !item.location_id || item.location_id === selectedLocationId)
+  const visibleDrafts = draftImports.filter((draft) => locFilter === 'all'
+    || (locFilter === 'none' ? !draft.location_id : draft.location_id === locFilter))
+  const draftCount = visibleDrafts.length
 
   const visibleOrders = useMemo(() => {
     const visibleIds = new Set(visibleItems.map((i) => i.id))
@@ -188,6 +195,7 @@ export default function InventoryHub() {
           <div className="flex flex-wrap items-center gap-2">
             {locations.length > 0 && (
               <select
+                aria-label="Inventory location"
                 value={locFilter}
                 onChange={(e) => setLocFilter(e.target.value)}
                 className="rounded-lg border border-w-line bg-w-surface px-3 py-2 text-xs text-w-text outline-none transition-colors focus:border-w-accent/50"
@@ -214,7 +222,7 @@ export default function InventoryHub() {
           <Button variant="secondary" size="sm" onClick={() => navigate(`${base}/inventory/audit`)}>
             <ClipboardCheck className="mr-1.5 inline h-3.5 w-3.5" /> Audit stock
           </Button>
-          {canSales && <Button variant="secondary" size="sm" onClick={() => { setReviewImportId(null); setSalesOpen(true) }}>
+          {canSales && <Button variant="secondary" size="sm" onClick={() => { setReviewImport(null); setSalesOpen(true) }}>
             <Upload className="mr-1.5 inline h-3.5 w-3.5" /> Import sales
           </Button>}
           <Button size="sm" onClick={() => setReceiveOpen(true)}>Receive delivery</Button>
@@ -236,11 +244,12 @@ export default function InventoryHub() {
          onCommitted={load}
       />
       {canSales && <SalesImportModal
+        key={reviewImport?.id ?? `upload:${locFilter}`}
         open={salesOpen}
         onClose={() => setSalesOpen(false)}
-        items={visibleItems}
-        locationId={locFilter !== 'all' && locFilter !== 'none' ? locFilter : undefined}
-        draftImportId={reviewImportId}
+        items={items}
+        locationId={reviewImport ? reviewImport.location_id ?? undefined : selectedLocationId}
+        draftImportId={reviewImport?.id}
         onCommitted={load}
       />}
       {canSales && <SalesIntakeWizard
@@ -249,7 +258,7 @@ export default function InventoryHub() {
         onClose={() => setSalesWizardOpen(false)}
         onAction={(action) => {
           if (action === 'mappings') setMappingsOpen(true)
-          if (action === 'import') { setReviewImportId(null); setSalesOpen(true) }
+          if (action === 'import') { setReviewImport(null); setSalesOpen(true) }
           if (action === 'audit') navigate(`${base}/inventory/audit`)
         }}
       />}
@@ -269,19 +278,19 @@ export default function InventoryHub() {
       />}
       <InventoryHelpModal help={help} onClose={() => setHelp(null)} />
       {canSales && mappingsOpen && <SalesMappingsPanel
-        items={visibleItems}
-        locationId={locFilter !== 'all' && locFilter !== 'none' ? locFilter : undefined}
+        key={locFilter}
+        items={salesItems}
+        locationId={selectedLocationId}
         onHelp={() => setHelp(INVENTORY_HELP.mappings)}
+        onSaved={() => setMappingsRevision((current) => current + 1)}
       />}
 
         {canSales && draftCount > 0 && (
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-400/25 bg-amber-400/[0.06] px-4 py-3 text-sm">
             <div className="flex items-center gap-2 text-amber-200"><AlertTriangle size={15} /> {draftCount} sales import{draftCount === 1 ? '' : 's'} waiting for review.</div>
             <Button variant="secondary" onClick={() => {
-              listSalesImports('draft').then((result) => {
-                setReviewImportId(result.imports[0]?.id ?? null)
-                setSalesOpen(true)
-              }).catch(() => toast('Failed to load sales drafts', 'error'))
+              setReviewImport(visibleDrafts[0])
+              setSalesOpen(true)
             }}>Review imports</Button>
           </div>
         )}
@@ -369,7 +378,7 @@ export default function InventoryHub() {
           <ReorderPanel recommendations={insights.recommendations} onSelect={(itemId) => navigate(`${base}/inventory/${itemId}`)} onHelp={() => setHelp(INVENTORY_HELP.reorder)} />
         </div>
 
-        {canSales && <section id="sales-connection" className="rounded-xl border border-w-line bg-w-surface p-4"><div className="flex items-start gap-2"><Link2 className="mt-0.5 h-4 w-4 text-w-accent" /><div><h2 className="text-sm font-medium text-w-text">Sales connection</h2><p className="mt-1 text-xs text-w-dim">Connect Square here when you are setting up inventory data. Forecasting uses the committed sales ledger after mapping.</p></div></div>{connections.length > 0 && <div className="mt-3 space-y-1.5">{connections.map((connection) => <div key={connection.id} className="rounded-lg bg-w-surface2 px-3 py-2 text-xs"><div className="flex items-center justify-between"><span className="font-medium capitalize text-w-text">{connection.provider}</span><span className={connection.status === 'connected' ? 'text-w-accent' : 'text-amber-300'}>{connection.status}</span></div><POSConnectionPanel connection={connection} locations={locations} onConnect={connectSquare} /></div>)}</div>}{connections.length === 0 && <div className="mt-3"><POSConnectionPanel connection={null} locations={locations} onConnect={connectSquare} /></div>}</section>}
+        {canSales && <section id="sales-connection" className="rounded-xl border border-w-line bg-w-surface p-4"><div className="flex items-start gap-2"><Link2 className="mt-0.5 h-4 w-4 text-w-accent" /><div><h2 className="text-sm font-medium text-w-text">Sales connection</h2><p className="mt-1 text-xs text-w-dim">Connect Square here when you are setting up inventory data. Forecasting uses the committed sales ledger after mapping.</p></div></div>{connections.length > 0 && <div className="mt-3 space-y-1.5">{connections.map((connection) => <div key={connection.id} className="rounded-lg bg-w-surface2 px-3 py-2 text-xs"><div className="flex items-center justify-between"><span className="font-medium capitalize text-w-text">{connection.provider}</span><span className={connection.status === 'connected' ? 'text-w-accent' : 'text-amber-300'}>{connection.status}</span></div><POSConnectionPanel connection={connection} locations={locations} locationId={selectedLocationId} mappingsRevision={mappingsRevision} onConnect={connectSquare} /></div>)}</div>}{connections.length === 0 && <div className="mt-3"><POSConnectionPanel connection={null} locations={locations} locationId={selectedLocationId} mappingsRevision={mappingsRevision} onConnect={connectSquare} /></div>}</section>}
 
         <OrderQueue orders={visibleOrders} items={visibleItems} onChange={load} onHelp={() => setHelp(INVENTORY_HELP.orders)} />
 

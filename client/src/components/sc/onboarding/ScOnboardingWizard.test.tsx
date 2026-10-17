@@ -65,6 +65,25 @@ describe('ScOnboardingWizard', () => {
     expect(refreshMock.mock.invocationCallOrder[0]).toBeLessThan(navigateMock.mock.invocationCallOrder[0])
   })
 
+  it('uses features refreshed after Stripe activation to choose the completion destination', async () => {
+    const user = userEvent.setup()
+    parseEmployeesMock.mockResolvedValue([
+      { email: 'barista@example.com', first_name: 'Ana', last_name: 'Ruiz', work_state: 'CA', job_title: 'Barista', department: 'Front' },
+    ])
+    await reachLocationsFromCafe(user)
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
+    await user.upload(fileInput(), new File(['x'], 'employees.csv', { type: 'text/csv' }))
+    await screen.findByText('1 employees ready to import')
+    for (let step = 0; step < 2 && !screen.queryByRole('button', { name: 'Complete setup' }); step += 1) {
+      await user.click(screen.getByRole('button', { name: 'Continue' }))
+    }
+    expect(screen.queryByText(/Next, Notifications will help you connect Square/)).not.toBeInTheDocument()
+    refreshMock.mockImplementationOnce(async () => { hasFeatureMock.mockReturnValue(true) })
+    await user.click(screen.getByRole('button', { name: 'Complete setup' }))
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/ops/schedule/editor?setup=sales', { replace: true }))
+    expect(navigateMock).not.toHaveBeenCalledWith('/ops/schedule', { replace: true })
+  })
+
   it('waits out the Stripe activation window instead of dead-ending on 403', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     statusMock

@@ -180,7 +180,14 @@ export default function ScOnboardingWizard() {
   const [activating, setActivating] = useState(false)
   const [parsing, setParsing] = useState<'locations' | 'employees' | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [completed, setCompleted] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // refresh() updates useMe's state. Choose the destination on that render,
+  // rather than from the feature flags captured before Stripe activated it.
+  useEffect(() => {
+    if (completed) navigate(salesSetupEnabled ? '/ops/schedule/editor?setup=sales' : '/ops/schedule', { replace: true })
+  }, [completed, navigate, salesSetupEnabled])
 
   useEffect(() => {
     let cancelled = false
@@ -363,7 +370,7 @@ export default function ScOnboardingWizard() {
       await refresh()
       // Straight to the schedule: it is what they signed up for, and every
       // store and employee they just entered is already on it.
-      navigate(salesSetupEnabled ? '/ops/schedule/editor?setup=sales' : '/ops/schedule', { replace: true })
+      setCompleted(true)
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : 'Setup could not be completed. Nothing was imported; review the details and try again.')
     } finally {

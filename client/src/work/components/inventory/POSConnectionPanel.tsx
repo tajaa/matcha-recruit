@@ -32,10 +32,14 @@ export default function POSConnectionPanel({
   connection,
   locations,
   onConnect,
+  locationId,
+  mappingsRevision = 0,
 }: {
   connection: POSConnection | null
   locations: ChannelLocation[]
   onConnect: () => void
+  locationId?: string
+  mappingsRevision?: number
 }) {
   const { toast } = useToast()
   const [posLocations, setPOSLocations] = useState<POSLocation[]>([])
@@ -51,12 +55,14 @@ export default function POSConnectionPanel({
   useEffect(() => {
     if (!connection) return
     let active = true
+    // Hide the previous store's choices while the replacement request runs.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true)
     Promise.all([
       listPOSLocations(connection.id),
       listPOSCatalog(connection.id),
       listPOSMappings(connection.id),
-      listSalesMappings(),
+      listSalesMappings(locationId),
     ]).then(([locationResponse, catalogResponse, mappingResponse, salesMappingResponse]) => {
       if (!active) return
       setPOSLocations(locationResponse.locations)
@@ -64,12 +70,15 @@ export default function POSConnectionPanel({
       setMapped(Object.fromEntries(mappingResponse.mappings.map((item) => [item.external_item_id, item.mapping_id])))
       setSalesMappings(salesMappingResponse.mappings)
     }).catch(() => {
-      if (active) toast('Failed to load Square setup', 'error')
+      if (active) {
+        setSalesMappings([])
+        toast('Failed to load Square setup', 'error')
+      }
     }).finally(() => {
       if (active) setLoading(false)
     })
     return () => { active = false }
-  }, [connection, toast])
+  }, [connection, locationId, mappingsRevision, toast])
 
   async function saveLocation(posLocation: POSLocation, locationId: string) {
     if (!connection || !locationId) return
@@ -141,7 +150,7 @@ export default function POSConnectionPanel({
         </div>
         <div>
           <p className="text-xs font-medium text-w-text">Catalog mappings</p>
-          <p className="mt-1 text-[11px] text-w-dim">Unmapped catalog lines become review drafts and never affect stock.</p>
+          <p className="mt-1 text-[11px] text-w-dim">Catalog mappings are shared across this Square connection. Unmapped catalog lines become review drafts and never affect stock.</p>
           <div className="mt-2 max-h-64 space-y-2 overflow-y-auto">
             {catalog.map((item) => <div key={item.external_item_id} className="flex flex-col gap-2 rounded-lg border border-w-line px-3 py-2 sm:flex-row sm:items-center">
               <div className="min-w-0 flex-1"><p className="truncate text-xs text-w-text">{item.name}</p><p className="text-[10px] text-w-faint">{item.sku || item.external_item_id}</p></div>
