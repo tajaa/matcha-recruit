@@ -281,11 +281,11 @@ email links to Gmail's own drafts folder, since the web has no Email ▸ Drafts
 view; Ask Espresso opens the one assistant conversation with the Mac's
 hand-off prompt in its composer, unsent.
 
-Edit draft sends `{"existing_only": true}` to `…/email-draft`, which never
-makes a draft: when Gmail no longer has it (sent or deleted in Gmail itself,
-where Espresso can't see it), the job forgets it, as `note_email_draft` does
-for a draft deleted from Espresso's Email, and the call is a 409
-`email_draft_missing` carrying the job as it is now. The pane says so, and
-Draft email is the person's own click to make a new one. With no body the
-endpoint behaves as before (the Mac's Edit draft still recreates a missing
-draft).
+Edit draft, on the web and the Mac, sends `{"existing_only": true}` to
+`…/email-draft`, which never makes a draft: when Gmail no longer has it (sent
+or deleted in Gmail itself, where Espresso can't see it), the job forgets it,
+as `note_email_draft` does for a draft deleted from Espresso's Email, and the
+call is a 409 `email_draft_missing` carrying the job as it is now. The pane
+says so, and Draft email is the person's own click to make a new one. Draft
+email sends no body, and with no body the endpoint behaves as before (an older
+Mac build's Edit draft still recreates a missing draft).

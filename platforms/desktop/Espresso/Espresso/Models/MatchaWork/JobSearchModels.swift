@@ -507,6 +507,31 @@ struct JobEmailDraftResult: Decodable {
     }
 }
 
+/// A refused `…/email-draft`, from its `detail`: the code, and for
+/// `email_draft_missing` (Edit draft found the draft gone from Gmail) the job
+/// as it is now, with that draft forgotten.
+struct JobEmailRefusal: Decodable {
+    var code: String?
+    var lead: JobLeadDetail?
+
+    enum CodingKeys: String, CodingKey { case code, lead }
+
+    private struct Body: Decodable { var detail: JobEmailRefusal }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        code = c.value(.code)
+        lead = c.value(.lead)
+    }
+
+    /// The refusal an error from that call carries, if it is one.
+    init?(_ error: Error) {
+        guard case let .httpError(_, message)? = error as? APIError,
+              let body = try? JSONDecoder().decode(Body.self, from: Data(message.utf8)) else { return nil }
+        self = body.detail
+    }
+}
+
 struct JobLeadDetail: Decodable {
     var summary: JobLeadSummary
     var description: String

@@ -369,6 +369,7 @@ extension FeatureGuide {
              points: [
                 "The top \(jobSearchDraftedJobs) jobs get an approach plan, an outreach email, answers to the application's questions and a cover letter.",
                 "Draft email puts a job's outreach email in your Gmail drafts. Fill in anything in [brackets], then send it from Email ▸ Drafts. The job shows when it's sent.",
+                "Edit draft in Email opens that draft. If you already sent or deleted it in Gmail itself, the job says so and makes nothing. Click Draft email if you want a new one.",
                 "Nothing is ever sent, applied for or submitted for you.",
                 "Work authorization, sponsorship, clearance, demographic and upload questions are left for you to answer.",
                 "Once a search finishes, Draft or Redraft any job from its page, up to \(jobSearchRedrafts) a search. Re-ranking and redrafting don't use up a search.",
