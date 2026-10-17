@@ -77,10 +77,19 @@ final class JobSearchService {
         try await client.request(method: "POST", path: "\(basePath)/\(searchId)/leads/\(leadId)/approach")
     }
 
+    /// Edit draft's body: only the draft already in Gmail, never a new one.
+    struct ExistingDraftBody: Encodable {
+        let existingOnly = true
+        enum CodingKeys: String, CodingKey { case existingOnly = "existing_only" }
+    }
+
     /// Put the job's first message in Gmail drafts; the same draft again
-    /// while it is still there.
-    func draftEmail(_ searchId: String, _ leadId: String) async throws -> JobEmailDraftResult {
-        try await client.request(method: "POST", path: "\(basePath)/\(searchId)/leads/\(leadId)/email-draft")
+    /// while it is still there. `existingOnly` (Edit draft) never makes one:
+    /// a draft that left Gmail is a 409 `email_draft_missing` with the job.
+    func draftEmail(_ searchId: String, _ leadId: String, existingOnly: Bool = false) async throws -> JobEmailDraftResult {
+        let path = "\(basePath)/\(searchId)/leads/\(leadId)/email-draft"
+        if existingOnly { return try await client.request(method: "POST", path: path, body: ExistingDraftBody()) }
+        return try await client.request(method: "POST", path: path)
     }
 
     func cancel(_ searchId: String) async throws -> JobSearchDetail {

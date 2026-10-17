@@ -92,6 +92,15 @@ struct JobLeadDetailView: View {
             }
             .font(.system(size: 11))
             .padding(.top, 2)
+            if vm.emailDraftGoneLeadId == job.id {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Image(systemName: "envelope.open").foregroundColor(.orange)
+                    Text("That draft isn't in your Gmail drafts any more, so it was sent or deleted there. Draft email makes a new one if you still want it.")
+                        .foregroundColor(appState.themeTextSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .font(.system(size: 11))
+            }
             if vm.emailNotConnected {
                 HStack(spacing: 6) {
                     Image(systemName: "envelope.badge").foregroundColor(.orange)
@@ -142,11 +151,14 @@ struct JobLeadDetailView: View {
         let job = lead.summary
         if !(lead.approach?.outreach?.body ?? "").isEmpty {
             if job.emailDraftId != nil, job.emailSentAt == nil {
-                // Asked again, the server returns the same draft while it's in
-                // Gmail, or makes a new one if it was sent or deleted there.
+                // Only the draft already in Gmail: if it was sent or deleted
+                // there, the pane says so and nothing is made. Draft email is
+                // what makes a new one.
                 Button {
                     Task {
-                        if let id = await vm.draftEmail(leadId: job.id) { appState.openEmailDrafts(draftId: id) }
+                        if let id = await vm.draftEmail(leadId: job.id, existingOnly: true) {
+                            appState.openEmailDrafts(draftId: id)
+                        }
                     }
                 } label: {
                     Label("Edit draft in Email", systemImage: "envelope.open")

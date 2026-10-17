@@ -39,6 +39,9 @@ final class JobSearchViewModel {
     var createdSearchId: String?
     /// Draft email was refused because Gmail isn't connected yet.
     var emailNotConnected = false
+    /// The job whose Edit draft found its draft gone from Gmail (sent or
+    /// deleted there): its pane says so, and Draft email makes a new one.
+    var emailDraftGoneLeadId: String?
 
     private let service = JobSearchService.shared
 
@@ -196,30 +199,49 @@ final class JobSearchViewModel {
     }
 
     /// Put a job's first message in the person's Gmail drafts. Returns the
-    /// draft's id (the same draft again while it is still in Gmail).
-    func draftEmail(leadId: String) async -> String? {
+    /// draft's id (the same draft again while it is still in Gmail), or nil.
+    /// `existingOnly` is Edit draft: it never makes a draft, and a draft that
+    /// left Gmail (sent or deleted there) is said in the pane, with Draft
+    /// email to make a new one. Nothing is ever sent.
+    func draftEmail(leadId: String, existingOnly: Bool = false) async -> String? {
         guard let searchId = selectedSearchId, !busy else { return nil }
         busy = true
         errorMessage = nil
         emailNotConnected = false
+        emailDraftGoneLeadId = nil
         defer { busy = false }
         do {
-            let result = try await service.draftEmail(searchId, leadId)
-            if let updated = result.lead {
-                if selectedLeadId == leadId { lead = updated }
-                if let i = detail?.leads.firstIndex(where: { $0.id == leadId }) {
-                    detail?.leads[i] = updated.summary
-                }
-            }
+            let result = try await service.draftEmail(searchId, leadId, existingOnly: existingOnly)
+            if let updated = result.lead { land(updated) }
             return result.draftId
         } catch {
-            // Not connected is shown beside the button, with a way to Email.
-            if (error as? APIError)?.detailCode == "email_not_connected" {
-                emailNotConnected = true
-            } else {
-                report(error)
-            }
+            emailRefused(error, leadId: leadId)
             return nil
+        }
+    }
+
+    /// A refused Draft email or Edit draft. Not connected is shown beside the
+    /// button, with a way to Email; a draft gone from Gmail lands the job as
+    /// the server has it now (no draft) and is said in its pane.
+    func emailRefused(_ error: Error, leadId: String) {
+        let refusal = JobEmailRefusal(error)
+        switch refusal?.code {
+        case "email_not_connected":
+            emailNotConnected = true
+        case "email_draft_missing":
+            if let updated = refusal?.lead { land(updated) }
+            emailDraftGoneLeadId = leadId
+        default:
+            report(error)
+        }
+    }
+
+    /// The job as the server has it after Draft email or Edit draft: in its
+    /// pane while it is still open, and in its row of the search.
+    private func land(_ updated: JobLeadDetail) {
+        show(updated)
+        if let i = detail?.leads.firstIndex(where: { $0.id == updated.summary.id }) {
+            detail?.leads[i] = updated.summary
         }
     }
 
@@ -250,6 +272,7 @@ final class JobSearchViewModel {
         searches = []; usage = nil; consent = nil; hasLoaded = false
         selectedSearchId = nil; detail = nil; selectedLeadId = nil; lead = nil
         errorMessage = nil; planFeature = nil
+        emailNotConnected = false; emailDraftGoneLeadId = nil
     }
 
     // MARK: Pure helpers (tested)

@@ -153,6 +153,115 @@ final class JobSearchLogicTests: XCTestCase {
         XCTAssertNil(result.lead)
     }
 
+    // MARK: Edit draft
+
+    /// A search with job "a" in Gmail drafts and job "b" beside it, open on `open`.
+    private func editDraftModel(open: String) throws -> JobSearchViewModel {
+        let vm = JobSearchViewModel()
+        vm.selectedSearchId = "s1"
+        vm.detail = try decode(JobSearchDetail.self, """
+        {"id": "s1", "status": "done", "fingerprint": "f", "leads": [
+          {"id": "a", "approach_status": "done", "email_draft_id": "r-1",
+           "email_drafted_at": "2026-10-15T03:00:00+00:00"},
+          {"id": "b", "approach_status": "done"}
+        ]}
+        """)
+        vm.selectedLeadId = open
+        vm.lead = try decode(JobLeadDetail.self, """
+        {"id": "\(open)", "approach_status": "done", "email_draft_id": \(open == "a" ? #""r-1""# : "null"),
+         "approach": {"summary": "Write to Dana.", "outreach": {"subject": "COO", "body": "Hi Dana"}}}
+        """)
+        return vm
+    }
+
+    /// The 409 Edit draft gets when its draft left Gmail, as APIClient hands
+    /// it over: the raw body, since its `detail` is an object.
+    private func draftGone(lead: String) -> APIError {
+        .httpError(409, """
+        {"detail": {"code": "email_draft_missing",
+                    "message": "That draft isn't in your Gmail drafts any more: it was sent or deleted there.",
+                    "lead": \(lead)}}
+        """)
+    }
+
+    private let forgottenLeadA = """
+    {"id": "a", "approach_status": "done", "email_draft_id": null, "email_drafted_at": null,
+     "email_sent_at": null, "approach": {"summary": "Write to Dana.", "outreach": {"subject": "COO", "body": "Hi Dana"}}}
+    """
+
+    func testEditDraftAsksForTheExistingDraftOnly() throws {
+        let json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(JobSearchService.ExistingDraftBody()))
+        XCTAssertEqual(json as? [String: Bool], ["existing_only": true])
+    }
+
+    func testAGoneDraftLandsTheJobWithoutItAndSaysSo() throws {
+        let vm = try editDraftModel(open: "a")
+        XCTAssertEqual(JobSearchDetailView.statusText(vm.detail!.leads[0]), "In drafts")
+
+        vm.emailRefused(draftGone(lead: forgottenLeadA), leadId: "a")
+
+        // The pane and the row both lose the draft, so the button reads Draft email again.
+        XCTAssertNil(vm.lead?.summary.emailDraftId)
+        XCTAssertFalse(vm.lead?.summary.emailWaiting ?? true)
+        XCTAssertEqual(vm.lead?.approach?.outreach?.body, "Hi Dana")
+        XCTAssertNil(vm.detail?.leads[0].emailDraftId)
+        XCTAssertNil(vm.detail?.leads[0].emailDraftedAt)
+        XCTAssertEqual(JobSearchDetailView.statusText(vm.detail!.leads[0]), "")
+        XCTAssertEqual(JobSearchViewModel.progress(vm.detail!.leads).emailsWaiting, 0)
+        // Said in the pane, not as an error.
+        XCTAssertEqual(vm.emailDraftGoneLeadId, "a")
+        XCTAssertNil(vm.errorMessage)
+        XCTAssertFalse(vm.emailNotConnected)
+    }
+
+    func testAGoneDraftForAJobNoLongerOpenOnlyUpdatesItsRow() throws {
+        let vm = try editDraftModel(open: "b")
+
+        vm.emailRefused(draftGone(lead: forgottenLeadA), leadId: "a")
+
+        XCTAssertEqual(vm.lead?.summary.id, "b", "the job now open stays open")
+        XCTAssertNil(vm.detail?.leads[0].emailDraftId)
+        XCTAssertEqual(vm.emailDraftGoneLeadId, "a", "said only in job a's pane")
+    }
+
+    func testAGoneDraftWithNoJobInTheAnswerIsStillSaid() throws {
+        let vm = try editDraftModel(open: "a")
+
+        vm.emailRefused(draftGone(lead: "null"), leadId: "a")
+
+        XCTAssertEqual(vm.emailDraftGoneLeadId, "a")
+        XCTAssertEqual(vm.lead?.summary.emailDraftId, "r-1", "nothing to land: the job is left as it was")
+        XCTAssertNil(vm.errorMessage)
+    }
+
+    func testOtherEmailRefusals() throws {
+        let vm = try editDraftModel(open: "a")
+        vm.emailRefused(APIError.httpError(409, #"{"detail": {"code": "email_not_connected", "message": "Connect Gmail in Email first."}}"#),
+                        leadId: "a")
+        XCTAssertTrue(vm.emailNotConnected)
+        XCTAssertNil(vm.emailDraftGoneLeadId)
+        XCTAssertNil(vm.errorMessage)
+
+        // A plain refusal is an error, and the job keeps its draft.
+        let plain = APIError.httpError(409, "This job has no drafted first message yet. Draft its approach first.")
+        XCTAssertNil(JobEmailRefusal(plain))
+        vm.emailRefused(plain, leadId: "a")
+        XCTAssertNotNil(vm.errorMessage)
+        XCTAssertNil(vm.emailDraftGoneLeadId)
+        XCTAssertEqual(vm.detail?.leads[0].emailDraftId, "r-1")
+        XCTAssertNil(JobEmailRefusal(URLError(.timedOut)))
+
+        vm.emailDraftGoneLeadId = "a"
+        vm.reset()
+        XCTAssertNil(vm.emailDraftGoneLeadId)
+        XCTAssertFalse(vm.emailNotConnected)
+    }
+
+    func testTheEditDraftGuideSaysNothingIsMadeAgain() {
+        let points = FeatureGuide.jobSearch.pages.flatMap(\.points)
+        XCTAssertTrue(points.contains { $0.hasPrefix("Edit draft in Email") && $0.contains("makes nothing") })
+    }
+
     func testTheListGoesCompactBesideAJobOrWhenNarrow() throws {
         let wide = JobSearchDetailView.fullTableWidth + 200
         XCTAssertFalse(JobSearchDetailView.usesCompactList(leadOpen: false, width: wide))
