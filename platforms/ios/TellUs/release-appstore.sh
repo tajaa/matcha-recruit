@@ -1,11 +1,18 @@
 #!/usr/bin/env bash
 # Build, archive, and upload Tell-Us to App Store Connect.
 #
-# Auto-bumps CURRENT_PROJECT_VERSION (build number) before archiving so every
-# upload gets a fresh number — App Store Connect rejects duplicates. Unlike
-# Espresso's Matcha.xcodeproj (hand-maintained pbxproj), TellUs is XcodeGen-
-# managed: the bump edits project.yml, then `xcodegen generate` regenerates
-# TellUs.xcodeproj before archiving, so both files stay in sync.
+# Build numbers come from App Store Connect, not project.yml: the upload runs
+# with manageAppVersionAndBuildNumber, so when the archive's number isn't higher
+# than the last upload Xcode gives the upload the next one. Every archive before
+# f8514eb (2026-08-15) carried build 1, and 16 of them uploaded fine that way.
+# The script used to bump CURRENT_PROJECT_VERSION in project.yml and commit it
+# before archiving. The commit landed on whatever branch was checked out —
+# usually local main, which was then one commit ahead of origin, so the next
+# `git pull` after any merge diverged. Nothing is bumped or committed now;
+# release.log records the number App Store Connect assigned.
+#
+# TellUs is XcodeGen-managed: project.yml is the source of truth and
+# `xcodegen generate` regenerates TellUs.xcodeproj before archiving.
 #
 # One-time setup (out of band):
 #   1. In Apple Developer portal: register the app with bundle ID
@@ -29,20 +36,18 @@
 # Optional:
 #   APPLE_TEAM_ID         (default: 5D6TJVCPBK from project.yml)
 #   BUNDLE_ID             (default: com.beetlejuse.app from project.yml)
-#   MARKETING_VERSION     If set, also overwrites MARKETING_VERSION
-#                         (e.g. 1.2.3). Otherwise only build number bumps.
+#   MARKETING_VERSION     If set, overwrites MARKETING_VERSION (e.g. 1.2.3)
+#                         in project.yml before archiving. The edit (and the
+#                         regenerated pbxproj) is left uncommitted for you to
+#                         land through a PR.
 #
 # Usage:
-#   ./release-appstore.sh                 bump build, archive, upload
-#   ./release-appstore.sh --no-upload     bump + archive only (test the build)
-#   ./release-appstore.sh --no-bump       skip the build-number bump (re-upload
-#                                         the same number — only useful if a
-#                                         prior upload failed mid-flight)
-#   ./release-appstore.sh --status        show project.yml build + last 20 attempts
-#   ./release-appstore.sh --set-build N   force project.yml to N (recover from drift
-#                                         when project.yml falls behind ASC because
-#                                         a previous archive failed and rolled
-#                                         back). Next run bumps from N.
+#   ./release-appstore.sh                 archive, upload
+#   ./release-appstore.sh --no-upload     archive only (test the build)
+#   ./release-appstore.sh --status        show the last 20 attempts
+#
+# --no-bump and --set-build N are still accepted and do nothing: App Store
+# Connect numbers every upload, so there is no local build number to manage.
 
 set -euo pipefail
 
@@ -60,7 +65,10 @@ RELEASE_LOG="$PROJECT_DIR/release.log"
 
 # Persistent attempt log — append-only history of every release attempt with
 # build number + archive/upload status. Survives temp-dir cleanup so you can
-# always see why a TestFlight number is missing.
+# always see why a TestFlight number is missing. The build column is the number
+# App Store Connect assigned ("-" when nothing was uploaded). Lines before
+# 2026-10-17 show the project.yml bump instead, which until f8514eb
+# (2026-08-15) was not even the number the archive carried.
 log_attempt() {
     local build="$1" archive="$2" upload="$3" note="${4:-}"
     local ts
@@ -72,35 +80,21 @@ log_attempt() {
 RED=$'\033[0;31m'; YELLOW=$'\033[0;33m'; GREEN=$'\033[0;32m'; DIM=$'\033[2m'; NC=$'\033[0m'
 
 NO_UPLOAD=false
-NO_BUMP=false
 SHOW_STATUS=false
-SET_BUILD=""
+NO_BUILD_NUMBERS="${DIM}App Store Connect assigns the build number at upload; there is no local build number to manage${NC}"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --no-upload) NO_UPLOAD=true; shift ;;
-        --no-bump)   NO_BUMP=true; shift ;;
+        --no-bump)   echo "--no-bump does nothing now: $NO_BUILD_NUMBERS"; shift ;;
         --status)    SHOW_STATUS=true; shift ;;
-        --set-build) SET_BUILD="$2"; shift 2 ;;
-        --set-build=*) SET_BUILD="${1#*=}"; shift ;;
+        --set-build|--set-build=*)
+            echo "--set-build does nothing now: $NO_BUILD_NUMBERS"; exit 0 ;;
         -h|--help)   grep -E '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *)           echo "${RED}unknown arg:${NC} $1"; exit 1 ;;
     esac
 done
 
-if [[ -n "$SET_BUILD" ]]; then
-    if ! [[ "$SET_BUILD" =~ ^[0-9]+(\.[0-9]+)*$ ]]; then
-        echo "${RED}error:${NC} --set-build value must be numeric (e.g. 18)"
-        exit 1
-    fi
-    OLD=$(grep -oE 'CURRENT_PROJECT_VERSION: "[0-9]+(\.[0-9]+)*"' "$PROJECT_YML" | head -1 | sed -E 's/.*"([0-9.]+)"/\1/')
-    sed -i '' "s/CURRENT_PROJECT_VERSION: \"${OLD}\"/CURRENT_PROJECT_VERSION: \"${SET_BUILD}\"/g" "$PROJECT_YML"
-    echo "${GREEN}build number:${NC} ${OLD} → ${SET_BUILD} (manual override)"
-    echo "${DIM}use this to recover from project.yml/ASC drift; next run will bump from ${SET_BUILD}${NC}"
-    exit 0
-fi
-
 if $SHOW_STATUS; then
-    echo "${DIM}project.yml build:${NC} $(grep -oE 'CURRENT_PROJECT_VERSION: "[0-9]+(\.[0-9]+)*"' "$PROJECT_YML" | head -1 | sed -E 's/.*"([0-9.]+)"/\1/')"
     if [[ -f "$RELEASE_LOG" ]]; then
         echo "${DIM}last 20 release attempts (release.log):${NC}"
         tail -20 "$RELEASE_LOG" | sed 's/^/  /'
@@ -142,54 +136,42 @@ if ! which xcodegen >/dev/null 2>&1; then
     exit 1
 fi
 
-# ─── Bump build number ────────────────────────────────────────────────────
-# XcodeGen-managed project: the bump edits project.yml (source of truth),
-# then `xcodegen generate` regenerates TellUs.xcodeproj from it — unlike
-# Espresso's hand-maintained pbxproj, editing the pbxproj directly here would
-# be silently discarded on the next generate.
-BUMP_DONE=false
+# ─── Marketing version ────────────────────────────────────────────────────
+# Only when MARKETING_VERSION is set. Edits project.yml (editing the pbxproj
+# directly would be discarded by the next `xcodegen generate`). Rolled back if
+# the archive fails; otherwise left in the working tree for you to commit.
+MARKETING_DONE=false
 PROJECT_YML_BACKUP=""
-OLD_VERSION=""
-NEW_VERSION=""
 
-bump_build_number() {
-    OLD_VERSION=$(grep -oE 'CURRENT_PROJECT_VERSION: "[0-9]+(\.[0-9]+)*"' "$PROJECT_YML" | head -1 | sed -E 's/.*"([0-9.]+)"/\1/')
-    if [[ -z "$OLD_VERSION" ]]; then
-        echo "${RED}error:${NC} no CURRENT_PROJECT_VERSION found in project.yml"
-        exit 1
-    fi
-    # Bump the last numeric component (e.g. 2.1 → 2.2, 3 → 4)
-    local prefix last
-    prefix="${OLD_VERSION%.*}"
-    last="${OLD_VERSION##*.}"
-    if [[ "$prefix" == "$last" ]]; then
-        NEW_VERSION=$(( last + 1 ))
-    else
-        NEW_VERSION="${prefix}.$((last + 1))"
-    fi
+set_marketing_version() {
+    [[ -z "${MARKETING_VERSION:-}" ]] && return
+    local old
+    old=$(grep -oE 'MARKETING_VERSION: "[^"]+"' "$PROJECT_YML" | head -1 | sed -E 's/.*"([^"]+)"/\1/')
     PROJECT_YML_BACKUP="$(mktemp -t tellus-projectyml.XXXXXX)"
     cp "$PROJECT_YML" "$PROJECT_YML_BACKUP"
-    sed -i '' "s/CURRENT_PROJECT_VERSION: \"${OLD_VERSION}\"/CURRENT_PROJECT_VERSION: \"${NEW_VERSION}\"/g" "$PROJECT_YML"
-    BUMP_DONE=true
-    echo "${GREEN}build number:${NC} ${OLD_VERSION} → ${NEW_VERSION}"
+    sed -i '' "s/MARKETING_VERSION: \"${old}\"/MARKETING_VERSION: \"${MARKETING_VERSION}\"/g" "$PROJECT_YML"
+    MARKETING_DONE=true
+    echo "${GREEN}marketing version:${NC} ${old} → ${MARKETING_VERSION}"
 }
 
-bump_marketing_version() {
-    [[ -z "${MARKETING_VERSION:-}" ]] && return
-    local old new
-    old=$(grep -oE 'MARKETING_VERSION: "[^"]+"' "$PROJECT_YML" | head -1 | sed -E 's/.*"([^"]+)"/\1/')
-    new="$MARKETING_VERSION"
-    sed -i '' "s/MARKETING_VERSION: \"${old}\"/MARKETING_VERSION: \"${new}\"/g" "$PROJECT_YML"
-    echo "${GREEN}marketing version:${NC} ${old} → ${new}"
-}
-
-rollback_bump() {
-    if $BUMP_DONE && [[ -f "$PROJECT_YML_BACKUP" ]]; then
+rollback_marketing_version() {
+    if $MARKETING_DONE && [[ -f "$PROJECT_YML_BACKUP" ]]; then
         cp "$PROJECT_YML_BACKUP" "$PROJECT_YML"
-        xcodegen generate >/dev/null 2>&1 || true
-        echo "${YELLOW}rolled back build number to ${OLD_VERSION}${NC}"
+        (cd "$PROJECT_DIR" && xcodegen generate) >/dev/null 2>&1 || true
+        echo "${YELLOW}rolled back marketing version${NC}"
     fi
     [[ -n "$PROJECT_YML_BACKUP" ]] && rm -f "$PROJECT_YML_BACKUP"
+}
+
+# The build number App Store Connect gave this archive's upload: xcodebuild
+# writes it into the archive's Distributions entry. Empty if none was given.
+uploaded_build_number() {
+    local plist="$ARCHIVE_PATH/Info.plist" i=0 n="" v
+    while /usr/libexec/PlistBuddy -c "Print :Distributions:${i}" "$plist" >/dev/null 2>&1; do
+        v=$(/usr/libexec/PlistBuddy -c "Print :Distributions:${i}:uploadedBuildNumber" "$plist" 2>/dev/null) && n="$v"
+        i=$((i + 1))
+    done
+    echo "$n"
 }
 
 # ─── Archive ──────────────────────────────────────────────────────────────
@@ -220,6 +202,7 @@ do_archive() {
         <string>Beetlejuse App Store</string>
     </dict>
     <key>uploadSymbols</key>    <true/>
+    <key>manageAppVersionAndBuildNumber</key> <true/>
 </dict>
 </plist>
 PLIST
@@ -299,7 +282,6 @@ do_upload() {
         echo "${RED}upload failed${NC}"
         echo "${DIM}common causes:${NC}"
         echo "  - bundle id not registered in App Store Connect"
-        echo "  - build number ($NEW_VERSION) already used (re-run normally to bump again)"
         echo "  - invalid App Store Connect API key (check APPLE_API_KEY_ID / ISSUER_ID / PATH)"
         echo "  - cert / provisioning-profile mismatch"
         grep -E ": (error|fatal error):|error:" "$upload_log" | head -20 | sed 's/^/  /' || tail -40 "$upload_log" | sed 's/^/  /'
@@ -320,44 +302,24 @@ do_upload() {
 }
 
 # ─── Main ─────────────────────────────────────────────────────────────────
-trap 'rollback_bump' ERR
+trap 'rollback_marketing_version' ERR
 
-if ! $NO_BUMP; then
-    bump_build_number
-    bump_marketing_version
-fi
+set_marketing_version
 
 if ! do_archive; then
-    log_attempt "$NEW_VERSION" "FAIL" "skipped" "archive failed — rolled back to $OLD_VERSION"
-    rollback_bump
+    log_attempt "-" "FAIL" "skipped" "archive failed"
+    rollback_marketing_version
     exit 1
 fi
 
-# At this point the bump is "earned" — even if upload fails, the build number
-# was used in a real archive and shouldn't be reused for a different build.
 trap - ERR
 [[ -n "$PROJECT_YML_BACKUP" ]] && rm -f "$PROJECT_YML_BACKUP"
-
-# Auto-commit the project.yml bump (+ the regenerated pbxproj) so subsequent
-# runs and fresh checkouts see the correct baseline. Without this, the bump
-# lives only in the uncommitted working tree — any `git checkout -- project.yml`
-# or branch switch silently regresses the build number, and the next run
-# bumps from the old committed value, producing a duplicate App Store Connect
-# rejects. Only stage these two files explicitly so unrelated working-tree
-# changes don't get swept in.
-if ! $NO_BUMP && [[ -n "$NEW_VERSION" ]]; then
-    if git -C "$PROJECT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-        git -C "$PROJECT_DIR" add "$PROJECT_YML" "$PROJECT_DIR/TellUs.xcodeproj/project.pbxproj"
-        if ! git -C "$PROJECT_DIR" diff --cached --quiet -- "$PROJECT_YML" "$PROJECT_DIR/TellUs.xcodeproj/project.pbxproj"; then
-            git -C "$PROJECT_DIR" commit -m "chore(tellus-ios): bump build to ${NEW_VERSION}" \
-                -- "$PROJECT_YML" "$PROJECT_DIR/TellUs.xcodeproj/project.pbxproj" >/dev/null
-            echo "${GREEN}committed:${NC} build ${NEW_VERSION} project.yml bump"
-        fi
-    fi
+if $MARKETING_DONE; then
+    echo "${DIM}MARKETING_VERSION ${MARKETING_VERSION} is in project.yml + the pbxproj, uncommitted — land it through a PR${NC}"
 fi
 
 if $NO_UPLOAD; then
-    log_attempt "$NEW_VERSION" "OK" "skipped" "--no-upload"
+    log_attempt "-" "OK" "skipped" "--no-upload"
     echo
     echo "${GREEN}archive ready (upload skipped)${NC}"
     echo "  archive: $ARCHIVE_PATH"
@@ -365,15 +327,16 @@ if $NO_UPLOAD; then
 fi
 
 if ! do_upload; then
-    log_attempt "$NEW_VERSION" "OK" "FAIL" "upload to ASC failed — build number kept; re-run with --no-bump to retry"
+    log_attempt "-" "OK" "FAIL" "upload to ASC failed — fix and re-run"
     exit 1
 fi
 
-log_attempt "$NEW_VERSION" "OK" "OK" "uploaded to ASC; processing 5–15 min before TestFlight"
+BUILD_NUMBER="$(uploaded_build_number)"
+log_attempt "${BUILD_NUMBER:-?}" "OK" "OK" "uploaded to ASC; processing 5–15 min before TestFlight"
 
 echo
 echo "${GREEN}uploaded to App Store Connect${NC}"
-echo "  build:   $NEW_VERSION"
+echo "  build:   ${BUILD_NUMBER:-? (not recorded in the archive — check TestFlight)}"
 echo "  archive: $ARCHIVE_PATH"
 echo "  next:    https://appstoreconnect.apple.com/ → Tell-Us → TestFlight"
 echo
