@@ -9,6 +9,10 @@ SerpApi and Google's Places API.
   connection: asked once more after 2 s. Failing again, the API is `down`.
 - Any other 4xx: this request's own error.
 
+Each call is logged to the AI usage ledger (`ai_usage.record_api_call`), so
+Admin → AI Usage shows every paid search by API, what asked for it and what
+it cost.
+
 `Fallback` holds the APIs that have keys, in order, for one phase. A call goes
 to the first one still in play. One that refuses for good is dropped (logged
 once as an error, so it shows in Admin → Server Errors), and so is one that is
@@ -23,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import time
 from typing import Any, Awaitable, Callable
 
 import httpx
@@ -80,10 +85,46 @@ def result_error(data: dict) -> str:
     return "" if "hasn't returned any results" in error or "no results" in error.lower() else error
 
 
+def provider_id(name: str) -> str:
+    """The ledger's provider for an API's display name: "Google Places" -> "google_places"."""
+    return "_".join(name.lower().split())
+
+
 async def answer(name: str, send: SendFn, *, transport: httpx.AsyncBaseTransport | None = None,
-                 sleep: SleepFn = asyncio.sleep, timeout: float = TIMEOUT_SECONDS) -> dict:
+                 sleep: SleepFn = asyncio.sleep, timeout: float = TIMEOUT_SECONDS,
+                 sku: str | None = None) -> dict:
     """One JSON object from an API, under the rules above. `send` may raise
-    an error of its own (not an `httpx.HTTPError`) to stop at once."""
+    an error of its own (not an `httpx.HTTPError`) to stop at once.
+
+    Every call is one row in the AI usage ledger (`ai_usage.record_api_call`):
+    provider `name`, model `sku` (the engine or SKU, which sets the price),
+    whether it answered and how long it took, the retry included."""
+    from app.core.services.ai_usage import record_api_call
+
+    started = time.monotonic()
+    status, error = "error", None
+    try:
+        body = await _ask(name, send, transport=transport, sleep=sleep, timeout=timeout)
+        status = "ok"
+        return body
+    except ProviderError as exc:
+        error = str(exc)
+        raise
+    except asyncio.CancelledError:
+        status, error = "timeout", "cancelled"
+        raise
+    except Exception as exc:
+        error = str(exc) or type(exc).__name__
+        raise
+    finally:
+        await record_api_call(
+            provider=provider_id(name), model=sku or "request", method="search",
+            latency_ms=int((time.monotonic() - started) * 1000), status=status, error=error,
+        )
+
+
+async def _ask(name: str, send: SendFn, *, transport: httpx.AsyncBaseTransport | None,
+               sleep: SleepFn, timeout: float) -> dict:
     last = ""
     for attempt in range(2):
         try:

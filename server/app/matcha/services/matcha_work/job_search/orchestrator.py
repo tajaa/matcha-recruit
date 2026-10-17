@@ -15,6 +15,7 @@ from app.database import connection_or_direct
 from app.matcha.services.matcha_work.agent_runtime import chain
 
 from . import model_phases, phases
+from .agent_phase import USAGE_FEATURE
 from .enqueue import dispatch
 from .phases import Deps, PhaseOutcome
 from .service import LIVE, STALE_INTERVAL, release_drafts, rerank, resting_status
@@ -76,6 +77,8 @@ JOB_CHAIN = chain.ChainSpec(
     ending=_ending,
     on_terminal=_stopped,
     budget_columns=phases.BUDGET_COLUMNS,
+    # Listing searches cost against the same label as the search's model runs.
+    usage_feature=lambda _search: USAGE_FEATURE,
     name="job search",
     noun="search",
     phase_seconds=PHASE_SECONDS,

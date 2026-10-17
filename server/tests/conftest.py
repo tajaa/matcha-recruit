@@ -43,6 +43,8 @@ os.environ["OPENAI_API_KEY"] = ""
 os.environ["OPENAI_API_1"] = ""
 # Same for Brave: with a key, the agents' web_search calls Brave's API.
 os.environ["BRAVE_SEARCH_API_KEY"] = ""
+# And its per-plan price: tests price Brave at list (ai_usage.API_PRICING).
+os.environ["BRAVE_SEARCH_USD_PER_1000"] = ""
 
 
 class _Permissive:
@@ -93,3 +95,25 @@ def _install_genai() -> None:
 
 
 _install_genai()
+
+
+import pytest  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _no_usage_ledger_writes(monkeypatch):
+    """No test writes the AI usage ledger or a saved API quota. A developer's
+    server/.env points DATABASE_URL at the real dev database, and every paid
+    search now logs a row (`search_apis.answer`), so a test that drove a fake
+    transport would otherwise write one there. A test that wants the rows
+    patches `ai_usage._insert_row` itself, after this."""
+    from app.core.services import ai_usage
+
+    async def _skip_row(row, *, direct=False):
+        return None
+
+    async def _skip_quota(key, value):
+        return None
+
+    monkeypatch.setattr(ai_usage, "_insert_row", _skip_row)
+    monkeypatch.setattr(ai_usage, "_save_quota", _skip_quota)

@@ -122,7 +122,7 @@ class _JobsApi:
         """One page of postings and the token for the next page (or None)."""
         params = self._params(query, location, page_token)
         data = await search_apis.answer(self.name, lambda client: client.get(self.base_url, params=params),
-                                        transport=self._transport, sleep=self._sleep)
+                                        transport=self._transport, sleep=self._sleep, sku=params["engine"])
         error = search_apis.result_error(data)
         if error:
             raise ProviderError(f"{self.name}: {error[:200]}")

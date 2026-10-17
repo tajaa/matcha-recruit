@@ -1,8 +1,13 @@
 """Admin endpoints for the AI usage ledger (/admin/ai-usage).
 
-Reads `ai_usage_log`, written by the Gemini client wrapper and the direct
-OpenAI Responses recorder in app/core/services/ai_usage.py. Read-only over
-that table — nothing here writes a row.
+Reads `ai_usage_log`, written by the Gemini client wrapper, the direct
+OpenAI Responses / Anthropic Messages recorders and the paid search APIs
+(`record_api_call`) in app/core/services/ai_usage.py. Read-only over that
+table — nothing here writes a row.
+
+`/espresso` reads Espresso's own run records (`mw_project_agent_runs` and
+their tool steps), and `/quotas` what each search API has left this period
+(`core/services/api_quotas.py`).
 """
 from __future__ import annotations
 
@@ -11,6 +16,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.core.dependencies import require_admin
+from app.core.services import api_quotas
 from app.database import get_connection
 
 router = APIRouter()
@@ -96,6 +102,17 @@ async def ai_usage_summary(since_hours: int = 24):
             """,
             str(since_hours),
         )
+        by_provider_rows = await conn.fetch(
+            f"""
+            SELECT provider, {_ROLLUP_COLUMNS}
+            FROM ai_usage_log
+            WHERE created_at > NOW() - ($1 || ' hours')::interval
+            GROUP BY provider
+            ORDER BY SUM(cost_usd) DESC NULLS LAST,
+                     COUNT(*) DESC
+            """,
+            str(since_hours),
+        )
 
     return {
         "since_hours": since_hours,
@@ -109,6 +126,9 @@ async def ai_usage_summary(since_hours: int = 24):
         "by_model": [
             {"provider": r["provider"], "model": r["model"], **_row_to_metrics(r)}
             for r in by_model_rows
+        ],
+        "by_provider": [
+            {"provider": r["provider"], **_row_to_metrics(r)} for r in by_provider_rows
         ],
     }
 
@@ -153,6 +173,7 @@ async def ai_usage_calls(
     feature: Optional[str] = None,
     model: Optional[str] = None,
     status: Optional[str] = None,
+    provider: Optional[str] = None,
     limit: int = 100,
     offset: int = 0,
 ):
@@ -175,6 +196,9 @@ async def ai_usage_calls(
     if status:
         args.append(status)
         filters.append(f"status = ${len(args)}")
+    if provider:
+        args.append(provider)
+        filters.append(f"provider = ${len(args)}")
 
     args.append(limit)
     args.append(offset)
@@ -224,3 +248,140 @@ async def ai_usage_calls(
             for r in rows
         ],
     }
+
+
+# Every Espresso surface logs under this prefix (assistant, tasks.<playbook>,
+# job_search, agent_card, repo_question, task_draft).
+ESPRESSO_FEATURE_PREFIX = "matcha.espresso."
+
+
+@router.get("/admin/ai-usage/espresso", dependencies=[Depends(require_admin)])
+async def ai_usage_espresso(since_hours: int = 24):
+    """Espresso's spend by provider and model (the ledger's `matcha.espresso.*`
+    rows: models, Brave and the other search APIs, Claude's hosted searches),
+    its agent runs by kind, and the tools those runs used (the run records)."""
+    since_hours = _clamp_since_hours(since_hours)
+
+    async with get_connection() as conn:
+        spend_rows = await conn.fetch(
+            f"""
+            SELECT provider, model, {_ROLLUP_COLUMNS}
+            FROM ai_usage_log
+            WHERE created_at > NOW() - ($1 || ' hours')::interval
+              AND starts_with(feature, $2)
+            GROUP BY provider, model
+            ORDER BY SUM(cost_usd) DESC NULLS LAST,
+                     COUNT(*) DESC
+            """,
+            str(since_hours), ESPRESSO_FEATURE_PREFIX,
+        )
+        run_rows = await conn.fetch(
+            """
+            SELECT kind,
+                   COUNT(*) AS runs,
+                   COUNT(*) FILTER (WHERE status = 'done') AS done,
+                   COUNT(*) FILTER (WHERE status = 'failed') AS failed,
+                   COUNT(*) FILTER (WHERE status IN ('queued', 'running')) AS live,
+                   COUNT(DISTINCT requested_by) AS people,
+                   SUM(model_calls) AS model_calls,
+                   SUM(search_calls) AS search_calls,
+                   AVG(EXTRACT(EPOCH FROM (completed_at - started_at)))
+                       FILTER (WHERE completed_at IS NOT NULL AND started_at IS NOT NULL) AS avg_seconds
+            FROM mw_project_agent_runs
+            WHERE created_at > NOW() - ($1 || ' hours')::interval
+            GROUP BY kind
+            ORDER BY COUNT(*) DESC
+            """,
+            str(since_hours),
+        )
+        people = await conn.fetchval(
+            """
+            SELECT COUNT(DISTINCT requested_by) FROM mw_project_agent_runs
+            WHERE created_at > NOW() - ($1 || ' hours')::interval
+            """,
+            str(since_hours),
+        )
+        tool_rows = await conn.fetch(
+            """
+            SELECT s.tool, s.kind,
+                   COUNT(*) AS calls,
+                   COUNT(*) FILTER (WHERE s.status = 'ok') AS ok,
+                   COUNT(*) FILTER (WHERE s.status = 'error') AS errors,
+                   COUNT(*) FILTER (WHERE s.status = 'skipped') AS skipped,
+                   COUNT(*) FILTER (WHERE s.status IN ('held', 'denied')) AS held,
+                   COUNT(*) FILTER (WHERE s.status IN ('claimed', 'unknown')) AS unknown,
+                   COUNT(DISTINCT s.run_id) AS runs,
+                   ARRAY_AGG(DISTINCT r.kind) AS run_kinds,
+                   MAX(s.created_at) AS last_used_at
+            FROM mw_project_agent_steps s
+            JOIN mw_project_agent_runs r ON r.id = s.run_id
+            WHERE s.created_at > NOW() - ($1 || ' hours')::interval
+            GROUP BY s.tool, s.kind
+            ORDER BY COUNT(*) DESC
+            LIMIT 200
+            """,
+            str(since_hours),
+        )
+
+    def _int(value: Any) -> int:
+        return int(value or 0)
+
+    runs = [
+        {
+            "kind": r["kind"],
+            "runs": _int(r["runs"]),
+            "done": _int(r["done"]),
+            "failed": _int(r["failed"]),
+            "live": _int(r["live"]),
+            "people": _int(r["people"]),
+            "model_calls": _int(r["model_calls"]),
+            "search_calls": _int(r["search_calls"]),
+            "avg_seconds": float(r["avg_seconds"]) if r["avg_seconds"] is not None else None,
+        }
+        for r in run_rows
+    ]
+    tools = [
+        {
+            "tool": r["tool"],
+            "kind": r["kind"],
+            "calls": _int(r["calls"]),
+            "ok": _int(r["ok"]),
+            "errors": _int(r["errors"]),
+            "skipped": _int(r["skipped"]),
+            "held": _int(r["held"]),
+            "unknown": _int(r["unknown"]),
+            "runs": _int(r["runs"]),
+            "run_kinds": sorted(k for k in (r["run_kinds"] or []) if k),
+            "last_used_at": r["last_used_at"].isoformat() if r["last_used_at"] else None,
+        }
+        for r in tool_rows
+    ]
+    spend = [
+        {"provider": r["provider"], "model": r["model"], **_row_to_metrics(r)} for r in spend_rows
+    ]
+    return {
+        "since_hours": since_hours,
+        "spend": spend,
+        "totals": {
+            "cost_usd": sum(r["cost_usd"] for r in spend if r["cost_usd"] is not None)
+            if any(r["cost_usd"] is not None for r in spend) else None,
+            "runs": sum(r["runs"] for r in runs),
+            "failed": sum(r["failed"] for r in runs),
+            "people": _int(people),
+            "model_calls": sum(r["model_calls"] for r in runs),
+            "search_calls": sum(r["search_calls"] for r in runs),
+            "tool_calls": sum(t["calls"] for t in tools),
+        },
+        "runs": runs,
+        "tools": tools,
+    }
+
+
+@router.get("/admin/ai-usage/quotas", dependencies=[Depends(require_admin)])
+async def ai_usage_quotas():
+    """What each paid search API has left this period. Brave's is the latest
+    its responses reported; SerpApi's and SearchAPI's are asked live from their
+    free account endpoints."""
+    async with get_connection() as conn:
+        brave = await api_quotas.brave(conn)
+    return {"providers": await api_quotas.all_quotas(brave)}

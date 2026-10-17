@@ -40,10 +40,12 @@ import asyncio
 import json
 import logging
 import re
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Literal, Mapping, get_args
 from uuid import UUID, uuid4
 
+from app.core.services.ai_usage import feature_scope
 from app.database import connection_or_direct
 
 logger = logging.getLogger(__name__)
@@ -118,6 +120,9 @@ class ChainSpec:
     idle_interval: str
     # A live row that has not moved in this long is ended by reconcile.
     stale_interval: str
+    # usage_feature(row): the AI usage label a phase's paid calls are logged
+    # under (searches; model runs set their own). None: the calling module's.
+    usage_feature: Callable[[dict], str] | None = None
 
     def __post_init__(self) -> None:
         if self.table not in get_args(ChainTable):
@@ -224,8 +229,11 @@ async def run_phase(spec: ChainSpec, row_id: UUID, token: UUID, *, deps: Any = N
         outcome = await spec.ending(row, f"Unknown step {step!r}.")
         error = outcome.progress["note"]
     else:
+        label = spec.usage_feature(row) if spec.usage_feature else None
         try:
-            outcome = await asyncio.wait_for(phase(row, deps, guard), spec.phase_seconds)
+            # The scope is set before wait_for makes its task, which copies it.
+            with feature_scope(label) if label else nullcontext():
+                outcome = await asyncio.wait_for(phase(row, deps, guard), spec.phase_seconds)
         except PhaseFailed as exc:
             outcome = await spec.ending(row, str(exc))
             error = str(exc)

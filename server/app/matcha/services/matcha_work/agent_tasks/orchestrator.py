@@ -18,6 +18,7 @@ from app.matcha.services.matcha_work.agent_runtime.chain import PhaseOutcome
 
 from . import chat, mail, notify, playbooks, service
 from .enqueue import dispatch
+from .model_run import USAGE_PREFIX
 from .research.phases import Deps
 
 logger = logging.getLogger(__name__)
@@ -80,6 +81,8 @@ TASK_CHAIN = chain.ChainSpec(
     on_terminal=_stopped,
     phase_column="phase",
     budget_columns=BUDGET_COLUMNS,
+    # A round's searches cost against the same label as its model runs.
+    usage_feature=lambda task: f"{USAGE_PREFIX}.{task.get('playbook') or 'research'}",
     name="agent task",
     noun="task",
     phase_seconds=PHASE_SECONDS,
