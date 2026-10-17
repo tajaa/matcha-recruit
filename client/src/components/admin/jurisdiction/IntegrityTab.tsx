@@ -1,3 +1,4 @@
+import { AdminInput, AdminButton, AdminTable } from '../AdminUI'
 import { useState } from 'react'
 import { useAsync } from '../../../hooks/useAsync'
 import { fetchIntegrityCheck, runStalenessCheck } from '../../../api/compliance'
@@ -62,21 +63,21 @@ export default function IntegrityTab() {
     <div className="space-y-4">
       {/* Header */}
       <div className="flex items-center gap-3 flex-wrap">
-        <input
+        <AdminInput
           type="text"
           placeholder="Filter by state (e.g. CA)"
           value={stateFilter}
           onChange={e => setStateFilter(e.target.value.toUpperCase())}
-          className="px-3 py-1.5 text-sm bg-zinc-800 border border-zinc-700 rounded w-40 uppercase"
+          className="w-40 uppercase"
           maxLength={2}
         />
-        <button
+        <AdminButton
           onClick={handleRunCheck}
           disabled={running}
-          className="px-3 py-1.5 text-xs font-medium rounded bg-amber-600/20 text-amber-400 border border-amber-600/30 hover:bg-amber-600/30 disabled:opacity-50"
+          className="text-amber-400 disabled:opacity-50" variant="ghost"
         >
           {running ? 'Running...' : 'Run Staleness Check'}
-        </button>
+        </AdminButton>
         <div className="ml-auto flex items-center gap-4 text-xs text-zinc-500">
           <span>Defined: <strong className="text-zinc-300">{data.total_defined_keys}</strong></span>
           <span>Records: <strong className="text-zinc-300">{data.total_db_records}</strong></span>
@@ -90,28 +91,28 @@ export default function IntegrityTab() {
         {data.missing_keys.length === 0 ? (
           <div className="px-4 py-3 text-sm text-zinc-500">No missing keys</div>
         ) : (
-          <table className="w-full text-left text-xs">
-            <thead className="text-zinc-500 uppercase bg-zinc-800/30">
+          <AdminTable>
+            <thead >
               <tr>
-                <th className="px-3 py-2">Jurisdiction</th>
-                <th className="px-3 py-2">Category</th>
-                <th className="px-3 py-2">Key</th>
-                <th className="px-3 py-2 text-center">Weight</th>
-                <th className="px-3 py-2">Group</th>
+                <th >Jurisdiction</th>
+                <th >Category</th>
+                <th >Key</th>
+                <th className="text-center">Weight</th>
+                <th >Group</th>
               </tr>
             </thead>
             <tbody>
               {data.missing_keys.slice(0, 100).map((mk, i) => (
                 <tr key={i} className="border-t border-zinc-800/30">
-                  <td className="px-3 py-1.5 text-zinc-300">{mk.city}, {mk.state}</td>
-                  <td className="px-3 py-1.5 text-zinc-400">{mk.category}</td>
-                  <td className="px-3 py-1.5 text-red-400 font-mono">{mk.key}</td>
-                  <td className="px-3 py-1.5 text-center">{mk.weight > 1 ? <span className="text-purple-300">{mk.weight}x</span> : '1x'}</td>
-                  <td className="px-3 py-1.5 text-zinc-500">{mk.key_group || '—'}</td>
+                  <td className="text-zinc-300">{mk.city}, {mk.state}</td>
+                  <td className="text-zinc-400">{mk.category}</td>
+                  <td className="text-red-400 font-mono">{mk.key}</td>
+                  <td className="text-center">{mk.weight > 1 ? <span className="text-purple-300">{mk.weight}x</span> : '1x'}</td>
+                  <td className="text-zinc-500">{mk.key_group || '—'}</td>
                 </tr>
               ))}
             </tbody>
-          </table>
+          </AdminTable>
         )}
         {data.missing_count > 100 && (
           <div className="px-4 py-2 text-xs text-zinc-500">Showing 100 of {data.missing_count}</div>
@@ -123,28 +124,28 @@ export default function IntegrityTab() {
         {data.stale_keys.length === 0 ? (
           <div className="px-4 py-3 text-sm text-zinc-500">No stale keys</div>
         ) : (
-          <table className="w-full text-left text-xs">
-            <thead className="text-zinc-500 uppercase bg-zinc-800/30">
+          <AdminTable>
+            <thead >
               <tr>
-                <th className="px-3 py-2">Jurisdiction</th>
-                <th className="px-3 py-2">Category</th>
-                <th className="px-3 py-2">Key</th>
-                <th className="px-3 py-2 text-center">Days</th>
-                <th className="px-3 py-2">Level</th>
+                <th >Jurisdiction</th>
+                <th >Category</th>
+                <th >Key</th>
+                <th className="text-center">Days</th>
+                <th >Level</th>
               </tr>
             </thead>
             <tbody>
               {data.stale_keys.map((sk, i) => (
                 <tr key={i} className="border-t border-zinc-800/30">
-                  <td className="px-3 py-1.5 text-zinc-300">{sk.city}, {sk.state}</td>
-                  <td className="px-3 py-1.5 text-zinc-400">{sk.category}</td>
-                  <td className="px-3 py-1.5 font-mono text-zinc-300">{sk.key_name}</td>
-                  <td className="px-3 py-1.5 text-center font-mono">{sk.days_since_verified}</td>
-                  <td className="px-3 py-1.5">{stalenessLabel(sk.staleness_level)}</td>
+                  <td className="text-zinc-300">{sk.city}, {sk.state}</td>
+                  <td className="text-zinc-400">{sk.category}</td>
+                  <td className="font-mono text-zinc-300">{sk.key_name}</td>
+                  <td className="text-center font-mono">{sk.days_since_verified}</td>
+                  <td >{stalenessLabel(sk.staleness_level)}</td>
                 </tr>
               ))}
             </tbody>
-          </table>
+          </AdminTable>
         )}
       </Section>
 
@@ -153,28 +154,28 @@ export default function IntegrityTab() {
         {data.partial_groups.length === 0 ? (
           <div className="px-4 py-3 text-sm text-zinc-500">No partial groups</div>
         ) : (
-          <table className="w-full text-left text-xs">
-            <thead className="text-zinc-500 uppercase bg-zinc-800/30">
+          <AdminTable>
+            <thead >
               <tr>
-                <th className="px-3 py-2">Jurisdiction</th>
-                <th className="px-3 py-2">Group</th>
-                <th className="px-3 py-2">Coverage</th>
-                <th className="px-3 py-2">Missing Keys</th>
+                <th >Jurisdiction</th>
+                <th >Group</th>
+                <th >Coverage</th>
+                <th >Missing Keys</th>
               </tr>
             </thead>
             <tbody>
               {data.partial_groups.map((pg, i) => (
                 <tr key={i} className="border-t border-zinc-800/30">
-                  <td className="px-3 py-1.5 text-zinc-300">{pg.city}, {pg.state}</td>
-                  <td className="px-3 py-1.5 text-yellow-400">{pg.key_group}</td>
-                  <td className="px-3 py-1.5 font-mono">{pg.present}/{pg.expected} ({pg.coverage_pct}%)</td>
-                  <td className="px-3 py-1.5 text-zinc-500 font-mono text-[11px]">
+                  <td className="text-zinc-300">{pg.city}, {pg.state}</td>
+                  <td className="text-yellow-400">{pg.key_group}</td>
+                  <td className="font-mono">{pg.present}/{pg.expected} ({pg.coverage_pct}%)</td>
+                  <td className="text-zinc-500 font-mono">
                     {pg.missing.join(', ')}
                   </td>
                 </tr>
               ))}
             </tbody>
-          </table>
+          </AdminTable>
         )}
       </Section>
 
@@ -183,28 +184,28 @@ export default function IntegrityTab() {
         {data.orphaned_records.length === 0 ? (
           <div className="px-4 py-3 text-sm text-zinc-500">No orphaned records</div>
         ) : (
-          <table className="w-full text-left text-xs">
-            <thead className="text-zinc-500 uppercase bg-zinc-800/30">
+          <AdminTable>
+            <thead >
               <tr>
-                <th className="px-3 py-2">Jurisdiction</th>
-                <th className="px-3 py-2">Category</th>
-                <th className="px-3 py-2">Regulation Key</th>
-                <th className="px-3 py-2">Title</th>
-                <th className="px-3 py-2">Tier</th>
+                <th >Jurisdiction</th>
+                <th >Category</th>
+                <th >Regulation Key</th>
+                <th >Title</th>
+                <th >Tier</th>
               </tr>
             </thead>
             <tbody>
               {data.orphaned_records.slice(0, 100).map((or, i) => (
                 <tr key={i} className="border-t border-zinc-800/30">
-                  <td className="px-3 py-1.5 text-zinc-300">{or.city}, {or.state}</td>
-                  <td className="px-3 py-1.5 text-zinc-400">{or.category}</td>
-                  <td className="px-3 py-1.5 font-mono text-zinc-500 text-[11px] max-w-xs truncate">{or.regulation_key}</td>
-                  <td className="px-3 py-1.5 text-zinc-400 max-w-xs truncate">{or.title}</td>
-                  <td className="px-3 py-1.5 text-zinc-500">{or.source_tier}</td>
+                  <td className="text-zinc-300">{or.city}, {or.state}</td>
+                  <td className="text-zinc-400">{or.category}</td>
+                  <td className="font-mono text-zinc-500 max-w-xs truncate">{or.regulation_key}</td>
+                  <td className="text-zinc-400 max-w-xs truncate">{or.title}</td>
+                  <td className="text-zinc-500">{or.source_tier}</td>
                 </tr>
               ))}
             </tbody>
-          </table>
+          </AdminTable>
         )}
         {data.orphaned_count > 100 && (
           <div className="px-4 py-2 text-xs text-zinc-500">Showing 100 of {data.orphaned_count}</div>

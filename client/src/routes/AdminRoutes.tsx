@@ -1,44 +1,47 @@
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import RequireRole from '../components/auth/RequireRole'
 import AppLayout from '../layouts/AppLayout'
+import AdminLayout from '../layouts/AdminLayout'
 import AdminSidebar from '../components/sidebars/AdminSidebar'
-import Companies from '../pages/admin/Companies'
-import TestAccounts from '../pages/admin/TestAccounts'
-import AdminCompanyDetail from '../pages/admin/company-detail'
-import Features from '../pages/admin/Features'
-import Settings from '../pages/admin/Settings'
-import JurisdictionData from '../pages/admin/JurisdictionData'
-import WcRateData from '../pages/admin/WcRateData'
-import PayerData from '../pages/admin/PayerData'
-import ComplianceStudio from '../pages/admin/studio/ComplianceStudio'
-import Automation from '../pages/admin/Automation'
-import FractionalHR from '../pages/admin/FractionalHR'
-import FractionalClientDetail from '../pages/admin/FractionalClientDetail'
-import DealFlow from '../pages/admin/DealFlow'
-import MatchaLiteAdmin from '../pages/admin/MatchaLiteAdmin'
-import Products from '../pages/admin/Products'
-import Pricing from '../pages/admin/Pricing'
-import ComplianceManagement from '../pages/admin/ComplianceManagement'
-import MatchaWork from '../pages/admin/MatchaWork'
-import Customers from '../pages/admin/Customers'
-import Updates from '../pages/admin/Updates'
-import Cappe from '../pages/admin/Cappe'
-import CappeCreators from '../pages/admin/CappeCreators'
-import GapAnalysisHome from '../pages/admin/GapAnalysisHome'
-import AdminOnboardingWizard from '../pages/admin/AdminOnboardingWizard'
-import GapDashboard from '../pages/admin/GapDashboard'
+import { ADMIN_AREAS } from '../components/admin/adminNavigation'
+import AdminCategoryPage from '../pages/admin/AdminCategoryPage'
+import Companies from '../pages/admin/customers/Companies'
+import TestAccounts from '../pages/admin/customers/TestAccounts'
+import AdminCompanyDetail from '../pages/admin/customers/company-detail'
+import Features from '../pages/admin/customers/Features'
+import Settings from '../pages/admin/platform/Settings'
+import JurisdictionData from '../pages/admin/compliance/JurisdictionData'
+import WcRateData from '../pages/admin/compliance/WcRateData'
+import PayerData from '../pages/admin/compliance/PayerData'
+import ComplianceStudio from '../pages/admin/compliance/studio/ComplianceStudio'
+import Automation from '../pages/admin/platform/Automation'
+import FractionalHR from '../pages/admin/customers/fractional-hr/FractionalHR'
+import FractionalClientDetail from '../pages/admin/customers/fractional-hr/FractionalClientDetail'
+import DealFlow from '../pages/admin/sales/DealFlow'
+import SignupLinks from '../pages/admin/catalog/SignupLinks'
+import Products from '../pages/admin/catalog/Products'
+import Pricing from '../pages/admin/catalog/Pricing'
+import ComplianceManagement from '../pages/admin/compliance/ComplianceManagement'
+import MatchaWork from '../pages/admin/customers/workspaces/MatchaWork'
+import Customers from '../pages/admin/customers/Customers'
+import Updates from '../pages/admin/updates/Updates'
+import Cappe from '../pages/admin/customers/workspaces/Cappe'
+import CappeCreators from '../pages/admin/customers/workspaces/CappeCreators'
+import GapAnalysisHome from '../pages/admin/sales/gap-analysis/GapAnalysisHome'
+import AdminOnboardingWizard from '../pages/admin/sales/gap-analysis/AdminOnboardingWizard'
+import GapDashboard from '../pages/admin/sales/gap-analysis/GapDashboard'
 import GapAnalysisReport from '../components/admin/onboarding/GapAnalysisReport'
-import ClientErrors from '../pages/admin/ClientErrors'
-import ServerErrors from '../pages/admin/ServerErrors'
-import AiUsage from '../pages/admin/AiUsage'
-import TrafficReport from '../pages/admin/TrafficReport'
-import Usage from '../pages/admin/Usage'
-import NewsletterAdmin from '../pages/admin/newsletter'
-import LandingMediaAdmin from '../pages/admin/LandingMedia'
-import Blogs from '../pages/admin/Blogs'
-import CategoryDetailPage from '../pages/admin/CategoryDetailPage'
-import PolicyDetailPage from '../pages/admin/PolicyDetailPage'
-import MatchaOps from '../pages/admin/MatchaOps'
+import ClientErrors from '../pages/admin/monitoring/ClientErrors'
+import ServerErrors from '../pages/admin/monitoring/ServerErrors'
+import AiUsage from '../pages/admin/monitoring/AiUsage'
+import TrafficReport from '../pages/admin/monitoring/TrafficReport'
+import Usage from '../pages/admin/monitoring/Usage'
+import NewsletterAdmin from '../pages/admin/marketing/newsletter'
+import LandingMediaAdmin from '../pages/admin/marketing/LandingMedia'
+import Blogs from '../pages/admin/marketing/blogs/Blogs'
+import CategoryDetailPage from '../pages/admin/compliance/CategoryDetailPage'
+import PolicyDetailPage from '../pages/admin/compliance/PolicyDetailPage'
+import MatchaOps from '../pages/admin/customers/workspaces/MatchaOps'
 
 // Old /admin/jurisdictions + /admin/scope-studio bookmarks/deep-links →
 // unified /admin/studio, preserving any query params (e.g. scope-studio's
@@ -55,7 +58,9 @@ export default function AdminRoutes() {
     <RequireRole roles={['admin']}>
       <Routes>
       <Route element={<AppLayout sidebar={<AdminSidebar />} logoLabel="Matcha Admin" variant="admin" />}>
-        <Route index element={<Navigate to="customers" replace />} />
+      <Route element={<AdminLayout />}>
+        <Route index element={<Navigate to={ADMIN_AREAS[0].to} replace />} />
+        <Route path="areas/:category" element={<AdminCategoryPage />} />
         <Route path="updates" element={<Updates />} />
         <Route path="customers" element={<Customers />} />
         <Route path="gap-analysis" element={<GapAnalysisHome />} />
@@ -92,7 +97,7 @@ export default function AdminRoutes() {
         <Route path="fractional-hr" element={<FractionalHR />} />
         <Route path="fractional-hr/:clientId" element={<FractionalClientDetail />} />
         <Route path="deal-flow" element={<DealFlow />} />
-        <Route path="matcha-lite" element={<MatchaLiteAdmin />} />
+        <Route path="matcha-lite" element={<SignupLinks />} />
         <Route path="products" element={<Products />} />
         <Route path="pricing" element={<Pricing />} />
         <Route path="compliance-mgmt" element={<ComplianceManagement />} />
@@ -101,6 +106,7 @@ export default function AdminRoutes() {
         <Route path="landing-media" element={<LandingMediaAdmin />} />
         <Route path="blogs" element={<Blogs />} />
         <Route path="blogs/composer" element={<Blogs />} />
+      </Route>
       </Route>
       </Routes>
     </RequireRole>

@@ -72,8 +72,10 @@ client/src/
 │   │                        handbook-pilot, ir, labor, legal-defense, limit-adequacy,
 │   │                        property, risk, risk-assessment, settings, training.
 │   │                        routes/AppRoutes.tsx is the ONLY importer of this tree.
-│   └── admin/               still flat (76 files) — deferred on purpose, not an
-│                            oversight. Leave alone unless doing that pass deliberately.
+│   └── admin/               Domain folders: customers/ (accounts, company-detail,
+│                            workspaces, fractional-hr), catalog/, sales/ (incl.
+│                            gap-analysis), compliance/ (library, studio), marketing/
+│                            (blogs, newsletter), monitoring/, platform/, updates/.
 ├── types/                  Shared TS types (camelCase filenames)
 ├── utils/                  Pure utilities: tier.ts, theme, dateFormat, staleChunk, usageTracker,
 │   │                        pcmToWav
@@ -87,12 +89,12 @@ client/src/
   `api/client`, and the shell-infra utils (`theme`, `staleChunk`, `usageTracker`,
   `api/errorReporter`). Cappe deliberately does NOT use these — it has its own parallel stack.
 - **Matcha must not reach into `cappe/`** except the two composition seams: `App.tsx` (host
-  dispatch via `cappe/host`) and `pages/admin/Cappe.tsx` (matcha's internal admin console *for*
+  dispatch via `cappe/host`) and `pages/admin/customers/workspaces/Cappe.tsx` (matcha's internal admin console *for*
   Cappe). Nothing else.
 - **Matcha ↔ work** crossings are limited to this documented set (like the backend's
   `tellus/geo.py` exception — don't add more without a note here):
   - `routes/AppRoutes.tsx` mounts `work/pages/Inbox` at `/app/inbox` (matcha surfaces the work inbox)
-  - `pages/admin/newsletter/ComposeTab.tsx` → `work/components/panels/SectionEditor`
+  - `pages/admin/marketing/newsletter/ComposeTab.tsx` → `work/components/panels/SectionEditor`
   - `pages/shared/CandidateInterview.tsx` → `work/hooks/useVoiceSession`
   - `components/sidebars/SidebarShell.tsx` → `work/api/channelSocket` (disconnect-on-logout)
   - `components/sidebars/SidebarShell.tsx` → `ops/hooks/useOpsNav` → `work/api/channels` (the rail's
@@ -119,6 +121,43 @@ client/src/
 - **New page** goes in `pages/app/<domain>/` and is registered in `routes/AppRoutes.tsx`.
 
 ## Conventions
+
+### Admin pages
+
+`routes/AdminRoutes.tsx` mounts `layouts/AdminLayout.tsx` inside the authenticated
+app shell. Settings is the design reference: one centered `max-w-6xl` canvas,
+small section headings, zinc cards and fields, restrained emerald selection,
+and normal page scrolling. Pages do not add their own outer width/padding or
+fixed-height console frame.
+
+- `components/admin/adminNavigation.ts` defines seven sidebar categories and
+  all thirty tool destinations. Six categories open directories at
+  `/admin/areas/:category`; Updates opens its own page directly. Every tool has
+  a named directory card and its own page, heading, and existing URL. Do not
+  hide tools inside shared workspace tabs.
+- `AdminLayout` supplies the centered canvas and category/tool breadcrumbs.
+  Each routed tool owns its page heading. Sidebar category links always open
+  their directory, including when one of that category's tools is active.
+  Tool pages also have an explicit sticky "Back to [category]" link.
+- Use `AdminList` for compact account tables and headings, `AdminMetricRow`
+  for inline totals, `AdminActionMenu` for secondary row actions, and
+  `useAdminPagination` + `AdminPagination` to bound rendered lists to 25/50/100
+  rows after filtering and sorting. These paginate the existing loaded data;
+  they do not change backend list endpoints or authorization.
+- Use `AdminUI` for fields, native selects, textareas, buttons, cards, section
+  headings, metrics, filter bars, and tables. These forward native props and
+  keep validation, labels, events, refs, and table spans intact. Keep layout and
+  meaningful status colors at call sites; shared components own chrome.
+- Use `AdminTabs` for local views within an individual tool.
+  Do not add another pill/tab style. `AdminWorkspace` composes ordinary sections
+  or list/detail columns on the same open canvas.
+- The browser/server error tools share `ErrorConsole`; their containers retain
+  separate API contracts, filters, copy payloads, and resolution actions.
+- Pricing is in Products & sales → Pricing, including Compliance, add-ons, Tell-Us,
+  and Espresso. Signup Links keeps comped/bespoke invitations.
+- Page implementation lives in the domain folders listed above; cross-cutting
+  display components stay in `components/admin`. The HTTP/auth helper, backend
+  permissions, and API payloads stay unchanged by presentation refactors.
 
 **Auth + identity**:
 - `useMe()` is the source of truth. Exposes `user`, `hasRole(role)`, `hasFeature(flag)`, `companyFeatures`. Never read token storage directly in components — go through this hook.

@@ -1,11 +1,17 @@
+import type { FederalSourcePreview } from '../../../types/adminJurisdiction'
+import { AdminButton } from '../AdminUI'
 import { getCategoryLabel } from './helpers'
 
-type FedPreview = { results: any[]; by_category: Record<string, any[]>; total: number }
+function previewField(item: unknown, key: string): string | undefined {
+  if (item === null || typeof item !== 'object') return undefined
+  const value: unknown = Reflect.get(item, key)
+  return typeof value === 'string' ? value : undefined
+}
 
 type Props = {
-  fedPreview: FedPreview
+  fedPreview: FederalSourcePreview
   fedApplying: boolean
-  setFedPreview: (v: FedPreview | null) => void
+  setFedPreview: (v: FederalSourcePreview | null) => void
   applyFedSources: () => void
 }
 
@@ -17,14 +23,14 @@ export default function FederalSourcesPreview({ fedPreview, fedApplying, setFedP
           {fedPreview.total} results from government APIs · {Object.keys(fedPreview.by_category).length} categories
         </p>
         <div className="flex gap-1.5">
-          <button onClick={() => setFedPreview(null)}
-            className="px-2 py-1 text-[11px] text-zinc-400 border border-zinc-700 rounded hover:bg-zinc-800 transition-colors">
+          <AdminButton onClick={() => setFedPreview(null)}
+           variant="secondary">
             Dismiss
-          </button>
-          <button onClick={applyFedSources} disabled={fedApplying}
-            className="px-2 py-1 text-[11px] font-medium text-amber-400 border border-amber-500/40 rounded hover:bg-amber-500/10 disabled:opacity-30 transition-colors">
+          </AdminButton>
+          <AdminButton onClick={applyFedSources} disabled={fedApplying}
+            className="text-amber-400 disabled:opacity-30" variant="ghost">
             {fedApplying ? 'Applying...' : `Apply ${fedPreview.total}`}
-          </button>
+          </AdminButton>
         </div>
       </div>
       <div className="max-h-64 overflow-y-auto space-y-2">
@@ -33,20 +39,20 @@ export default function FederalSourcesPreview({ fedPreview, fedApplying, setFedP
             <p className="text-[10px] font-medium text-zinc-300 uppercase tracking-wider mb-0.5">
               {getCategoryLabel(cat)} <span className="text-zinc-600">({items.length})</span>
             </p>
-            {items.map((item: any, i: number) => (
+            {items.map((item, i) => (
               <div key={i} className="ml-2 mb-1">
                 <p className="text-[11px] text-zinc-300 leading-4">
-                  {item.title}
-                  {item.source_url && (
-                    <a href={item.source_url} target="_blank" rel="noreferrer"
+                  {previewField(item, 'title')}
+                  {previewField(item, 'source_url') && (
+                    <a href={previewField(item, 'source_url')} target="_blank" rel="noreferrer"
                       className="ml-1 text-amber-500/60 hover:text-amber-400 text-[10px]">↗</a>
                   )}
                 </p>
-                {item.description && (
-                  <p className="text-[10px] text-zinc-600 leading-3.5 mt-0.5">{item.description}</p>
+                {previewField(item, 'description') && (
+                  <p className="text-[10px] text-zinc-600 leading-3.5 mt-0.5">{previewField(item, 'description')}</p>
                 )}
                 <p className="text-[10px] text-zinc-600">
-                  {item.source_name}{item.effective_date ? ` · ${item.effective_date}` : ''}
+                  {previewField(item, 'source_name')}{previewField(item, 'effective_date') ? ` · ${previewField(item, 'effective_date')}` : ''}
                 </p>
               </div>
             ))}

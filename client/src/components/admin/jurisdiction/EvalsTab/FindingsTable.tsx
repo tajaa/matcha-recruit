@@ -1,6 +1,7 @@
+import { AdminButton as Button, AdminSelect, AdminTable } from '../../AdminUI'
 import { useState } from 'react'
 import { api } from '../../../../api/client'
-import { Button } from '../../../ui'
+
 import { SUITES } from './constants'
 import { severityBadge } from './helpers'
 import type { RunDetail } from './types'
@@ -32,72 +33,68 @@ export function FindingsTable({ detail, onResolved }: { detail: RunDetail; onRes
       </div>
 
       <div className="flex gap-2">
-        <select
+        <AdminSelect
           value={severity}
           onChange={(e) => setSeverity(e.target.value)}
-          className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-200"
         >
           <option value="">All severities</option>
           <option value="critical">Critical</option>
           <option value="warn">Warn</option>
           <option value="info">Info</option>
-        </select>
-        <select
+        </AdminSelect>
+        <AdminSelect
           value={suite}
           onChange={(e) => setSuite(e.target.value)}
-          className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-200"
         >
           <option value="">All suites</option>
           {SUITES.map((s) => (
             <option key={s} value={s}>{s}</option>
           ))}
-        </select>
+        </AdminSelect>
         <span className="text-xs text-zinc-500 self-center">
           showing {rows.length} of {detail.total}
         </span>
       </div>
 
-      <div className="border border-zinc-800 rounded-lg overflow-hidden">
-        <table className="w-full text-xs">
-          <thead className="bg-zinc-900/50">
-            <tr>
-              {['Severity', 'Type', 'Jurisdiction', 'Key', 'Detail', ''].map((h) => (
-                <th key={h} className="text-left px-3 py-2 text-[10px] uppercase tracking-wider text-zinc-500">
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((f) => (
-              <tr key={f.id} className="border-t border-zinc-900">
-                <td className="px-3 py-2">{severityBadge(f.severity)}</td>
-                <td className="px-3 py-2 text-zinc-300 whitespace-nowrap">{f.finding_type}</td>
-                <td className="px-3 py-2 text-zinc-400 whitespace-nowrap">{f.jurisdiction_label || '—'}</td>
-                <td className="px-3 py-2 text-zinc-400 font-mono">{f.requirement_key || '—'}</td>
-                <td className="px-3 py-2 text-zinc-500 max-w-md truncate">
-                  {f.observed ? JSON.stringify(f.observed) : '—'}
-                </td>
-                <td className="px-3 py-2 whitespace-nowrap">
-                  {f.status === 'open' ? (
-                    <div className="flex gap-1">
-                      <Button variant="ghost" size="sm" onClick={() => resolve(f.id, 'confirmed')}>Confirm</Button>
-                      <Button variant="ghost" size="sm" onClick={() => resolve(f.id, 'dismissed')}>Dismiss</Button>
-                    </div>
-                  ) : (
-                    <span className="text-zinc-600">{f.status}</span>
-                  )}
-                </td>
-              </tr>
+      <AdminTable>
+        <thead >
+          <tr>
+            {['Severity', 'Type', 'Jurisdiction', 'Key', 'Detail', ''].map((h) => (
+              <th key={h} className="text-left text-zinc-500">
+                {h}
+              </th>
             ))}
-            {!rows.length && (
-              <tr>
-                <td colSpan={6} className="px-3 py-6 text-center text-zinc-600">No findings match.</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((f) => (
+            <tr key={f.id} className="border-t border-zinc-900">
+              <td >{severityBadge(f.severity)}</td>
+              <td className="text-zinc-300 whitespace-nowrap">{f.finding_type}</td>
+              <td className="text-zinc-400 whitespace-nowrap">{f.jurisdiction_label || '—'}</td>
+              <td className="text-zinc-400 font-mono">{f.requirement_key || '—'}</td>
+              <td className="text-zinc-500 max-w-md truncate">
+                {f.observed ? JSON.stringify(f.observed) : '—'}
+              </td>
+              <td className="whitespace-nowrap">
+                {f.status === 'open' ? (
+                  <div className="flex gap-1">
+                    <Button variant="ghost" size="sm" onClick={() => resolve(f.id, 'confirmed')}>Confirm</Button>
+                    <Button variant="ghost" size="sm" onClick={() => resolve(f.id, 'dismissed')}>Dismiss</Button>
+                  </div>
+                ) : (
+                  <span className="text-zinc-600">{f.status}</span>
+                )}
+              </td>
+            </tr>
+          ))}
+          {!rows.length && (
+            <tr>
+              <td colSpan={6} className="text-center text-zinc-600">No findings match.</td>
+            </tr>
+          )}
+        </tbody>
+      </AdminTable>
     </div>
   )
 }

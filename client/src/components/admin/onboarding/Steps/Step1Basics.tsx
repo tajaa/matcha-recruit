@@ -1,3 +1,4 @@
+import { AdminSection, AdminInput, AdminSelect, AdminTextarea } from '../../AdminUI'
 import { useEffect, useMemo, useState } from 'react'
 
 import {
@@ -54,67 +55,63 @@ export function Step1Basics({ session, onUpdated, onNext }: StepProps) {
   }
 
   return (
-    <div className="max-w-2xl">
-      <h2 className="text-base font-medium text-zinc-100 mb-1">Business basics</h2>
-      <p className="text-sm text-zinc-400 mb-6">
-        Name, industry, sub-specialty, and the owner email we'll invite at the end.
-      </p>
+    <AdminSection title={<>Business basics</>} description={<>Name, industry, sub-specialty, and the owner email we'll invite at the end.</>}>
       <ErrorBox message={error} />
 
       <div className="grid grid-cols-2 gap-4">
         <div className="col-span-2">
           <FieldLabel>Business name</FieldLabel>
-          <input
+          <AdminInput
             value={businessName}
             onChange={(e) => setBusinessName(e.target.value)}
             placeholder="Acme Diner"
-            className="w-full rounded-md bg-vsc-bg border border-vsc-border px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500"
+            className="bg-vsc-bg border-vsc-border"
           />
         </div>
         <div>
           <FieldLabel>Industry</FieldLabel>
-          <select
+          <AdminSelect
             value={industry}
             onChange={(e) => { setIndustry(e.target.value); setSpecialty('') }}
-            className="w-full rounded-md bg-vsc-bg border border-vsc-border px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500"
+            className="w-full bg-vsc-bg border-vsc-border"
           >
             <option value="">— pick —</option>
             {industryOptions.map((i) => (
               <option key={i} value={i}>{i}</option>
             ))}
-          </select>
+          </AdminSelect>
         </div>
         <div>
           <FieldLabel>Specialty</FieldLabel>
-          <select
+          <AdminSelect
             value={specialty}
             onChange={(e) => setSpecialty(e.target.value)}
             disabled={specialtyOptions.length === 0}
-            className="w-full rounded-md bg-vsc-bg border border-vsc-border px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500 disabled:opacity-50"
+            className="w-full bg-vsc-bg border-vsc-border disabled:opacity-50"
           >
             <option value="">{specialtyOptions.length ? '— optional —' : '— none —'}</option>
             {specialtyOptions.map((s) => (
               <option key={s} value={s}>{s}</option>
             ))}
-          </select>
+          </AdminSelect>
         </div>
         <div>
           <FieldLabel>Owner email</FieldLabel>
-          <input
+          <AdminInput
             type="email"
             value={ownerEmail}
             onChange={(e) => setOwnerEmail(e.target.value)}
             placeholder="owner@example.com"
-            className="w-full rounded-md bg-vsc-bg border border-vsc-border px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500"
+            className="bg-vsc-bg border-vsc-border"
           />
         </div>
         <div>
           <FieldLabel>Owner name</FieldLabel>
-          <input
+          <AdminInput
             value={ownerName}
             onChange={(e) => setOwnerName(e.target.value)}
             placeholder="Jane Owner"
-            className="w-full rounded-md bg-vsc-bg border border-vsc-border px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500"
+            className="bg-vsc-bg border-vsc-border"
           />
         </div>
         <div className="col-span-2">
@@ -124,7 +121,7 @@ export function Step1Basics({ session, onUpdated, onNext }: StepProps) {
               · the AI uses this to find non-obvious requirements
             </span>
           </FieldLabel>
-          <textarea
+          <AdminTextarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             rows={5}
@@ -139,7 +136,7 @@ export function Step1Basics({ session, onUpdated, onNext }: StepProps) {
               'midnight; outdoor patio with heaters". The more detail, the ' +
               'better the AI can surface compliance the HR admin might miss.'
             }
-            className="w-full rounded-md bg-vsc-bg border border-vsc-border px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500 resize-y"
+            className="bg-vsc-bg border-vsc-border resize-y"
           />
           <div className="text-[11px] text-zinc-500 mt-1">
             {description.length} / 2000
@@ -152,6 +149,6 @@ export function Step1Basics({ session, onUpdated, onNext }: StepProps) {
           Save + Continue
         </PrimaryButton>
       </div>
-    </div>
+    </AdminSection>
   )
 }

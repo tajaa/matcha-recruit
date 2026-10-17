@@ -1,8 +1,9 @@
+/* eslint-disable react-hooks/set-state-in-effect -- Effects intentionally synchronize this tool with loaded data, URL selections, and preview inputs. */
+import { AdminButton as Button, AdminSelect, AdminButton, AdminTable } from '../AdminUI'
 import { useState, useEffect, useMemo } from 'react'
 import { fetchQualityAudit } from '../../../api/compliance'
 import type { QualityRequirement, QualityAuditResponse } from '../../../api/compliance'
 import { CATEGORY_SHORT_LABELS } from '../../../generated/complianceCategories'
-import { Button } from '../../ui'
 
 interface RequirementAuditTableProps {
   onEditRequirement?: (requirementId: string) => void
@@ -194,43 +195,39 @@ export default function RequirementAuditTable({ onEditRequirement }: Requirement
 
       {/* Filter bar */}
       <div className="flex flex-wrap items-center gap-2">
-        <select
+        <AdminSelect
           value={filterState}
           onChange={(e) => { setFilterState(e.target.value); setPage(0) }}
-          className="bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-300 text-xs px-2.5 py-1.5"
         >
           <option value="">All States</option>
           {allStates.map((s) => <option key={s} value={s}>{s}</option>)}
-        </select>
-        <select
+        </AdminSelect>
+        <AdminSelect
           value={filterCategory}
           onChange={(e) => { setFilterCategory(e.target.value); setPage(0) }}
-          className="bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-300 text-xs px-2.5 py-1.5"
         >
           <option value="">All Categories</option>
           {allCategories.map((c) => (
             <option key={c} value={c}>{CATEGORY_SHORT_LABELS[c] ?? c}</option>
           ))}
-        </select>
-        <select
+        </AdminSelect>
+        <AdminSelect
           value={filterSource}
           onChange={(e) => { setFilterSource(e.target.value as SourceFilter); setPage(0) }}
-          className="bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-300 text-xs px-2.5 py-1.5"
         >
           {(['All', 'API', 'Gemini', 'Skill', 'Manual', 'Unknown'] as SourceFilter[]).map((s) => (
             <option key={s} value={s}>{s}</option>
           ))}
-        </select>
-        <select
+        </AdminSelect>
+        <AdminSelect
           value={filterCitation}
           onChange={(e) => { setFilterCitation(e.target.value as 'All' | 'Verified' | 'Unverified'); setPage(0) }}
-          className="bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-300 text-xs px-2.5 py-1.5"
           title="Registry-verified statute citation"
         >
           <option value="All">All citations</option>
           <option value="Verified">Verified cite</option>
           <option value="Unverified">Unverified cite</option>
-        </select>
+        </AdminSelect>
         <button
           type="button"
           onClick={() => { setStaleOnly(!staleOnly); setPage(0) }}
@@ -254,49 +251,49 @@ export default function RequirementAuditTable({ onEditRequirement }: Requirement
         ) : (
           <>
             <div className="max-h-[55vh] overflow-y-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-zinc-900/50 text-zinc-400 sticky top-0">
+              <AdminTable>
+                <thead className="sticky top-0">
                   <tr>
-                    <th className="text-left py-2 px-3 font-medium text-[10px] uppercase tracking-wide whitespace-nowrap">Jurisdiction</th>
-                    <th className="text-left py-2 px-3 font-medium text-[10px] uppercase tracking-wide">Category</th>
-                    <th className="text-left py-2 px-3 font-medium text-[10px] uppercase tracking-wide">Title</th>
+                    <th className="text-left whitespace-nowrap">Jurisdiction</th>
+                    <th className="text-left">Category</th>
+                    <th className="text-left">Title</th>
                     <th
-                      className="text-left py-2 px-3 font-medium text-[10px] uppercase tracking-wide cursor-pointer hover:text-zinc-200 select-none whitespace-nowrap"
+                      className="text-left cursor-pointer hover:text-zinc-200 select-none whitespace-nowrap"
                       onClick={() => toggleSort('completeness')}
                     >
                       Complete{sortIcon('completeness')}
                     </th>
                     <th
-                      className="text-left py-2 px-3 font-medium text-[10px] uppercase tracking-wide cursor-pointer hover:text-zinc-200 select-none"
+                      className="text-left cursor-pointer hover:text-zinc-200 select-none"
                       onClick={() => toggleSort('tier')}
                     >
                       Tier{sortIcon('tier')}
                     </th>
-                    <th className="text-left py-2 px-3 font-medium text-[10px] uppercase tracking-wide">Source</th>
+                    <th className="text-left">Source</th>
                     <th
-                      className="text-left py-2 px-3 font-medium text-[10px] uppercase tracking-wide cursor-pointer hover:text-zinc-200 select-none"
+                      className="text-left cursor-pointer hover:text-zinc-200 select-none"
                       onClick={() => toggleSort('staleness')}
                     >
                       Stale{sortIcon('staleness')}
                     </th>
-                    <th className="text-left py-2 px-3 font-medium text-[10px] uppercase tracking-wide">Flags</th>
-                    <th className="py-2 px-3 w-14" />
+                    <th className="text-left">Flags</th>
+                    <th className="w-14" />
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-zinc-800">
+                <tbody >
                   {paged.map((req) => (
                     <tr key={req.id} className="hover:bg-zinc-800/30">
-                      <td className="py-1.5 px-3 whitespace-nowrap">
+                      <td className="whitespace-nowrap">
                         <span className="font-mono font-bold text-zinc-200 text-[11px]">{req.state}</span>
                         {req.city && <span className="text-zinc-500 text-[11px] ml-1">{req.city}</span>}
                       </td>
-                      <td className="py-1.5 px-3 text-zinc-400 text-[11px] whitespace-nowrap">
+                      <td className="text-zinc-400 whitespace-nowrap">
                         {CATEGORY_SHORT_LABELS[req.category] ?? req.category}
                       </td>
-                      <td className="py-1.5 px-3 text-zinc-300 text-[11px] max-w-[180px]" title={req.title ?? undefined}>
+                      <td className="text-zinc-300 max-w-[180px]" title={req.title ?? undefined}>
                         {(req.title?.length ?? 0) > 40 ? req.title!.slice(0, 40) + '…' : req.title}
                       </td>
-                      <td className="py-1.5 px-3">
+                      <td >
                         <div className="flex items-center gap-1.5">
                           <div className="w-12 h-1.5 rounded-full bg-zinc-800 overflow-hidden">
                             <div
@@ -310,23 +307,23 @@ export default function RequirementAuditTable({ onEditRequirement }: Requirement
                           <span className="text-[10px] font-mono text-zinc-500">{Math.round(req.completeness_score)}%</span>
                         </div>
                       </td>
-                      <td className="py-1.5 px-3">{tierBadge(req.source_tier ?? '')}</td>
-                      <td className="py-1.5 px-3">{provenanceBadge(req.research_source ?? '')}</td>
-                      <td className="py-1.5 px-3">{stalenessCell(req.staleness_days)}</td>
-                      <td className="py-1.5 px-3">{qualityFlags(req)}</td>
-                      <td className="py-1.5 px-3">
-                        <button
+                      <td >{tierBadge(req.source_tier ?? '')}</td>
+                      <td >{provenanceBadge(req.research_source ?? '')}</td>
+                      <td >{stalenessCell(req.staleness_days)}</td>
+                      <td >{qualityFlags(req)}</td>
+                      <td >
+                        <AdminButton
                           type="button"
                           onClick={() => onEditRequirement?.(req.id)}
-                          className="text-[10px] text-zinc-600 hover:text-zinc-300 transition-colors px-1.5 py-0.5 rounded hover:bg-zinc-800"
+                         variant="secondary"
                         >
                           Edit
-                        </button>
+                        </AdminButton>
                       </td>
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </AdminTable>
             </div>
             {totalPages > 1 && (
               <div className="flex items-center justify-between px-3 py-2 border-t border-zinc-800/60">

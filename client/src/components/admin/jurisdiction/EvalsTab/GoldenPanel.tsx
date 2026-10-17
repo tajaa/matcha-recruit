@@ -1,3 +1,4 @@
+import { AdminTable } from '../../AdminUI'
 import { useEffect, useState } from 'react'
 import { api } from '../../../../api/client'
 import type { GoldenResponse } from './types'
@@ -33,38 +34,36 @@ export function GoldenPanel() {
           primary source by a human. Verify them before trusting the accuracy subscore.
         </p>
       )}
-      <div className="border border-zinc-800 rounded-lg overflow-hidden">
-        <table className="w-full text-xs">
-          <thead className="bg-zinc-900/50">
-            <tr>
-              {['State', 'Jurisdiction', 'Key', 'Comparator', 'Window', 'Source', 'Verified'].map((h) => (
-                <th key={h} className="text-left px-3 py-2 text-[10px] uppercase tracking-wider text-zinc-500">
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {data.facts.map((f) => (
-              <tr key={`${f.jurisdiction}-${f.requirement_key}-${f.effective_from}`} className="border-t border-zinc-900">
-                <td className={`px-3 py-2 font-medium ${stateCls[f.state]}`}>{f.state}</td>
-                <td className="px-3 py-2 text-zinc-400">{f.jurisdiction}</td>
-                <td className="px-3 py-2 text-zinc-300 font-mono">{f.requirement_key}</td>
-                <td className="px-3 py-2 text-zinc-500">{f.comparator}</td>
-                <td className="px-3 py-2 text-zinc-500">
-                  {f.effective_from} → {f.effective_to || '∞'}
-                </td>
-                <td className="px-3 py-2">
-                  <a href={f.authority_url} target="_blank" rel="noreferrer" className="text-blue-400 hover:underline">
-                    source
-                  </a>
-                </td>
-                <td className="px-3 py-2 text-zinc-500">{f.verified_by || <span className="text-amber-400">—</span>}</td>
-              </tr>
+      <AdminTable>
+        <thead >
+          <tr>
+            {['State', 'Jurisdiction', 'Key', 'Comparator', 'Window', 'Source', 'Verified'].map((h) => (
+              <th key={h} className="text-left text-zinc-500">
+                {h}
+              </th>
             ))}
-          </tbody>
-        </table>
-      </div>
+          </tr>
+        </thead>
+        <tbody>
+          {data.facts.map((f) => (
+            <tr key={`${f.jurisdiction}-${f.requirement_key}-${f.effective_from}`} className="border-t border-zinc-900">
+              <td className={`${stateCls[f.state]}`}>{f.state}</td>
+              <td className="text-zinc-400">{f.jurisdiction}</td>
+              <td className="text-zinc-300 font-mono">{f.requirement_key}</td>
+              <td className="text-zinc-500">{f.comparator}</td>
+              <td className="text-zinc-500">
+                {f.effective_from} → {f.effective_to || '∞'}
+              </td>
+              <td >
+                <a href={f.authority_url} target="_blank" rel="noreferrer" className="text-blue-400 hover:underline">
+                  source
+                </a>
+              </td>
+              <td className="text-zinc-500">{f.verified_by || <span className="text-amber-400">—</span>}</td>
+            </tr>
+          ))}
+        </tbody>
+      </AdminTable>
     </div>
   )
 }

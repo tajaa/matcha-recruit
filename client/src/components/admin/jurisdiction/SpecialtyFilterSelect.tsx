@@ -1,3 +1,4 @@
+import { AdminSelect } from '../AdminUI'
 import {
   CATEGORY_SHORT_LABELS,
   CATEGORY_GROUPS,
@@ -20,10 +21,10 @@ const OPTGROUP_CONFIGS: { label: string; group: string }[] = [
 
 export default function SpecialtyFilterSelect({ value, onChange, className }: Props) {
   return (
-    <select
+    <AdminSelect
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      className={className ?? 'bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-300 text-xs px-2.5 py-1.5 focus:border-zinc-500'}
+      className={className ?? ''}
     >
       <option value="all">All Specialties</option>
       <option value="general">General Labor</option>
@@ -41,6 +42,6 @@ export default function SpecialtyFilterSelect({ value, onChange, className }: Pr
             ))}
         </optgroup>
       ))}
-    </select>
+    </AdminSelect>
   )
 }

@@ -1,6 +1,7 @@
+import { AdminButton as Button, AdminTable } from '../AdminUI'
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../../../api/client'
-import { Button } from '../../ui'
+
 import { BaselinePanel } from './EvalsTab/BaselinePanel'
 import { SUITES } from './EvalsTab/constants'
 import type { Suite } from './EvalsTab/constants'
@@ -111,51 +112,49 @@ export default function EvalsTab() {
 
       {view === 'runs' && (
         <div className="space-y-4">
-          <div className="border border-zinc-800 rounded-lg overflow-hidden">
-            <table className="w-full text-xs">
-              <thead className="bg-zinc-900/50">
-                <tr>
-                  {['Started', 'Suites', 'Status', 'Findings', ''].map((h) => (
-                    <th key={h} className="text-left px-3 py-2 text-[10px] uppercase tracking-wider text-zinc-500">
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {runs.map((r) => (
-                  <tr key={r.id} className="border-t border-zinc-900">
-                    <td className="px-3 py-2 text-zinc-400">{r.started_at?.slice(0, 16).replace('T', ' ')}</td>
-                    <td className="px-3 py-2 text-zinc-500">{r.suites.join(', ')}</td>
-                    <td className="px-3 py-2">
-                      <span
-                        className={
-                          r.status === 'completed'
-                            ? 'text-emerald-400'
-                            : r.status === 'failed'
-                              ? 'text-red-400'
-                              : 'text-amber-400'
-                        }
-                      >
-                        {r.status}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2 text-zinc-300">
-                      {(r.totals?.findings as number | undefined) ?? '—'}
-                    </td>
-                    <td className="px-3 py-2">
-                      <Button variant="ghost" size="sm" onClick={() => openRun(r.id)}>View</Button>
-                    </td>
-                  </tr>
+          <AdminTable>
+            <thead >
+              <tr>
+                {['Started', 'Suites', 'Status', 'Findings', ''].map((h) => (
+                  <th key={h} className="text-left text-zinc-500">
+                    {h}
+                  </th>
                 ))}
-                {!runs.length && (
-                  <tr>
-                    <td colSpan={5} className="px-3 py-6 text-center text-zinc-600">No runs yet.</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+              </tr>
+            </thead>
+            <tbody>
+              {runs.map((r) => (
+                <tr key={r.id} className="border-t border-zinc-900">
+                  <td className="text-zinc-400">{r.started_at?.slice(0, 16).replace('T', ' ')}</td>
+                  <td className="text-zinc-500">{r.suites.join(', ')}</td>
+                  <td >
+                    <span
+                      className={
+                        r.status === 'completed'
+                          ? 'text-emerald-400'
+                          : r.status === 'failed'
+                            ? 'text-red-400'
+                            : 'text-amber-400'
+                      }
+                    >
+                      {r.status}
+                    </span>
+                  </td>
+                  <td className="text-zinc-300">
+                    {(r.totals?.findings as number | undefined) ?? '—'}
+                  </td>
+                  <td >
+                    <Button variant="ghost" size="sm" onClick={() => openRun(r.id)}>View</Button>
+                  </td>
+                </tr>
+              ))}
+              {!runs.length && (
+                <tr>
+                  <td colSpan={5} className="text-center text-zinc-600">No runs yet.</td>
+                </tr>
+              )}
+            </tbody>
+          </AdminTable>
 
           {selectedRun && (
             <FindingsTable detail={selectedRun} onResolved={() => openRun(selectedRun.run.id)} />

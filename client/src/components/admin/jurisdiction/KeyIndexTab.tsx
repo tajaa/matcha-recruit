@@ -1,3 +1,4 @@
+import { AdminInput, AdminSelect, AdminTable } from '../AdminUI'
 import { useState, useMemo } from 'react'
 import { useAsync } from '../../../hooks/useAsync'
 import { Link } from 'react-router-dom'
@@ -26,22 +27,22 @@ function KeyRow({ k, expanded, onToggle }: { k: RegulationKeyCoverage; expanded:
         className={`border-b border-zinc-800/50 cursor-pointer hover:bg-zinc-800/30 ${isMissing ? 'text-red-400' : ''}`}
         onClick={onToggle}
       >
-        <td className="px-3 py-2 font-mono text-xs">
+        <td className="font-mono">
           <Link to={`/admin/jurisdiction-data/policy/${k.id}`} className="hover:text-emerald-400" onClick={e => e.stopPropagation()}>{k.key}</Link>
         </td>
-        <td className="px-3 py-2 text-sm">
+        <td >
           <Link to={`/admin/jurisdiction-data/policy/${k.id}`} className="hover:text-emerald-400" onClick={e => e.stopPropagation()}>{k.name}</Link>
         </td>
-        <td className="px-3 py-2 text-xs text-zinc-400">{k.enforcing_agency || '—'}</td>
-        <td className="px-3 py-2 text-xs text-center">{k.base_weight > 1 ? <span className="text-purple-300">{k.base_weight}x</span> : '1x'}</td>
-        <td className="px-3 py-2 text-xs text-zinc-500">{k.key_group || '—'}</td>
-        <td className="px-3 py-2 text-xs text-center font-mono">{k.jurisdiction_count}</td>
-        <td className="px-3 py-2 text-xs">{stalenessLabel(k.staleness_level)}</td>
-        <td className="px-3 py-2 text-xs text-zinc-500 font-mono">{k.newest_value || '—'}</td>
+        <td className="text-zinc-400">{k.enforcing_agency || '—'}</td>
+        <td className="text-center">{k.base_weight > 1 ? <span className="text-purple-300">{k.base_weight}x</span> : '1x'}</td>
+        <td className="text-zinc-500">{k.key_group || '—'}</td>
+        <td className="text-center font-mono">{k.jurisdiction_count}</td>
+        <td >{stalenessLabel(k.staleness_level)}</td>
+        <td className="text-zinc-500 font-mono">{k.newest_value || '—'}</td>
       </tr>
       {expanded && (
         <tr className="bg-zinc-800/20">
-          <td colSpan={8} className="px-6 py-3 text-xs text-zinc-400">
+          <td colSpan={8} className="text-zinc-400">
             <div className="flex gap-6">
               <div><strong>State variance:</strong> {k.state_variance}</div>
               <div><strong>Best tier:</strong> T{k.best_tier || 0}</div>
@@ -98,61 +99,59 @@ export default function KeyIndexTab() {
     <div className="space-y-4">
       {/* Filters */}
       <div className="flex items-center gap-3 flex-wrap">
-        <input
+        <AdminInput
           type="text"
           placeholder="Search keys, names, agencies..."
           value={search}
           onChange={e => setSearch(e.target.value)}
-          className="px-3 py-1.5 text-sm bg-zinc-800 border border-zinc-700 rounded w-72"
+          className="w-72"
         />
-        <select value={groupFilter} onChange={e => setGroupFilter(e.target.value as GroupFilter)} className="px-2 py-1.5 text-sm bg-zinc-800 border border-zinc-700 rounded">
+        <AdminSelect value={groupFilter} onChange={e => setGroupFilter(e.target.value as GroupFilter)} >
           <option value="all">All Groups</option>
           <option value="labor">Labor</option>
           <option value="healthcare">Healthcare</option>
           <option value="oncology">Oncology</option>
           <option value="medical_compliance">Medical Compliance</option>
           <option value="supplementary">Supplementary</option>
-        </select>
-        <select value={stalenessFilter} onChange={e => setStalenessFilter(e.target.value as StalenessFilter)} className="px-2 py-1.5 text-sm bg-zinc-800 border border-zinc-700 rounded">
+        </AdminSelect>
+        <AdminSelect value={stalenessFilter} onChange={e => setStalenessFilter(e.target.value as StalenessFilter)} >
           <option value="all">All Staleness</option>
           <option value="fresh">Fresh</option>
           <option value="warning">Stale (Warning)</option>
           <option value="critical">Critical</option>
           <option value="expired">Expired</option>
           <option value="no_data">No Data</option>
-        </select>
+        </AdminSelect>
         <span className="text-xs text-zinc-500 ml-auto">{totalKeys} keys shown</span>
       </div>
 
       {/* Table */}
-      <div className="border border-zinc-700/50 rounded-lg overflow-hidden">
-        <table className="w-full text-left">
-          <thead className="bg-zinc-800/80 text-xs text-zinc-400 uppercase">
-            <tr>
-              <th className="px-3 py-2 w-48">Key</th>
-              <th className="px-3 py-2">Name</th>
-              <th className="px-3 py-2 w-40">Agency</th>
-              <th className="px-3 py-2 w-16 text-center">Wt</th>
-              <th className="px-3 py-2 w-32">Group</th>
-              <th className="px-3 py-2 w-20 text-center">Jur.</th>
-              <th className="px-3 py-2 w-20">Stale</th>
-              <th className="px-3 py-2 w-28">Value</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map(cat => (
-              <CategorySection
-                key={cat.category}
-                cat={cat}
-                collapsed={collapsedCats.has(cat.category)}
-                onToggle={() => toggleCat(cat.category)}
-                expandedKey={expandedKey}
-                onKeyToggle={k => setExpandedKey(expandedKey === k ? null : k)}
-              />
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <AdminTable>
+        <thead >
+          <tr>
+            <th className="w-48">Key</th>
+            <th >Name</th>
+            <th className="w-40">Agency</th>
+            <th className="w-16 text-center">Wt</th>
+            <th className="w-32">Group</th>
+            <th className="w-20 text-center">Jur.</th>
+            <th className="w-20">Stale</th>
+            <th className="w-28">Value</th>
+          </tr>
+        </thead>
+        <tbody>
+          {filtered.map(cat => (
+            <CategorySection
+              key={cat.category}
+              cat={cat}
+              collapsed={collapsedCats.has(cat.category)}
+              onToggle={() => toggleCat(cat.category)}
+              expandedKey={expandedKey}
+              onKeyToggle={k => setExpandedKey(expandedKey === k ? null : k)}
+            />
+          ))}
+        </tbody>
+      </AdminTable>
     </div>
   )
 }
@@ -174,7 +173,7 @@ function CategorySection({
         className="bg-zinc-800/40 cursor-pointer hover:bg-zinc-800/60 border-b border-zinc-700/30"
         onClick={onToggle}
       >
-        <td colSpan={8} className="px-3 py-2">
+        <td colSpan={8} >
           <div className="flex items-center gap-3 text-sm">
             <span className="text-zinc-500">{collapsed ? '▸' : '▾'}</span>
             <Link to={`/admin/jurisdiction-data/category/${cat.category}`} className="font-medium text-zinc-200 hover:text-emerald-400" onClick={e => e.stopPropagation()}>{label}</Link>

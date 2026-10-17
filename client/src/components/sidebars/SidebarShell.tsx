@@ -15,6 +15,8 @@ export type NavIcon = ComponentType<{ className?: string; strokeWidth?: number }
 
 export type NavItem = {
   to: string
+  /** Select this row for these additional paths while keeping its destination. */
+  activePaths?: readonly string[]
   icon: NavIcon
   label: string
   badge?: number
@@ -81,7 +83,7 @@ function findActiveTo(pathname: string, items: NavItem[]): string | null {
   let best: string | null = null
   let bestLen = -1
   for (const item of items) {
-    const len = matchLength(pathname, item.to)
+    const len = Math.max(...[item.to, ...(item.activePaths ?? [])].map((path) => matchLength(pathname, path)))
     if (len > bestLen) {
       bestLen = len
       best = item.to
@@ -125,6 +127,7 @@ const ROW_PAD = (collapsed: boolean) => (collapsed ? 'justify-center pl-0 pr-2.5
 
 function NavItemLink({ item, activeTo, collapsed }: { item: NavItem; activeTo: string | null; collapsed: boolean }) {
   const isActive = item.to === activeTo
+  const ItemLink = item.activePaths ? Link : NavLink
 
   const seenRef = useRef(false)
   const onSeenRef = useRef(item.onSeen)
@@ -157,8 +160,9 @@ function NavItemLink({ item, activeTo, collapsed }: { item: NavItem; activeTo: s
   }
 
   return (
-    <NavLink
+    <ItemLink
       to={item.to}
+      aria-current={isActive ? 'page' : undefined}
       title={collapsed ? item.label : undefined}
       className={`text-[13px] ${ROW} ${ROW_PAD(collapsed)} ${
         isActive
@@ -189,7 +193,7 @@ function NavItemLink({ item, activeTo, collapsed }: { item: NavItem; activeTo: s
       {collapsed && !!item.badge && item.badge > 0 && (
         <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-emerald-400" />
       )}
-    </NavLink>
+    </ItemLink>
   )
 }
 

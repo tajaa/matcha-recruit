@@ -1,3 +1,4 @@
+import { AdminButton, AdminCard } from '../AdminUI'
 import { useCallback, useEffect, useState } from 'react'
 import { Loader2, ShieldCheck, EyeOff, AlertTriangle, Layers, Check, Search, RefreshCw, ExternalLink } from 'lucide-react'
 import { Link } from 'react-router-dom'
@@ -59,11 +60,11 @@ function ActionButton({ onClick, busy, icon: Icon, label, disabled }: {
   onClick: () => void; busy: boolean; icon: typeof Check; label: string; disabled?: boolean
 }) {
   return (
-    <button type="button" onClick={onClick} disabled={busy || disabled}
-      className="inline-flex shrink-0 items-center gap-1 rounded border border-white/[0.14] bg-white/[0.06] px-1.5 py-0.5 text-[10px] font-medium text-zinc-100 hover:bg-white/[0.12] disabled:opacity-40">
+    <AdminButton type="button" onClick={onClick} disabled={busy || disabled}
+      className="shrink-0 gap-1 disabled:opacity-40" variant="ghost">
       {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Icon className="h-3 w-3" />}
       {label}
-    </button>
+    </AdminButton>
   )
 }
 
@@ -71,13 +72,13 @@ function Tile({ icon: Icon, label, value, sub, tone }: {
   icon: typeof ShieldCheck; label: string; value: number; sub: string; tone: string
 }) {
   return (
-    <div className="rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2.5">
+    <AdminCard className="px-3 py-2.5">
       <div className={`flex items-center gap-1.5 text-[11px] ${tone}`}>
         <Icon className="h-3.5 w-3.5" /> {label}
       </div>
       <div className="mt-1 font-mono text-lg text-zinc-100">{value}</div>
       <div className="mt-0.5 text-[10px] leading-tight text-zinc-600">{sub}</div>
-    </div>
+    </AdminCard>
   )
 }
 
@@ -279,18 +280,18 @@ export default function StatutoryFitPanel({ companyId, onCodifyGated, refreshKey
           {fit.counts.gated > 0 && (
             <div className="absolute right-2 top-2 flex items-center gap-1.5">
               {fit.counts.codifiable_now > 0 && (
-                <button type="button" onClick={() => void reconcile()} disabled={busy === 'reconcile'}
+                <AdminButton type="button" onClick={() => void reconcile()} disabled={busy === 'reconcile'}
                         title="One reconcile binds these to statutes already confirmed in the registry — no typing"
-                        className="inline-flex items-center gap-0.5 rounded border border-cyan-800/50 bg-cyan-900/30 px-1.5 py-0.5 text-[10px] font-medium text-cyan-300 hover:bg-cyan-900/50 disabled:opacity-40">
+                        className="gap-0.5 text-cyan-300 disabled:opacity-40" variant="ghost">
                   Reconcile {fit.counts.codifiable_now}
-                </button>
+                </AdminButton>
               )}
               {onCodifyGated ? (
-                <button type="button" onClick={() => onCodifyGated(fit.gated)}
+                <AdminButton type="button" onClick={() => onCodifyGated(fit.gated)}
                         title="Walks the rows one at a time — you supply each statute citation"
-                        className="inline-flex items-center gap-0.5 rounded border border-amber-800/50 bg-amber-900/30 px-1.5 py-0.5 text-[10px] font-medium text-amber-300 hover:bg-amber-900/50">
+                        className="gap-0.5 text-amber-300" variant="ghost">
                   By hand
-                </button>
+                </AdminButton>
               ) : (
                 <Link to={`/admin/studio?view=pipeline&company=${companyId}`}
                       className="inline-flex items-center gap-0.5 text-[10px] text-amber-400 hover:text-amber-300">

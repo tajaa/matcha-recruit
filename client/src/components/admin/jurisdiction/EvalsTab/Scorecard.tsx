@@ -1,5 +1,6 @@
+import { AdminButton as Button, AdminTable } from '../../AdminUI'
 import { useMemo, useState } from 'react'
-import { Button } from '../../../ui'
+
 import { fmtScore, scoreCellBg, scoreColor, statusBadge } from './helpers'
 import type { ScorecardCell } from './types'
 
@@ -32,43 +33,41 @@ export function Scorecard({ cells }: { cells: ScorecardCell[] }) {
 
   return (
     <div className="space-y-3">
-      <div className="overflow-x-auto border border-zinc-800 rounded-lg">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-zinc-800">
-              <th className="text-left px-3 py-2 text-[10px] uppercase tracking-wider text-zinc-500 font-medium sticky left-0 bg-zinc-950">
-                Jurisdiction
+      <AdminTable>
+        <thead>
+          <tr className="border-b border-zinc-800">
+            <th className="text-left text-zinc-500 sticky left-0">
+              Jurisdiction
+            </th>
+            {industries.map((i) => (
+              <th key={i} className="text-zinc-500">
+                {i}
               </th>
-              {industries.map((i) => (
-                <th key={i} className="px-2 py-2 text-[10px] uppercase tracking-wider text-zinc-500 font-medium">
-                  {i}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {jurisdictions.map(([jid, label]) => (
-              <tr key={jid} className="border-b border-zinc-900">
-                <td className="px-3 py-1.5 text-zinc-300 whitespace-nowrap sticky left-0 bg-zinc-950">{label}</td>
-                {industries.map((ind) => {
-                  const cell = byKey.get(`${jid}|${ind}`)
-                  return (
-                    <td key={ind} className="px-1 py-1">
-                      <button
-                        onClick={() => cell && setSelected(cell)}
-                        disabled={!cell}
-                        className={`w-full rounded px-2 py-1 font-medium ${scoreCellBg(cell?.composite)} ${scoreColor(cell?.composite)} ${cell ? 'hover:ring-1 hover:ring-zinc-600' : 'cursor-default'}`}
-                      >
-                        {fmtScore(cell?.composite)}
-                      </button>
-                    </td>
-                  )
-                })}
-              </tr>
             ))}
-          </tbody>
-        </table>
-      </div>
+          </tr>
+        </thead>
+        <tbody>
+          {jurisdictions.map(([jid, label]) => (
+            <tr key={jid} className="border-b border-zinc-900">
+              <td className="text-zinc-300 whitespace-nowrap sticky left-0">{label}</td>
+              {industries.map((ind) => {
+                const cell = byKey.get(`${jid}|${ind}`)
+                return (
+                  <td key={ind} >
+                    <button
+                      onClick={() => cell && setSelected(cell)}
+                      disabled={!cell}
+                      className={`w-full rounded px-2 py-1 font-medium ${scoreCellBg(cell?.composite)} ${scoreColor(cell?.composite)} ${cell ? 'hover:ring-1 hover:ring-zinc-600' : 'cursor-default'}`}
+                    >
+                      {fmtScore(cell?.composite)}
+                    </button>
+                  </td>
+                )
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </AdminTable>
 
       {selected && (
         <div className="border border-zinc-700 rounded-lg p-4">

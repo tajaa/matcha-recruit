@@ -1,4 +1,4 @@
-import { Button, Input, Textarea } from '../../ui'
+import { AdminButton as Button, AdminInput as Input, AdminTextarea as Textarea } from '../AdminUI'
 import type { JurisdictionReq, RowContext } from './types'
 import { LEVEL_COLORS } from './constants'
 import { getCategoryLabel, reqAnchor } from './helpers'

@@ -1,7 +1,8 @@
+import { AdminButton as Button, AdminSelect, AdminInput, AdminCard } from '../../AdminUI'
 import { useState } from 'react'
 
 import { api } from '../../../../api/client'
-import { Button } from '../../../ui'
+
 import type { AuthorityItem, Vocabulary } from './types'
 
 /**
@@ -134,39 +135,39 @@ export function ClassificationEditor({
       <div className="grid gap-2 md:grid-cols-3">
         <label className="block">
           <span className="text-[10px] uppercase tracking-wider text-zinc-500">Disposition</span>
-          <select
+          <AdminSelect
             value={disposition}
             onChange={(e) => setDisposition(e.target.value)}
-            className="mt-0.5 w-full rounded border border-white/[0.08] bg-zinc-950 px-2 py-1 text-[11px] text-zinc-200">
+            className="w-full mt-0.5">
             {vocab.dispositions.map((d) => (
               <option key={d} value={d}>{d}</option>
             ))}
-          </select>
+          </AdminSelect>
         </label>
 
         <label className="block">
           <span className="text-[10px] uppercase tracking-wider text-zinc-500">
             Key category
           </span>
-          <select
+          <AdminSelect
             value={categorySlug}
             onChange={(e) => {
               setCategorySlug(e.target.value)
               setRegulationKey('')  // the old key doesn't belong to the new category
             }}
-            className="mt-0.5 w-full rounded border border-white/[0.08] bg-zinc-950 px-2 py-1 text-[11px] text-zinc-200">
+            className="w-full mt-0.5">
             <option value="">— none (uncodified) —</option>
             {Object.keys(vocab.keys_by_category).map((c) => (
               <option key={c} value={c}>{c}</option>
             ))}
-          </select>
+          </AdminSelect>
         </label>
 
         <label className="block">
           <span className="text-[10px] uppercase tracking-wider text-zinc-500">
             Regulation key
           </span>
-          <select
+          <AdminSelect
             value={regulationKey}
             disabled={!categorySlug}
             onChange={(e) => setRegulationKey(e.target.value)}
@@ -175,12 +176,12 @@ export function ClassificationEditor({
                 ? 'Without a key this obligation can never be codified against the catalog.'
                 : 'Pick a key category first.'
             }
-            className="mt-0.5 w-full rounded border border-white/[0.08] bg-zinc-950 px-2 py-1 text-[11px] text-zinc-200 disabled:opacity-40">
+            className="w-full mt-0.5 disabled:opacity-40">
             <option value="">— none —</option>
             {keyOptions.map((k) => (
               <option key={k} value={k}>{k}</option>
             ))}
-          </select>
+          </AdminSelect>
         </label>
       </div>
 
@@ -189,11 +190,11 @@ export function ClassificationEditor({
           <span className="text-[10px] uppercase tracking-wider text-zinc-500">
             Excluded reason (required)
           </span>
-          <input
+          <AdminInput
             value={excludedReason}
             onChange={(e) => setExcludedReason(e.target.value)}
             placeholder="e.g. construction-only standard; no general-industry application"
-            className="mt-0.5 w-full rounded border border-white/[0.08] bg-zinc-950 px-2 py-1 text-[11px] text-zinc-200"
+            className="mt-0.5"
           />
         </label>
       ) : (
@@ -229,7 +230,7 @@ export function ClassificationEditor({
       )}
 
       {item.entity_condition && (
-        <div className="mt-2 rounded border border-white/[0.08] bg-white/[0.02] px-2 py-1">
+        <AdminCard className="mt-2 px-2 py-1">
           <span className="text-[10px] uppercase tracking-wider text-zinc-500">
             Trigger (kept as-is)
           </span>
@@ -238,13 +239,13 @@ export function ClassificationEditor({
             title="This obligation only applies to facilities matching this condition. There is no trigger editor yet — saving preserves it rather than wiping it, which would make the obligation apply to everyone.">
             {JSON.stringify(item.entity_condition)}
           </div>
-        </div>
+        </AdminCard>
       )}
 
       <div className="mt-3 flex items-center gap-2">
         <Button
           size="sm"
-          variant="primary"
+        variant="primary"
           disabled={saving || needsReason || needsApplies}
           onClick={save}>
           {saving ? 'Saving…' : 'Save + confirm'}
