@@ -1,7 +1,6 @@
 import { AdminTable } from '../../../../components/admin/AdminUI'
 import { Link } from 'react-router-dom'
-import { Shield, KeyRound } from 'lucide-react'
-import { ActionBtn } from './ActionBtn'
+import { AdminActionMenu } from '../../../../components/admin/AdminActionMenu'
 import { fmtTokens, fmtUsd, relTime } from './helpers'
 import type { Individual } from './types'
 
@@ -17,10 +16,10 @@ export function PersonalTable({
   onCancel: (u: Individual) => void
 }) {
   if (rows.length === 0) {
-    return <p className="text-sm text-zinc-500">No personal users yet.</p>
+    return <p className="text-sm text-zinc-500">No personal accounts match this view.</p>
   }
   return (
-    <AdminTable>
+    <AdminTable className="min-w-[740px]">
       <thead >
         <tr>
           <th className="text-left">Email</th>
@@ -28,7 +27,7 @@ export function PersonalTable({
           <th className="text-left">Subscription</th>
           <th className="text-left">Tokens</th>
           <th className="text-left">Account</th>
-          <th className="text-left w-[280px]">Actions</th>
+          <th className="text-right">Actions</th>
         </tr>
       </thead>
       <tbody>
@@ -72,18 +71,19 @@ export function PersonalTable({
               )}
             </td>
             <td >
-              <div className="flex flex-wrap items-center gap-1.5">
-                <ActionBtn icon={Shield} label={u.is_suspended ? 'Unsus' : 'Suspend'} onClick={() => onSuspend(u)} />
-                <ActionBtn icon={KeyRound} label="Reset" onClick={() => onReset(u)} />
-                {u.subscription && u.subscription.status === 'active' && (
-                  <ActionBtn label="Cancel sub" tone="danger" onClick={() => onCancel(u)} />
-                )}
+              <div className="flex items-center justify-end gap-2 whitespace-nowrap">
                 <Link
                   to={`/admin/companies/${u.company_id}`}
-                  className="text-[10px] px-2 py-1 rounded bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+                  title="Tokens, billing, and refunds"
+                  className="text-xs text-zinc-400 hover:text-zinc-100"
                 >
-                  Tokens / Refund →
+                  Manage
                 </Link>
+                <AdminActionMenu label={`Actions for ${u.email}`} items={[
+                  { label: u.is_suspended ? 'Unsuspend account' : 'Suspend account', danger: !u.is_suspended, onSelect: () => onSuspend(u) },
+                  { label: 'Reset password', onSelect: () => onReset(u) },
+                  ...(u.subscription?.status === 'active' ? [{ label: 'Cancel subscription', danger: true, onSelect: () => onCancel(u) }] : []),
+                ]} />
               </div>
             </td>
           </tr>

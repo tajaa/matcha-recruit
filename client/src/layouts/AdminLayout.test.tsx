@@ -41,6 +41,7 @@ describe('AdminLayout and category directories', () => {
     await userEvent.click(within(tools).getByRole('link', { name: page.label }))
     expect(screen.getByText(page.to)).toBeInTheDocument()
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(page.label)
+    expect(screen.getByRole('link', { name: `Back to ${area.label}` })).toHaveAttribute('href', area.to)
     expect(screen.queryByRole('navigation', { name: /workspaces|pages/ })).not.toBeInTheDocument()
     await userEvent.click(within(screen.getByRole('navigation', { name: 'Breadcrumb' })).getByRole('link', { name: area.label }))
     expect(screen.getByRole('navigation', { name: `${area.label} tools` })).toBeInTheDocument()
@@ -52,6 +53,13 @@ describe('AdminLayout and category directories', () => {
     expect(within(breadcrumb).getByRole('link', { name: 'Customers' })).toHaveAttribute('href', '/admin/areas/customers')
     expect(within(breadcrumb).getByRole('link', { name: 'Companies' })).toHaveAttribute('href', '/admin/companies')
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Companies')
+    expect(screen.getByRole('link', { name: 'Back to Customers' })).toHaveAttribute('href', '/admin/areas/customers')
+  })
+
+  it('returns to the category through the explicit back link', async () => {
+    renderPage('/admin/matcha-work')
+    await userEvent.click(screen.getByRole('link', { name: 'Back to Customers' }))
+    expect(screen.getByRole('navigation', { name: 'Customers tools' })).toBeInTheDocument()
   })
 
   it('preserves direct-link filters and anchors', () => {

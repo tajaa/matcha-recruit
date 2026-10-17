@@ -1,7 +1,6 @@
 import { AdminTable } from '../../../../components/admin/AdminUI'
 import { Link } from 'react-router-dom'
-import { Shield, KeyRound } from 'lucide-react'
-import { ActionBtn } from './ActionBtn'
+import { AdminActionMenu } from '../../../../components/admin/AdminActionMenu'
 import { StatusBadge } from './StatusBadge'
 import { TIER_BADGE, TIER_LABEL } from './constants'
 import { fmtUsd, relTime, tierFromRegistration } from './helpers'
@@ -27,7 +26,7 @@ export function RegistrationTable({
   onRestore: (r: Registration) => void
 }) {
   if (rows.length === 0) {
-    return <p className="text-sm text-zinc-500">No customers in this tab.</p>
+    return <p className="text-sm text-zinc-500">No customers match this view.</p>
   }
 
   // Show columns appropriate to the tier; All shows the union.
@@ -36,7 +35,7 @@ export function RegistrationTable({
   const showStatus = tab === 'platform' || tab === 'all'
 
   return (
-    <AdminTable>
+    <AdminTable className="min-w-[780px]">
       <thead >
         <tr>
           <th className="text-left">Company / Email</th>
@@ -45,7 +44,7 @@ export function RegistrationTable({
           {showStatus && <th className="text-left">Status</th>}
           {showSub && <th className="text-left">Subscription</th>}
           <th className="text-left">Account</th>
-          <th className="text-left w-[280px]">Actions</th>
+          <th className="text-right">Actions</th>
         </tr>
       </thead>
       <tbody>
@@ -113,30 +112,19 @@ export function RegistrationTable({
                 </div>
               </td>
               <td >
-                <div className="flex flex-wrap items-center gap-1.5">
-                  {!isDeleted && (
-                    <>
-                      <ActionBtn icon={Shield} label={r.is_suspended ? 'Unsus' : 'Suspend'} onClick={() => onSuspend(r)} />
-                      <ActionBtn icon={KeyRound} label="Reset" onClick={() => onReset(r)} disabled={!r.owner_user_id} />
-                      {r.subscription && r.subscription.status === 'active' && (
-                        <>
-                          <ActionBtn label="Cancel ↘" onClick={() => onCancelAtEnd(r)} />
-                          <ActionBtn label="Cancel now" tone="danger" onClick={() => onCancel(r)} />
-                        </>
-                      )}
-                      <Link
-                        to={`/admin/companies/${r.id}`}
-                        className="text-[10px] px-2 py-1 rounded bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
-                      >
-                        More →
-                      </Link>
-                    </>
-                  )}
-                  {!isDeleted ? (
-                    <ActionBtn label="Delete" tone="danger" onClick={() => onSoftDelete(r)} />
-                  ) : (
-                    <ActionBtn label="Restore" tone="success" onClick={() => onRestore(r)} />
-                  )}
+                <div className="flex items-center justify-end gap-2 whitespace-nowrap">
+                  {!isDeleted && <Link to={`/admin/companies/${r.id}`} className="text-xs text-zinc-400 hover:text-zinc-100">Manage</Link>}
+                  <AdminActionMenu label={`Actions for ${r.company_name}`} items={isDeleted ? [
+                    { label: 'Restore company', onSelect: () => onRestore(r) },
+                  ] : [
+                    { label: r.is_suspended ? 'Unsuspend owner' : 'Suspend owner', danger: !r.is_suspended, onSelect: () => onSuspend(r) },
+                    { label: 'Reset password', disabled: !r.owner_user_id, onSelect: () => onReset(r) },
+                    ...(r.subscription?.status === 'active' ? [
+                      { label: 'Cancel at period end', onSelect: () => onCancelAtEnd(r) },
+                      { label: 'Cancel subscription now', danger: true, onSelect: () => onCancel(r) },
+                    ] : []),
+                    { label: 'Delete company', danger: true, onSelect: () => onSoftDelete(r) },
+                  ]} />
                 </div>
               </td>
             </tr>

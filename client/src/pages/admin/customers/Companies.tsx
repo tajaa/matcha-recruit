@@ -1,6 +1,8 @@
 import { AdminButton as Button, AdminInput as Input, AdminSelect } from '../../../components/admin/AdminUI'
 import { AdminPageHeader } from '../../../components/admin/AdminPageHeader'
-import { useState } from 'react'
+import { AdminList, AdminPagination } from '../../../components/admin/AdminList'
+import { useAdminPagination } from '../../../components/admin/useAdminPagination'
+import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Badge, DataTable, Modal } from '../../../components/ui'
 import { api } from '../../../api/client'
@@ -120,6 +122,7 @@ export default function Companies() {
   const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all')
   const [tier, setTier] = useState<Tier>('all')
   const [search, setSearch] = useState('')
+  const [sort, setSort] = useState('newest')
   const [showAdd, setShowAdd] = useState(false)
   const [form, setForm] = useState<RegisterForm>(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
@@ -146,9 +149,12 @@ export default function Companies() {
     [],
   )
 
-  const filtered = companies.filter((c) =>
-    c.company_name.toLowerCase().includes(search.toLowerCase())
-  )
+  const filtered = useMemo(() => {
+    const query = search.trim().toLowerCase()
+    return companies.filter((company) => [company.company_name, company.owner_email, company.owner_name].some((value) => (value ?? '').toLowerCase().includes(query)))
+      .sort((a, b) => sort === 'name' ? a.company_name.localeCompare(b.company_name) || a.id.localeCompare(b.id) : new Date(b.created_at).getTime() - new Date(a.created_at).getTime() || a.id.localeCompare(b.id))
+  }, [companies, search, sort])
+  const pagination = useAdminPagination(filtered, JSON.stringify([search, filter, tier, sort]))
 
   async function approve(id: string) {
     await api.post(`/admin/business-registrations/${id}/approve`)
@@ -214,7 +220,7 @@ export default function Companies() {
   const showSpecialties = HEALTHCARE_INDUSTRIES.has(form.industry)
 
   return (
-    <div>
+    <AdminList>
       <AdminPageHeader
         title="Companies"
         description="Manage registered businesses and approvals."
@@ -225,48 +231,22 @@ export default function Companies() {
         }
       />
 
-      {/* Filters */}
-      <div className="mt-6 flex flex-col gap-3">
-        <div className="flex items-center gap-3">
-          <Input
-            label=""
-            placeholder="Search companies..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="max-w-xs"
-          />
-          <div className="flex gap-1 ml-auto">
-            {(['all', 'pending', 'approved', 'rejected'] as const).map((s) => (
-              <Button
-                key={s}
-              variant={filter === s ? 'primary' : 'ghost'}
-                size="sm"
-                onClick={() => setFilter(s)}
-              >
-                {s.charAt(0).toUpperCase() + s.slice(1)}
-              </Button>
-            ))}
-          </div>
-        </div>
-        <div className="flex items-center gap-1">
-          <span className="text-[10px] uppercase tracking-wider text-zinc-500 mr-2">Tier</span>
-          {(['all', 'free', 'lite', 'x', 'compliance', 'platform', 'personal'] as const).map((t) => (
-            <Button
-              key={t}
-            variant={tier === t ? 'primary' : 'ghost'}
-              size="sm"
-              onClick={() => setTier(t)}
-            >
-              {t === 'all' ? 'All' : TIER_LABEL[t]}
-            </Button>
-          ))}
-        </div>
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <Input aria-label="Search companies" placeholder="Search company, owner, or email…" value={search} onChange={(event) => setSearch(event.target.value)} className="max-w-xs py-1.5! text-xs!" />
+        <AdminSelect aria-label="Company status" value={filter} onChange={(event) => setFilter(event.target.value as typeof filter)} className="py-1.5! text-xs!">
+          <option value="all">All statuses</option><option value="pending">Pending</option><option value="approved">Approved</option><option value="rejected">Rejected</option>
+        </AdminSelect>
+        <AdminSelect aria-label="Company tier" value={tier} onChange={(event) => setTier(event.target.value as Tier)} className="py-1.5! text-xs!">
+          <option value="all">All tiers</option>{Object.entries(TIER_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+        </AdminSelect>
+        <AdminSelect aria-label="Sort companies" value={sort} onChange={(event) => setSort(event.target.value)} className="py-1.5! text-xs!"><option value="newest">Newest first</option><option value="name">Name A–Z</option></AdminSelect>
       </div>
 
       {/* Table */}
-      <div className="mt-6">
+      <div className="mt-3">
+        <AdminPagination pagination={pagination} />
         <DataTable
-          rows={filtered}
+          rows={pagination.rows}
           rowKey={(c) => c.id}
           loading={loading}
           error={error}
@@ -458,6 +438,6 @@ export default function Companies() {
           </div>
         </form>
       </Modal>
-    </div>
+    </AdminList>
   )
 }

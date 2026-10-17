@@ -1,9 +1,12 @@
-import { AdminStat as Stat, AdminCard, AdminInput, AdminButton, AdminTable } from '../../../../components/admin/AdminUI'
+import { AdminCard, AdminInput, AdminButton, AdminSelect, AdminTable } from '../../../../components/admin/AdminUI'
 import { AdminPageHeader } from '../../../../components/admin/AdminPageHeader'
+import { AdminList, AdminMetricRow, AdminPagination } from '../../../../components/admin/AdminList'
+import { AdminActionMenu } from '../../../../components/admin/AdminActionMenu'
+import { useAdminPagination } from '../../../../components/admin/useAdminPagination'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Loader2, Search, Zap, Plus, UserPlus, Copy, Check, Shield, KeyRound } from 'lucide-react'
+import { Loader2, Search, Zap, UserPlus, Copy, Check } from 'lucide-react'
 import { api } from '../../../../api/client'
 import { useAsync } from '../../../../hooks/useAsync'
 
@@ -52,6 +55,9 @@ function relTime(iso: string | null): string {
 
 export default function Individuals({ embedded = false }: { embedded?: boolean }) {
   const [search, setSearch] = useState('')
+  const [status, setStatus] = useState('all')
+  const [plan, setPlan] = useState('all')
+  const [sort, setSort] = useState('newest')
   const [grantTarget, setGrantTarget] = useState<IndividualUser | null>(null)
   const [grantAmount, setGrantAmount] = useState('')
   const [granting, setGranting] = useState(false)
@@ -65,6 +71,7 @@ export default function Individuals({ embedded = false }: { embedded?: boolean }
   const {
     data: users,
     loading,
+    error,
     setData: setUsers,
     reload: fetchUsers,
   } = useAsync(() => api.get<IndividualUser[]>('/matcha-work/billing/admin/individuals'), [], [])
@@ -139,7 +146,7 @@ export default function Individuals({ embedded = false }: { embedded?: boolean }
 
   async function toggleSuspend(u: IndividualUser) {
     const path = u.is_suspended ? 'unsuspend' : 'suspend'
-    if (u.is_suspended === false && !confirm(`Suspend ${u.email}? They will be locked out.`)) return
+    if (!u.is_suspended && !confirm(`Suspend ${u.email}? They will be locked out.`)) return
     setUsers((prev) => prev.map((x) => (x.user_id === u.user_id ? { ...x, is_suspended: !u.is_suspended } : x)))
     try {
       await api.post(`/admin/users/${u.user_id}/${path}`, {})
@@ -159,18 +166,29 @@ export default function Individuals({ embedded = false }: { embedded?: boolean }
     }
   }
 
-  const filtered = users.filter((u) => {
-    if (!search) return true
-    const q = search.toLowerCase()
-    return u.email.toLowerCase().includes(q) || (u.name || '').toLowerCase().includes(q)
-  })
+  const filtered = useMemo(() => {
+    const query = search.trim().toLowerCase()
+    return users.filter((user) => {
+      const paid = user.subscription?.status === 'active'
+      const comped = user.beta_features?.matcha_work_beta_lite || user.beta_features?.matcha_work_beta_full
+      return (!query || user.email.toLowerCase().includes(query) || (user.name ?? '').toLowerCase().includes(query))
+        && (status === 'all' || (status === 'suspended' ? user.is_suspended : !user.is_suspended))
+        && (plan === 'all' || (plan === 'paid' ? paid : plan === 'comped' ? comped : !paid && !comped))
+    }).sort((a, b) => {
+      if (sort === 'name') return (a.name || a.email).localeCompare(b.name || b.email) || a.user_id.localeCompare(b.user_id)
+      if (sort === 'tokens') return (a.free_tokens_remaining + a.subscription_tokens_remaining) - (b.free_tokens_remaining + b.subscription_tokens_remaining) || a.user_id.localeCompare(b.user_id)
+      const date = (a.created_at ? new Date(a.created_at).getTime() : 0) - (b.created_at ? new Date(b.created_at).getTime() : 0)
+      return (sort === 'oldest' ? date : -date) || a.user_id.localeCompare(b.user_id)
+    })
+  }, [users, search, status, plan, sort])
+  const pagination = useAdminPagination(filtered, JSON.stringify([search, status, plan, sort]))
 
   const activeSubscriptions = users.filter((user) => user.subscription?.status === 'active').length
   const comped = users.filter((user) => user.beta_features?.matcha_work_beta_lite || user.beta_features?.matcha_work_beta_full).length
   const suspended = users.filter((user) => user.is_suspended).length
   const tokensRemaining = users.reduce((sum, user) => sum + user.free_tokens_remaining + user.subscription_tokens_remaining, 0)
 
-  if (loading) {
+  if (loading && users.length === 0 && !error) {
     return (
       <div className="flex items-center justify-center h-64">
         <Loader2 className="animate-spin text-zinc-500" size={24} />
@@ -179,190 +197,82 @@ export default function Individuals({ embedded = false }: { embedded?: boolean }
   }
 
   return (
-    <div>
+    <AdminList>
       {!embedded && (
         <AdminPageHeader title={<>Individual Users</>} description={<>Personal account users ({users.length} total) — the Lite/Pro checkboxes comp the full Werk tier without Stripe</>} />
       )}
 
-      {embedded && (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-          <Stat label="Personal accounts" value={users.length} />
-          <Stat label="Subscriptions" value={activeSubscriptions} />
-          <Stat label="Comped plans" value={comped} />
-          <Stat label="Suspended" value={suspended} />
-          <Stat label="Tokens remaining" value={formatTokens(tokensRemaining)} />
-        </div>
-      )}
+      {embedded && <AdminMetricRow items={[
+        { label: 'Personal accounts', value: users.length },
+        { label: 'Subscriptions', value: activeSubscriptions },
+        { label: 'Comped', value: comped },
+        { label: 'Suspended', value: suspended },
+        { label: 'Tokens remaining', value: formatTokens(tokensRemaining) },
+      ]} />}
 
-      <div className={`${embedded ? 'mt-6' : ''} mb-4 flex flex-wrap items-center justify-between gap-3`}>
-        <div className="relative w-full max-w-xs">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <div className="relative min-w-48 flex-1 sm:max-w-xs">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
-          <AdminInput
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by email or name..."
-            className="pl-9 pr-3"
-          />
+          <AdminInput aria-label="Search personal accounts" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search email or name…" className="py-1.5! pl-9 pr-3 text-xs!" />
         </div>
-        <AdminButton
-          onClick={() => setShowInvite(true)}
-          className="gap-1.5" variant="success"
-        >
-          <UserPlus size={12} />
-          Generate Signup URL
-        </AdminButton>
+        <AdminSelect aria-label="Account status" value={status} onChange={(event) => setStatus(event.target.value)} className="py-1.5! text-xs!">
+          <option value="all">All statuses</option><option value="active">Active</option><option value="suspended">Suspended</option>
+        </AdminSelect>
+        <AdminSelect aria-label="Plan filter" value={plan} onChange={(event) => setPlan(event.target.value)} className="py-1.5! text-xs!">
+          <option value="all">All plans</option><option value="paid">Paid subscription</option><option value="comped">Comped</option><option value="free">Free</option>
+        </AdminSelect>
+        <AdminSelect aria-label="Sort personal accounts" value={sort} onChange={(event) => setSort(event.target.value)} className="py-1.5! text-xs!">
+          <option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="name">Name A–Z</option><option value="tokens">Lowest token balance</option>
+        </AdminSelect>
+        <AdminButton onClick={() => setShowInvite(true)} className="gap-1.5 sm:ml-auto" variant="success"><UserPlus size={12} />Generate Signup URL</AdminButton>
       </div>
-
-      {/* Table */}
-      <AdminTable>
-        <thead>
-          <tr className="bg-zinc-900/80 border-b border-zinc-800">
-            <th className="text-left text-zinc-400">Email</th>
-            <th className="text-left text-zinc-400">Name</th>
-            <th className="text-left text-zinc-400">Joined</th>
-            <th className="text-left text-zinc-400">Subscription</th>
-            <th className="text-left text-zinc-400">Tokens Used</th>
-            <th className="text-left text-zinc-400">Remaining</th>
-            <th className="text-center text-zinc-400" title="Comp grant — full Werk Lite tier, no Stripe (stored as matcha_work_beta_lite)">Lite (comp)</th>
-            <th className="text-center text-zinc-400" title="Comp grant — full Werk Pro tier, no Stripe (stored as matcha_work_beta_full)">Pro (comp)</th>
-            <th className="text-left text-zinc-400 w-32">Actions</th>
-          </tr>
-        </thead>
+      {error && <div role="alert" className="mb-3 flex items-center gap-3 text-xs text-red-300">{error}<AdminButton variant="ghost" onClick={fetchUsers}>Retry</AdminButton></div>}
+      <AdminPagination pagination={pagination} />
+      <AdminTable className="min-w-[880px]">
+        <thead><tr>
+          <th>Account</th><th>Plan</th><th>Tokens used</th><th>Remaining</th><th title="Comped tier access without Stripe">Comped access</th><th>Joined</th><th className="text-right">Actions</th>
+        </tr></thead>
         <tbody>
-          {filtered.length === 0 && (
-            <tr>
-              <td colSpan={9} className="text-center text-zinc-500">
-                {search ? 'No users match your search.' : 'No individual users yet.'}
-              </td>
-            </tr>
-          )}
-          {filtered.map((u) => {
-            const pct = u.free_token_limit > 0 ? Math.min(100, (u.free_tokens_used / u.free_token_limit) * 100) : 0
-            const low = u.free_tokens_remaining <= 0
+          {pagination.rows.length === 0 && <tr><td colSpan={7} className="text-center text-zinc-500">{error ? 'Accounts could not be loaded.' : users.length ? 'No users match these filters.' : 'No individual users yet.'}</td></tr>}
+          {pagination.rows.map((user) => {
+            const pct = user.free_token_limit > 0 ? Math.min(100, (user.free_tokens_used / user.free_token_limit) * 100) : 0
+            const low = user.free_tokens_remaining <= 0
             const warn = !low && pct > 80
-            return (
-              <tr key={u.user_id} className="border-b border-zinc-800/50 hover:bg-zinc-800/20">
-                <td className="text-zinc-200">
-                  {u.email}
-                  {u.is_suspended && (
-                    <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded border border-red-500/40 bg-red-500/10 text-red-300">
-                      Suspended
-                    </span>
-                  )}
-                </td>
-                <td className="text-zinc-400">{u.name || '--'}</td>
-                <td className="text-zinc-500">{relTime(u.created_at)}</td>
-                <td >
-                  {u.subscription ? (
-                    <div className="flex flex-col gap-0.5">
-                      <span className="text-zinc-300">
-                        {u.subscription.pack_id} <span className="text-zinc-500">·</span>{' '}
-                        <span className={u.subscription.status === 'active' ? 'text-emerald-400' : 'text-zinc-500'}>
-                          {u.subscription.status}
-                        </span>
-                      </span>
-                      <span className="text-[10px] text-zinc-500">
-                        {fmtUsd(u.subscription.amount_cents)}
-                        {u.subscription.current_period_end && (
-                          <> · renews {new Date(u.subscription.current_period_end).toLocaleDateString()}</>
-                        )}
-                      </span>
-                      <a
-                        href={`https://dashboard.stripe.com/subscriptions/${u.subscription.stripe_subscription_id}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-[10px] text-emerald-400 hover:text-emerald-300"
-                      >
-                        Stripe →
-                      </a>
-                    </div>
-                  ) : u.beta_features?.matcha_work_beta_full ? (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded border border-violet-500/40 bg-violet-500/10 text-violet-300">
-                      Pro · comped
-                    </span>
-                  ) : u.beta_features?.matcha_work_beta_lite ? (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded border border-sky-500/40 bg-sky-500/10 text-sky-300">
-                      Lite · comped
-                    </span>
-                  ) : (
-                    <span className="text-zinc-600">—</span>
-                  )}
-                </td>
-                <td >
-                  <div className="flex items-center gap-2">
-                    <div className="w-16 h-1.5 rounded-full bg-zinc-800 overflow-hidden">
-                      <div
-                        className={`h-full rounded-full ${low ? 'bg-red-500' : warn ? 'bg-amber-500' : 'bg-emerald-500'}`}
-                        style={{ width: `${Math.min(pct, 100)}%` }}
-                      />
-                    </div>
-                    <span className={`${low ? 'text-red-400' : warn ? 'text-amber-400' : 'text-zinc-400'}`}>
-                      {formatTokens(u.free_tokens_used)}
-                    </span>
-                  </div>
-                </td>
-                <td >
-                  <span className={low ? 'text-red-400 font-medium' : 'text-zinc-400'}>
-                    {formatTokens(u.free_tokens_remaining)}
-                  </span>
-                </td>
-                <td className="text-center">
-                  <input
-                    type="checkbox"
-                    checked={!!u.beta_features?.matcha_work_beta_lite}
-                    onChange={(e) => toggleBetaFlag(u.user_id, 'matcha_work_beta_lite', e.target.checked)}
-                    className="accent-emerald-500 w-3.5 h-3.5 cursor-pointer"
-                  />
-                </td>
-                <td className="text-center">
-                  <input
-                    type="checkbox"
-                    checked={!!u.beta_features?.matcha_work_beta_full}
-                    onChange={(e) => toggleBetaFlag(u.user_id, 'matcha_work_beta_full', e.target.checked)}
-                    className="accent-emerald-500 w-3.5 h-3.5 cursor-pointer"
-                  />
-                </td>
-                <td >
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    <AdminButton
-                      onClick={() => { setGrantTarget(u); setGrantAmount('') }}
-                      className="gap-1"
-                      title="Grant tokens" variant="secondary"
-                    >
-                      <Plus size={10} />
-                      Tokens
-                    </AdminButton>
-                    <AdminButton
-                      onClick={() => issuePasswordReset(u)}
-                      className="gap-1"
-                      title="Issue 1h password reset link" variant="secondary"
-                    >
-                      <KeyRound size={10} />
-                      Reset
-                    </AdminButton>
-                    <button
-                      onClick={() => toggleSuspend(u)}
-                      className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors ${
-                        u.is_suspended
-                          ? 'bg-emerald-900/40 text-emerald-300 hover:bg-emerald-900/60'
-                          : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
-                      }`}
-                      title={u.is_suspended ? 'Unsuspend' : 'Suspend'}
-                    >
-                      <Shield size={10} />
-                      {u.is_suspended ? 'Unsuspend' : 'Suspend'}
-                    </button>
-                    <Link
-                      to={`/admin/companies/${u.company_id}`}
-                      className="text-[10px] text-zinc-500 hover:text-zinc-300 underline"
-                      title="Open company detail for billing/refund/cancel"
-                    >
-                      Manage →
-                    </Link>
-                  </div>
-                </td>
-              </tr>
-            )
+            return <tr key={user.user_id} className="hover:bg-zinc-800/20">
+              <td className="max-w-60">
+                <Link to={`/admin/companies/${user.company_id}`} title={user.email} className="block truncate font-medium text-zinc-100 hover:text-emerald-400">{user.email}</Link>
+                <div className="mt-0.5 flex items-center gap-2 text-[11px] text-zinc-500"><span className="truncate" title={user.name ?? undefined}>{user.name || '—'}</span>{user.is_suspended && <span className="shrink-0 text-red-300">Suspended</span>}</div>
+              </td>
+              <td className="whitespace-nowrap">
+                {user.subscription ? <>
+                  <div className="text-zinc-300">{user.subscription.pack_id} · <span className={user.subscription.status === 'active' ? 'text-emerald-400' : 'text-zinc-500'}>{user.subscription.status}</span></div>
+                  <div className="mt-0.5 text-[10px] text-zinc-500">{fmtUsd(user.subscription.amount_cents)}{user.subscription.current_period_end && <> · renews {new Date(user.subscription.current_period_end).toLocaleDateString()}</>}</div>
+                </> : user.beta_features?.matcha_work_beta_full ? <span className="rounded border border-violet-500/40 bg-violet-500/10 px-1.5 py-0.5 text-[10px] text-violet-300">Pro · comped</span>
+                  : user.beta_features?.matcha_work_beta_lite ? <span className="rounded border border-sky-500/40 bg-sky-500/10 px-1.5 py-0.5 text-[10px] text-sky-300">Lite · comped</span> : <span className="text-zinc-500">Free</span>}
+              </td>
+              <td className="tabular-nums">
+                <span className={low ? 'text-red-400' : warn ? 'text-amber-400' : 'text-zinc-300'}>{formatTokens(user.free_tokens_used)}</span>
+                <div className="mt-1 h-1 w-16 overflow-hidden rounded-full bg-zinc-800" title={`${user.free_tokens_used.toLocaleString()} of ${user.free_token_limit.toLocaleString()} free tokens used`}><div className={`h-full rounded-full ${low ? 'bg-red-500' : warn ? 'bg-amber-500' : 'bg-emerald-500'}`} style={{ width: `${pct}%` }} /></div>
+              </td>
+              <td className="whitespace-nowrap tabular-nums" title="Available free and subscription tokens">
+                <span className={low && !user.subscription_tokens_remaining ? 'font-medium text-red-400' : 'text-zinc-300'}>{formatTokens(user.free_tokens_remaining + user.subscription_tokens_remaining)}</span>
+                <div className="mt-0.5 text-[10px] text-zinc-500">{formatTokens(user.free_tokens_remaining)} free · {formatTokens(user.subscription_tokens_remaining)} plan</div>
+              </td>
+              <td className="whitespace-nowrap"><div className="flex items-center gap-3">
+                <label className="flex items-center gap-1.5 text-[11px] text-zinc-400" title="Comp full Lite access without Stripe"><input aria-label={`Lite comp for ${user.email}`} type="checkbox" checked={!!user.beta_features?.matcha_work_beta_lite} onChange={(event) => toggleBetaFlag(user.user_id, 'matcha_work_beta_lite', event.target.checked)} className="h-3.5 w-3.5 cursor-pointer accent-emerald-500" />Lite</label>
+                <label className="flex items-center gap-1.5 text-[11px] text-zinc-400" title="Comp full Pro access without Stripe"><input aria-label={`Pro comp for ${user.email}`} type="checkbox" checked={!!user.beta_features?.matcha_work_beta_full} onChange={(event) => toggleBetaFlag(user.user_id, 'matcha_work_beta_full', event.target.checked)} className="h-3.5 w-3.5 cursor-pointer accent-emerald-500" />Pro</label>
+              </div></td>
+              <td className="whitespace-nowrap text-zinc-500" title={user.created_at ?? undefined}>{relTime(user.created_at)}</td>
+              <td><div className="flex items-center justify-end gap-2 whitespace-nowrap">
+                <Link to={`/admin/companies/${user.company_id}`} className="text-xs text-zinc-400 hover:text-zinc-100" title="Billing, refunds, and account details">Manage</Link>
+                <AdminActionMenu label={`Actions for ${user.email}`} items={[
+                  { label: 'Grant tokens', onSelect: () => { setGrantTarget(user); setGrantAmount('') } },
+                  { label: 'Reset password', onSelect: () => issuePasswordReset(user) },
+                  { label: user.is_suspended ? 'Unsuspend account' : 'Suspend account', danger: !user.is_suspended, onSelect: () => toggleSuspend(user) },
+                  ...(user.subscription ? [{ label: 'Open Stripe subscription', href: `https://dashboard.stripe.com/subscriptions/${user.subscription.stripe_subscription_id}` }] : []),
+                ]} />
+              </div></td>
+            </tr>
           })}
         </tbody>
       </AdminTable>
@@ -379,6 +289,7 @@ export default function Individuals({ embedded = false }: { embedded?: boolean }
               <>
                 <label className="block text-[11px] font-medium text-zinc-400 mb-1">Email</label>
                 <AdminInput
+                  aria-label="Invite email"
                   type="email"
                   value={inviteEmail}
                   onChange={(e) => setInviteEmail(e.target.value)}
@@ -460,6 +371,7 @@ export default function Individuals({ embedded = false }: { embedded?: boolean }
               ))}
             </div>
             <AdminInput
+              aria-label="Token grant amount"
               value={grantAmount}
               onChange={(e) => setGrantAmount(e.target.value.replace(/\D/g, ''))}
               placeholder="Custom amount..."
@@ -484,6 +396,6 @@ export default function Individuals({ embedded = false }: { embedded?: boolean }
           </AdminCard>
         </div>
       )}
-    </div>
+    </AdminList>
   )
 }

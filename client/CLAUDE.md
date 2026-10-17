@@ -138,6 +138,12 @@ fixed-height console frame.
 - `AdminLayout` supplies the centered canvas and category/tool breadcrumbs.
   Each routed tool owns its page heading. Sidebar category links always open
   their directory, including when one of that category's tools is active.
+  Tool pages also have an explicit sticky "Back to [category]" link.
+- Use `AdminList` for compact account tables and headings, `AdminMetricRow`
+  for inline totals, `AdminActionMenu` for secondary row actions, and
+  `useAdminPagination` + `AdminPagination` to bound rendered lists to 25/50/100
+  rows after filtering and sorting. These paginate the existing loaded data;
+  they do not change backend list endpoints or authorization.
 - Use `AdminUI` for fields, native selects, textareas, buttons, cards, section
   headings, metrics, filter bars, and tables. These forward native props and
   keep validation, labels, events, refs, and table spans intact. Keep layout and
