@@ -83,6 +83,40 @@ async def test_asking_again_returns_the_draft_while_it_is_in_gmail(conn, gmail):
 
 
 @pytest.mark.asyncio
+async def test_edit_draft_never_makes_one(conn, gmail):
+    waiting = _lead(email_draft_id="r-1", email_drafted_at=NOW)
+    conn.on("FROM mw_job_leads WHERE id = $1", waiting)
+    out = await service.draft_email(SEARCH, LEAD, USER, existing_only=True)
+    assert out["created"] is False and out["draft_id"] == "r-1"
+    # Sent or deleted in Gmail itself: forgotten on the job and refused, so a
+    # new draft is the person's own click. Nothing is made or sent.
+    gmail.get_draft.side_effect = _missing()
+    conn.on("UPDATE mw_job_leads", _lead())
+    with pytest.raises(service.JobSearchError) as exc:
+        await service.draft_email(SEARCH, LEAD, USER, existing_only=True)
+    assert exc.value.code == 409 and exc.value.detail["code"] == "email_draft_missing"
+    assert exc.value.detail["lead"]["email_draft_id"] is None
+    [update] = conn.ran("UPDATE mw_job_leads")
+    assert update[2] == (LEAD, SEARCH, "r-1") and "SET email_draft_id = NULL" in update[1]
+    assert "AND email_draft_id = $3" in update[1]
+    # A new draft made meanwhile isn't forgotten: the job comes back as it is.
+    conn.on("UPDATE mw_job_leads", None)
+    conn.on("SELECT * FROM mw_job_leads WHERE id = $1", _lead(email_draft_id="r-9"))
+    with pytest.raises(service.JobSearchError) as exc:
+        await service.draft_email(SEARCH, LEAD, USER, existing_only=True)
+    assert exc.value.detail["lead"]["email_draft_id"] == "r-9"
+    # Already sent, or never drafted: refused as it is, with Gmail not asked.
+    gmail.get_draft.reset_mock()
+    for row in (_lead(email_draft_id="r-1", email_sent_at=NOW), _lead()):
+        conn.on("FROM mw_job_leads WHERE id = $1", row)
+        with pytest.raises(service.JobSearchError) as exc:
+            await service.draft_email(SEARCH, LEAD, USER, existing_only=True)
+        assert exc.value.detail["code"] == "email_draft_missing"
+    assert not gmail.get_draft.await_count and not gmail.create_draft.await_count
+    assert len(conn.ran("UPDATE mw_job_leads")) == 2
+
+
+@pytest.mark.asyncio
 async def test_no_message_no_gmail_or_no_job_is_said_plainly(conn, gmail):
     conn.on("FROM mw_job_leads WHERE id = $1", None)
     with pytest.raises(service.JobSearchError) as exc:
@@ -133,5 +167,8 @@ async def test_the_route_passes_the_caller(monkeypatch):
     drafted = AsyncMock(return_value={"draft_id": "r-1"})
     monkeypatch.setattr(routes.service, "draft_email", drafted)
     caller = SimpleNamespace(id=uuid4())
-    assert await routes.draft_job_email(SEARCH, LEAD, caller) == {"draft_id": "r-1"}
+    assert await routes.draft_job_email(SEARCH, LEAD, None, caller) == {"draft_id": "r-1"}
     assert drafted.await_args.args == (SEARCH, LEAD, caller.id)
+    assert drafted.await_args.kwargs == {"existing_only": False}
+    await routes.draft_job_email(SEARCH, LEAD, routes.EmailDraftRequest(existing_only=True), caller)
+    assert drafted.await_args.kwargs == {"existing_only": True}

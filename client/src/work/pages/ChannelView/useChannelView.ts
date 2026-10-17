@@ -526,6 +526,8 @@ export function useChannelView(channelIdOverride?: string | null, embedded = fal
     setChannel,
     messages,
     input,
+    /** Put words in the composer without sending them (Ask Espresso on a job). */
+    setInput,
     loading,
     error,
     typingUsers,

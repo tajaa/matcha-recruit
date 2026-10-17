@@ -272,11 +272,19 @@ def _one_line(text: str | None, limit: int) -> str:
     return " ".join(str(text or "").split())[:limit]
 
 
-async def draft_email(search_id: UUID, lead_id: UUID, user_id: UUID) -> dict:
+_DRAFT_GONE = "That draft isn't in your Gmail drafts any more: it was sent or deleted there."
+
+
+async def draft_email(search_id: UUID, lead_id: UUID, user_id: UUID, *, existing_only: bool = False) -> dict:
     """Put a job's drafted first message in the person's Gmail drafts, where
     they edit and send it (Espresso's Email ▸ Drafts, or Gmail itself).
     Nothing is sent. A job keeps one draft: asking again returns it while it
-    is still in Gmail, and makes a new one once it was sent or deleted."""
+    is still in Gmail, and makes a new one once it was sent or deleted.
+
+    `existing_only` (the web's Edit draft) never makes one. A draft Gmail no
+    longer has is forgotten on the job, as when it is deleted from Espresso's
+    Email, and refused with `email_draft_missing` and the job as it is now, so
+    a new draft is the person's own Draft email."""
     import httpx
 
     from ..gmail_service import GmailService
@@ -298,7 +306,8 @@ async def draft_email(search_id: UUID, lead_id: UUID, user_id: UUID) -> dict:
         raise JobSearchError("Connect Gmail in Email first.", 409, {
             "code": "email_not_connected", "message": "Connect Gmail in Email first.",
         })
-    if lead["email_draft_id"] and lead["email_sent_at"] is None:
+    waiting = bool(lead["email_draft_id"]) and lead["email_sent_at"] is None
+    if waiting:
         try:
             existing = await gmail.get_draft(lead["email_draft_id"])
             return {"draft_id": existing["id"], "to": existing["to"], "subject": existing["subject"],
@@ -308,6 +317,20 @@ async def draft_email(search_id: UUID, lead_id: UUID, user_id: UUID) -> dict:
                 raise
         except ValueError:
             pass  # a stored id Gmail would refuse: make a new draft
+    if existing_only:
+        if waiting:
+            async with connection_or_direct() as conn:
+                lead = await conn.fetchrow(
+                    """UPDATE mw_job_leads
+                       SET email_draft_id = NULL, email_drafted_at = NULL, updated_at = NOW()
+                       WHERE id = $1 AND search_id = $2 AND email_draft_id = $3 RETURNING *""",
+                    lead_id, search_id, lead["email_draft_id"],
+                ) or await conn.fetchrow(
+                    "SELECT * FROM mw_job_leads WHERE id = $1 AND search_id = $2", lead_id, search_id,
+                )
+        raise JobSearchError(_DRAFT_GONE, 409, {
+            "code": "email_draft_missing", "message": _DRAFT_GONE, "lead": lead_detail(lead) if lead else None,
+        })
     to = _one_line(outreach.get("to_email"), 320)
     to = to if _ADDRESS.fullmatch(to) else ""  # the hiring contact, when the approach found one
     subject = _one_line(outreach.get("subject"), 200) or _one_line(
