@@ -207,6 +207,9 @@ async def round_finished(conn, task_id: UUID) -> bool:
             task_id,
         )], summary) if task["status"] == "done" else []
         message = compose(dict(task), summary=summary, top=top, columns=plan_view(dict(task))["columns"])
+        from ..recaps.delivery import own_mail
+        if await own_mail(conn, kind="research", source_id=task_id, message=message):
+            return True
         return await _send(to, message, task_id)
     except Exception:
         logger.warning("task email failed task=%s", task_id, exc_info=True)
@@ -221,7 +224,11 @@ async def search_finished(conn, task: dict, top: list[dict]) -> bool:
         to = await _recipient(conn, task["user_id"])
         if to is None:
             return False
-        return await _send(to, compose(task, summary=None, top=top, columns=[]), task.get("id"))
+        message = compose(task, summary=None, top=top, columns=[])
+        from ..recaps.delivery import own_mail
+        if task.get("job_search_id") and await own_mail(conn, kind="jobs", source_id=task["job_search_id"], message=message):
+            return True
+        return await _send(to, message, task.get("id"))
     except Exception:
         logger.warning("job search task email failed task=%s", task.get("id"), exc_info=True)
         return False

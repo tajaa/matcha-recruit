@@ -419,6 +419,8 @@ async def delete_task(task_id: UUID, user_id: UUID) -> dict:
         return await _job_call(job_service.delete_search(search_id, user_id))
     async with connection_or_direct() as conn, conn.transaction():
         await owned_task(conn, task_id, user_id, lock=True)
+        from ..recaps.scope import revoke_source
+        await revoke_source(conn, "research", task_id)
         await conn.execute(
             f"""UPDATE mw_agent_tasks SET status = 'cancelled', dispatch_token = NULL, lease_until = NULL
                 WHERE id = $1 AND status IN ({_OPEN_SQL})""",

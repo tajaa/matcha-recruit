@@ -97,7 +97,8 @@ async def dispatch(search_id: UUID, token: UUID, *, countdown: int = 0) -> None:
 
 
 async def create_search(user, company_id: UUID, body: JobSearchCreate, *,
-                        origin: tuple[UUID | None, UUID | None] | None = None) -> dict:
+                        origin: tuple[UUID | None, UUID | None] | None = None,
+                        recap_parent_run_id: UUID | None = None) -> dict:
     """Start a search, and its row in Tasks (`agent_tasks/job_tasks.py`).
     `origin`: the conversation (and message) a task started it from, where its
     card is posted when it finishes; only server code passes one."""
@@ -153,6 +154,8 @@ async def create_search(user, company_id: UUID, body: JobSearchCreate, *,
                     "message": "A job search is already running. Cancel it or wait for it to finish.",
                 })
             await job_tasks.insert_pointer(conn, row, origin=origin)
+            from ..recaps.scope import register_job
+            await register_job(conn, row, parent_run_id=recap_parent_run_id)
     try:
         await dispatch(row["id"], token)
     except Exception:

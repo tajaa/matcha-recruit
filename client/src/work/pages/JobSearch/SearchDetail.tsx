@@ -1,3 +1,4 @@
+import RecapLink from '../../components/recaps/RecapLink'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { AlertTriangle, ArrowLeft, FileCheck2, ListFilter, Loader2, SlidersHorizontal, Trash2, X } from 'lucide-react'
 import type { JobLeadSummary, JobSearchDetail, JobWeights } from '../../api/matchaWork/jobSearch'
@@ -52,6 +53,7 @@ export default function SearchDetail({
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <header className="space-y-2 border-b border-w-line px-5 py-4">
+        <RecapLink sourceId={detail.id} />
         <div className="flex items-start gap-2">
           <button type="button" onClick={onBack} aria-label="All searches" className="-ml-1 rounded-md p-1 text-w-dim hover:bg-w-surface2 hover:text-w-text md:hidden">
             <ArrowLeft size={16} />

@@ -302,6 +302,10 @@ class Settings:
     # Espresso Tasks (`services/matcha_work/agent_tasks/`). Off until the Mac
     # Tasks tab ships; admins can use it either way.
     espresso_tasks_enabled: bool = False
+    espresso_recaps_enabled: bool = False
+    espresso_recaps_capture_enabled: bool = False
+    espresso_recaps_allowed_users: str = ""
+    espresso_recaps_render_bundle: str = "/app/recap-render"
     # Tenant-only distribution that carries the shared origin/WAF/secret config.
     cappe_cf_tenant_distribution_id: Optional[str] = None
     # Connection group the tenants route through.
@@ -504,6 +508,10 @@ def load_settings() -> Settings:
         in ("1", "true", "yes"),
         espresso_tasks_enabled=os.getenv("ESPRESSO_TASKS_ENABLED", "").strip().lower()
         in ("1", "true", "yes"),
+        espresso_recaps_enabled=os.getenv("ESPRESSO_RECAPS_ENABLED", "").strip().lower() in ("1", "true", "yes"),
+        espresso_recaps_capture_enabled=os.getenv("ESPRESSO_RECAPS_CAPTURE_ENABLED", "").strip().lower() in ("1", "true", "yes"),
+        espresso_recaps_allowed_users=os.getenv("ESPRESSO_RECAPS_ALLOWED_USERS", ""),
+        espresso_recaps_render_bundle=os.getenv("ESPRESSO_RECAPS_RENDER_BUNDLE", "/app/recap-render"),
         cappe_cf_tenant_distribution_id=os.getenv("CAPPE_CF_TENANT_DISTRIBUTION_ID"),
         cappe_cf_connection_group_id=os.getenv("CAPPE_CF_CONNECTION_GROUP_ID"),
         cappe_cf_routing_endpoint=os.getenv("CAPPE_CF_ROUTING_ENDPOINT"),

@@ -124,7 +124,7 @@ async def ability_keys(user, company_id: UUID, channel_id: UUID, surface: str) -
 async def start_run(
     *, channel_id: UUID, company_id: UUID, user, request: str, message_id: UUID,
     surface: str, project_id: UUID | None = None, resume_prompt_id: UUID | None = None,
-    model: str | None = None,
+    model: str | None = None, recap_parent_run_id: UUID | None = None,
 ) -> bool:
     """Gate, queue and acknowledge one run. False when it was refused (the
     reason is posted). `model` is the app menu's pick (`models.resolve`)."""
@@ -136,6 +136,7 @@ async def start_run(
             trigger_message_id=message_id, project_id=project_id, surface=surface,
             prompt=request, abilities=keys, resume_prompt_id=resume_prompt_id,
             skip_preflight=True, model=model,
+            **({"recap_parent_run_id": recap_parent_run_id} if recap_parent_run_id else {}),
         )
     except HTTPException as exc:
         await post_as_espresso(company_id, channel_id, _reason(exc))
@@ -209,6 +210,7 @@ async def _answer_prompt(*, prompt: dict, channel_id: UUID, company_id: UUID, us
         await start_run(
             channel_id=channel_id, company_id=company_id, user=user, request=next_request,
             message_id=message_id, surface=surface, project_id=project_id, model=model,
+            recap_parent_run_id=prompt["run_id"],
         )
     return True
 

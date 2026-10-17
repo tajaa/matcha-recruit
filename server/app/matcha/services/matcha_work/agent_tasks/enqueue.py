@@ -181,7 +181,8 @@ def _brief(playbook: Playbook, raw: dict) -> dict:
 
 
 async def create_task(user, company_id: UUID, body, *,
-                      origin: tuple[UUID | None, UUID | None] | None = None) -> dict:
+                      origin: tuple[UUID | None, UUID | None] | None = None,
+                      recap_parent_run_id: UUID | None = None) -> dict:
     """Start a task. `body`: `AgentTaskCreate`. `origin`: the conversation (and
     message) it was started from, where its cards are posted; only server
     code passes one."""
@@ -200,7 +201,8 @@ async def create_task(user, company_id: UUID, body, *,
         if not tasks_enabled(user):
             raise HTTPException(status_code=403, detail={"code": "feature_disabled",
                                                          "message": "Tasks aren't available yet."})
-        return await job_tasks.start(user, company_id, body, brief, origin=origin)
+        return await job_tasks.start(user, company_id, body, brief, origin=origin,
+                                     **({"recap_parent_run_id": recap_parent_run_id} if recap_parent_run_id else {}))
     plan = await preflight(user, company_id, playbook, consent_version=body.consent_version)
     limit = allowance.limit_for_plan(plan) if plan is not None else None
     cost = allowance.WEIGHTS[playbook.key]
@@ -240,6 +242,8 @@ async def create_task(user, company_id: UUID, body, *,
                    VALUES ($1, $2, 1, 'initial', $3, $4, 'running')""",
                 row["id"], user.id, body.directive, cost,
             )
+            from ..recaps.scope import register_task
+            await register_task(conn, dict(row), parent_run_id=recap_parent_run_id)
     try:
         await dispatch(row["id"], token)
     except Exception:
@@ -350,6 +354,8 @@ async def _new_round(conn, user, task: dict, *, kind: str, directive: str, item_
         task["id"], user.id, n, kind, request_id, directive,
         json.dumps({"item_ids": [str(i) for i in item_ids]}), cost,
     )
+    from ..recaps.scope import register_task
+    await register_task(conn, {**task, "current_round": n})
     if kind == "document":
         made = await document.write(conn, task, item_ids=item_ids, today=date.today())
         await conn.execute(

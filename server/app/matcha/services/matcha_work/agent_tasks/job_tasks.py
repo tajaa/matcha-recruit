@@ -198,7 +198,8 @@ async def insert_pointer(conn, search: Any, *, origin: tuple[UUID | None, UUID |
 
 
 async def start(user, company_id: UUID, body, brief: dict, *,
-                origin: tuple[UUID | None, UUID | None] | None = None) -> dict:
+                origin: tuple[UUID | None, UUID | None] | None = None,
+                recap_parent_run_id: UUID | None = None) -> dict:
     """Start the job search a task asked for; returns its task. `body`:
     `AgentTaskCreate`. Raises what `create_search` raises (plan, allowance,
     consent, a search already running)."""
@@ -213,7 +214,8 @@ async def start(user, company_id: UUID, body, brief: dict, *,
                              base_floor=brief["base_floor"]),
         use_resume=brief["use_resume"], consent_version=body.consent_version,
     )
-    search = await job_enqueue.create_search(user, company_id, create, origin=origin)
+    search = await job_enqueue.create_search(user, company_id, create, origin=origin,
+                                            **({"recap_parent_run_id": recap_parent_run_id} if recap_parent_run_id else {}))
     return await service.task_for_search(user.id, UUID(search["id"]))
 
 

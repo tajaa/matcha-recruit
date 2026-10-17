@@ -31,10 +31,15 @@ def run_assistant(run_id: str) -> None:
 # to AGENT_BROWSER_QUEUE, its result read back by the run. The view bounds
 # itself (VIEW_SECONDS + STORE_SECONDS); these limits are the backstop.
 @celery_app.task(name="app.workers.tasks.assistant.view_page", soft_time_limit=90, time_limit=120)
-def view_page(url: str, prefix: str) -> dict:
+def view_page(url: str, prefix: str, recap_run_id: str | None = None) -> dict:
     from app.matcha.services.matcha_work.agent_runtime.abilities.screenshots import view_and_store
 
-    return asyncio.run(view_and_store(url, prefix))
+    from app.matcha.services.matcha_work.recaps.scope import current_run
+    token = current_run.set(UUID(recap_run_id) if recap_run_id else None)
+    try:
+        return asyncio.run(view_and_store(url, prefix))
+    finally:
+        current_run.reset(token)
 
 
 async def _run(run_id: UUID) -> None:

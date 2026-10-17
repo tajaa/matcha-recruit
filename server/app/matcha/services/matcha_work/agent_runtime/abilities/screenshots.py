@@ -95,33 +95,36 @@ async def _view_in_browser(url: str) -> tuple[dict, bytes | None]:
     allowed = frozenset({_site(host)})
     async with open_page(BrowsePolicy(allowed_hosts=allowed)) as session:
         page = session.page
-        try:
-            response = await page.goto(url, wait_until="domcontentloaded", timeout=_GOTO_MS)
-        except Exception:
+        from ...recaps.capture import window
+        async with window(page) as capture:
+            try:
+                response = await page.goto(url, wait_until="domcontentloaded", timeout=_GOTO_MS)
+            except Exception:
+                if session.blocked_navigations:
+                    # The guard aborted the navigation, so goto only says "blocked by client".
+                    raise _off_site(session.blocked_navigations[0])
+                raise
+            # The navigation guard never sees an HTTP redirect (Playwright routes
+            # only a redirect's first request), so where the page ended up is
+            # checked here: after the load, and again once it has settled.
+            if not host_allowed(page.url, allowed):
+                raise _off_site(page.url)
+            if response is not None and response.status >= 400:
+                raise ViewRefused(f"HTTP {response.status}")
+            try:
+                await page.wait_for_load_state("networkidle", timeout=_SETTLE_MS)
+            except Exception:  # noqa: BLE001
+                pass  # a page that never goes quiet (polling, ads) still shows something
+            if not host_allowed(page.url, allowed):
+                raise _off_site(page.url)
+            title = await page.title()
+            text = await page.inner_text("body")
+            shot = await page.screenshot(type="png", full_page=False)
+            out = {"url": page.url, "title": (title or "")[:200], "text": _page_text(text)}
             if session.blocked_navigations:
-                # The guard aborted the navigation, so goto only says "blocked by client".
-                raise _off_site(session.blocked_navigations[0])
-            raise
-        # The navigation guard never sees an HTTP redirect (Playwright routes
-        # only a redirect's first request), so where the page ended up is
-        # checked here: after the load, and again once it has settled.
-        if not host_allowed(page.url, allowed):
-            raise _off_site(page.url)
-        if response is not None and response.status >= 400:
-            raise ViewRefused(f"HTTP {response.status}")
-        try:
-            await page.wait_for_load_state("networkidle", timeout=_SETTLE_MS)
-        except Exception:  # noqa: BLE001
-            pass  # a page that never goes quiet (polling, ads) still shows something
-        if not host_allowed(page.url, allowed):
-            raise _off_site(page.url)
-        title = await page.title()
-        text = await page.inner_text("body")
-        shot = await page.screenshot(type="png", full_page=False)
-        out = {"url": page.url, "title": (title or "")[:200], "text": _page_text(text)}
-        if session.blocked_navigations:
-            out["note"] = "The page tried to leave its own site; that was blocked."
-        return out, shot
+                out["note"] = "The page tried to leave its own site; that was blocked."
+            capture.accepted = True
+            return out, shot
 
 
 async def _store_screenshot(png: bytes, prefix: str) -> str | None:
@@ -160,11 +163,18 @@ def browser_here() -> bool:
     return consumes_queue(os.getenv(BROWSER_QUEUE_ENV))
 
 
+def _recap_worker_scope() -> dict:
+    from ...recaps import scope, settings
+    run_id = scope.current_run.get()
+    return {"recap_run_id": str(run_id)} if settings.enabled() and run_id else {}
+
+
 async def _view_on_browser_worker(url: str, prefix: str) -> dict:
     from app.workers.tasks.assistant import view_page as view_task
 
     pending = view_task.apply_async(
         args=[url, prefix], queue=os.getenv(BROWSER_QUEUE_ENV),
+        **({"kwargs": _recap_worker_scope()} if _recap_worker_scope() else {}),
         # Still queued by then, it is dropped rather than run for nobody.
         expires=QUEUE_SECONDS,
     )

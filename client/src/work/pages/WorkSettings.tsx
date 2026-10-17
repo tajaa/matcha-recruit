@@ -6,6 +6,7 @@ import { updateWorkProfile, uploadWorkAvatar } from '../api/account'
 import { ESPRESSO_THEMES, setEspressoTheme, useEspressoTheme } from '../utils/espressoTheme'
 import { useWorkSurface } from '../routes/WorkSurfaceContext'
 import { avatarValidationError } from '../utils/avatarValidation'
+import RecapPreferences from '../components/recaps/RecapPreferences'
 import AiConnectorsSettings from '../components/shell/AiConnectorsSettings'
 import PaymentCardsSettings from '../components/shell/PaymentCardsSettings'
 import ShippingAddressesSettings from '../components/shell/ShippingAddressesSettings'
@@ -87,6 +88,7 @@ export default function WorkSettings() {
     <h1 className="text-2xl font-semibold text-w-text">Settings</h1>
     {me && <AccountSettings me={me} refresh={refresh} />}
     {surface === 'espresso' && <AppearanceSettings />}
+    {surface === 'espresso' && me && <RecapPreferences key={me.user.id} />}
     {me && <AiConnectorsSettings />}
     {/* Purchases are internal-only in v1; the server decides who (admins plus
         an allowlist). Everyone else sees neither section. */}
