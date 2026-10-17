@@ -3,6 +3,8 @@ import RequireRole from '../components/auth/RequireRole'
 import AppLayout from '../layouts/AppLayout'
 import AdminLayout from '../layouts/AdminLayout'
 import AdminSidebar from '../components/sidebars/AdminSidebar'
+import { ADMIN_AREAS } from '../components/admin/adminNavigation'
+import AdminCategoryPage from '../pages/admin/AdminCategoryPage'
 import Companies from '../pages/admin/customers/Companies'
 import TestAccounts from '../pages/admin/customers/TestAccounts'
 import AdminCompanyDetail from '../pages/admin/customers/company-detail'
@@ -57,7 +59,8 @@ export default function AdminRoutes() {
       <Routes>
       <Route element={<AppLayout sidebar={<AdminSidebar />} logoLabel="Matcha Admin" variant="admin" />}>
       <Route element={<AdminLayout />}>
-        <Route index element={<Navigate to="customers" replace />} />
+        <Route index element={<Navigate to={ADMIN_AREAS[0].to} replace />} />
+        <Route path="areas/:category" element={<AdminCategoryPage />} />
         <Route path="updates" element={<Updates />} />
         <Route path="customers" element={<Customers />} />
         <Route path="gap-analysis" element={<GapAnalysisHome />} />

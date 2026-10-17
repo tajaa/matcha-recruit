@@ -130,22 +130,24 @@ small section headings, zinc cards and fields, restrained emerald selection,
 and normal page scrolling. Pages do not add their own outer width/padding or
 fixed-height console frame.
 
-- `components/admin/adminNavigation.ts` defines seven areas and fifteen
-  workspaces. Related tools are tabs of Accounts, Product workspaces, Catalog,
-  Compliance data, Reference data, Content, Analytics, or Errors. Keep tool URLs
-  stable: navigation matches both their roots and detail/composer descendants.
-- `AdminLayout` supplies a workspace heading once. `AdminPageContext` makes its
-  routed tool headings sections; standalone pages retain a page heading.
+- `components/admin/adminNavigation.ts` defines seven sidebar categories and
+  all thirty tool destinations. Six categories open directories at
+  `/admin/areas/:category`; Updates opens its own page directly. Every tool has
+  a named directory card and its own page, heading, and existing URL. Do not
+  hide tools inside shared workspace tabs.
+- `AdminLayout` supplies the centered canvas and category/tool breadcrumbs.
+  Each routed tool owns its page heading. Sidebar category links always open
+  their directory, including when one of that category's tools is active.
 - Use `AdminUI` for fields, native selects, textareas, buttons, cards, section
   headings, metrics, filter bars, and tables. These forward native props and
   keep validation, labels, events, refs, and table spans intact. Keep layout and
   meaningful status colors at call sites; shared components own chrome.
-- Use `AdminTabs` for local views and `AdminRouteTabs` for URL-backed views.
+- Use `AdminTabs` for local views within an individual tool.
   Do not add another pill/tab style. `AdminWorkspace` composes ordinary sections
   or list/detail columns on the same open canvas.
 - The browser/server error tools share `ErrorConsole`; their containers retain
   separate API contracts, filters, copy payloads, and resolution actions.
-- Pricing is only in Catalog → Pricing, including Compliance, add-ons, Tell-Us,
+- Pricing is in Products & sales → Pricing, including Compliance, add-ons, Tell-Us,
   and Espresso. Signup Links keeps comped/bespoke invitations.
 - Page implementation lives in the domain folders listed above; cross-cutting
   display components stay in `components/admin`. The HTTP/auth helper, backend

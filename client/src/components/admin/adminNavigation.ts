@@ -1,134 +1,100 @@
-import { Activity, Boxes, Megaphone, Rocket, Settings, ShieldCheck, Users } from 'lucide-react'
+import {
+  Activity, AlertOctagon, AlertTriangle, BarChart3, BookOpen, Boxes, Building2,
+  Calculator, Cog, Cpu, Database, DollarSign, FileText, HeartHandshake,
+  Image as ImageIcon, LayoutTemplate, Leaf, Mail, Megaphone, Radio, Rocket,
+  Settings, ShieldCheck, Sparkles, ToggleRight, Users,
+} from 'lucide-react'
 import type { NavIcon, NavItem } from '../sidebars/SidebarShell'
 
-type AdminTabLink = { to: string; label: string }
-type AdminWorkspaceLink = AdminTabLink & { description?: string; tabs?: AdminTabLink[] }
-type AdminArea = { label: string; icon: NavIcon; pages: AdminWorkspaceLink[] }
+type AdminPageLink = { to: string; label: string; description: string; icon: NavIcon }
+export type AdminArea = AdminPageLink & { pages: AdminPageLink[] }
 
-// Areas contain workspaces, not a second flat list of every tool. Workspace
-// tabs retain their original URLs so bookmarks, composers and detail links work.
+// Categories are directories, and every tool remains its own page. This one
+// inventory drives the sidebar, directory cards, and tool breadcrumbs.
 export const ADMIN_AREAS: AdminArea[] = [
   {
-    label: 'Customers', icon: Users,
+    to: '/admin/areas/customers', label: 'Customers', icon: Users,
+    description: 'Manage customers, companies, and accounts across each product.',
     pages: [
-      {
-        to: '/admin/customers', label: 'Accounts',
-        description: 'Customer lifecycle, business approvals, test accounts, and feature access.',
-        tabs: [
-          { to: '/admin/customers', label: 'Customers' },
-          { to: '/admin/companies', label: 'Businesses' },
-          { to: '/admin/test-accounts', label: 'Test accounts' },
-          { to: '/admin/features', label: 'Feature access' },
-        ],
-      },
-      {
-        to: '/admin/matcha-work', label: 'Product workspaces',
-        description: 'Manage Matcha Work, operations, and Gummfit accounts in one place.',
-        tabs: [
-          { to: '/admin/matcha-work', label: 'Matcha Work' },
-          { to: '/admin/matcha-ops', label: 'Matcha Ops' },
-          { to: '/admin/cappe', label: 'Gummfit' },
-          { to: '/admin/cappe-creators', label: 'Creators' },
-        ],
-      },
-      { to: '/admin/fractional-hr', label: 'Fractional HR' },
+      { to: '/admin/customers', label: 'Customers', icon: Users, description: 'Review customer accounts, registrations, and onboarding.' },
+      { to: '/admin/companies', label: 'Companies', icon: Building2, description: 'Manage businesses, approvals, and company details.' },
+      { to: '/admin/test-accounts', label: 'Test Accounts', icon: ShieldCheck, description: 'Create and manage test customers and companies.' },
+      { to: '/admin/matcha-work', label: 'Matcha Work', icon: Sparkles, description: 'Manage personal and business AI workspace accounts.' },
+      { to: '/admin/matcha-ops', label: 'Matcha Ops', icon: Radio, description: 'Manage operations accounts and product access.' },
+      { to: '/admin/cappe', label: 'Cappe', icon: LayoutTemplate, description: 'Manage Gummfit websites, brands, and marketplace activity.' },
+      { to: '/admin/cappe-creators', label: 'Gummfit Creators', icon: Users, description: 'Review creator applications, social accounts, and payouts.' },
+      { to: '/admin/fractional-hr', label: 'Fractional HR', icon: HeartHandshake, description: 'Manage fractional HR clients and their service workspaces.' },
     ],
   },
   {
-    label: 'Products & sales', icon: Boxes,
+    to: '/admin/areas/products-sales', label: 'Products & sales', icon: Boxes,
+    description: 'Configure products and pricing, create signup links, and manage sales.',
     pages: [
-      {
-        to: '/admin/products', label: 'Catalog',
-        description: 'Product bundles, checkout pricing, and customer signup links.',
-        tabs: [
-          { to: '/admin/products', label: 'Products' },
-          { to: '/admin/pricing', label: 'Pricing' },
-          { to: '/admin/matcha-lite', label: 'Signup links' },
-        ],
-      },
-      { to: '/admin/gap-analysis', label: 'Gap analysis' },
-      { to: '/admin/deal-flow', label: 'Deal flow' },
+      { to: '/admin/products', label: 'Products', icon: Boxes, description: 'Build product bundles, features, and signup experiences.' },
+      { to: '/admin/pricing', label: 'Pricing', icon: DollarSign, description: 'Set product prices, add-ons, and subscription plans.' },
+      { to: '/admin/matcha-lite', label: 'Signup Links', icon: Leaf, description: 'Create customer invitations and bespoke signup links.' },
+      { to: '/admin/gap-analysis', label: 'Gap Analysis', icon: Sparkles, description: 'Run company assessments and review compliance gaps.' },
+      { to: '/admin/deal-flow', label: 'Deal Flow', icon: Calculator, description: 'Manage sales opportunities, proposals, and deal progress.' },
     ],
   },
   {
-    label: 'Compliance', icon: ShieldCheck,
+    to: '/admin/areas/compliance', label: 'Compliance', icon: ShieldCheck,
+    description: 'Manage company compliance and maintain the shared research and reference data.',
     pages: [
-      {
-        to: '/admin/studio', label: 'Compliance data',
-        description: 'Research, maintain, and validate the shared compliance catalog.',
-        tabs: [
-          { to: '/admin/studio', label: 'Studio' },
-          { to: '/admin/jurisdiction-data', label: 'Data quality & policies' },
-        ],
-      },
-      { to: '/admin/compliance-mgmt', label: 'Company compliance' },
-      {
-        to: '/admin/payer-data', label: 'Reference data',
-        description: 'Payer coverage policies and workers’ compensation rate sources.',
-        tabs: [
-          { to: '/admin/payer-data', label: 'Payers' },
-          { to: '/admin/wc-rate-data', label: 'WC rates' },
-        ],
-      },
+      { to: '/admin/compliance-mgmt', label: 'Compliance Management', icon: ShieldCheck, description: 'Manage company locations and compliance requirements.' },
+      { to: '/admin/studio', label: 'Compliance Studio', icon: Sparkles, description: 'Research jurisdictions, maintain coverage, and run evaluations.' },
+      { to: '/admin/jurisdiction-data', label: 'Compliance Library', icon: BookOpen, description: 'Browse policies, categories, sources, and data quality.' },
+      { to: '/admin/payer-data', label: 'Payer Data', icon: FileText, description: 'Maintain payer coverage policies and source documents.' },
+      { to: '/admin/wc-rate-data', label: 'WC Rate Data', icon: Database, description: 'Maintain workers’ compensation rates and reference sources.' },
     ],
   },
   {
-    label: 'Marketing', icon: Megaphone,
-    pages: [{
-      to: '/admin/blogs', label: 'Content',
-      description: 'Publish articles, manage newsletters, and configure landing media.',
-      tabs: [
-        { to: '/admin/blogs', label: 'Blog' },
-        { to: '/admin/newsletter', label: 'Newsletter' },
-        { to: '/admin/landing-media', label: 'Landing media' },
-      ],
-    }],
-  },
-  {
-    label: 'Monitoring', icon: Activity,
+    to: '/admin/areas/marketing', label: 'Marketing', icon: Megaphone,
+    description: 'Publish articles, send newsletters, and manage public-facing media.',
     pages: [
-      {
-        to: '/admin/usage', label: 'Analytics',
-        description: 'Product activity, site traffic, and AI consumption.',
-        tabs: [
-          { to: '/admin/usage', label: 'Product usage' },
-          { to: '/admin/traffic', label: 'Site traffic' },
-          { to: '/admin/ai-usage', label: 'AI usage' },
-        ],
-      },
-      {
-        to: '/admin/server-errors', label: 'Errors',
-        description: 'Investigate browser and backend errors, inspect reports, and track resolution.',
-        tabs: [
-          { to: '/admin/server-errors', label: 'Server' },
-          { to: '/admin/client-errors', label: 'Browser' },
-        ],
-      },
+      { to: '/admin/blogs', label: 'Blog', icon: BookOpen, description: 'Write, edit, and publish blog articles.' },
+      { to: '/admin/newsletter', label: 'Newsletter', icon: Mail, description: 'Create campaigns, manage subscribers, and review delivery.' },
+      { to: '/admin/landing-media', label: 'Landing Media', icon: ImageIcon, description: 'Manage the images and videos used on landing pages.' },
     ],
   },
   {
-    label: 'Platform', icon: Settings,
+    to: '/admin/areas/monitoring', label: 'Monitoring', icon: Activity,
+    description: 'Review traffic and usage, track AI consumption, and investigate errors.',
     pages: [
-      { to: '/admin/settings', label: 'Settings' },
-      { to: '/admin/automation', label: 'Automation' },
+      { to: '/admin/traffic', label: 'Traffic', icon: BarChart3, description: 'Review site visits, traffic sources, and visitor activity.' },
+      { to: '/admin/usage', label: 'Usage', icon: Activity, description: 'Monitor product activity and customer usage.' },
+      { to: '/admin/ai-usage', label: 'AI Usage', icon: Cpu, description: 'Track model activity, token consumption, and AI costs.' },
+      { to: '/admin/client-errors', label: 'Client Errors', icon: AlertOctagon, description: 'Investigate browser error reports and track resolution.' },
+      { to: '/admin/server-errors', label: 'Server Errors', icon: AlertTriangle, description: 'Investigate backend failures and track resolution.' },
     ],
   },
-  { label: 'Updates', icon: Rocket, pages: [{ to: '/admin/updates', label: 'Updates' }] },
+  {
+    to: '/admin/areas/platform', label: 'Platform', icon: Settings,
+    description: 'Configure the platform, manage business features, and monitor automation.',
+    pages: [
+      { to: '/admin/features', label: 'Business Features', icon: ToggleRight, description: 'Manage company feature access, grants, and beta availability.' },
+      { to: '/admin/settings', label: 'Settings', icon: Settings, description: 'Configure models, integrations, and platform-wide defaults.' },
+      { to: '/admin/automation', label: 'Automation', icon: Cog, description: 'Manage scheduled jobs and inspect their recent runs.' },
+    ],
+  },
+  {
+    to: '/admin/updates', label: 'Updates', icon: Rocket,
+    description: 'Recent product changes and platform updates.',
+    pages: [{ to: '/admin/updates', label: 'Updates', icon: Rocket, description: 'Read recent product changes and platform updates.' }],
+  },
 ]
 
-export function findAdminPage(pathname: string): { area: AdminArea; page: AdminWorkspaceLink; tab: AdminTabLink } | undefined {
-  return ADMIN_AREAS.flatMap((area) => area.pages.flatMap((page) =>
-    (page.tabs ?? [page]).map((tab) => ({ area, page, tab })),
-  ))
-    .filter(({ tab }) => pathname === tab.to || pathname.startsWith(`${tab.to}/`))
-    .sort((a, b) => b.tab.to.length - a.tab.to.length)[0]
+export function findAdminPage(pathname: string): { area: AdminArea; page: AdminPageLink } | undefined {
+  return ADMIN_AREAS.flatMap((area) => area.pages.map((page) => ({ area, page })))
+    .filter(({ page }) => pathname === page.to || pathname.startsWith(`${page.to}/`))
+    .sort((a, b) => b.page.to.length - a.page.to.length)[0]
 }
 
-export function adminSidebarItems(pathname: string): NavItem[] {
-  const active = findAdminPage(pathname)
+export function adminSidebarItems(): NavItem[] {
   return ADMIN_AREAS.map((area) => ({
     label: area.label,
     icon: area.icon,
-    to: active?.area === area ? active.tab.to : area.pages[0].to,
+    to: area.to,
+    activePaths: area.pages.map((page) => page.to),
   }))
 }

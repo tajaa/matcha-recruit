@@ -1,5 +1,4 @@
 import type { ComponentProps, ReactNode } from 'react'
-import { Link } from 'react-router-dom'
 
 const itemClass = 'inline-flex shrink-0 items-center justify-center gap-2 border-b-2 px-1 py-2.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 disabled:pointer-events-none disabled:opacity-50'
 const selection = (active: boolean) => active ? 'border-emerald-500 text-zinc-100' : 'border-transparent text-zinc-500 hover:border-zinc-600 hover:text-zinc-200'
@@ -26,19 +25,5 @@ export function AdminTabs<T extends string>({ options, value, onChange, classNam
     <AdminTabBar role="group" aria-label={label} className={className}>
       {options.map((option) => <AdminTab key={option.value} active={value === option.value} disabled={option.disabled} onClick={() => onChange(option.value)}>{option.label}</AdminTab>)}
     </AdminTabBar>
-  )
-}
-
-export function AdminRouteTabs({ links, activeTo, label }: {
-  links: readonly { to: string; label: string }[]
-  activeTo: string
-  label: string
-}) {
-  return (
-    <nav aria-label={label}>
-      <AdminTabBar>
-        {links.map((link) => <Link key={link.to} to={link.to} aria-current={activeTo === link.to ? 'page' : undefined} className={`${itemClass} ${selection(activeTo === link.to)}`}>{link.label}</Link>)}
-      </AdminTabBar>
-    </nav>
   )
 }

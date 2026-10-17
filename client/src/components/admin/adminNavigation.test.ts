@@ -3,7 +3,7 @@ import { ADMIN_AREAS, adminSidebarItems, findAdminPage } from './adminNavigation
 
 describe('admin navigation', () => {
   it('keeps every existing sidebar destination in exactly one area', () => {
-    const destinations = ADMIN_AREAS.flatMap((area) => area.pages.flatMap((page) => (page.tabs ?? [page]).map((tab) => tab.to)))
+    const destinations = ADMIN_AREAS.flatMap((area) => area.pages.map((page) => page.to))
     expect(new Set(destinations).size).toBe(destinations.length)
     expect(destinations.map((to) => to.replace('/admin/', '')).sort()).toEqual([
       'updates', 'customers', 'companies', 'test-accounts', 'matcha-work',
@@ -13,8 +13,9 @@ describe('admin navigation', () => {
       'blogs', 'newsletter', 'landing-media', 'traffic', 'usage', 'client-errors',
       'server-errors', 'ai-usage', 'features', 'settings',
     ].sort())
-    expect(adminSidebarItems('/admin/settings')).toHaveLength(7)
-    expect(ADMIN_AREAS.flatMap((area) => area.pages)).toHaveLength(15)
+    expect(adminSidebarItems()).toHaveLength(7)
+    expect(ADMIN_AREAS.flatMap((area) => area.pages)).toHaveLength(30)
+    expect(new Set(ADMIN_AREAS.map((area) => area.to)).size).toBe(7)
   })
 
   it.each([
@@ -26,11 +27,21 @@ describe('admin navigation', () => {
     ['/admin/newsletter/composer', 'Marketing', '/admin/newsletter'],
     ['/admin/blogs/composer', 'Marketing', '/admin/blogs'],
     ['/admin/cappe-creators', 'Customers', '/admin/cappe-creators'],
+    ['/admin/features', 'Platform', '/admin/features'],
   ])('selects the owning page for %s', (pathname, areaLabel, to) => {
     const active = findAdminPage(pathname)
     expect(active?.area.label).toBe(areaLabel)
-    expect(active?.tab.to).toBe(to)
-    expect(adminSidebarItems(pathname).find((item) => item.label === areaLabel)?.to).toBe(to)
+    expect(active?.page.to).toBe(to)
+    const sidebarItem = adminSidebarItems().find((item) => item.label === areaLabel)
+    expect(sidebarItem?.to).toBe(active?.area.to)
+    expect(sidebarItem?.activePaths).toContain(to)
+  })
+
+  it('links each category to its directory instead of choosing a child tool', () => {
+    expect(adminSidebarItems().map((item) => item.to)).toEqual([
+      '/admin/areas/customers', '/admin/areas/products-sales', '/admin/areas/compliance',
+      '/admin/areas/marketing', '/admin/areas/monitoring', '/admin/areas/platform', '/admin/updates',
+    ])
   })
 
   it.each(['/admin', '/app/settings', '/admin/companies-unknown', '/admin/newsletters'])('does not match a partial or unrelated path: %s', (pathname) => {
