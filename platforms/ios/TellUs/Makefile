@@ -39,7 +39,7 @@ run:
 run-prod:
 	SIM="$(SIM)" ./run-prod.sh
 
-# Bump build number, archive, and upload to App Store Connect / TestFlight.
+# Archive and upload to App Store Connect / TestFlight (ASC assigns the build number).
 # Requires APPLE_API_KEY_ID / APPLE_API_ISSUER_ID / APPLE_API_KEY_PATH — see
 # release-appstore.sh's header for one-time setup.
 release:
