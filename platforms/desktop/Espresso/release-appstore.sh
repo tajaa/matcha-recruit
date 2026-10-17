@@ -1,8 +1,15 @@
 #!/usr/bin/env bash
 # Build, archive, and upload Matcha to App Store Connect.
 #
-# Auto-bumps CURRENT_PROJECT_VERSION (build number) before archiving so every
-# upload gets a fresh number — App Store Connect rejects duplicates.
+# Build numbers come from App Store Connect, not the pbxproj: the upload runs
+# with manageAppVersionAndBuildNumber, so Xcode gives each upload the next free
+# build number (archives built at CURRENT_PROJECT_VERSION 97 went up as builds
+# 125–129). The script used to bump CURRENT_PROJECT_VERSION and commit it
+# before archiving. The Espresso target never read the number it bumped, and
+# the commit landed on whatever branch was checked out — usually local main,
+# which was then one commit ahead of origin, so the next `git pull` after any
+# merge diverged. Nothing is bumped or committed now; release.log records the
+# number App Store Connect assigned.
 # Surfaces errors with context so you can fix and re-run.
 #
 # One-time setup (out of band):
@@ -27,20 +34,17 @@
 # Optional:
 #   APPLE_TEAM_ID         (default: 5D6TJVCPBK from pbxproj)
 #   BUNDLE_ID             (default: com.matchawork.app from pbxproj)
-#   MARKETING_VERSION     If set, also overwrites MARKETING_VERSION
-#                         (e.g. 1.2.3). Otherwise only build number bumps.
+#   MARKETING_VERSION     If set, overwrites MARKETING_VERSION (e.g. 1.2.3)
+#                         in the pbxproj before archiving. The edit is left
+#                         uncommitted for you to land through a PR.
 #
 # Usage:
-#   ./release-appstore.sh                 bump build, archive, upload
-#   ./release-appstore.sh --no-upload     bump + archive only (test the build)
-#   ./release-appstore.sh --no-bump       skip the build-number bump (re-upload
-#                                         the same number — only useful if a
-#                                         prior upload failed mid-flight)
-#   ./release-appstore.sh --status        show pbxproj build + last 20 attempts
-#   ./release-appstore.sh --set-build N   force pbxproj to N (recover from drift
-#                                         when pbxproj falls behind ASC because
-#                                         a previous archive failed and rolled
-#                                         back). Next run bumps from N.
+#   ./release-appstore.sh                 archive, upload
+#   ./release-appstore.sh --no-upload     archive only (test the build)
+#   ./release-appstore.sh --status        show the last 20 attempts
+#
+# --no-bump and --set-build N are still accepted and do nothing: App Store
+# Connect numbers every upload, so there is no local build number to manage.
 
 set -euo pipefail
 
@@ -59,7 +63,10 @@ RELEASE_LOG="$PROJECT_DIR/release.log"
 
 # Persistent attempt log — append-only history of every release attempt with
 # build number + archive/upload status. Survives temp-dir cleanup so you can
-# always see why a TestFlight number is missing.
+# always see why a TestFlight number is missing. The build column is the number
+# App Store Connect assigned ("-" when nothing was uploaded). Lines before
+# 2026-10-17 show the pbxproj bump instead, which from the July Werk → Espresso
+# rename until then was not the number the app carried.
 log_attempt() {
     local build="$1" archive="$2" upload="$3" note="${4:-}"
     local ts
@@ -71,35 +78,21 @@ log_attempt() {
 RED=$'\033[0;31m'; YELLOW=$'\033[0;33m'; GREEN=$'\033[0;32m'; DIM=$'\033[2m'; NC=$'\033[0m'
 
 NO_UPLOAD=false
-NO_BUMP=false
 SHOW_STATUS=false
-SET_BUILD=""
+NO_BUILD_NUMBERS="${DIM}App Store Connect assigns the build number at upload; there is no local build number to manage${NC}"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --no-upload) NO_UPLOAD=true; shift ;;
-        --no-bump)   NO_BUMP=true; shift ;;
+        --no-bump)   echo "--no-bump does nothing now: $NO_BUILD_NUMBERS"; shift ;;
         --status)    SHOW_STATUS=true; shift ;;
-        --set-build) SET_BUILD="$2"; shift 2 ;;
-        --set-build=*) SET_BUILD="${1#*=}"; shift ;;
+        --set-build|--set-build=*)
+            echo "--set-build does nothing now: $NO_BUILD_NUMBERS"; exit 0 ;;
         -h|--help)   grep -E '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *)           echo "${RED}unknown arg:${NC} $1"; exit 1 ;;
     esac
 done
 
-if [[ -n "$SET_BUILD" ]]; then
-    if ! [[ "$SET_BUILD" =~ ^[0-9]+(\.[0-9]+)*$ ]]; then
-        echo "${RED}error:${NC} --set-build value must be numeric (e.g. 18)"
-        exit 1
-    fi
-    OLD=$(grep -oE 'CURRENT_PROJECT_VERSION = [0-9]+(\.[0-9]+)*' "$PBXPROJ" | head -1 | awk '{print $3}')
-    sed -i '' "s/CURRENT_PROJECT_VERSION = ${OLD};/CURRENT_PROJECT_VERSION = ${SET_BUILD};/g" "$PBXPROJ"
-    echo "${GREEN}build number:${NC} ${OLD} → ${SET_BUILD} (manual override)"
-    echo "${DIM}use this to recover from pbxproj/ASC drift; next run will bump from ${SET_BUILD}${NC}"
-    exit 0
-fi
-
 if $SHOW_STATUS; then
-    echo "${DIM}pbxproj build:${NC} $(grep -oE 'CURRENT_PROJECT_VERSION = [0-9]+(\.[0-9]+)*' "$PBXPROJ" | head -1 | awk '{print $3}')"
     if [[ -f "$RELEASE_LOG" ]]; then
         echo "${DIM}last 20 release attempts (release.log):${NC}"
         tail -20 "$RELEASE_LOG" | sed 's/^/  /'
@@ -136,51 +129,40 @@ if ! $NO_UPLOAD; then
     fi
 fi
 
-# ─── Bump build number ────────────────────────────────────────────────────
-# Read all CURRENT_PROJECT_VERSION occurrences in pbxproj (Debug + Release
-# configs share a value usually, but we bump every match so they stay synced).
-BUMP_DONE=false
+# ─── Marketing version ────────────────────────────────────────────────────
+# Only when MARKETING_VERSION is set. Rolled back if the archive fails;
+# otherwise left in the working tree for you to commit.
+MARKETING_DONE=false
 PBXPROJ_BACKUP=""
-OLD_VERSION=""
-NEW_VERSION=""
 
-bump_build_number() {
-    OLD_VERSION=$(grep -oE 'CURRENT_PROJECT_VERSION = [0-9]+(\.[0-9]+)*' "$PBXPROJ" | head -1 | awk '{print $3}')
-    if [[ -z "$OLD_VERSION" ]]; then
-        echo "${RED}error:${NC} no CURRENT_PROJECT_VERSION found in pbxproj"
-        exit 1
-    fi
-    # Bump the last numeric component (e.g. 2.1 → 2.2, 3 → 4)
-    local prefix last
-    prefix="${OLD_VERSION%.*}"
-    last="${OLD_VERSION##*.}"
-    if [[ "$prefix" == "$last" ]]; then
-        NEW_VERSION=$(( last + 1 ))
-    else
-        NEW_VERSION="${prefix}.$((last + 1))"
-    fi
+set_marketing_version() {
+    [[ -z "${MARKETING_VERSION:-}" ]] && return
+    local old
+    old=$(grep -oE 'MARKETING_VERSION = [^;]+' "$PBXPROJ" | head -1 | awk -F' = ' '{print $2}')
     PBXPROJ_BACKUP="$(mktemp -t matcha-pbxproj.XXXXXX)"
     cp "$PBXPROJ" "$PBXPROJ_BACKUP"
-    sed -i '' "s/CURRENT_PROJECT_VERSION = ${OLD_VERSION};/CURRENT_PROJECT_VERSION = ${NEW_VERSION};/g" "$PBXPROJ"
-    BUMP_DONE=true
-    echo "${GREEN}build number:${NC} ${OLD_VERSION} → ${NEW_VERSION}"
+    sed -i '' "s/MARKETING_VERSION = ${old};/MARKETING_VERSION = ${MARKETING_VERSION};/g" "$PBXPROJ"
+    MARKETING_DONE=true
+    echo "${GREEN}marketing version:${NC} ${old} → ${MARKETING_VERSION}"
 }
 
-bump_marketing_version() {
-    [[ -z "${MARKETING_VERSION:-}" ]] && return
-    local old new
-    old=$(grep -oE 'MARKETING_VERSION = [^;]+' "$PBXPROJ" | head -1 | awk -F' = ' '{print $2}')
-    new="$MARKETING_VERSION"
-    sed -i '' "s/MARKETING_VERSION = ${old};/MARKETING_VERSION = ${new};/g" "$PBXPROJ"
-    echo "${GREEN}marketing version:${NC} ${old} → ${new}"
-}
-
-rollback_bump() {
-    if $BUMP_DONE && [[ -f "$PBXPROJ_BACKUP" ]]; then
+rollback_marketing_version() {
+    if $MARKETING_DONE && [[ -f "$PBXPROJ_BACKUP" ]]; then
         cp "$PBXPROJ_BACKUP" "$PBXPROJ"
-        echo "${YELLOW}rolled back build number to ${OLD_VERSION}${NC}"
+        echo "${YELLOW}rolled back marketing version${NC}"
     fi
     [[ -n "$PBXPROJ_BACKUP" ]] && rm -f "$PBXPROJ_BACKUP"
+}
+
+# The build number App Store Connect gave this archive's upload: xcodebuild
+# writes it into the archive's Distributions entry. Empty if none was given.
+uploaded_build_number() {
+    local plist="$ARCHIVE_PATH/Info.plist" i=0 n="" v
+    while /usr/libexec/PlistBuddy -c "Print :Distributions:${i}" "$plist" >/dev/null 2>&1; do
+        v=$(/usr/libexec/PlistBuddy -c "Print :Distributions:${i}:uploadedBuildNumber" "$plist" 2>/dev/null) && n="$v"
+        i=$((i + 1))
+    done
+    echo "$n"
 }
 
 # ─── Archive ──────────────────────────────────────────────────────────────
@@ -212,6 +194,7 @@ do_archive() {
     <key>provisioningProfiles</key>
     <dict><key>${BUNDLE_ID_OVERRIDE:-com.matchawork.app}</key><string>${APPSTORE_PROFILE_NAME:-Espresso Mac App Store}</string></dict>
     <key>uploadSymbols</key>    <true/>
+    <key>manageAppVersionAndBuildNumber</key> <true/>
 </dict>
 </plist>
 PLIST
@@ -278,7 +261,6 @@ do_upload() {
         echo "${RED}upload failed${NC}"
         echo "${DIM}common causes:${NC}"
         echo "  - bundle id not registered in App Store Connect"
-        echo "  - build number ($NEW_VERSION) already used (re-run normally to bump again)"
         echo "  - invalid App Store Connect API key (check APPLE_API_KEY_ID / ISSUER_ID / PATH)"
         echo "  - cert / provisioning-profile mismatch"
         grep -E ": (error|fatal error):|error:" "$upload_log" | head -20 | sed 's/^/  /' || tail -40 "$upload_log" | sed 's/^/  /'
@@ -299,43 +281,24 @@ do_upload() {
 }
 
 # ─── Main ─────────────────────────────────────────────────────────────────
-trap 'rollback_bump' ERR
+trap 'rollback_marketing_version' ERR
 
-if ! $NO_BUMP; then
-    bump_build_number
-    bump_marketing_version
-fi
+set_marketing_version
 
 if ! do_archive; then
-    log_attempt "$NEW_VERSION" "FAIL" "skipped" "archive failed — rolled back to $OLD_VERSION"
-    rollback_bump
+    log_attempt "-" "FAIL" "skipped" "archive failed"
+    rollback_marketing_version
     exit 1
 fi
 
-# At this point the bump is "earned" — even if upload fails, the build number
-# was used in a real archive and shouldn't be reused for a different build.
 trap - ERR
 [[ -n "$PBXPROJ_BACKUP" ]] && rm -f "$PBXPROJ_BACKUP"
-
-# Auto-commit the pbxproj bump so subsequent runs (and fresh checkouts) see
-# the correct baseline. Without this, the bump lives only in the uncommitted
-# working tree — any `git checkout -- pbxproj` or branch switch silently
-# regresses the build number, and the next run bumps from the old committed
-# value, producing a duplicate build number that App Store Connect rejects.
-# Only stage the pbxproj explicitly so unrelated working-tree changes don't
-# get swept in.
-if ! $NO_BUMP && [[ -n "$NEW_VERSION" ]]; then
-    if git -C "$(dirname "$PBXPROJ")" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-        git add "$PBXPROJ"
-        if ! git diff --cached --quiet -- "$PBXPROJ"; then
-            git commit -m "chore(desktop): bump build to ${NEW_VERSION}" -- "$PBXPROJ" >/dev/null
-            echo "${GREEN}committed:${NC} build ${NEW_VERSION} pbxproj bump"
-        fi
-    fi
+if $MARKETING_DONE; then
+    echo "${DIM}MARKETING_VERSION ${MARKETING_VERSION} is in the pbxproj, uncommitted — land it through a PR${NC}"
 fi
 
 if $NO_UPLOAD; then
-    log_attempt "$NEW_VERSION" "OK" "skipped" "--no-upload"
+    log_attempt "-" "OK" "skipped" "--no-upload"
     echo
     echo "${GREEN}archive ready (upload skipped)${NC}"
     echo "  archive: $ARCHIVE_PATH"
@@ -343,15 +306,16 @@ if $NO_UPLOAD; then
 fi
 
 if ! do_upload; then
-    log_attempt "$NEW_VERSION" "OK" "FAIL" "upload to ASC failed — build number kept; re-run with --no-bump to retry"
+    log_attempt "-" "OK" "FAIL" "upload to ASC failed — fix and re-run"
     exit 1
 fi
 
-log_attempt "$NEW_VERSION" "OK" "OK" "uploaded to ASC; processing 5–15 min before TestFlight"
+BUILD_NUMBER="$(uploaded_build_number)"
+log_attempt "${BUILD_NUMBER:-?}" "OK" "OK" "uploaded to ASC; processing 5–15 min before TestFlight"
 
 echo
 echo "${GREEN}uploaded to App Store Connect${NC}"
-echo "  build:   $NEW_VERSION"
+echo "  build:   ${BUILD_NUMBER:-? (not recorded in the archive — check TestFlight)}"
 echo "  archive: $ARCHIVE_PATH"
 echo "  next:    https://appstoreconnect.apple.com/ → Matcha → TestFlight (Mac)"
 echo
