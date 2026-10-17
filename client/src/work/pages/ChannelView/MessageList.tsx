@@ -184,6 +184,7 @@ export default function MessageList({
                         content={body}
                         userId={userId}
                         onQuickReply={onQuickReply ? (reply) => onQuickReply(msg, reply) : undefined}
+                        channelId={msg.channel_id}
                       />
                     </div>
                   )

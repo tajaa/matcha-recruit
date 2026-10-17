@@ -18,6 +18,7 @@ import { useSidebarData } from './WorkSidebar/useSidebarData'
 import { useSectionState } from './WorkSidebar/useSectionState'
 import { useSidebarRename } from './WorkSidebar/useSidebarRename'
 import { useEntitlements } from '../../hooks/useEntitlements'
+import { useTasksSummary } from '../../hooks/useTasksSummary'
 import { showPaywall } from '../../utils/paywall'
 import { getStarredFileMeta, useStars } from '../../hooks/useStars'
 import { openProjectFile } from '../../utils/openProjectFile'
@@ -43,8 +44,12 @@ export default function WorkSidebar({ open, onToggle }: Props) {
   const starredJournals = useStars(userId, 'journals')
   const starredFiles = useStars(userId, 'files')
   const [starredFileError, setStarredFileError] = useState(false)
-  const { plan, can } = useEntitlements()
+  const { plan, can, tasksEnabled, jobSearchEnabled } = useEntitlements()
   const showProjects = can('projects_solo')
+  // Espresso Tasks, as on the Mac: personal accounts with Tasks or Job search
+  // (job searches are tasks too), with how many run and a dot when one needs them.
+  const showTasks = isPersonal && (tasksEnabled || jobSearchEnabled)
+  const tasksBadge = useTasksSummary(showTasks)
   const canCreate = surface !== 'matcha-work' && canCreateChannel(me?.user?.role)
   const opsAccess = me?.ops_access ?? me?.work_access
   const showEvents = surface !== 'matcha-work' && canReviewEvents(opsAccess) && hasFeature('ems')
@@ -216,6 +221,8 @@ export default function WorkSidebar({ open, onToggle }: Props) {
         navigate={navigate}
         isActive={isActive}
         showProjects={showProjects}
+        showTasks={showTasks}
+        tasksBadge={tasksBadge}
         totalChannelUnread={totalChannelUnread}
         pendingConnections={pendingConnections}
         inboxUnread={inboxUnread}
@@ -272,6 +279,15 @@ export default function WorkSidebar({ open, onToggle }: Props) {
 
           {showAssistant && <SidebarNavButton icon={Sparkles} label="Ask Espresso" active={location.pathname.startsWith(`${base}/assistant`)} onClick={() => navigate(`${base}/assistant`)} />}
 
+          {showTasks && (
+            <SidebarNavButton
+              icon={ClipboardList}
+              label="Tasks"
+              active={location.pathname.startsWith(`${base}/tasks`)}
+              onClick={() => navigate(`${base}/tasks`)}
+              badge={<TasksBadge count={tasksBadge.count} attention={tasksBadge.attention} />}
+            />
+          )}
           {/* Your own tools, then the company's */}
           <div className="h-3" aria-hidden />
           <SidebarNavButton icon={NotebookPen} label="Journals" active={location.pathname.startsWith(`${base}/journals`)} onClick={() => navigate(`${base}/journals`)} />
@@ -418,5 +434,20 @@ export default function WorkSidebar({ open, onToggle }: Props) {
         onPick={handlePickTemplate}
       />
     </>
+  )
+}
+
+/** How many tasks run, and a dot when one needs the person or finished unseen. */
+function TasksBadge({ count, attention }: { count: number; attention: boolean }) {
+  if (!count && !attention) return null
+  return (
+    <span className="ml-auto flex items-center gap-1 shrink-0">
+      {count > 0 && (
+        <span className="w-4 h-4 rounded-full bg-w-surface2 text-[9px] font-bold text-w-text flex items-center justify-center" aria-label={`${count} running`}>
+          {count > 9 ? '9+' : count}
+        </span>
+      )}
+      {attention && <span className="w-1.5 h-1.5 rounded-full bg-w-accent" aria-label="Needs you" />}
+    </span>
   )
 }

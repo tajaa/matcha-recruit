@@ -13,6 +13,10 @@ export type WorkEntitlements = {
      *  rule (`matcha_work_ai._models.picker_models`), not re-derived here. */
     chat_models?: { id: string; locked: boolean }[]
     default_chat_model?: string
+    /** Job search: a personal account on a server with a listings provider. */
+    job_search?: boolean
+    /** Espresso Tasks: starting them, from chat or the Tasks page's box. */
+    agent_tasks?: boolean
   }
   quotas: {
     token_limit: number

@@ -90,6 +90,10 @@ export function useEntitlements() {
     chatModels: entitlements?.workspace?.chat_models ?? null,
     /** Where the picker starts (the admin's agent model when one is set). */
     defaultChatModel: entitlements?.workspace?.default_chat_model ?? null,
+    /** Whether this account can start Tasks. Closed while unknown, like the Mac. */
+    tasksEnabled: entitlements?.workspace?.agent_tasks === true,
+    /** Whether it has Job search (whose searches live in Tasks). Closed while unknown. */
+    jobSearchEnabled: entitlements?.workspace?.job_search === true,
     refetch,
   }
 }
