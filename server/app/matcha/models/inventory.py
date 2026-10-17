@@ -3,7 +3,7 @@ from decimal import Decimal
 from typing import Annotated, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field, PlainSerializer
+from pydantic import BaseModel, EmailStr, Field, PlainSerializer
 
 
 JsonDecimal = Annotated[
@@ -173,9 +173,24 @@ class SalesMappingUpsert(BaseModel):
 
 
 class SalesSourceUpsert(BaseModel):
-    from_address: str = Field(min_length=3, max_length=320)
+    from_address: EmailStr = Field(max_length=320)
     subject_match: Optional[str] = Field(default=None, max_length=200)
     location_id: Optional[UUID] = None
+
+
+class SalesSetupStatus(BaseModel):
+    location_id: UUID
+    days_with_sales: int
+    latest_sales_date: Optional[date] = None
+    draft_imports: int
+    square_configured: bool
+    square_connected: bool
+    square_bound: bool
+    square_sync_enabled: bool
+    mailbox_configured: bool
+    mailbox_address: Optional[str] = None
+    email_registered: bool
+    email_poll_enabled: bool
 
 
 class SalesLine(BaseModel):

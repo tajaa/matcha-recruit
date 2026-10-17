@@ -25,6 +25,7 @@ export type DraftLine = Omit<SalesLine, 'components'> & {
 
 const emptyComponent = (): DraftComponent => ({ item_id: '', quantity_per_sale: '1', unit: null })
 
+// eslint-disable-next-line react-refresh/only-export-components -- Pure mapping helper shared with tests.
 export function toDraftLine(line: SalesLine): DraftLine {
   const components = Array.isArray(line.components) && line.components.length
     ? line.components.map((component) => ({
@@ -69,33 +70,42 @@ export default function SalesImportModal({ open, onClose, items, locationId, dra
   const [filename, setFilename] = useState<string | null>(null)
   const [source, setSource] = useState<'upload' | 'email' | 'square' | 'toast'>('upload')
   const [loadedImportId, setLoadedImportId] = useState<string | null>(null)
+  const [loadedLocationId, setLoadedLocationId] = useState<string | null>(null)
   const [gmailMessageId, setGmailMessageId] = useState<string | null>(null)
   const [parsing, setParsing] = useState(false)
   const [committing, setCommitting] = useState(false)
   const [discarding, setDiscarding] = useState(false)
   const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null)
 
-  const itemOptions = items.map((item) => ({ value: item.id, label: item.name }))
+  // A saved import owns its store, even when opened from an unfiltered page.
+  const importLocationId = loadedImportId ? loadedLocationId ?? undefined : locationId
+  const availableItems = items.filter((item) => !item.location_id || item.location_id === importLocationId)
+  const itemOptions = availableItems.map((item) => ({ value: item.id, label: item.name }))
 
   useEffect(() => {
     if (!open || !draftImportId) return
+    let active = true
     getSalesImport(draftImportId)
       .then((result) => {
+        if (!active) return
         const rawLines = (result.raw?.lines ?? result.lines) as SalesLine[]
         setDraft({ business_date: result.business_date, lines: rawLines, available: rawLines.length > 0 })
         setLines(rawLines.map(toDraftLine))
         setLoadedImportId(result.id)
+        setLoadedLocationId(result.location_id)
         setFilename(result.filename)
         setSource(result.source)
         setGmailMessageId(result.gmail_message_id ?? null)
       })
-      .catch(() => toast('Failed to load the sales draft', 'error'))
+      .catch(() => { if (active) toast('Failed to load the sales draft', 'error') })
+    return () => { active = false }
   }, [draftImportId, open, toast])
 
   function reset() {
     setDraft(null)
     setLines([])
     setLoadedImportId(null)
+    setLoadedLocationId(null)
     setFilename(null)
     setSource('upload')
     setGmailMessageId(null)
@@ -113,7 +123,7 @@ export default function SalesImportModal({ open, onClose, items, locationId, dra
     setParsing(true)
     setFilename(file.name)
     try {
-      const result = await parseSales(file, locationId)
+      const result = await parseSales(file, importLocationId)
       setLoadedImportId(null)
       setSource('upload')
       setGmailMessageId(null)
@@ -137,7 +147,7 @@ export default function SalesImportModal({ open, onClose, items, locationId, dra
       const components = line.components.map((component, i) => {
         if (i !== componentIndex) return component
         if (!('item_id' in patch)) return { ...component, ...patch }
-        const item = items.find((candidate) => candidate.id === patch.item_id)
+        const item = availableItems.find((candidate) => candidate.id === patch.item_id)
         return { ...component, ...patch, unit: item?.unit ?? component.unit }
       })
       return { ...line, components, mapping_id: null, mappingDirty: true, ignored: false, status: 'mapped', commitError: undefined }
@@ -173,7 +183,7 @@ export default function SalesImportModal({ open, onClose, items, locationId, dra
     const line = lines[index]
     if (!line) return
     try {
-      const item = await createItem({ name: line.sold_name, location_id: locationId })
+      const item = await createItem({ name: line.sold_name, location_id: importLocationId })
       updateLine(index, {
         components: [{ item_id: item.id, quantity_per_sale: '1', unit: item.unit ?? null }],
         kind: 'direct', mapping_id: null, mappingDirty: true, status: 'mapped', ignored: false, commitError: undefined,
@@ -190,12 +200,12 @@ export default function SalesImportModal({ open, onClose, items, locationId, dra
     try {
       const result = await commitSales({
         import_id: loadedImportId,
-        location_id: locationId,
+        location_id: importLocationId,
         business_date: draft.business_date,
         source,
         filename,
         gmail_message_id: gmailMessageId,
-        lines: lines.map((line) => buildCommitLine(line, locationId)),
+        lines: lines.map((line) => buildCommitLine(line, importLocationId)),
       })
       if (result.unmapped > 0) {
         toast('Map or ignore every sales line before committing.', 'error')
@@ -307,6 +317,7 @@ function validComponents(line: DraftLine): SalesMappingComponentInput[] {
   }))
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- Pure mapping helper shared with tests.
 export function isLineValid(line: DraftLine) {
   if (line.kind === 'ignore') return true
   const components = validComponents(line)
@@ -315,6 +326,7 @@ export function isLineValid(line: DraftLine) {
     && new Set(components.map((component) => component.item_id)).size === components.length
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- Pure mapping helper shared with tests.
 export function buildCommitLine(line: DraftLine, locationId?: string): SalesLine {
   if (line.ignored) {
     return {

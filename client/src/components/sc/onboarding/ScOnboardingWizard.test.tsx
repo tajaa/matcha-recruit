@@ -3,11 +3,12 @@ import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '../../../api/client'
 
-const { statusMock, completeMock, refreshMock, navigateMock, parseLocationsMock, parseEmployeesMock } = vi.hoisted(() => ({
+const { statusMock, completeMock, refreshMock, navigateMock, hasFeatureMock, parseLocationsMock, parseEmployeesMock } = vi.hoisted(() => ({
   statusMock: vi.fn(),
   completeMock: vi.fn(),
   refreshMock: vi.fn(),
   navigateMock: vi.fn(),
+  hasFeatureMock: vi.fn(),
   parseLocationsMock: vi.fn(),
   parseEmployeesMock: vi.fn(),
 }))
@@ -20,7 +21,7 @@ vi.mock('../../../api/sc/scOnboarding', () => ({
     parseEmployeesCsv: parseEmployeesMock,
   },
 }))
-vi.mock('../../../hooks/useMe', () => ({ useMe: () => ({ refresh: refreshMock }) }))
+vi.mock('../../../hooks/useMe', () => ({ useMe: () => ({ refresh: refreshMock, hasFeature: hasFeatureMock }) }))
 vi.mock('react-router-dom', async (importOriginal) => ({
   ...(await importOriginal<typeof import('react-router-dom')>()),
   useNavigate: () => navigateMock,
@@ -37,10 +38,51 @@ function renderWizard() {
 describe('ScOnboardingWizard', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    hasFeatureMock.mockReturnValue(false)
     refreshMock.mockResolvedValue(undefined)
   })
 
   afterEach(() => vi.useRealTimers())
+
+  it('hands a sales-enabled account to sales notifications after setup', async () => {
+    const user = userEvent.setup()
+    hasFeatureMock.mockReturnValue(true)
+    parseEmployeesMock.mockResolvedValue([
+      { email: 'barista@example.com', first_name: 'Ana', last_name: 'Ruiz', work_state: 'CA', job_title: 'Barista', department: 'Front' },
+    ])
+    await reachLocationsFromCafe(user)
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
+    await user.upload(fileInput(), new File(['x'], 'employees.csv', { type: 'text/csv' }))
+    await screen.findByText('1 employees ready to import')
+    // Follow the wizard to review without coupling sales setup to the
+    // independent PR that removes the jobs step.
+    for (let step = 0; step < 2 && !screen.queryByRole('button', { name: 'Complete setup' }); step += 1) {
+      await user.click(screen.getByRole('button', { name: 'Continue' }))
+    }
+    expect(screen.getByText(/Next, Notifications will help you connect Square/)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Complete setup' }))
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/ops/schedule/editor?setup=sales', { replace: true }))
+    expect(refreshMock.mock.invocationCallOrder[0]).toBeLessThan(navigateMock.mock.invocationCallOrder[0])
+  })
+
+  it('uses features refreshed after Stripe activation to choose the completion destination', async () => {
+    const user = userEvent.setup()
+    parseEmployeesMock.mockResolvedValue([
+      { email: 'barista@example.com', first_name: 'Ana', last_name: 'Ruiz', work_state: 'CA', job_title: 'Barista', department: 'Front' },
+    ])
+    await reachLocationsFromCafe(user)
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
+    await user.upload(fileInput(), new File(['x'], 'employees.csv', { type: 'text/csv' }))
+    await screen.findByText('1 employees ready to import')
+    for (let step = 0; step < 2 && !screen.queryByRole('button', { name: 'Complete setup' }); step += 1) {
+      await user.click(screen.getByRole('button', { name: 'Continue' }))
+    }
+    expect(screen.queryByText(/Next, Notifications will help you connect Square/)).not.toBeInTheDocument()
+    refreshMock.mockImplementationOnce(async () => { hasFeatureMock.mockReturnValue(true) })
+    await user.click(screen.getByRole('button', { name: 'Complete setup' }))
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/ops/schedule/editor?setup=sales', { replace: true }))
+    expect(navigateMock).not.toHaveBeenCalledWith('/ops/schedule', { replace: true })
+  })
 
   it('waits out the Stripe activation window instead of dead-ending on 403', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })

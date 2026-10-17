@@ -134,7 +134,8 @@ function unassignedCount(locations: ScLocationImport[], employees: ScEmployeeImp
 
 export default function ScOnboardingWizard() {
   const navigate = useNavigate()
-  const { refresh } = useMe()
+  const { refresh, hasFeature } = useMe()
+  const salesSetupEnabled = hasFeature('matcha_ops') && hasFeature('inventory') && hasFeature('sales_intake')
   const [step, setStep] = useState(0)
   const [companyName, setCompanyName] = useState('')
   const [companySize, setCompanySize] = useState<CompanySize | ''>('')
@@ -150,7 +151,14 @@ export default function ScOnboardingWizard() {
   const [activating, setActivating] = useState(false)
   const [parsing, setParsing] = useState<'locations' | 'employees' | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [completed, setCompleted] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // refresh() updates useMe's state. Choose the destination on that render,
+  // rather than from the feature flags captured before Stripe activated it.
+  useEffect(() => {
+    if (completed) navigate(salesSetupEnabled ? '/ops/schedule/editor?setup=sales' : '/ops/schedule', { replace: true })
+  }, [completed, navigate, salesSetupEnabled])
 
   useEffect(() => {
     let cancelled = false
@@ -292,7 +300,7 @@ export default function ScOnboardingWizard() {
       await refresh()
       // Straight to the schedule: it is what they signed up for, and every
       // store and employee they just entered is already on it.
-      navigate('/ops/schedule', { replace: true })
+      setCompleted(true)
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : 'Setup could not be completed. Nothing was imported; review the details and try again.')
     } finally {
@@ -434,6 +442,7 @@ export default function ScOnboardingWizard() {
           {step === 3 && companySize && (
             <div className="space-y-5">
               <div><h2 className="text-lg font-medium">Review setup</h2><p className="text-sm text-zinc-400">Submission is atomic: if any item fails validation, no company setup records are created.</p></div>
+              {salesSetupEnabled && <p className="rounded-lg border border-emerald-500/25 bg-emerald-500/[0.05] p-3 text-sm text-emerald-100">Next, Notifications will help you connect Square or register a nightly sales email for each store. Sales-based forecasts need received sales data; company setup alone does not connect your POS.</p>}
               <dl className="grid gap-3 text-sm sm:grid-cols-2"><div><dt className="text-zinc-500">Company size</dt><dd>{companySize}</dd></div><div><dt className="text-zinc-500">NAICS</dt><dd>{naicsCode}</dd></div></dl>
               <div className="grid gap-3 sm:grid-cols-2">
                 <ReviewList title={`Locations (${locations.length})`} items={locations.map((location) => `${location.name} — ${location.address}, ${location.city}, ${location.state} ${location.zipcode}; ${location.timezone}`)} empty="Skipped" />
