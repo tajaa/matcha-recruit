@@ -74,6 +74,11 @@ struct JobSearchDetailView: View {
                     nextSteps(detail)
                     Divider().opacity(0.2)
                 }
+                let wider = JobSearchViewModel.widerCount(detail)
+                if wider > 0 {
+                    widerBar(wider)
+                    Divider().opacity(0.2)
+                }
                 filters(detail)
                 leadsTable
             }
@@ -103,6 +108,7 @@ struct JobSearchDetailView: View {
     /// The person's own state first, then where its first message is.
     nonisolated static func statusText(_ lead: JobLeadSummary) -> String {
         if lead.isIrrelevant { return "Screened out" }
+        if lead.isBelowFloor && lead.userState == "new" { return "Weaker fit" }
         if lead.userState == "applied" { return "Applied" }
         if lead.emailSentAt != nil { return "Emailed" }
         if lead.emailWaiting { return "In drafts" }
@@ -141,6 +147,25 @@ struct JobSearchDetailView: View {
         }
         .padding(.horizontal, 18).padding(.vertical, 10)
         .background(appState.themeAccent.opacity(0.04))
+    }
+
+    /// The first pass shows the 4/5 and 5/5 jobs; this offers the 3/5 ones.
+    private func widerBar(_ count: Int) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "line.3.horizontal.decrease.circle")
+                .foregroundColor(appState.themeTextSecondary)
+            Text("Showing your strongest matches (4/5 or better). "
+                 + (count == 1 ? "1 more job scored 3/5." : "\(count) more jobs scored 3/5."))
+                .font(.system(size: 12))
+                .foregroundColor(appState.themeText)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
+            Button("Show \(count) more at 3/5") { Task { await vm.widen() } }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(vm.busy)
+        }
+        .padding(.horizontal, 18).padding(.vertical, 8)
     }
 
     private func step(_ n: Int, _ text: String, action: (String, () -> Void)?) -> some View {
@@ -212,7 +237,7 @@ struct JobSearchDetailView: View {
     /// One row when it fits; beside an open job, the checkbox and count drop
     /// to a second row, and narrower still the filter becomes a menu.
     private func filters(_ detail: JobSearchDetail) -> some View {
-        let screened = Toggle("Show screened out", isOn: $vm.showIrrelevant)
+        let screened = Toggle("Show weaker matches", isOn: $vm.showIrrelevant)
             .toggleStyle(.checkbox)
             .font(.system(size: 11))
             .fixedSize()

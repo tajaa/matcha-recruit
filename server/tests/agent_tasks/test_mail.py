@@ -165,7 +165,7 @@ async def test_a_finished_job_search_is_emailed_its_top_jobs(monkeypatch):
     send = AsyncMock(return_value=True)
     monkeypatch.setattr(mail, "_send", send)
     conn = (FakeConn().on("WHERE t.job_search_id = $1", pointer(js_status="done", js_completed_at=NOW))
-            .on("FROM mw_job_leads WHERE search_id = $1", [lead_row()]).on("FROM users WHERE id", USER_ROW))
+            .on("FROM mw_job_leads l WHERE search_id = $1", [lead_row()]).on("FROM users WHERE id", USER_ROW))
     await job_tasks.search_stopped(conn, SEARCH)
     to, message, _ = send.await_args.args
     assert to == "renter@example.com" and message["subject"] == "Done: COO"

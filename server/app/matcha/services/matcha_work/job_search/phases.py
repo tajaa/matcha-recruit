@@ -37,9 +37,9 @@ from app.matcha.services.matcha_work.agent_card.page_extract import job_postings
 from app.matcha.services.matcha_work.agent_runtime import chain
 from app.matcha.services.matcha_work.agent_runtime.chain import Budget, PhaseFailed, PhaseOutcome
 
-from . import ats, normalize, providers
+from . import ats, normalize, providers, ranking
 from . import comp as comp_mod
-from .service import rerank
+from .service import fit_floor, rerank
 
 logger = logging.getLogger(__name__)
 
@@ -463,13 +463,32 @@ async def _save_enrichment(conn, search_id: UUID, token: UUID, lead_id, update: 
     )
 
 
+# A lead counts as a match at the search's fit floor when screening rated it
+# at least that, or couldn't rate it (its batch failed). $2 is the floor.
+_MATCH = "screen_status <> 'irrelevant' AND (fit_score IS NULL OR fit_score >= $2)"
+
+
 async def enrich(search: dict, deps: Deps, guard: chain.Guard) -> PhaseOutcome:
+    """Read the matches' postings, then rank and queue the top ones' drafts.
+
+    Only jobs at the search's fit floor are read (`service.fit_floor`). The
+    first pass settles it: 4/5, or 3/5 when screening rated nothing that high.
+    A widened search (`service.widen`) reads its 3/5 jobs and ends without
+    drafting."""
+    floor = fit_floor(search)
     async with connection_or_direct() as conn:
+        if floor is None:
+            strong = await conn.fetchval(
+                """SELECT EXISTS (SELECT 1 FROM mw_job_leads WHERE search_id = $1
+                       AND screen_status <> 'irrelevant' AND fit_score >= $2)""",
+                search["id"], ranking.FIT_FLOOR,
+            )
+            floor = ranking.FIT_FLOOR if strong else ranking.WIDER_FIT_FLOOR
         leads = await conn.fetch(
             f"""SELECT id, title, company, apply_links, comp, description FROM mw_job_leads
-                WHERE search_id = $1 AND enriched_at IS NULL AND screen_status <> 'irrelevant'
+                WHERE search_id = $1 AND enriched_at IS NULL AND {_MATCH}
                 ORDER BY fit_score DESC NULLS LAST, created_at, id LIMIT {ENRICH_BATCH}""",
-            search["id"],
+            search["id"], floor,
         )
     budget = Budget(left=await grant(search["id"], "fetch_calls", LEAD_FETCHES * len(leads), MAX_FETCHES))
     if leads and budget.left <= 0:
@@ -494,43 +513,67 @@ async def enrich(search: dict, deps: Deps, guard: chain.Guard) -> PhaseOutcome:
             if update is not NOT_TRIED:
                 await _save_enrichment(conn, search["id"], guard.token, lead_id, update)
         remaining = int(await conn.fetchval(
-            """SELECT COUNT(*) FROM mw_job_leads WHERE search_id = $1
-               AND enriched_at IS NULL AND screen_status <> 'irrelevant'""",
-            search["id"],
+            f"""SELECT COUNT(*) FROM mw_job_leads WHERE search_id = $1
+               AND enriched_at IS NULL AND {_MATCH}""",
+            search["id"], floor,
         ) or 0)
         counts = await conn.fetchrow(
-            """SELECT COUNT(*) AS total,
-                      COUNT(*) FILTER (WHERE comp_status = 'posted') AS posted
+            f"""SELECT COUNT(*) AS total,
+                      COUNT(*) FILTER (WHERE comp_status = 'posted') AS posted,
+                      COUNT(*) FILTER (WHERE {_MATCH} AND user_state <> 'dismissed') AS matches,
+                      COUNT(*) FILTER (WHERE screen_status <> 'irrelevant' AND fit_score = $3
+                                       AND user_state <> 'dismissed') AS wider
                FROM mw_job_leads WHERE search_id = $1""",
-            search["id"],
+            search["id"], floor, ranking.WIDER_FIT_FLOOR,
         )
+    matches = int(counts.get("matches") or 0)
     if remaining and leads and not budget.exhausted:
         return PhaseOutcome(
             status="enriching",
-            progress={"note": f"Read postings; {remaining} to go…", "posted_pay": counts["posted"]},
+            progress={"note": f"Read postings; {remaining} to go…", "posted_pay": counts["posted"],
+                      "fit_floor": floor},
         )
     if not await guard.current():
         return PhaseOutcome(status="enriching")  # advance will find the chain retired
+    cursor = decode_jsonb(search.get("phase_cursor"), {}) or {}
+    widening = isinstance(cursor, dict) and bool(cursor.get("widen"))
+    ranked = {"found": counts["total"], "posted_pay": counts["posted"], "matches": matches,
+              "fit_floor": floor, "ranked": True}
     async with connection_or_direct() as conn:
-        fresh = await conn.fetchrow("SELECT * FROM mw_job_searches WHERE id = $1", search["id"])
-        await rerank(conn, fresh)
-        top = await conn.fetch(
-            f"""UPDATE mw_job_leads SET approach_status = 'queued', updated_at = NOW()
-                WHERE id IN (SELECT id FROM mw_job_leads
-                             WHERE search_id = $1 AND rank_band < 9
-                             ORDER BY rank LIMIT {APPROACH_TOP})
-                RETURNING id, rank""",
-            search["id"],
+        # The floor goes on the row first: the re-rank reads it from there.
+        fresh = await conn.fetchrow(
+            """UPDATE mw_job_searches SET progress = progress || $2::jsonb
+               WHERE id = $1 AND dispatch_token = $3 RETURNING *""",
+            search["id"], json.dumps({"fit_floor": floor}), guard.token,
         )
+        if fresh is None:
+            return PhaseOutcome(status="enriching")  # cancelled meanwhile: nothing more to write
+        await rerank(conn, fresh)
+        if widening:
+            top = []
+        else:
+            top = await conn.fetch(
+                f"""UPDATE mw_job_leads SET approach_status = 'queued', updated_at = NOW()
+                    WHERE id IN (SELECT id FROM mw_job_leads
+                                 WHERE search_id = $1 AND rank_band < {ranking.BELOW_FLOOR_BAND}
+                                 ORDER BY rank LIMIT {APPROACH_TOP})
+                    RETURNING id, rank""",
+                search["id"],
+            )
+    if widening:
+        # Back to where it was (`after`), with no drafts queued.
+        return PhaseOutcome(status=cursor.get("after") or "done", cursor={}, progress={
+            "note": f"Added {counts.get('wider') or 0} jobs at 3/5; {matches} matches in all.", **ranked})
     queue = [str(row["id"]) for row in sorted(top, key=lambda r: r["rank"] or 0)]
-    ranked = {"found": counts["total"], "posted_pay": counts["posted"], "ranked": True}
+    found = (f"{matches} strong matches (4/5 or better)" if floor == ranking.FIT_FLOOR
+             else f"{matches} matches at 3/5 or better") + f" of {counts['total']} jobs"
     if not queue:
         return PhaseOutcome(status="done", progress={
-            "note": f"Ranked {counts['total']} jobs; {counts['posted']} post their pay.", **ranked})
+            "note": f"{found}; {counts['posted']} post their pay.", **ranked})
     return PhaseOutcome(
         status="approaching",
         cursor={"approach_queue": queue},
-        progress={"note": f"Ranked {counts['total']} jobs ({counts['posted']} post their pay). "
+        progress={"note": f"{found} ({counts['posted']} post their pay). "
                           f"Drafting how to approach the top {len(queue)}…", **ranked},
     )
 

@@ -95,6 +95,14 @@ async def redraft_job_approach(
     return await _call(enqueue.redraft_approach(current_user, search_id, lead_id))
 
 
+@router.post("/{search_id}/widen", status_code=202)
+async def widen_job_search(search_id: UUID, current_user: CurrentUser = Depends(require_admin_or_client)):
+    """Add the 3/5 matches to a search that showed its 4/5 and 5/5 ones first:
+    their postings are read and they rank with the rest. Free, once per
+    search; nothing is drafted for them unless asked."""
+    return await _call(enqueue.widen(current_user, search_id))
+
+
 @router.post("/{search_id}/leads/{lead_id}/email-draft")
 async def draft_job_email(
     search_id: UUID, lead_id: UUID, current_user: CurrentUser = Depends(require_admin_or_client),

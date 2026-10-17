@@ -180,6 +180,13 @@ final class JobSearchViewModel {
         await perform { self.apply(try await self.service.rerank(searchId, weights: weights)) }
     }
 
+    /// Show the jobs that scored 3/5: the search reads and ranks them, and
+    /// drafts nothing new.
+    func widen() async {
+        guard let searchId = selectedSearchId else { return }
+        await perform { self.apply(try await self.service.widen(searchId)) }
+    }
+
     func redraft() async {
         guard let searchId = selectedSearchId, let leadId = selectedLeadId else { return }
         await perform {
@@ -304,11 +311,22 @@ final class JobSearchViewModel {
         return out.joined(separator: "\n")
     }
 
+    /// How many 3/5 jobs "Show more" would add: only for a finished search
+    /// still at its first-pass floor of 4/5 (the server widens once).
+    nonisolated static func widerCount(_ detail: JobSearchDetail) -> Int {
+        guard detail.search.fitFloor == 4, detail.search.canDraft else { return 0 }
+        return detail.leads.filter {
+            $0.isBelowFloor && !$0.isIrrelevant && $0.fitScore == 3 && $0.userState != "dismissed"
+        }.count
+    }
+
     nonisolated static func filtered(_ leads: [JobLeadSummary], filter: Filter, showIrrelevant: Bool) -> [JobLeadSummary] {
         leads.filter { lead in
-            // Screened-out jobs hide from the browsing tabs, never from the
-            // person's own lists: a job they saved or applied to stays there.
-            if lead.isIrrelevant && !showIrrelevant && (filter == .all || filter == .postedPay || filter == .drafted) {
+            // Screened-out jobs and those under the search's fit floor hide
+            // from the browsing tabs, never from the person's own lists: a
+            // job they saved or applied to stays there.
+            if (lead.isIrrelevant || lead.isBelowFloor) && !showIrrelevant
+                && (filter == .all || filter == .postedPay || filter == .drafted) {
                 return false
             }
             switch filter {

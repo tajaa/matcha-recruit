@@ -18,7 +18,7 @@ from uuid import UUID
 from pydantic import ValidationError
 
 from app.matcha.models.matcha_work.job_search import JobWeights, LeadPatch
-from app.matcha.services.matcha_work.job_search import providers
+from app.matcha.services.matcha_work.job_search import providers, ranking
 from app.matcha.services.matcha_work.job_search import service as store
 
 from .. import consent
@@ -59,6 +59,13 @@ def _compact_lead(lead: dict) -> dict:
     return {k: lead.get(k) for k in keep}
 
 
+def _shown(leads: list[dict], weaker: bool) -> list[dict]:
+    """The search's matches; jobs below its fit floor only when asked for."""
+    if weaker:
+        return leads
+    return [lead for lead in leads if lead.get("rank_band") != ranking.BELOW_FLOOR_BAND]
+
+
 def _remember(session: JobsSession, search_id: str, leads: list[dict]) -> None:
     session.searches.add(search_id)
     for lead in leads:
@@ -75,13 +82,15 @@ async def _read(ctx: RunContext, state: RunState, args: dict) -> dict:
     search_id = _uuid(args.get("search_id"))
     view = await store.get_search(search_id, ctx.user_id)
     offset = max(0, int(args.get("offset") or 0))
-    leads = view["leads"][offset: offset + PAGE]
+    shown = _shown(view["leads"], bool(args.get("include_weaker")))
+    leads = shown[offset: offset + PAGE]
     _remember(session_of(state), view["id"], leads)
     return {
         "search": {**_compact_search(view), "ask": view["ask"], "weights": view["weights"],
-                   "progress": view["progress"]},
+                   "progress": view["progress"], "fit_floor": view.get("fit_floor")},
         "jobs": [_compact_lead(lead) for lead in leads],
-        "next_offset": offset + len(leads) if offset + len(leads) < len(view["leads"]) else None,
+        "weaker_matches": len(view["leads"]) - len(_shown(view["leads"], False)),
+        "next_offset": offset + len(leads) if offset + len(leads) < len(shown) else None,
     }
 
 
@@ -112,7 +121,7 @@ async def _rank(ctx: RunContext, state: RunState, args: dict) -> dict:
         raise ValueError("Read this search before re-ranking it.")
     weights = JobWeights(**{k: args[k] for k in ("base", "bonus", "equity", "fit") if k in args})
     view = await store.update_weights(UUID(search_id), ctx.user_id, weights)
-    leads = view["leads"][:PAGE]
+    leads = _shown(view["leads"], False)[:PAGE]
     _remember(session_of(state), view["id"], leads)
     return {"weights": view["weights"], "jobs": [_compact_lead(lead) for lead in leads]}
 
@@ -146,6 +155,9 @@ _PROMPT = """Job searches:
 (playbook job_search) if you have it; otherwise they start it from Tasks in the app. \
 list_job_searches, then read_job_search for the ranked jobs and read_job_lead for one job's posting, \
 pay evidence and drafted approach (outreach, answers, cover letter).
+- A search lists its strong matches (fit 4/5 or better) first; weaker_matches counts the jobs below \
+its fit floor, which read_job_search shows with include_weaker. In the app, "Show more at 3/5" reads \
+and ranks them.
 - Pay is only what the posting states, with the text it came from; "Pay not posted" means unknown, \
 never zero. Never estimate a salary as if it were posted.
 - update_job_lead keeps the person's status (saved, applied, dismissed) and notes on a job you read. \
@@ -196,8 +208,10 @@ def build() -> Ability:
         tools=(
             _tool("list_job_searches", "read", "List the person's saved job searches.", {}, _list),
             _tool("read_job_search", "read",
-                  "Read one search: its ask, weights and ranked jobs (25 at a time; follow next_offset).",
-                  {"properties": {"search_id": _ID, "offset": {"type": "integer", "minimum": 0}},
+                  "Read one search: its ask, weights and ranked jobs (25 at a time; follow next_offset). "
+                  "Jobs below the search's fit floor are left out unless include_weaker is true.",
+                  {"properties": {"search_id": _ID, "offset": {"type": "integer", "minimum": 0},
+                                  "include_weaker": {"type": "boolean"}},
                    "required": ["search_id"]}, _read, untrusted=True),
             _tool("read_job_lead", "read",
                   "Read one job: the posting, pay with the text it came from, application questions "

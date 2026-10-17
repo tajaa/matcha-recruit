@@ -93,11 +93,14 @@ async def test_enrich_queues_the_top_jobs_for_approaches(monkeypatch):
     conn.on("SET approach_status = 'queued'", top)
     conn.on("COUNT(*) FILTER", {"total": 3, "posted": 2})
     conn.on("SELECT 1 FROM mw_job_searches WHERE id = $1 AND dispatch_token = $2", 1)
+    conn.on("SET progress = progress || $2::jsonb", search_row(status="enriching"))
     out = await phases.enrich(search_row(status="enriching", fetch_calls=phases.MAX_FETCHES),
                               phases.Deps(), phases.Guard(SEARCH, uuid4()))
     assert out.status == "approaching"
     assert out.cursor == {"approach_queue": [str(top[1]["id"]), str(top[0]["id"])]}
-    assert f"LIMIT {phases.APPROACH_TOP}" in conn.ran("SET approach_status = 'queued'")[0][1]
+    queued = conn.ran("SET approach_status = 'queued'")[0][1]
+    # Only matches at the search's fit floor are drafted.
+    assert f"LIMIT {phases.APPROACH_TOP}" in queued and "rank_band < 8" in queued
 
 
 @pytest.mark.asyncio

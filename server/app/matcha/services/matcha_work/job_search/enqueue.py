@@ -189,3 +189,18 @@ async def redraft_approach(user, search_id: UUID, lead_id: UUID) -> dict:
         # The search stays `approaching`; a status poll restarts it.
         logger.exception("job search redraft dispatch failed search=%s", search_id)
     return await get_search(search_id, user.id)
+
+
+async def widen(user, search_id: UUID) -> dict:
+    """Add a finished search's 3/5 matches (`service.widen`). Free and once
+    per search, so it needs no rate limit of its own."""
+    from .service import get_search
+    from .service import widen as widen_search
+
+    _search, token = await widen_search(search_id, user.id)
+    try:
+        await dispatch(search_id, token)
+    except Exception:
+        # The search stays `enriching`; a status poll restarts it.
+        logger.exception("job search widen dispatch failed search=%s", search_id)
+    return await get_search(search_id, user.id)

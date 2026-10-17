@@ -276,9 +276,11 @@ async def test_a_finished_search_is_told_once_with_its_card(monkeypatch):
     monkeypatch.setattr(project_chat, "broadcast_espresso_message", broadcast)
     c = FakeConn().on("WHERE t.job_search_id = $1", pointer(js_status="done", js_completed_at=NOW,
                                                             origin_channel_id=channel))
-    c.on("FROM mw_job_leads WHERE search_id = $1", [lead_row()])
+    c.on("FROM mw_job_leads l WHERE search_id = $1", [lead_row()])
     await job_tasks.search_stopped(c, SEARCH)
     assert c.ran("SET completed_at = NOW()")[0][2] == (TASK,)
+    # The card's top jobs are the matches: none from below the fit floor.
+    assert "l.rank_band < 8" in c.ran("FROM mw_job_leads l WHERE search_id = $1")[0][1]
     assert told.await_args.args[1]["status"] == "done" and told.await_args.args[1]["title"] == "COO"
     task, kwargs = posted.await_args.args[1], posted.await_args.kwargs
     assert task["progress"] == {"note": "Searching"} and kwargs["channel_id"] == channel

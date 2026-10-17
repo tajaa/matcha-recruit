@@ -68,6 +68,23 @@ def test_dismissed_and_irrelevant_go_last_and_ties_are_stable():
     assert order(leads) == order(list(reversed(leads)))
 
 
+def test_a_fit_floor_puts_weaker_matches_after_every_strong_one():
+    leads = [
+        lead("weak-high-pay", {"base": base(400_000, 450_000)}, fit=3),
+        lead("strong-unposted", {}, fit=4),
+        lead("strong", {"base": base(200_000, 220_000)}, fit=5),
+        lead("unscreened", {}, fit=None),
+        lead("out", {"base": base(500_000, 600_000)}, fit=4, screen_status="irrelevant"),
+    ]
+    # No floor (a search from before floors): pay posted outranks fit.
+    assert order(leads)[0] == "weak-high-pay"
+    ranked = ranking.rank(leads, None, fit_floor=ranking.FIT_FLOOR)
+    assert [r.lead_id for r in ranked] == ["strong", "strong-unposted", "unscreened", "weak-high-pay", "out"]
+    assert [r.band for r in ranked] == [0, 2, 2, ranking.BELOW_FLOOR_BAND, 9]
+    # Widened to 3/5, the 3/5 job ranks with the rest again.
+    assert order(leads, fit_floor=ranking.WIDER_FIT_FLOOR)[0] == "weak-high-pay"
+
+
 def test_weights_are_cleaned():
     assert ranking.clean_weights(None) == ranking.DEFAULT_WEIGHTS
     assert ranking.clean_weights({"base": 0, "bonus": 0, "equity": 0, "fit": 0}) == ranking.DEFAULT_WEIGHTS
