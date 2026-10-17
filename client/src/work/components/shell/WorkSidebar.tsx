@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { PanelLeftClose, Home, Search, ClipboardList, BookOpenCheck, Package, Archive, NotebookPen, CheckSquare, Star, MessagesSquare, Sparkles, HardDrive, Briefcase, FileSignature } from 'lucide-react'
+import { PanelLeftClose, Home, Search, ClipboardList, BookOpenCheck, Package, Archive, NotebookPen, CheckSquare, Star, MessagesSquare, Sparkles, HardDrive, Briefcase, BriefcaseBusiness, FileSignature } from 'lucide-react'
 import { logoutSession } from '../../../api/client'
 import type { ChannelSummary } from '../../api/channels'
 import { createProjectNew, createThread, archiveThread, notifyThreadsChanged } from '../../api/matchaWork'
@@ -58,6 +58,9 @@ export default function WorkSidebar({ open, onToggle }: Props) {
   // workspace. A plan that doesn't include it gets the paywall when they ask
   // for something, like the other Pro features.
   const showAssistant = isPersonal
+  // Job search goes with the assistant: personal accounts, Pro (the paywall
+  // comes up when a search is started on a plan without it).
+  const showJobSearch = isPersonal
 
   const {
     channels, setChannels,
@@ -231,6 +234,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
         showDrive={showDrive}
         showHrCases={showHrCases}
         showWriteUps={showWriteUps}
+        showJobSearch={showJobSearch}
         loggedEventsCount={loggedEventsCount}
       />
     )
@@ -271,6 +275,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
           <SidebarNavButton icon={Home} label="Home" active={location.pathname === base} onClick={() => navigate(base)} />
 
           {showAssistant && <SidebarNavButton icon={Sparkles} label="Ask Espresso" active={location.pathname.startsWith(`${base}/assistant`)} onClick={() => navigate(`${base}/assistant`)} />}
+          {showJobSearch && <SidebarNavButton icon={BriefcaseBusiness} label="Job search" active={location.pathname.startsWith(`${base}/jobs`)} onClick={() => navigate(`${base}/jobs`)} />}
 
           {/* Your own tools, then the company's */}
           <div className="h-3" aria-hidden />
