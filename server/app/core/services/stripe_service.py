@@ -1,4 +1,4 @@
-"""Stripe service wrapper for Matcha Work credit checkout."""
+"""Stripe billing helpers using Dashboard-managed Checkout payment methods."""
 
 from __future__ import annotations
 
@@ -151,7 +151,6 @@ class StripeService:
                 mode="payment",
                 success_url=resolved_success_url,
                 cancel_url=resolved_cancel_url,
-                payment_method_types=["card"],
                 metadata=metadata,
                 line_items=[
                     {
@@ -202,7 +201,6 @@ class StripeService:
                 mode="subscription",
                 success_url=resolved_success_url,
                 cancel_url=resolved_cancel_url,
-                payment_method_types=["card"],
                 metadata=metadata,
                 subscription_data={"metadata": metadata},
                 line_items=[
@@ -291,7 +289,6 @@ class StripeService:
                 mode="subscription",
                 success_url=resolved_success_url,
                 cancel_url=resolved_cancel_url,
-                payment_method_types=["card"],
                 metadata=metadata,
                 subscription_data={"metadata": metadata},
                 line_items=[
@@ -358,7 +355,6 @@ class StripeService:
                 mode="subscription",
                 success_url=resolved_success_url,
                 cancel_url=resolved_cancel_url,
-                payment_method_types=["card"],
                 metadata=metadata,
                 subscription_data={"metadata": metadata},
                 line_items=[
@@ -430,7 +426,6 @@ class StripeService:
                 mode="subscription",
                 success_url=resolved_success_url,
                 cancel_url=resolved_cancel_url,
-                payment_method_types=["card"],
                 metadata=metadata,
                 subscription_data={"metadata": metadata},
                 line_items=[
@@ -498,7 +493,6 @@ class StripeService:
                 mode="subscription",
                 success_url=success_url,
                 cancel_url=cancel_url,
-                payment_method_types=["card"],
                 metadata=metadata,
                 subscription_data={"metadata": metadata},
                 line_items=[
@@ -561,7 +555,6 @@ class StripeService:
                 mode="subscription",
                 success_url=resolved_success_url,
                 cancel_url=resolved_cancel_url,
-                payment_method_types=["card"],
                 metadata=metadata,
                 subscription_data={"metadata": metadata},
                 line_items=[
@@ -630,7 +623,6 @@ class StripeService:
                 mode="subscription",
                 success_url=resolved_success_url,
                 cancel_url=resolved_cancel_url,
-                payment_method_types=["card"],
                 metadata=metadata,
                 subscription_data={"metadata": metadata},
                 line_items=[
@@ -691,7 +683,6 @@ class StripeService:
                 mode="subscription",
                 success_url=resolved_success_url,
                 cancel_url=resolved_cancel_url,
-                payment_method_types=["card"],
                 metadata=metadata,
                 subscription_data={"metadata": metadata},
                 line_items=[
@@ -753,7 +744,6 @@ class StripeService:
                 mode="subscription",
                 success_url=resolved_success_url,
                 cancel_url=resolved_cancel_url,
-                payment_method_types=["card"],
                 metadata=metadata,
                 subscription_data={"metadata": metadata},
                 line_items=[
@@ -819,7 +809,6 @@ class StripeService:
                 mode="subscription",
                 success_url=resolved_success_url,
                 cancel_url=resolved_cancel_url,
-                payment_method_types=["card"],
                 metadata=metadata,
                 subscription_data={"metadata": metadata},
                 line_items=[
@@ -876,7 +865,6 @@ class StripeService:
                 mode="subscription",
                 success_url=resolved_success_url,
                 cancel_url=resolved_cancel_url,
-                payment_method_types=["card"],
                 metadata=metadata,
                 subscription_data={"metadata": metadata},
                 line_items=[
@@ -925,7 +913,6 @@ class StripeService:
                 mode="subscription",
                 success_url=resolved_success_url,
                 cancel_url=resolved_cancel_url,
-                payment_method_types=["card"],
                 metadata=metadata,
                 subscription_data={"metadata": metadata},
                 line_items=[

@@ -135,7 +135,6 @@ async def create_checkout_session(
             mode="subscription",
             success_url=resolved_success,
             cancel_url=resolved_cancel,
-            payment_method_types=["card"],
             metadata=metadata,
             subscription_data={"metadata": metadata},
             line_items=[{"price": stripe_price_id, "quantity": 1}],
@@ -209,7 +208,6 @@ async def create_tip_checkout(
             mode="payment",
             success_url=f"{settings.app_base_url}{channel_path}",
             cancel_url=f"{settings.app_base_url}{cancel_path}",
-            payment_method_types=["card"],
             metadata=metadata,
             line_items=[{
                 "price_data": {
