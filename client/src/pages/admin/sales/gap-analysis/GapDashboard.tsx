@@ -1,0 +1,452 @@
+/* eslint-disable react-hooks/set-state-in-effect -- Effects intentionally synchronize this tool with loaded data, URL selections, and preview inputs. */
+import { AdminButton } from '../../../../components/admin/AdminUI'
+/**
+ * Persistent per-company Compliance Gap Analysis dashboard.
+ *
+ * Route: /admin/gap-analysis/company/:companyId
+ *
+ * This is the durable home for a company's compliance scope — for initial AND
+ * continuous onboarding. It loads CHEAP (the backend re-resolves the persisted
+ * scope against the current bank with no Gemini call, so gaps filled earlier
+ * already show as covered) and offers two deliberate Gemini actions:
+ *   • "Research" a gap (or selected gaps) → fills it into the bank (covered).
+ *   • "Re-run analysis" → full role-aware enrichment (picks up new locations /
+ *     roster changes flagged by the drift banner).
+ */
+import { AdminPageTitle } from '../../../../components/admin/AdminPageHeader'
+import { useCallback, useEffect, useState } from 'react'
+import { useParams, Link } from 'react-router-dom'
+import {
+  ArrowLeft, Loader2, Play, Sparkles, RefreshCw, FileDown, FileText,
+  CheckCircle2, AlertTriangle, Search, MapPin, FileSearch, Lightbulb,
+  ChevronRight,
+} from 'lucide-react'
+import { adminOnboarding } from '../../../../api/admin/adminOnboarding'
+import type { GapDashboardResponse, ResolvedScopeMissing } from '../../../../api/admin/adminOnboarding'
+import { useEnrichStream } from '../../../../hooks/admin/useEnrichStream'
+import { useResearchGaps } from '../../../../hooks/admin/useResearchGaps'
+import StatutoryFitPanel from '../../../../components/admin/onboarding/StatutoryFitPanel'
+import GapCard from '../../../../components/admin/onboarding/GapCard'
+import { humanizeCategory, jurisdictionLabel } from '../../../../components/admin/onboarding/gapLabels'
+import { complexityBandClass } from './helpers'
+import type { CoveredItem } from './dashboard/types'
+import { COVERAGE_SOURCE_BADGE, COVERAGE_SOURCE_LABEL, COVERAGE_SOURCE_TITLE } from './dashboard/constants'
+import { missingId, toResearchItem } from './dashboard/helpers'
+import GapStatCard from './dashboard/GapStatCard'
+import EventFeed from './dashboard/EventFeed'
+import CoveredRow from './dashboard/CoveredRow'
+
+export default function GapDashboard() {
+  const { companyId } = useParams<{ companyId: string }>()
+  const [data, setData] = useState<GapDashboardResponse | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [activeResearch, setActiveResearch] = useState<string | null>(null) // 'bulk' | missingId
+  const [showCovered, setShowCovered] = useState(false)
+  const [showCx, setShowCx] = useState(false)
+
+  const enrich = useEnrichStream()
+  const research = useResearchGaps()
+
+  const reload = useCallback(() => {
+    if (!companyId) return
+    return adminOnboarding.getGapDashboard(companyId)
+      .then(setData).catch(() => {}).finally(() => setLoading(false))
+  }, [companyId])
+
+  useEffect(() => { void reload() }, [reload])
+  // After a full re-run or a gap fill completes, reload (coverage up / gaps down).
+  useEffect(() => { if (enrich.done) { void reload() } }, [enrich.done, reload])
+  useEffect(() => {
+    if (research.done) { void reload(); setSelected(new Set()); setActiveResearch(null) }
+  }, [research.done, reload])
+
+  if (!companyId) return null
+
+  const busy = enrich.running || research.running
+
+  function toggle(id: string) {
+    setSelected((prev) => {
+      const n = new Set(prev)
+      if (n.has(id)) n.delete(id); else n.add(id)
+      return n
+    })
+  }
+
+  function researchOne(m: ResolvedScopeMissing) {
+    setActiveResearch(missingId(m))
+    void research.run(companyId!, [toResearchItem(m)])
+  }
+
+  function researchSelected() {
+    const gaps = data?.dossier?.coverage.gaps ?? []
+    const items = gaps.filter((m) => selected.has(missingId(m))).map(toResearchItem)
+    if (items.length) { setActiveResearch('bulk'); void research.run(companyId!, items) }
+  }
+
+  // ── Loading ──
+  if (loading) {
+    return <div className="flex items-center justify-center py-24 text-zinc-500"><Loader2 className="animate-spin" size={22} /></div>
+  }
+
+  const dossier = data?.dossier
+  const counts = dossier?.counts
+  const gaps = dossier?.coverage.gaps ?? []
+  const covered = (dossier?.coverage.covered ?? []) as CoveredItem[]
+  const ambiguous = dossier?.coverage.ambiguous ?? []
+  const suggestions = dossier?.ai_suggestions ?? {}
+  const drift = data?.drift
+  const jurisdictionCount = dossier?.scope.applicable_jurisdictions?.length ?? 0
+  const coveragePct = counts?.coverage_pct ?? 0
+  const coverageSource = counts?.coverage_source
+  // engine_coverage_pct is only present when coverage_source === 'engine'
+  const displayCoveragePct = counts?.engine_coverage_pct ?? coveragePct
+  const cx = data?.complexity
+
+  const suggestionCount =
+    (suggestions.suggested_compliance_categories?.length ?? 0) +
+    (suggestions.suggested_certifications?.length ?? 0) +
+    (suggestions.suggested_licenses?.length ?? 0) +
+    (suggestions.suggested_jurisdictions?.length ?? 0)
+
+  // group gaps by jurisdiction
+  const gapsByJur = new Map<string, ResolvedScopeMissing[]>()
+  for (const g of gaps) {
+    const k = jurisdictionLabel(g)
+    if (!gapsByJur.has(k)) gapsByJur.set(k, [])
+    gapsByJur.get(k)!.push(g)
+  }
+  // group covered by category
+  const coveredByCat = new Map<string, CoveredItem[]>()
+  for (const c of covered) {
+    const k = humanizeCategory(c.category_slug || 'Other')
+    if (!coveredByCat.has(k)) coveredByCat.set(k, [])
+    coveredByCat.get(k)!.push(c)
+  }
+
+  const companyName = data?.company?.name || 'Company'
+  const driftActive = !!drift && (drift.new_locations > 0 || drift.new_jurisdictions > 0)
+
+  return (
+    <div>
+      {/* Header */}
+      <div className="flex items-center gap-3 mb-1">
+        <Link to="/admin/gap-analysis" className="text-zinc-500 hover:text-zinc-300"><ArrowLeft size={18} /></Link>
+        <Sparkles className="w-5 h-5 text-vsc-accent" />
+        <AdminPageTitle>Gap Analysis</AdminPageTitle>
+        <span className="text-sm text-zinc-500">· {companyName}</span>
+        {drift?.last_analyzed_at && (
+          <span className="text-[11px] text-zinc-600 ml-2">last analyzed {new Date(drift.last_analyzed_at).toLocaleDateString()}</span>
+        )}
+        <div className="flex-1" />
+        {data?.status === 'ok' && data.session_id && (
+          <>
+            <AdminButton onClick={() => adminOnboarding.downloadReportPdf(data.session_id!)} className="gap-1.5 h-8" variant="ghost">
+              <FileDown className="w-3.5 h-3.5" /> PDF
+            </AdminButton>
+            <AdminButton onClick={() => adminOnboarding.downloadReportMarkdown(data.session_id!)} className="gap-1.5 h-8" variant="ghost">
+              <FileText className="w-3.5 h-3.5" /> MD
+            </AdminButton>
+          </>
+        )}
+        <AdminButton
+          onClick={() => void enrich.run(companyId)}
+          disabled={busy}
+          className="gap-2 h-8 hover:opacity-90 disabled:opacity-50" variant="primary"
+        >
+          {enrich.running ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+          {enrich.running ? 'Analyzing…' : 'Re-run analysis'}
+        </AdminButton>
+      </div>
+      <p className="text-xs text-zinc-500 mb-5 ml-9">
+        Live compliance scope for this company. Fill gaps as you go — re-run when locations or roster change.
+      </p>
+
+      {enrich.error && <div className="mb-4 ml-9 rounded-md border border-red-500/30 bg-red-500/5 p-3 text-sm text-red-300">{enrich.error}</div>}
+
+      {/* Statutory fit — the deterministic second opinion, and deliberately
+          OUTSIDE the `dossier &&` gate below. It needs no gap session: it is
+          computed from the catalog and the company's projections, so it answers
+          on a company that has never been analyzed — which is exactly when
+          "what does this business still need?" is worth asking. Mounted inside
+          the dossier block it silently rendered nothing for every never_run
+          company, Sunset included.
+          It will disagree with the AI dossier's numbers; that difference is the
+          point (curated statutory floor vs per-run model breadth), so they sit
+          side by side rather than reconciled into one figure that hides which
+          is which. */}
+      <div className="ml-9 mb-5">
+        <StatutoryFitPanel companyId={companyId} />
+      </div>
+
+      {/* never_run empty state */}
+      {data?.status === 'never_run' && !enrich.running && !enrich.done && (
+        <div className="ml-9 rounded-xl border border-vsc-border bg-vsc-panel p-8 text-center">
+          <FileSearch className="w-8 h-8 text-zinc-600 mx-auto mb-3" />
+          <h2 className="text-sm font-medium text-zinc-200">No gap analysis yet</h2>
+          <p className="text-xs text-zinc-500 mt-1 mb-4 max-w-md mx-auto">
+            Run the first analysis to scope this company's compliance + jurisdictional needs from its locations and employee roster.
+          </p>
+          <AdminButton onClick={() => void enrich.run(companyId)} className="gap-2 h-9 hover:opacity-90" variant="primary">
+            <Play className="w-4 h-4" /> Run first analysis
+          </AdminButton>
+        </div>
+      )}
+
+      {/* re-run / first-run live feed */}
+      {(enrich.running || (enrich.events.length > 0 && !enrich.done)) && (
+        <div className="ml-9 mb-5"><EventFeed events={enrich.events} running={enrich.running} label="analyzing…" /></div>
+      )}
+
+      {/* Dashboard body */}
+      {dossier && (
+        <div className="space-y-5">
+          {/* Stat row */}
+          <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+            <div className="rounded-lg border border-vsc-border bg-vsc-panel p-3 col-span-2 md:col-span-1">
+              <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Coverage</div>
+              <div className="text-2xl font-semibold text-zinc-100 mt-1">{displayCoveragePct}%</div>
+              <div className="mt-1.5 h-1.5 rounded-full bg-vsc-bg overflow-hidden">
+                <div className="h-full rounded-full bg-emerald-500" style={{ width: `${displayCoveragePct}%` }} />
+              </div>
+              {coverageSource && (
+                <div className="mt-1.5 text-[10px]">
+                  <span
+                    className={`rounded border px-1 py-0.5 ${COVERAGE_SOURCE_BADGE[coverageSource]}`}
+                    title={COVERAGE_SOURCE_TITLE[coverageSource]}
+                  >
+                    {COVERAGE_SOURCE_LABEL[coverageSource]}
+                  </span>
+                  {coverageSource !== 'bank' && (
+                    <span className="ml-1 text-zinc-500">
+                      {counts?.engine_covered ?? 0} codified · {counts?.engine_gaps ?? 0} to codify
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+            {cx && (
+              <AdminButton
+                onClick={() => setShowCx((v) => !v)}
+                className="text-left"
+                title="Compliance complexity — click for breakdown" variant="ghost"
+              >
+                <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Complexity</div>
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="text-2xl font-semibold text-zinc-100">{cx.score}</span>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded border uppercase tracking-wide ${complexityBandClass(cx.band)}`}>{cx.band}</span>
+                </div>
+              </AdminButton>
+            )}
+            <GapStatCard label="Covered" value={counts?.covered ?? 0} tone="ok" />
+            <GapStatCard label="Gaps" value={counts?.gaps ?? 0} tone="gap" />
+            <GapStatCard label="Ambiguous" value={counts?.ambiguous ?? 0} />
+            <GapStatCard label="Jurisdictions" value={jurisdictionCount} />
+          </div>
+
+          {/* Base-layer labor readiness — the federal + state foundation this
+              company inherits, scored against the enumerated master-list. */}
+          {data?.baseline && data.baseline.length > 0 && (
+            <div className="rounded-xl border border-vsc-border bg-vsc-panel p-4">
+              <div className="flex items-center justify-between mb-2">
+                <div>
+                  <h3 className="text-sm font-semibold text-zinc-200">Base-layer labor coverage</h3>
+                  <p className="text-[11px] text-zinc-500">
+                    Federal + state foundations this company inherits, vs the enumerated labor master-list.
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {data.baseline.map((b) => {
+                  const pct = b.score
+                  const tone = pct == null ? 'text-zinc-500'
+                    : pct >= 90 ? 'text-emerald-300' : pct >= 60 ? 'text-amber-300' : 'text-red-300'
+                  return (
+                    <div key={b.jurisdiction_id} className="rounded-lg border border-vsc-border px-3 py-1.5">
+                      <span className="text-xs text-zinc-400">{b.label}: </span>
+                      <span className={`text-xs font-semibold ${tone}`}>
+                        {b.present ?? '—'}/{b.expected ?? '—'}
+                        {pct != null && ` (${Math.round(pct)}%)`}
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Complexity breakdown (expand from the card) */}
+          {cx && showCx && (
+            <div className="rounded-xl border border-vsc-border bg-vsc-panel p-4">
+              <div className="text-sm font-semibold text-zinc-100 mb-3">
+                Complexity breakdown — <span className="text-zinc-400 font-normal">{cx.score}/100 · {cx.band}</span>
+              </div>
+              <div className="space-y-2">
+                {([
+                  ['Domain risk', cx.breakdown.domain, 'what they do'],
+                  ['Jurisdictional breadth', cx.breakdown.breadth, 'states & locales'],
+                  ['Scale', cx.breakdown.scale, 'headcount'],
+                  ['Requirement load', cx.breakdown.load, 'obligations'],
+                ] as [string, number, string][]).map(([label, val, hint]) => (
+                  <div key={label} className="flex items-center gap-3">
+                    <div className="w-44 shrink-0 text-xs text-zinc-300">{label} <span className="text-zinc-600">· {hint}</span></div>
+                    <div className="flex-1 h-2 rounded-full bg-vsc-bg overflow-hidden">
+                      <div className="h-full rounded-full bg-vsc-accent" style={{ width: `${val}%` }} />
+                    </div>
+                    <span className="w-9 text-right text-xs text-zinc-400 tabular-nums">{val}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-3 pt-3 border-t border-vsc-border text-[11px] text-zinc-500 flex flex-wrap gap-x-4 gap-y-1">
+                {cx.breakdown.drivers.industry && <span>Industry: <span className="text-zinc-300">{cx.breakdown.drivers.industry}</span></span>}
+                <span>{cx.breakdown.drivers.states} states · {cx.breakdown.drivers.jurisdictions} jurisdictions</span>
+                <span>{cx.breakdown.drivers.headcount} employees</span>
+                <span>{cx.breakdown.drivers.category_count} categories</span>
+                <span>{cx.breakdown.drivers.requirement_count} requirements</span>
+              </div>
+            </div>
+          )}
+
+          {/* Drift banner */}
+          {driftActive && (
+            <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
+              <div className="text-xs text-amber-200">
+                {drift!.new_locations > 0 && <>{drift!.new_locations} new location{drift!.new_locations > 1 ? 's' : ''} </>}
+                {drift!.new_locations > 0 && drift!.new_jurisdictions > 0 && '· '}
+                {drift!.new_jurisdictions > 0 && <>{drift!.new_jurisdictions} roster jurisdiction{drift!.new_jurisdictions > 1 ? 's' : ''} not yet analyzed </>}
+                — <button onClick={() => void enrich.run(companyId)} disabled={busy} className="font-medium underline hover:text-amber-100 disabled:opacity-50">Re-run analysis</button> to refresh.
+              </div>
+            </div>
+          )}
+
+          {/* Gaps — the core */}
+          <div className="rounded-xl border border-vsc-border bg-vsc-panel/40 p-4">
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <h2 className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
+                <Search className="w-4 h-4 text-amber-400" /> Gaps — need research ({gaps.length})
+              </h2>
+              {gaps.length > 0 && (
+                <AdminButton
+                  onClick={researchSelected}
+                  disabled={busy || selected.size === 0}
+                  className="hover:opacity-90 disabled:opacity-40 gap-2" variant="primary"
+                >
+                  {research.running && activeResearch === 'bulk' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
+                  Research selected ({selected.size})
+                </AdminButton>
+              )}
+            </div>
+
+            {gaps.length === 0 ? (
+              <div className="text-center py-6 text-sm text-emerald-300 flex items-center justify-center gap-2">
+                <CheckCircle2 className="w-4 h-4" /> No open gaps — every scoped requirement is covered.
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {[...gapsByJur.entries()].map(([jur, items]) => (
+                  <div key={jur}>
+                    <div className="flex items-center gap-1.5 text-[11px] text-zinc-500 uppercase tracking-wide mb-1.5">
+                      <MapPin className="w-3 h-3" /> {jur} · {items.length}
+                    </div>
+                    <div className="space-y-2">
+                      {items.map((m) => {
+                        const id = missingId(m)
+                        return (
+                          <GapCard
+                            key={id}
+                            gap={m}
+                            selected={selected.has(id)}
+                            onToggle={() => toggle(id)}
+                            onResearch={() => researchOne(m)}
+                            researching={research.running && activeResearch === id}
+                            disabled={busy}
+                          />
+                        )
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {research.running && (
+              <div className="mt-3 border-t border-vsc-border pt-3">
+                <EventFeed events={research.events} running={research.running} label="researching…" />
+              </div>
+            )}
+            {research.error && <p className="text-xs text-red-400 mt-2">{research.error}</p>}
+          </div>
+
+          {/* AI safety net */}
+          {suggestionCount > 0 && (
+            <div className="rounded-xl border border-vsc-border bg-vsc-panel p-4">
+              <h2 className="text-sm font-semibold text-zinc-100 flex items-center gap-2 mb-2">
+                <Lightbulb className="w-4 h-4 text-amber-400" /> AI safety net ({suggestionCount})
+              </h2>
+              {suggestions.summary && <p className="text-[11px] text-zinc-500 mb-2 leading-relaxed">{suggestions.summary}</p>}
+              <div className="flex flex-wrap gap-1.5">
+                {suggestions.suggested_compliance_categories?.map((c) => (
+                  <span key={`c-${c.category_slug}`} className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300 border border-vsc-border">{humanizeCategory(c.category_slug)} · {c.scope}</span>
+                ))}
+                {suggestions.suggested_certifications?.map((c) => (
+                  <span key={`ct-${c.slug}`} className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300 border border-vsc-border">{c.name}</span>
+                ))}
+                {suggestions.suggested_licenses?.map((l) => (
+                  <span key={`l-${l.slug}`} className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300 border border-vsc-border">{l.name}</span>
+                ))}
+                {suggestions.suggested_jurisdictions?.map((j, i) => (
+                  <span key={`j-${i}`} className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300 border border-vsc-border">{jurisdictionLabel(j)}</span>
+                ))}
+              </div>
+              <p className="text-[10px] text-zinc-600 mt-2">Advisory — re-run analysis to fold confirmed items into scope.</p>
+            </div>
+          )}
+
+          {/* Ambiguous */}
+          {ambiguous.length > 0 && (
+            <div className="rounded-xl border border-vsc-border bg-vsc-panel p-4">
+              <h2 className="text-sm font-semibold text-zinc-100 flex items-center gap-2 mb-2">
+                <AlertTriangle className="w-4 h-4 text-amber-400" /> Ambiguous — need disambiguation ({ambiguous.length})
+              </h2>
+              <div className="space-y-1.5">
+                {ambiguous.map((a, i) => (
+                  <div key={i} className="text-xs text-zinc-400">
+                    <span className="text-zinc-200">{humanizeCategory(a.category_slug)}</span>
+                    {a.why ? <span className="text-zinc-500"> — {a.why}</span> : null}
+                    <span className="text-zinc-600"> ({a.candidates?.length ?? 0} candidates)</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Covered (collapsible) */}
+          <div className="rounded-xl border border-vsc-border bg-vsc-panel">
+            <button onClick={() => setShowCovered((v) => !v)} className="w-full flex items-center gap-2 px-4 py-3 text-left">
+              <ChevronRight className={`w-4 h-4 text-zinc-500 transition-transform ${showCovered ? 'rotate-90' : ''}`} />
+              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+              <span className="text-sm font-semibold text-zinc-100">Already covered ({covered.length})</span>
+            </button>
+            {showCovered && (
+              <div className="px-2 pb-2">
+                {covered.length === 0 ? (
+                  <p className="text-xs text-zinc-500 px-2 py-3">Nothing covered yet — research the gaps above.</p>
+                ) : (
+                  [...coveredByCat.entries()].map(([cat, items]) => (
+                    <div key={cat} className="mb-2">
+                      <div className="text-[11px] text-zinc-500 uppercase tracking-wide px-3 pt-2 pb-1">{cat} · {items.length}</div>
+                      <div className="rounded-lg border border-vsc-border overflow-hidden">
+                        {items.map((c, i) => <CoveredRow key={c.requirement_id || i} companyId={companyId} item={c} />)}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}

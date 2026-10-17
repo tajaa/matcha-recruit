@@ -1,3 +1,5 @@
+/* eslint-disable react-hooks/set-state-in-effect -- Effects intentionally synchronize this tool with loaded data, URL selections, and preview inputs. */
+import { AdminSelect, AdminTable } from '../AdminUI'
 import { useState, useEffect, useMemo } from 'react'
 import { fetchCoverageMatrix } from '../../../api/compliance'
 import type { CoverageMatrixResponse, CoverageCell } from '../../../api/compliance'
@@ -125,14 +127,13 @@ export default function CoverageHeatmap({ onCellClick }: CoverageHeatmapProps) {
     <div className="space-y-3">
       {/* Filter bar */}
       <div className="flex flex-wrap items-center gap-2">
-        <select
+        <AdminSelect
           value={filterState}
           onChange={(e) => setFilterState(e.target.value)}
-          className="bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-300 text-xs px-2.5 py-1.5"
         >
           <option value="">All States</option>
           {allStates.map((s) => <option key={s} value={s}>{s}</option>)}
-        </select>
+        </AdminSelect>
         <div className="flex rounded-lg overflow-hidden border border-zinc-700 text-xs">
           {(['All', 'Healthcare', 'HR'] as DomainFilter[]).map((d) => (
             <button
@@ -171,17 +172,17 @@ export default function CoverageHeatmap({ onCellClick }: CoverageHeatmapProps) {
         </div>
       ) : (<>
       {/* Heatmap grid */}
-      <div className="border border-zinc-800 rounded-lg overflow-auto max-h-[60vh]">
-        <table className="text-xs border-collapse">
-          <thead className="sticky top-0 z-10 bg-zinc-950">
+      <div className="max-h-[60vh]">
+        <AdminTable>
+          <thead className="sticky top-0 z-10">
             <tr>
-              <th className="py-1.5 px-2 text-left text-[10px] text-zinc-500 uppercase tracking-wide whitespace-nowrap min-w-[120px] bg-zinc-950">
+              <th className="text-left text-zinc-500 whitespace-nowrap min-w-[120px]">
                 Jurisdiction
               </th>
               {filteredCategories.map((cat) => (
                 <th
                   key={cat}
-                  className="py-1.5 px-1 text-center text-[9px] text-zinc-500 uppercase tracking-wide whitespace-nowrap bg-zinc-950"
+                  className="text-center text-zinc-500 whitespace-nowrap"
                   style={{ minWidth: 36 }}
                   title={cat}
                 >
@@ -193,7 +194,7 @@ export default function CoverageHeatmap({ onCellClick }: CoverageHeatmapProps) {
           <tbody>
             {displayJurisdictions.map((j) => (
               <tr key={j.id} className="hover:bg-zinc-900/40">
-                <td className="py-0.5 px-2 text-zinc-300 whitespace-nowrap font-mono text-[11px] sticky left-0 bg-zinc-950 z-[5]">
+                <td className="text-zinc-300 whitespace-nowrap font-mono sticky left-0 z-[5]">
                   {j.city || j.name}, {j.state}
                 </td>
                 {filteredCategories.map((cat) => {
@@ -201,7 +202,7 @@ export default function CoverageHeatmap({ onCellClick }: CoverageHeatmapProps) {
                   const cell = data.cells[key]
                   const color = cellColor(cell)
                   return (
-                    <td key={cat} className="py-0.5 px-0.5 text-center">
+                    <td key={cat} className="text-center">
                       <div
                         className={`w-7 h-5 mx-auto rounded-sm cursor-pointer transition-opacity hover:opacity-80 flex items-center justify-center text-[9px] font-mono ${color}`}
                         onClick={() => onCellClick?.(j.id, cat)}
@@ -219,7 +220,7 @@ export default function CoverageHeatmap({ onCellClick }: CoverageHeatmapProps) {
               </tr>
             ))}
           </tbody>
-        </table>
+        </AdminTable>
       </div>
 
       {/* Legend */}

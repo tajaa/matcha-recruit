@@ -1,0 +1,632 @@
+import { AdminSection, AdminCard as Card, AdminButton as Button, AdminTextarea, AdminInput, AdminTable } from '../../../components/admin/AdminUI'
+import { AdminPageHeader } from '../../../components/admin/AdminPageHeader'
+import { useState } from 'react'
+
+import { Loader2, Trash2, Plus, RefreshCw, Send } from 'lucide-react'
+import { useAsync } from '../../../hooks/useAsync'
+import {
+  adminSettingsApi,
+  type TokenQuota,
+  type TokenUsage,
+  type BetaInvitation,
+  type AutoPRBoardCapabilities,
+} from '../../../api/admin/platformSettings'
+import { AgentModelsSetting } from '../../../components/admin/AgentModelsSetting'
+
+// Mirrors the backend's fallback when platform_settings has no row yet.
+const DEFAULT_RESEARCH_MODE = 'light'
+
+const RESEARCH_MODELS = [
+  { id: 'lite', label: 'Lite', model: 'Gemini 3.1 Flash Lite', description: 'Fastest, lowest cost — good for bulk research' },
+  { id: 'light', label: 'Light', model: 'Gemini 3 Flash', description: 'Balanced speed and quality (default)' },
+  { id: 'heavy', label: 'Pro', model: 'Gemini 3.1 Pro', description: 'Highest quality, slower — best for targeted research' },
+]
+
+const errText = (e: unknown) => (e instanceof Error ? e.message : String(e))
+
+// What each AutoPR board grant actually permits. Written as blast radius, not
+// as a feature name: an admin ticking "outreach" is authorizing drafted email
+// to leave the building once a human approves each one.
+const AUTOPR_CAPABILITY_COPY: Record<string, { label: string; description: string }> = {
+  research: {
+    label: 'Research',
+    description: 'Allows live web search for Research tickets and implementation/rework PRs. Research tickets attach a report without changing code.',
+  },
+  outreach: {
+    label: 'Outreach',
+    description: 'A run may STAGE email and contact requests on a card. Nothing sends until a person approves that exact item, and it sends from their own mailbox.',
+  },
+  browse: {
+    label: 'Browse',
+    description: 'A run may drive a real browser and attach screenshots of what it saw.',
+  },
+  email: {
+    label: 'Email',
+    description: 'Email tickets may run: the model reads the email snapshots a person attached to the card and drafts replies. Nothing sends without the Outreach grant AND a per-item approval.',
+  },
+}
+
+export default function Settings() {
+  const [pendingMode, setPendingMode] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+
+  // Token quotas & usage
+  const [showAddQuota, setShowAddQuota] = useState(false)
+  const [newQuota, setNewQuota] = useState({ user_email: '', token_limit: '100000', window_hours: '12' })
+  const [quotaError, setQuotaError] = useState('')
+
+  // AutoPR per-board capability grants
+  const [pendingBoards, setPendingBoards] = useState<Record<string, string[]> | null>(null)
+  const [boardsSaving, setBoardsSaving] = useState(false)
+  const [boardsError, setBoardsError] = useState<string | null>(null)
+
+  // Beta invitations
+  const [betaEmails, setBetaEmails] = useState('')
+  const [betaSending, setBetaSending] = useState(false)
+  const [betaResult, setBetaResult] = useState<string | null>(null)
+
+  // Two different nulls, deliberately kept apart. An UNSET row means the backend
+  // is using its documented 'light' default, so show Light selected. A FAILED
+  // lookup means we don't know, and the old code's `catch -> 'light'` displayed
+  // Light with total confidence while the real mode might be anything — that
+  // case is now settings.error and renders as an error, not as a selection.
+  const settings = useAsync(() => adminSettingsApi.getPlatformSettings(), [])
+  const researchMode = settings.data
+    ? (settings.data.jurisdiction_research_model_mode ?? DEFAULT_RESEARCH_MODE)
+    : null
+  const selectedMode = pendingMode ?? researchMode
+
+  const quotaState = useAsync<{ quotas: TokenQuota[]; usage: TokenUsage[] }>(
+    async () => {
+      const [quotas, usage] = await Promise.all([
+        adminSettingsApi.listQuotas(),
+        adminSettingsApi.listUsage(),
+      ])
+      return { quotas, usage }
+    },
+    [],
+    { quotas: [], usage: [] },
+  )
+  const { quotas, usage } = quotaState.data
+  const quotaLoading = quotaState.loading
+
+  const beta = useAsync<BetaInvitation[]>(() => adminSettingsApi.listBetaInvitations(), [], [])
+
+  const boards = useAsync<AutoPRBoardCapabilities | null>(
+    () => adminSettingsApi.getAutoPRBoardCapabilities(),
+    [],
+    null,
+  )
+  const editableBoards = pendingBoards ?? boards.data?.capabilities ?? null
+
+  const toggleBoardCapability = (projectId: string, capability: string) => {
+    setPendingBoards((prev) => {
+      const base = prev ?? boards.data?.capabilities ?? {}
+      const current = base[projectId] ?? []
+      const next = current.includes(capability)
+        ? current.filter((c) => c !== capability)
+        : [...current, capability]
+      return { ...base, [projectId]: next }
+    })
+  }
+
+  // Grants are a set per board, so the comparison has to be one too: with a
+  // raw JSON.stringify, ticking a box and unticking it left `{ id: [] }`
+  // against the server's `{}` and the form stayed dirty forever, and granting
+  // two capabilities in the other order did the same.
+  const boardGrantsKey = (map: Record<string, string[]>) =>
+    JSON.stringify(
+      Object.entries(map)
+        .map(([id, caps]) => [id, [...caps].sort()] as const)
+        .filter(([, caps]) => caps.length > 0)
+        .sort(([a], [b]) => a.localeCompare(b)),
+    )
+  const boardsDirty =
+    editableBoards !== null &&
+    boards.data !== null &&
+    boardGrantsKey(editableBoards) !== boardGrantsKey(boards.data.capabilities ?? {})
+
+  const handleSaveBoards = async () => {
+    if (!editableBoards || !boards.data) return
+    setBoardsSaving(true)
+    setBoardsError(null)
+    try {
+      // Submit only the boards the harness watches. The server refuses any
+      // other key, and a grant left behind by a board that was later dropped
+      // from the watched set is invisible here — resubmitting it would make
+      // every save fail on a board the admin cannot see or clear.
+      const watched = new Set(boards.data.watched_project_ids)
+      const submitted = Object.fromEntries(
+        Object.entries(editableBoards).filter(([id]) => watched.has(id)),
+      )
+      const saved = await adminSettingsApi.setAutoPRBoardCapabilities(submitted)
+      // Adopt the server's normalized map, not the local draft: it deduped and
+      // ordered the grants, and the dirty check compares against it.
+      boards.setData({ ...(boards.data as AutoPRBoardCapabilities), capabilities: saved.capabilities })
+      setPendingBoards(null)
+    } catch (e) {
+      setBoardsError(errText(e))
+    } finally {
+      setBoardsSaving(false)
+    }
+  }
+  const betaInvites = beta.data
+  const betaLoading = beta.loading
+
+  async function handleSave() {
+    if (!selectedMode || selectedMode === researchMode) return
+    setSaving(true)
+    setSaveError(null)
+    try {
+      await adminSettingsApi.setResearchModelMode(selectedMode)
+      settings.setData({ ...settings.data, jurisdiction_research_model_mode: selectedMode })
+      setPendingMode(null)
+    } catch (e) {
+      // api/client.ts throws on non-2xx. Uncaught, this was an unhandled
+      // rejection: the button returned to "Saved" and the admin had no way to
+      // know the mode had not changed.
+      setSaveError(errText(e))
+    } finally { setSaving(false) }
+  }
+
+  async function handleUpdateQuota(id: string, updates: Record<string, unknown>) {
+    setQuotaError('')
+    try {
+      await adminSettingsApi.updateQuota(id, updates)
+    } catch (e) {
+      setQuotaError(errText(e))
+      return
+    }
+    await quotaState.reload()
+  }
+
+  async function handleDeleteQuota(id: string) {
+    setQuotaError('')
+    try {
+      await adminSettingsApi.deleteQuota(id)
+    } catch (e) {
+      // Without this a failed delete left the row on screen with no message —
+      // indistinguishable from a delete that worked but hadn't refreshed yet.
+      setQuotaError(errText(e))
+      return
+    }
+    await quotaState.reload()
+  }
+
+  async function handleAddQuota() {
+    setQuotaError('')
+    const body: Record<string, unknown> = {
+      token_limit: parseInt(newQuota.token_limit) || 100000,
+      window_hours: parseInt(newQuota.window_hours) || 12,
+    }
+    // If email provided, look up user_id
+    if (newQuota.user_email.trim()) {
+      body.user_email = newQuota.user_email.trim()
+      // We'll let the backend resolve the email — but current endpoint takes user_id.
+      // For now, find user_id from usage data or just pass null for global.
+      const match = usage.find((u) => u.email === newQuota.user_email.trim())
+      if (match) {
+        body.user_id = match.user_id
+      } else {
+        setQuotaError('User not found in recent usage. Enter the exact email.')
+        return
+      }
+    }
+    try {
+      await adminSettingsApi.createQuota(body)
+    } catch (e) {
+      // Previously `if (res.ok)` — a rejected quota just did nothing and left
+      // the form open with no explanation.
+      setQuotaError(errText(e))
+      return
+    }
+    setShowAddQuota(false)
+    setNewQuota({ user_email: '', token_limit: '100000', window_hours: '12' })
+    await quotaState.reload()
+  }
+
+  async function handleSendBetaInvites() {
+    const emails = betaEmails
+      .split(/[\n,;]+/)
+      .map((e) => e.trim().toLowerCase())
+      .filter((e) => e.includes('@'))
+    if (emails.length === 0) return
+    setBetaSending(true)
+    setBetaResult(null)
+    try {
+      const data = await adminSettingsApi.sendBetaInvitations(emails)
+      setBetaResult(`Sent ${data.sent} invitation${data.sent !== 1 ? 's' : ''}${data.skipped?.length ? `. Skipped: ${data.skipped.join(', ')}` : ''}`)
+      setBetaEmails('')
+      await beta.reload()
+    } catch (e) {
+      setBetaResult(errText(e))
+    } finally {
+      setBetaSending(false)
+    }
+  }
+
+  async function handleRevokeBetaInvite(id: string) {
+    setBetaResult(null)
+    try {
+      await adminSettingsApi.revokeBetaInvitation(id)
+    } catch (e) {
+      setBetaResult(errText(e))
+      return
+    }
+    await beta.reload()
+  }
+
+  const hasChanges = selectedMode !== null && selectedMode !== researchMode
+
+  return (
+    <div>
+      <AdminPageHeader title="Settings" description="Platform-wide configuration." />
+
+      {/* Two columns on wide screens: the short sections stack on the left
+          against AutoPR's taller board list on the right; the wide ones (AI
+          models, quotas, live usage) take the full width below. One column
+          below lg. */}
+      <div className="mt-8 space-y-12">
+      <div className="grid items-start gap-x-8 gap-y-12 lg:grid-cols-2">
+      <div className="min-w-0 space-y-12">
+
+      {/* ── Compliance Research Model ── */}
+      <AdminSection title={<>Compliance Research Model</>} description={<>Controls which Gemini model is used for jurisdiction &amp; specialization research.</>}>
+        {settings.loading ? (
+          <div className="flex items-center gap-2 py-4 text-sm text-zinc-500">
+            <Loader2 className="w-4 h-4 animate-spin" /> Loading settings...
+          </div>
+        ) : settings.error ? (
+          /* Without this the list renders with no option selected, which reads
+             as "no mode is set" rather than "we couldn't find out". */
+          <p className="py-4 text-sm text-red-400">{settings.error}</p>
+        ) : (
+          <div className="space-y-2">
+            {RESEARCH_MODELS.map((m) => (
+              <Card
+                key={m.id}
+                className={`flex items-center gap-4 p-4 cursor-pointer transition-colors ${
+                  selectedMode === m.id ? 'border-emerald-500 bg-emerald-950/20' : 'hover:border-zinc-700'
+                }`}
+                onClick={() => setPendingMode(m.id)}
+              >
+                <div className={`h-3 w-3 rounded-full border-2 shrink-0 ${
+                  selectedMode === m.id ? 'border-emerald-500 bg-emerald-500' : 'border-zinc-600'
+                }`} />
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-zinc-100">
+                    {m.label} <span className="ml-2 text-xs font-normal text-zinc-500">{m.model}</span>
+                  </p>
+                  <p className="text-xs text-zinc-500">{m.description}</p>
+                </div>
+              </Card>
+            ))}
+          </div>
+        )}
+        <div className="mt-6">
+          <Button onClick={handleSave} disabled={!hasChanges || saving}>
+            {saving ? 'Saving...' : hasChanges ? 'Save changes' : 'Saved'}
+          </Button>
+          {saveError && <p className="mt-2 text-xs text-red-400">{saveError}</p>}
+        </div>
+      </AdminSection>
+
+      {/* ── Beta Invitations ── */}
+      <AdminSection title={<>Matcha Work Beta Invitations</>} description={<>Send private beta invitations for Matcha Work. Recipients get an independent individual account (not attached to any business).</>}>
+
+        {/* Send form */}
+        <Card className="p-4 mb-4">
+          <label className="text-[10px] text-zinc-500 mb-1 block">Email addresses (one per line, or comma-separated)</label>
+          <AdminTextarea
+            value={betaEmails}
+            onChange={(e) => setBetaEmails(e.target.value)}
+            placeholder="jane@example.com&#10;john@example.com"
+            rows={3}
+            className="resize-y"
+          />
+          {betaResult && <p className="text-xs text-emerald-400 mt-2">{betaResult}</p>}
+          <div className="mt-3">
+            <Button onClick={handleSendBetaInvites} disabled={betaSending || !betaEmails.trim()}>
+              <Send size={12} className="mr-1.5" />
+              {betaSending ? 'Sending...' : 'Send Invitations'}
+            </Button>
+          </div>
+        </Card>
+
+        {/* Invitation list */}
+        {betaLoading ? (
+          <div className="flex items-center gap-2 py-4 text-sm text-zinc-500">
+            <Loader2 className="w-4 h-4 animate-spin" /> Loading invitations...
+          </div>
+        ) : beta.error ? (
+          <p className="py-4 text-sm text-red-400">{beta.error}</p>
+        ) : betaInvites.length === 0 ? (
+          <p className="text-xs text-zinc-500 py-4">No invitations sent yet.</p>
+        ) : (
+          <div className="space-y-1.5">
+            {betaInvites.map((inv) => (
+              <Card key={inv.id} className="flex items-center gap-3 px-3 py-2.5">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-zinc-200 truncate">{inv.email}</p>
+                  <p className="text-[10px] text-zinc-500">
+                    Sent {inv.created_at ? new Date(inv.created_at).toLocaleDateString() : '—'}
+                    {inv.registered_at && ` · Registered ${new Date(inv.registered_at).toLocaleDateString()}`}
+                  </p>
+                </div>
+                <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
+                  inv.status === 'registered'
+                    ? 'bg-emerald-900/30 text-emerald-400'
+                    : inv.status === 'pending'
+                    ? 'bg-amber-900/30 text-amber-400'
+                    : 'bg-zinc-800 text-zinc-500'
+                }`}>
+                  {inv.status}
+                </span>
+                {inv.status === 'pending' && (
+                  <button onClick={() => handleRevokeBetaInvite(inv.id)} className="text-zinc-600 hover:text-red-400 p-1">
+                    <Trash2 size={12} />
+                  </button>
+                )}
+              </Card>
+            ))}
+          </div>
+        )}
+      </AdminSection>
+      </div>
+
+      {/* ── AutoPR board capabilities ── */}
+      <AdminSection title={<>AutoPR board capabilities</>} description={<>What the AutoPR bot may do on each Espresso board it watches. Every grant is off by
+          default, and drafting code pull requests needs none of them. Only the four boards the
+          harness polls can be granted anything.</>}>
+        {boards.loading ? (
+          <div className="flex items-center gap-2 py-4 text-sm text-zinc-500">
+            <Loader2 className="w-4 h-4 animate-spin" /> Loading board grants...
+          </div>
+        ) : boards.error ? (
+          <p className="py-4 text-sm text-red-400">{boards.error}</p>
+        ) : !boards.data || boards.data.watched_project_ids.length === 0 ? (
+          <p className="py-4 text-sm text-zinc-500">AutoPR is not watching any board.</p>
+        ) : (
+          <div className="space-y-3">
+            {(boards.data.orphaned_project_ids?.length ?? 0) > 0 && (
+              <p className="text-xs text-amber-400">
+                {boards.data.orphaned_project_ids!.length} grant(s) belong to boards AutoPR no longer
+                watches and will be dropped on the next save.
+              </p>
+            )}
+            {boards.data.watched_project_ids.map((projectId) => {
+              const granted = editableBoards?.[projectId] ?? []
+              const title = boards.data?.watched_projects?.find((p) => p.id === projectId)?.title
+              return (
+                <Card key={projectId} className="p-4">
+                  <p className="text-sm text-zinc-100 mb-0.5">
+                    {title ?? <span className="text-zinc-500 italic">(board not found)</span>}
+                  </p>
+                  <p className="font-mono text-[11px] text-zinc-500 mb-3 break-all">{projectId}</p>
+                  <div className="space-y-2">
+                    {(boards.data?.known_capabilities ?? []).map((cap) => {
+                      const copy = AUTOPR_CAPABILITY_COPY[cap]
+                      const on = granted.includes(cap)
+                      return (
+                        <label
+                          key={cap}
+                          className="flex items-start gap-3 cursor-pointer rounded p-2 -m-2 hover:bg-zinc-900/60"
+                        >
+                          <input
+                            type="checkbox"
+                            className="mt-0.5 shrink-0"
+                            checked={on}
+                            onChange={() => toggleBoardCapability(projectId, cap)}
+                          />
+                          <span className="min-w-0">
+                            <span className="block text-sm text-zinc-100">{copy?.label ?? cap}</span>
+                            <span className="block text-xs text-zinc-500">
+                              {copy?.description ?? 'No description for this capability.'}
+                            </span>
+                          </span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                </Card>
+              )
+            })}
+          </div>
+        )}
+        {boards.data && (
+          <div className="mt-4">
+            <Button onClick={handleSaveBoards} disabled={!boardsDirty || boardsSaving}>
+              {boardsSaving ? 'Saving...' : boardsDirty ? 'Save grants' : 'Saved'}
+            </Button>
+            {boardsError && <p className="mt-2 text-xs text-red-400">{boardsError}</p>}
+          </div>
+        )}
+      </AdminSection>
+      </div>
+
+      {/* ── AI models ── */}
+      <AdminSection title={<>AI models</>} description={<>Which model each app runs on, with per-product overrides. Built-in keeps a product on the
+          model it was built on. Managers can still pick a model per chat in the schedule assistant.</>}>
+        {settings.loading ? (
+          <div className="flex items-center gap-2 py-4 text-sm text-zinc-500">
+            <Loader2 className="w-4 h-4 animate-spin" /> Loading settings...
+          </div>
+        ) : settings.error ? (
+          <p className="py-4 text-sm text-red-400">{settings.error}</p>
+        ) : (
+          <AgentModelsSetting
+            models={settings.data?.agent_models ?? { apps: {}, surfaces: {} }}
+            registry={settings.data?.agent_model_registry ?? []}
+            choices={settings.data?.agent_model_choices ?? []}
+            version={settings.data?.agent_models_version ?? null}
+            anthropicConfigured={!!settings.data?.anthropic_configured}
+            onSaved={(models, version) =>
+              settings.setData({ ...settings.data, agent_models: models, agent_models_version: version })}
+          />
+        )}
+      </AdminSection>
+
+      {/* ── Token Quotas ── */}
+      <div className="min-w-0">
+        <div className="flex items-center justify-between mb-1">
+          <h2 className="text-sm font-medium text-zinc-300">Token Quotas</h2>
+          <div className="flex items-center gap-2">
+            <button onClick={() => quotaState.reload()} className="text-zinc-500 hover:text-zinc-300 p-1">
+              <RefreshCw size={14} />
+            </button>
+            <button
+              onClick={() => setShowAddQuota(!showAddQuota)}
+              className="flex items-center gap-1 text-xs text-emerald-400 hover:text-emerald-300"
+            >
+              <Plus size={12} /> Add quota
+            </button>
+          </div>
+        </div>
+        <p className="text-xs text-zinc-500 mb-4">
+          Control how many AI tokens each user can consume per rolling window. Global defaults apply to all users without a specific quota.
+        </p>
+
+        {/* Add quota form */}
+        {showAddQuota && (
+          <Card className="p-4 mb-4 border-emerald-800/50">
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className="text-[10px] text-zinc-500 mb-1 block">User email (blank = global)</label>
+                <AdminInput
+                  value={newQuota.user_email}
+                  onChange={(e) => setNewQuota({ ...newQuota, user_email: e.target.value })}
+                  placeholder="user@example.com"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] text-zinc-500 mb-1 block">Token limit</label>
+                <AdminInput
+                  type="number"
+                  value={newQuota.token_limit}
+                  onChange={(e) => setNewQuota({ ...newQuota, token_limit: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="text-[10px] text-zinc-500 mb-1 block">Window (hours)</label>
+                <AdminInput
+                  type="number"
+                  value={newQuota.window_hours}
+                  onChange={(e) => setNewQuota({ ...newQuota, window_hours: e.target.value })}
+                />
+              </div>
+            </div>
+            {quotaError && <p className="text-xs text-red-400 mt-2">{quotaError}</p>}
+            <div className="flex gap-2 mt-3">
+              <Button onClick={handleAddQuota}>Add</Button>
+              <button onClick={() => setShowAddQuota(false)} className="text-xs text-zinc-500">Cancel</button>
+            </div>
+          </Card>
+        )}
+
+        {quotaLoading ? (
+          <div className="flex items-center gap-2 py-4 text-sm text-zinc-500">
+            <Loader2 className="w-4 h-4 animate-spin" /> Loading quotas...
+          </div>
+        ) : quotaState.error ? (
+          /* An error must outrank the list: rendering an empty quota list on a
+             failed load reads as "no quotas configured", and an admin acting on
+             that creates a duplicate. */
+          <p className="py-4 text-sm text-red-400">{quotaState.error}</p>
+        ) : (
+          <div className="space-y-2">
+            {quotas.map((q) => (
+              <Card key={q.id} className="flex items-center gap-4 p-3">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-zinc-100">
+                    {q.user_email || q.company_name || 'Global Default'}
+                  </p>
+                  <p className="text-xs text-zinc-500">
+                    {(q.token_limit).toLocaleString()} tokens / {q.window_hours}h
+                    {!q.is_active && <span className="ml-2 text-amber-400">(disabled)</span>}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <AdminInput
+                    type="number"
+                    defaultValue={q.token_limit}
+                    onBlur={(e) => {
+                      const v = parseInt(e.target.value)
+                      if (v && v !== q.token_limit) handleUpdateQuota(q.id, { token_limit: v })
+                    }}
+                    className="w-24"
+                  />
+                  <button
+                    onClick={() => handleUpdateQuota(q.id, { is_active: !q.is_active })}
+                    className={`text-[10px] px-2 py-1 rounded ${q.is_active ? 'text-emerald-400 bg-emerald-900/30' : 'text-zinc-500 bg-zinc-800'}`}
+                  >
+                    {q.is_active ? 'Active' : 'Off'}
+                  </button>
+                  <button onClick={() => handleDeleteQuota(q.id)} className="text-zinc-600 hover:text-red-400 p-1">
+                    <Trash2 size={12} />
+                  </button>
+                </div>
+              </Card>
+            ))}
+            {quotas.length === 0 && (
+              <p className="text-xs text-zinc-500 py-4">No quotas configured. All users use the hardcoded default (100k tokens / 12h).</p>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* ── Live Token Usage ── */}
+      <AdminSection title={<>Live Token Usage (last 12h)</>} description={<>Active users and their token consumption in the current window.</>}>
+
+        {quotaLoading ? (
+          <div className="flex items-center gap-2 py-4 text-sm text-zinc-500">
+            <Loader2 className="w-4 h-4 animate-spin" /> Loading...
+          </div>
+        ) : quotaState.error ? (
+          <p className="py-4 text-sm text-red-400">{quotaState.error}</p>
+        ) : usage.length === 0 ? (
+          <p className="text-xs text-zinc-500 py-4">No token usage in the last 12 hours.</p>
+        ) : (
+          <AdminTable>
+            <thead>
+              <tr className="text-zinc-500 border-b border-zinc-800">
+                <th className="text-left">User</th>
+                <th className="text-left">Company</th>
+                <th className="text-right">Tokens</th>
+                <th className="text-right">Calls</th>
+                <th className="text-right">Cost</th>
+              </tr>
+            </thead>
+            <tbody>
+              {usage.map((u) => {
+                const globalQuota = quotas.find((q) => !q.user_id && !q.company_id)
+                const userQuota = quotas.find((q) => q.user_id === u.user_id)
+                const limit = userQuota?.token_limit ?? globalQuota?.token_limit ?? 100000
+                const pct = Math.round((u.tokens_used / limit) * 100)
+                const over = pct >= 100
+                return (
+                  <tr key={u.user_id} className="border-b border-zinc-800/50">
+                    <td className="text-zinc-200">{u.email}</td>
+                    <td className="text-zinc-500">{u.company_name || '—'}</td>
+                    <td className="text-right">
+                      <span className={over ? 'text-red-400 font-medium' : 'text-zinc-200'}>
+                        {u.tokens_used.toLocaleString()}
+                      </span>
+                      <span className="text-zinc-600"> / {limit.toLocaleString()}</span>
+                      <span className={`ml-1 ${over ? 'text-red-400' : pct >= 80 ? 'text-amber-400' : 'text-zinc-500'}`}>
+                        ({pct}%)
+                      </span>
+                    </td>
+                    <td className="text-right text-zinc-400">{u.call_count}</td>
+                    <td className="text-right text-zinc-400">${Number(u.cost_dollars).toFixed(4)}</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </AdminTable>
+        )}
+      </AdminSection>
+      </div>
+    </div>
+  )
+}

@@ -1,10 +1,12 @@
+import { AdminSection, AdminInput, AdminSelect, AdminButton } from '../../AdminUI'
 import { useState } from 'react'
 
 import {
   adminOnboarding,
   type LocationInput,
 } from '../../../../api/admin/adminOnboarding'
-import { ALL_STATES, ErrorBox, FieldLabel, PrimaryButton, type StepProps } from './_shared'
+import { ErrorBox, FieldLabel, PrimaryButton, type StepProps } from './_shared'
+import { ALL_STATES } from './helpers'
 
 // ── Step 3: Locations + create-company ─────────────────────────────────
 
@@ -49,11 +51,7 @@ export function Step3Locations({ session, onUpdated, onNext }: StepProps) {
   }
 
   return (
-    <div className="max-w-3xl">
-      <h2 className="text-base font-medium text-zinc-100 mb-1">Locations</h2>
-      <p className="text-sm text-zinc-400 mb-6">
-        Add each physical location. State drives jurisdiction-specific scope. County / city refine it. A company-wide sentinel is added automatically for federal-only requirements.
-      </p>
+    <AdminSection title={<>Locations</>} description={<>Add each physical location. State drives jurisdiction-specific scope. County / city refine it. A company-wide sentinel is added automatically for federal-only requirements.</>}>
       <ErrorBox message={error} />
 
       <div className="space-y-3 mb-4">
@@ -62,48 +60,48 @@ export function Step3Locations({ session, onUpdated, onNext }: StepProps) {
             <div className="grid grid-cols-12 gap-2 items-end">
               <div className="col-span-3">
                 <FieldLabel>Name</FieldLabel>
-                <input
+                <AdminInput
                   value={loc.name || ''}
                   onChange={(e) => update(idx, { name: e.target.value })}
                   placeholder="Main"
-                  className="w-full rounded-md bg-vsc-bg border border-vsc-border px-2 py-1.5 text-sm text-zinc-100 outline-none focus:border-emerald-500"
+                  className="bg-vsc-bg border-vsc-border"
                 />
               </div>
               <div className="col-span-3">
                 <FieldLabel>City</FieldLabel>
-                <input
+                <AdminInput
                   value={loc.city || ''}
                   onChange={(e) => update(idx, { city: e.target.value })}
-                  className="w-full rounded-md bg-vsc-bg border border-vsc-border px-2 py-1.5 text-sm text-zinc-100 outline-none focus:border-emerald-500"
+                  className="bg-vsc-bg border-vsc-border"
                 />
               </div>
               <div className="col-span-2">
                 <FieldLabel>State</FieldLabel>
-                <select
+                <AdminSelect
                   value={loc.state || ''}
                   onChange={(e) => update(idx, { state: e.target.value })}
-                  className="w-full rounded-md bg-vsc-bg border border-vsc-border px-2 py-1.5 text-sm text-zinc-100 outline-none focus:border-emerald-500"
+                  className="w-full bg-vsc-bg border-vsc-border"
                 >
                   <option value="">—</option>
                   {ALL_STATES.map((s) => (
                     <option key={s} value={s}>{s}</option>
                   ))}
-                </select>
+                </AdminSelect>
               </div>
               <div className="col-span-2">
                 <FieldLabel>County</FieldLabel>
-                <input
+                <AdminInput
                   value={loc.county || ''}
                   onChange={(e) => update(idx, { county: e.target.value })}
-                  className="w-full rounded-md bg-vsc-bg border border-vsc-border px-2 py-1.5 text-sm text-zinc-100 outline-none focus:border-emerald-500"
+                  className="bg-vsc-bg border-vsc-border"
                 />
               </div>
               <div className="col-span-1">
                 <FieldLabel>Zip</FieldLabel>
-                <input
+                <AdminInput
                   value={loc.zipcode || ''}
                   onChange={(e) => update(idx, { zipcode: e.target.value })}
-                  className="w-full rounded-md bg-vsc-bg border border-vsc-border px-2 py-1.5 text-sm text-zinc-100 outline-none focus:border-emerald-500"
+                  className="bg-vsc-bg border-vsc-border"
                 />
               </div>
               <div className="col-span-1 flex justify-end">
@@ -122,18 +120,18 @@ export function Step3Locations({ session, onUpdated, onNext }: StepProps) {
       </div>
 
       <div className="flex items-center gap-2">
-        <button
+        <AdminButton
           onClick={add}
-          className="px-3 h-8 text-xs text-zinc-300 border border-vsc-border rounded-md hover:border-zinc-500"
+          className="h-8" variant="ghost"
         >
           + Add location
-        </button>
+        </AdminButton>
         <div className="ml-auto">
           <PrimaryButton busy={busy} onClick={() => void save()}>
             Save + Provision company
           </PrimaryButton>
         </div>
       </div>
-    </div>
+    </AdminSection>
   )
 }

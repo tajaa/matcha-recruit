@@ -6,13 +6,13 @@ type AdminWorkspaceProps = ComponentProps<typeof AdminPageHeader> & {
   direction?: 'row' | 'column'
 }
 
-// List/detail tools share the same header as Settings, with a bounded panel
-// below. Short windows and phones can scroll the page instead of clipping it.
+// Tools share Settings' open canvas and normal page scroll. List/detail tools
+// keep their side-by-side organization without an extra dark console frame.
 export function AdminWorkspace({ children, direction = 'column', ...header }: AdminWorkspaceProps) {
   return (
     <div>
       <AdminPageHeader {...header} />
-      <div className={`flex h-[calc(100dvh-18rem)] min-h-[32rem] overflow-auto rounded-lg border border-zinc-800 bg-zinc-900/50 ${direction === 'column' ? 'flex-col' : 'flex-col md:flex-row'}`}>
+      <div className={`flex min-w-0 gap-6 ${direction === 'column' ? 'flex-col' : 'flex-col md:flex-row'}`}>
         {children}
       </div>
     </div>

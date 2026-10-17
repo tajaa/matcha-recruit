@@ -1,0 +1,489 @@
+import { AdminStat as Stat, AdminCard, AdminInput, AdminButton, AdminTable } from '../../../../components/admin/AdminUI'
+import { AdminPageHeader } from '../../../../components/admin/AdminPageHeader'
+
+import { useState } from 'react'
+import { Link } from 'react-router-dom'
+import { Loader2, Search, Zap, Plus, UserPlus, Copy, Check, Shield, KeyRound } from 'lucide-react'
+import { api } from '../../../../api/client'
+import { useAsync } from '../../../../hooks/useAsync'
+
+interface IndividualUser {
+  user_id: string
+  email: string
+  name: string | null
+  company_id: string
+  created_at: string | null
+  free_tokens_used: number
+  free_token_limit: number
+  free_tokens_remaining: number
+  subscription_token_limit: number
+  subscription_tokens_remaining: number
+  has_active_subscription: boolean
+  beta_features?: Record<string, boolean>
+  is_suspended?: boolean
+  subscription?: {
+    pack_id: string
+    status: string
+    amount_cents: number
+    stripe_subscription_id: string
+    stripe_customer_id: string
+    current_period_end: string | null
+    canceled_at: string | null
+  } | null
+}
+
+function fmtUsd(cents: number) {
+  return `$${(cents / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
+
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1_000) return `${Math.round(n / 1_000)}K`
+  return String(n)
+}
+
+function relTime(iso: string | null): string {
+  if (!iso) return '--'
+  const d = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000)
+  if (d === 0) return 'Today'
+  if (d === 1) return 'Yesterday'
+  return `${d}d ago`
+}
+
+export default function Individuals({ embedded = false }: { embedded?: boolean }) {
+  const [search, setSearch] = useState('')
+  const [grantTarget, setGrantTarget] = useState<IndividualUser | null>(null)
+  const [grantAmount, setGrantAmount] = useState('')
+  const [granting, setGranting] = useState(false)
+  const [showInvite, setShowInvite] = useState(false)
+  const [inviteEmail, setInviteEmail] = useState('')
+  const [inviteResult, setInviteResult] = useState<{ invite_url: string; email: string; reused: boolean } | null>(null)
+  const [inviteError, setInviteError] = useState('')
+  const [inviting, setInviting] = useState(false)
+  const [copied, setCopied] = useState(false)
+
+  const {
+    data: users,
+    loading,
+    setData: setUsers,
+    reload: fetchUsers,
+  } = useAsync(() => api.get<IndividualUser[]>('/matcha-work/billing/admin/individuals'), [], [])
+
+  async function toggleBetaFlag(userId: string, flag: string, value: boolean) {
+    setUsers(prev => prev.map(u =>
+      u.user_id === userId
+        ? { ...u, beta_features: { ...u.beta_features, [flag]: value } }
+        : u
+    ))
+    try {
+      await api.patch(`/admin/users/${userId}/beta-flags`, { [flag]: value })
+    } finally {
+      fetchUsers()
+    }
+  }
+
+  async function handleCreateInvite() {
+    if (!inviteEmail.trim()) return
+    setInviting(true)
+    setInviteError('')
+    setInviteResult(null)
+    try {
+      const res = await api.post<{ invite_url: string; email: string; reused: boolean }>(
+        '/admin/individual-invites',
+        { email: inviteEmail.trim() },
+      )
+      setInviteResult(res)
+    } catch (err) {
+      setInviteError(err instanceof Error ? err.message : 'Failed to generate invite')
+    } finally {
+      setInviting(false)
+    }
+  }
+
+  async function handleCopyInvite() {
+    if (!inviteResult) return
+    try {
+      await navigator.clipboard.writeText(inviteResult.invite_url)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch { /* Preserve the existing best-effort fallback. */ }
+  }
+
+  function closeInvite() {
+    setShowInvite(false)
+    setInviteEmail('')
+    setInviteResult(null)
+    setInviteError('')
+    setCopied(false)
+  }
+
+  async function handleGrant() {
+    if (!grantTarget || !grantAmount) return
+    const amount = parseInt(grantAmount, 10)
+    if (isNaN(amount) || amount <= 0) return
+    setGranting(true)
+    try {
+      await api.post(`/matcha-work/billing/admin/companies/${grantTarget.company_id}/tokens`, {
+        tokens: amount,
+        description: `Admin grant to individual: ${grantTarget.email}`,
+      })
+      // Await the refetch before dismissing: closing first leaves the row
+      // showing its pre-grant token count for the length of the round-trip,
+      // which reads as "the grant didn't work".
+      await fetchUsers()
+      setGrantTarget(null)
+      setGrantAmount('')
+    } catch { /* Preserve the existing best-effort fallback. */ }
+    setGranting(false)
+  }
+
+  async function toggleSuspend(u: IndividualUser) {
+    const path = u.is_suspended ? 'unsuspend' : 'suspend'
+    if (u.is_suspended === false && !confirm(`Suspend ${u.email}? They will be locked out.`)) return
+    setUsers((prev) => prev.map((x) => (x.user_id === u.user_id ? { ...x, is_suspended: !u.is_suspended } : x)))
+    try {
+      await api.post(`/admin/users/${u.user_id}/${path}`, {})
+    } catch {
+      // Revert on failure
+      setUsers((prev) => prev.map((x) => (x.user_id === u.user_id ? { ...x, is_suspended: u.is_suspended } : x)))
+    }
+  }
+
+  async function issuePasswordReset(u: IndividualUser) {
+    try {
+      const res = await api.post<{ reset_url: string }>(`/admin/users/${u.user_id}/password-reset`, {})
+      try { await navigator.clipboard.writeText(res.reset_url) } catch { /* Preserve the existing best-effort fallback. */ }
+      alert(`Reset link copied to clipboard. Valid 1 hour:\n\n${res.reset_url}`)
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to issue reset link')
+    }
+  }
+
+  const filtered = users.filter((u) => {
+    if (!search) return true
+    const q = search.toLowerCase()
+    return u.email.toLowerCase().includes(q) || (u.name || '').toLowerCase().includes(q)
+  })
+
+  const activeSubscriptions = users.filter((user) => user.subscription?.status === 'active').length
+  const comped = users.filter((user) => user.beta_features?.matcha_work_beta_lite || user.beta_features?.matcha_work_beta_full).length
+  const suspended = users.filter((user) => user.is_suspended).length
+  const tokensRemaining = users.reduce((sum, user) => sum + user.free_tokens_remaining + user.subscription_tokens_remaining, 0)
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="animate-spin text-zinc-500" size={24} />
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      {!embedded && (
+        <AdminPageHeader title={<>Individual Users</>} description={<>Personal account users ({users.length} total) — the Lite/Pro checkboxes comp the full Werk tier without Stripe</>} />
+      )}
+
+      {embedded && (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+          <Stat label="Personal accounts" value={users.length} />
+          <Stat label="Subscriptions" value={activeSubscriptions} />
+          <Stat label="Comped plans" value={comped} />
+          <Stat label="Suspended" value={suspended} />
+          <Stat label="Tokens remaining" value={formatTokens(tokensRemaining)} />
+        </div>
+      )}
+
+      <div className={`${embedded ? 'mt-6' : ''} mb-4 flex flex-wrap items-center justify-between gap-3`}>
+        <div className="relative w-full max-w-xs">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+          <AdminInput
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by email or name..."
+            className="pl-9 pr-3"
+          />
+        </div>
+        <AdminButton
+          onClick={() => setShowInvite(true)}
+          className="gap-1.5" variant="success"
+        >
+          <UserPlus size={12} />
+          Generate Signup URL
+        </AdminButton>
+      </div>
+
+      {/* Table */}
+      <AdminTable>
+        <thead>
+          <tr className="bg-zinc-900/80 border-b border-zinc-800">
+            <th className="text-left text-zinc-400">Email</th>
+            <th className="text-left text-zinc-400">Name</th>
+            <th className="text-left text-zinc-400">Joined</th>
+            <th className="text-left text-zinc-400">Subscription</th>
+            <th className="text-left text-zinc-400">Tokens Used</th>
+            <th className="text-left text-zinc-400">Remaining</th>
+            <th className="text-center text-zinc-400" title="Comp grant — full Werk Lite tier, no Stripe (stored as matcha_work_beta_lite)">Lite (comp)</th>
+            <th className="text-center text-zinc-400" title="Comp grant — full Werk Pro tier, no Stripe (stored as matcha_work_beta_full)">Pro (comp)</th>
+            <th className="text-left text-zinc-400 w-32">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {filtered.length === 0 && (
+            <tr>
+              <td colSpan={9} className="text-center text-zinc-500">
+                {search ? 'No users match your search.' : 'No individual users yet.'}
+              </td>
+            </tr>
+          )}
+          {filtered.map((u) => {
+            const pct = u.free_token_limit > 0 ? Math.min(100, (u.free_tokens_used / u.free_token_limit) * 100) : 0
+            const low = u.free_tokens_remaining <= 0
+            const warn = !low && pct > 80
+            return (
+              <tr key={u.user_id} className="border-b border-zinc-800/50 hover:bg-zinc-800/20">
+                <td className="text-zinc-200">
+                  {u.email}
+                  {u.is_suspended && (
+                    <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded border border-red-500/40 bg-red-500/10 text-red-300">
+                      Suspended
+                    </span>
+                  )}
+                </td>
+                <td className="text-zinc-400">{u.name || '--'}</td>
+                <td className="text-zinc-500">{relTime(u.created_at)}</td>
+                <td >
+                  {u.subscription ? (
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-zinc-300">
+                        {u.subscription.pack_id} <span className="text-zinc-500">·</span>{' '}
+                        <span className={u.subscription.status === 'active' ? 'text-emerald-400' : 'text-zinc-500'}>
+                          {u.subscription.status}
+                        </span>
+                      </span>
+                      <span className="text-[10px] text-zinc-500">
+                        {fmtUsd(u.subscription.amount_cents)}
+                        {u.subscription.current_period_end && (
+                          <> · renews {new Date(u.subscription.current_period_end).toLocaleDateString()}</>
+                        )}
+                      </span>
+                      <a
+                        href={`https://dashboard.stripe.com/subscriptions/${u.subscription.stripe_subscription_id}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[10px] text-emerald-400 hover:text-emerald-300"
+                      >
+                        Stripe →
+                      </a>
+                    </div>
+                  ) : u.beta_features?.matcha_work_beta_full ? (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded border border-violet-500/40 bg-violet-500/10 text-violet-300">
+                      Pro · comped
+                    </span>
+                  ) : u.beta_features?.matcha_work_beta_lite ? (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded border border-sky-500/40 bg-sky-500/10 text-sky-300">
+                      Lite · comped
+                    </span>
+                  ) : (
+                    <span className="text-zinc-600">—</span>
+                  )}
+                </td>
+                <td >
+                  <div className="flex items-center gap-2">
+                    <div className="w-16 h-1.5 rounded-full bg-zinc-800 overflow-hidden">
+                      <div
+                        className={`h-full rounded-full ${low ? 'bg-red-500' : warn ? 'bg-amber-500' : 'bg-emerald-500'}`}
+                        style={{ width: `${Math.min(pct, 100)}%` }}
+                      />
+                    </div>
+                    <span className={`${low ? 'text-red-400' : warn ? 'text-amber-400' : 'text-zinc-400'}`}>
+                      {formatTokens(u.free_tokens_used)}
+                    </span>
+                  </div>
+                </td>
+                <td >
+                  <span className={low ? 'text-red-400 font-medium' : 'text-zinc-400'}>
+                    {formatTokens(u.free_tokens_remaining)}
+                  </span>
+                </td>
+                <td className="text-center">
+                  <input
+                    type="checkbox"
+                    checked={!!u.beta_features?.matcha_work_beta_lite}
+                    onChange={(e) => toggleBetaFlag(u.user_id, 'matcha_work_beta_lite', e.target.checked)}
+                    className="accent-emerald-500 w-3.5 h-3.5 cursor-pointer"
+                  />
+                </td>
+                <td className="text-center">
+                  <input
+                    type="checkbox"
+                    checked={!!u.beta_features?.matcha_work_beta_full}
+                    onChange={(e) => toggleBetaFlag(u.user_id, 'matcha_work_beta_full', e.target.checked)}
+                    className="accent-emerald-500 w-3.5 h-3.5 cursor-pointer"
+                  />
+                </td>
+                <td >
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <AdminButton
+                      onClick={() => { setGrantTarget(u); setGrantAmount('') }}
+                      className="gap-1"
+                      title="Grant tokens" variant="secondary"
+                    >
+                      <Plus size={10} />
+                      Tokens
+                    </AdminButton>
+                    <AdminButton
+                      onClick={() => issuePasswordReset(u)}
+                      className="gap-1"
+                      title="Issue 1h password reset link" variant="secondary"
+                    >
+                      <KeyRound size={10} />
+                      Reset
+                    </AdminButton>
+                    <button
+                      onClick={() => toggleSuspend(u)}
+                      className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors ${
+                        u.is_suspended
+                          ? 'bg-emerald-900/40 text-emerald-300 hover:bg-emerald-900/60'
+                          : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
+                      }`}
+                      title={u.is_suspended ? 'Unsuspend' : 'Suspend'}
+                    >
+                      <Shield size={10} />
+                      {u.is_suspended ? 'Unsuspend' : 'Suspend'}
+                    </button>
+                    <Link
+                      to={`/admin/companies/${u.company_id}`}
+                      className="text-[10px] text-zinc-500 hover:text-zinc-300 underline"
+                      title="Open company detail for billing/refund/cancel"
+                    >
+                      Manage →
+                    </Link>
+                  </div>
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </AdminTable>
+
+      {/* Generate signup URL modal */}
+      {showInvite && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+          <AdminCard className="w-full max-w-md">
+            <h3 className="text-sm font-semibold text-zinc-100 mb-1">Generate Individual Signup URL</h3>
+            <p className="text-xs text-zinc-500 mb-4">
+              Creates a one-time matcha-work invite link for an individual account. No email is sent — share the URL manually.
+            </p>
+            {!inviteResult ? (
+              <>
+                <label className="block text-[11px] font-medium text-zinc-400 mb-1">Email</label>
+                <AdminInput
+                  type="email"
+                  value={inviteEmail}
+                  onChange={(e) => setInviteEmail(e.target.value)}
+                  placeholder="user@example.com"
+                  autoFocus
+                  className="mb-3"
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleCreateInvite() }}
+                />
+                {inviteError && (
+                  <p className="text-[11px] text-red-400 mb-3">{inviteError}</p>
+                )}
+                <div className="flex justify-end gap-2">
+                  <button
+                    onClick={closeInvite}
+                    className="px-3 py-1.5 rounded-lg text-xs text-zinc-400 hover:text-zinc-200"
+                  >
+                    Cancel
+                  </button>
+                  <AdminButton
+                    onClick={handleCreateInvite}
+                    disabled={!inviteEmail.trim() || inviting}
+                    className="gap-1.5 disabled:opacity-40" variant="success"
+                  >
+                    {inviting ? <Loader2 size={12} className="animate-spin" /> : <UserPlus size={12} />}
+                    Generate URL
+                  </AdminButton>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="text-[11px] text-zinc-500 mb-2">
+                  Invite for <span className="text-zinc-300">{inviteResult.email}</span>
+                  {inviteResult.reused && <span className="ml-2 text-amber-400">(existing pending invite reused)</span>}
+                </p>
+                <div className="flex items-center gap-2 p-2 rounded-lg border border-zinc-700 bg-zinc-800 mb-4">
+                  <code className="flex-1 text-[11px] text-zinc-300 truncate font-mono">{inviteResult.invite_url}</code>
+                  <AdminButton
+                    onClick={handleCopyInvite}
+                    className="shrink-0 gap-1" variant="secondary"
+                  >
+                    {copied ? <Check size={10} /> : <Copy size={10} />}
+                    {copied ? 'Copied' : 'Copy'}
+                  </AdminButton>
+                </div>
+                <div className="flex justify-end">
+                  <AdminButton
+                    onClick={closeInvite}
+                   variant="secondary"
+                  >
+                    Done
+                  </AdminButton>
+                </div>
+              </>
+            )}
+          </AdminCard>
+        </div>
+      )}
+
+      {/* Grant tokens modal */}
+      {grantTarget && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+          <AdminCard className="w-full max-w-sm">
+            <h3 className="text-sm font-semibold text-zinc-100 mb-1">Grant Tokens</h3>
+            <p className="text-xs text-zinc-500 mb-4">{grantTarget.email}</p>
+            <p className="text-[11px] text-zinc-500 mb-3">
+              Current: {formatTokens(grantTarget.free_tokens_remaining)} remaining of {formatTokens(grantTarget.free_token_limit)}
+            </p>
+            <div className="flex gap-2 mb-4">
+              {[100_000, 500_000, 1_000_000, 5_000_000].map((amt) => (
+                <button
+                  key={amt}
+                  onClick={() => setGrantAmount(String(amt))}
+                  className={`px-2 py-1 rounded text-[10px] font-medium transition-colors ${
+                    grantAmount === String(amt) ? 'bg-emerald-700 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'
+                  }`}
+                >
+                  +{formatTokens(amt)}
+                </button>
+              ))}
+            </div>
+            <AdminInput
+              value={grantAmount}
+              onChange={(e) => setGrantAmount(e.target.value.replace(/\D/g, ''))}
+              placeholder="Custom amount..."
+              className="mb-4"
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setGrantTarget(null)}
+                className="px-3 py-1.5 rounded-lg text-xs text-zinc-400 hover:text-zinc-200"
+              >
+                Cancel
+              </button>
+              <AdminButton
+                onClick={handleGrant}
+                disabled={!grantAmount || granting}
+                className="gap-1.5 disabled:opacity-40" variant="success"
+              >
+                {granting ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}
+                Grant {grantAmount ? formatTokens(parseInt(grantAmount, 10) || 0) : ''}
+              </AdminButton>
+            </div>
+          </AdminCard>
+        </div>
+      )}
+    </div>
+  )
+}

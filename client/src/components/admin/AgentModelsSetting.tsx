@@ -1,5 +1,6 @@
+import { AdminButton as Button, AdminCard as Card, AdminSelect as Select } from './AdminUI'
 import { useId, useState } from 'react'
-import { Button, Card, Select } from '../ui'
+
 import {
   adminSettingsApi,
   type AgentModelApp,

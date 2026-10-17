@@ -1,3 +1,4 @@
+import { AdminSection, AdminButton } from '../../AdminUI'
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
@@ -141,12 +142,8 @@ export function Step5GapAnalysis({ session, onUpdated, onNext }: StepProps) {
   }
 
   return (
-    <div className="max-w-3xl">
-      <h2 className="text-base font-medium text-zinc-100 mb-1">Gap Analysis</h2>
-      <p className="text-sm text-zinc-400 mb-2">
-        {missing.length} to research · {existing.length} already covered
-        {gap ? ` · AI flagged ${totalSuggestions} extra${totalSuggestions === 1 ? '' : 's'}` : ''}
-      </p>
+    <AdminSection title={<>Gap Analysis</>} description={<>{missing.length} to research · {existing.length} already covered
+        {gap ? ` · AI flagged ${totalSuggestions} extra${totalSuggestions === 1 ? '' : 's'}` : ''}</>}>
       {session.company_id && (
         <Link
           to={`/admin/gap-analysis/company/${session.company_id}`}
@@ -206,14 +203,14 @@ export function Step5GapAnalysis({ session, onUpdated, onNext }: StepProps) {
           </div>
 
           <div className="flex items-center gap-3 mt-4 pt-3 border-t border-amber-500/20">
-            <button
+            <AdminButton
               onClick={() => void dispatchResearch()}
               disabled={dispatchBusy || approved.size === 0}
-              className="inline-flex items-center gap-2 px-4 h-9 rounded-md bg-amber-500/90 hover:bg-amber-500 text-zinc-950 text-sm font-medium disabled:opacity-50"
+              className="gap-2 h-9 disabled:opacity-50" variant="ghost"
             >
               {dispatchBusy && <Loader2 className="w-4 h-4 animate-spin" />}
               Start research ({approved.size})
-            </button>
+            </AdminButton>
             {dispatchedCount !== null && (
               <div className="text-xs text-emerald-300">
                 {dispatchedCount} job{dispatchedCount === 1 ? '' : 's'} started — results land in the compliance DB.
@@ -265,14 +262,14 @@ export function Step5GapAnalysis({ session, onUpdated, onNext }: StepProps) {
               Gemini re-reads the manifest and flags anything the wizard missed. Read-only — Finalize on the next step.
             </div>
           </div>
-          <button
+          <AdminButton
             onClick={() => void runGapCheck()}
             disabled={gapBusy}
-            className="inline-flex items-center gap-2 px-3 h-8 rounded-md border border-vsc-border hover:border-zinc-500 text-xs text-zinc-200 disabled:opacity-50 shrink-0"
+            className="gap-2 h-8 disabled:opacity-50 shrink-0" variant="ghost"
           >
             {gapBusy && <Loader2 className="w-3 h-3 animate-spin" />}
             {gap ? 'Re-run' : 'Run gap check'}
-          </button>
+          </AdminButton>
         </div>
 
         {gap && totalSuggestions === 0 && (
@@ -372,6 +369,6 @@ export function Step5GapAnalysis({ session, onUpdated, onNext }: StepProps) {
           </span>
         )}
       </div>
-    </div>
+    </AdminSection>
   )
 }

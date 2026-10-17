@@ -1,3 +1,5 @@
+/* eslint-disable react-hooks/set-state-in-effect -- Effects intentionally synchronize this tool with loaded data, URL selections, and preview inputs. */
+import { AdminSelect, AdminButton } from '../AdminUI'
 import { useState, useEffect, useMemo } from 'react'
 import { fetchCoverageMatrix } from '../../../api/compliance'
 import type { CoverageMatrixResponse, CoverageCell } from '../../../api/compliance'
@@ -126,14 +128,13 @@ export default function GapIntelligencePanel() {
     <div className="space-y-3">
       {/* Filter bar */}
       <div className="flex items-center gap-2">
-        <select
+        <AdminSelect
           value={filterState}
           onChange={(e) => setFilterState(e.target.value)}
-          className="bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-300 text-xs px-2.5 py-1.5"
         >
           <option value="">All States</option>
           {allStates.map((s) => <option key={s} value={s}>{s}</option>)}
-        </select>
+        </AdminSelect>
         <span className="text-[11px] text-zinc-600 ml-auto">
           {filteredGaps.length} of {gaps.length} gaps shown
         </span>
@@ -165,16 +166,16 @@ export default function GapIntelligencePanel() {
                 <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded ${priorityColor(gap.priority)}`}>
                   P{gap.priority}
                 </span>
-                <button
+                <AdminButton
                   type="button"
                   onClick={() => {
                     // TODO: wire up to AI research workflow
                     console.log('[GapIntelligencePanel] Research Now clicked:', { jurisdictionId: gap.jurisdictionId, category: gap.category })
                   }}
-                  className="text-[11px] px-2 py-1 rounded border border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-500 transition-colors"
+                 variant="ghost"
                 >
                   Research Now
-                </button>
+                </AdminButton>
               </div>
             </div>
           ))}

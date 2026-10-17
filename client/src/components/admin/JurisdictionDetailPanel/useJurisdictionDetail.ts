@@ -1,3 +1,5 @@
+import type { FederalSourcePreview } from '../../../types/adminJurisdiction'
+/* eslint-disable react-hooks/set-state-in-effect -- Effects intentionally synchronize this tool with loaded data, URL selections, and preview inputs. */
 import { useEffect, useState, useCallback, useMemo } from 'react'
 import { api } from '../../../api/client'
 import { postSSE } from '../../../api/sse'
@@ -36,7 +38,7 @@ export function useJurisdictionDetail({ id, state, preemptionRules, selectedProf
   const [medicalRunning, setMedicalRunning] = useState(false)
   const [lifeSciRunning, setLifeSciRunning] = useState(false)
   const [fedSourcesRunning, setFedSourcesRunning] = useState(false)
-  const [fedPreview, setFedPreview] = useState<{ results: any[]; by_category: Record<string, any[]>; total: number } | null>(null)
+  const [fedPreview, setFedPreview] = useState<FederalSourcePreview | null>(null)
   const [fedApplying, setFedApplying] = useState(false)
   const [scanMessages, setScanMessages] = useState<string[]>([])
   const [viewMode, setViewMode] = useState<ViewMode>('requirements')

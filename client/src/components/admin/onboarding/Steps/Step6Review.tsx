@@ -1,3 +1,4 @@
+import { AdminSection } from '../../AdminUI'
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 
@@ -37,11 +38,7 @@ export function Step6Review({ session, onUpdated }: StepProps) {
   const ai = session.ai_scope
 
   return (
-    <div className="max-w-3xl">
-      <h2 className="text-base font-medium text-zinc-100 mb-1">Finalize</h2>
-      <p className="text-sm text-zinc-400 mb-6">
-        One last look before we write the scope manifest and issue the owner invite.
-      </p>
+    <AdminSection title={<>Finalize</>} description={<>One last look before we write the scope manifest and issue the owner invite.</>}>
       <ErrorBox message={error} />
 
       <SummaryRow label="Business" value={basics.business_name || '—'} />
@@ -81,7 +78,7 @@ export function Step6Review({ session, onUpdated }: StepProps) {
           </PrimaryButton>
         )}
       </div>
-    </div>
+    </AdminSection>
   )
 }
 

@@ -3,7 +3,7 @@ import { ADMIN_AREAS, adminSidebarItems, findAdminPage } from './adminNavigation
 
 describe('admin navigation', () => {
   it('keeps every existing sidebar destination in exactly one area', () => {
-    const destinations = ADMIN_AREAS.flatMap((area) => area.pages.map((page) => page.to))
+    const destinations = ADMIN_AREAS.flatMap((area) => area.pages.flatMap((page) => (page.tabs ?? [page]).map((tab) => tab.to)))
     expect(new Set(destinations).size).toBe(destinations.length)
     expect(destinations.map((to) => to.replace('/admin/', '')).sort()).toEqual([
       'updates', 'customers', 'companies', 'test-accounts', 'matcha-work',
@@ -14,6 +14,7 @@ describe('admin navigation', () => {
       'server-errors', 'ai-usage', 'features', 'settings',
     ].sort())
     expect(adminSidebarItems('/admin/settings')).toHaveLength(7)
+    expect(ADMIN_AREAS.flatMap((area) => area.pages)).toHaveLength(15)
   })
 
   it.each([
@@ -28,7 +29,7 @@ describe('admin navigation', () => {
   ])('selects the owning page for %s', (pathname, areaLabel, to) => {
     const active = findAdminPage(pathname)
     expect(active?.area.label).toBe(areaLabel)
-    expect(active?.page.to).toBe(to)
+    expect(active?.tab.to).toBe(to)
     expect(adminSidebarItems(pathname).find((item) => item.label === areaLabel)?.to).toBe(to)
   })
 

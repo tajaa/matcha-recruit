@@ -1,8 +1,10 @@
+import { AdminSection, AdminButton } from '../../AdminUI'
 import { useState } from 'react'
 import { Loader2 } from 'lucide-react'
 
 import { adminOnboarding } from '../../../../api/admin/adminOnboarding'
-import { ErrorBox, PrimaryButton, isScopeEmpty, type StepProps } from './_shared'
+import { ErrorBox, PrimaryButton, type StepProps } from './_shared'
+import { isScopeEmpty } from './helpers'
 
 // ── Step 4: Scope (AI expand) ──────────────────────────────────────────
 
@@ -41,11 +43,7 @@ export function Step4Scope({ session, onUpdated, onNext }: StepProps) {
   }
 
   return (
-    <div className="max-w-3xl">
-      <h2 className="text-base font-medium text-zinc-100 mb-1">AI scope expansion</h2>
-      <p className="text-sm text-zinc-400 mb-6">
-        Gemini reads industry + specialty + locations and proposes compliance categories, certifications, and licenses. Next you'll see which ones we already have data for and which need new research.
-      </p>
+    <AdminSection title={<>AI scope expansion</>} description={<>Gemini reads industry + specialty + locations and proposes compliance categories, certifications, and licenses. Next you'll see which ones we already have data for and which need new research.</>}>
       <ErrorBox message={error} />
 
       {!scope ? (
@@ -68,14 +66,14 @@ export function Step4Scope({ session, onUpdated, onNext }: StepProps) {
               <div className="mt-1 text-amber-200/80">
                 Try expanding the company description in Step 1 (industry, services, specialties) or re-run the expansion. If this keeps happening, the AI may be timing out.
               </div>
-              <button
+              <AdminButton
                 onClick={() => void expand()}
                 disabled={busy}
-                className="mt-3 inline-flex items-center gap-2 px-3 h-9 text-xs rounded bg-amber-500/90 hover:bg-amber-500 text-zinc-950 disabled:opacity-50"
+                className="mt-3 gap-2 h-9 disabled:opacity-50" variant="ghost"
               >
                 {busy && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
                 Re-run AI scope expansion
-              </button>
+              </AdminButton>
             </div>
           ) : (
             <div className="mt-6 flex items-center gap-2">
@@ -93,7 +91,7 @@ export function Step4Scope({ session, onUpdated, onNext }: StepProps) {
           )}
         </>
       )}
-    </div>
+    </AdminSection>
   )
 }
 

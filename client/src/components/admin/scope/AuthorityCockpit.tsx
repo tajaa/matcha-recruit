@@ -1,3 +1,4 @@
+import { AdminButton as Button, AdminCard, AdminButton, AdminTable } from '../AdminUI'
 /**
  * The codification cockpit — drives the front half of the scope-registry
  * pipeline from the UI.
@@ -14,7 +15,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { api } from '../../../api/client'
-import { Button, LABEL } from '../../ui'
+import { LABEL } from '../../ui'
 import { HelpHint } from '../../ui/HelpHint'
 import { ClassificationEditor } from './AuthorityCockpit/ClassificationEditor'
 import { FunnelBar } from './AuthorityCockpit/FunnelBar'
@@ -136,7 +137,7 @@ export default function AuthorityCockpit({ onMutate }: { onMutate?: () => void }
   }, [indexes])
 
   return (
-    <div className="mt-5 rounded-xl border border-white/[0.06] bg-zinc-950 p-4">
+    <AdminCard className="mt-5">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <div className={LABEL}>Codification cockpit</div>
@@ -148,7 +149,7 @@ export default function AuthorityCockpit({ onMutate }: { onMutate?: () => void }
           )}
         </div>
         <div className="flex items-center gap-2">
-          <button
+          <AdminButton
             onClick={() => {
               setShowStrata((v) => !v)
               if (!strata) {
@@ -157,10 +158,10 @@ export default function AuthorityCockpit({ onMutate }: { onMutate?: () => void }
                   .catch(() => setStrata([]))
               }
             }}
-            className="rounded border border-white/[0.08] px-2 py-1 text-[11px] text-zinc-400 hover:border-white/20">
+           variant="ghost">
             {showStrata ? 'Hide strata' : 'Strata'}
-          </button>
-          <button
+          </AdminButton>
+          <AdminButton
             onClick={() => {
               setShowShadow((v) => !v)
               if (!shadow) {
@@ -169,11 +170,11 @@ export default function AuthorityCockpit({ onMutate }: { onMutate?: () => void }
                   .catch(() => setShadow([]))
               }
             }}
-            className="rounded border border-white/[0.08] px-2 py-1 text-[11px] text-zinc-400 hover:border-white/20">
+           variant="ghost">
             {showShadow ? 'Hide shadow log' : 'Shadow log'}
-          </button>
+          </AdminButton>
           <Button size="sm"
-            variant="secondary"
+          variant="secondary"
             disabled={busy !== null}
             onClick={() => act('reconcile', () => api.post('/admin/scope-registry/reconcile', {}))}>
             {busy === 'reconcile' ? 'Reconciling…' : 'Reconcile'}
@@ -200,7 +201,7 @@ export default function AuthorityCockpit({ onMutate }: { onMutate?: () => void }
       {/* Index list + funnel */}
       <div className="grid gap-2 md:grid-cols-2">
         {(indexes ?? []).map((ix) => (
-          <div key={ix.slug} className="rounded-lg border border-white/[0.06] bg-white/[0.02] p-3">
+          <AdminCard key={ix.slug} >
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <div className="truncate text-sm text-zinc-200">{ix.name}</div>
@@ -210,7 +211,7 @@ export default function AuthorityCockpit({ onMutate }: { onMutate?: () => void }
                 </div>
               </div>
               <div className="flex shrink-0 gap-1">
-                <button
+                <AdminButton
                   disabled={busy !== null}
                   title="Re-read this authority's section list from the source. Two ingests are needed before drift can be detected."
                   onClick={() =>
@@ -218,10 +219,10 @@ export default function AuthorityCockpit({ onMutate }: { onMutate?: () => void }
                       api.post(`/admin/scope-registry/authority/${encodeURIComponent(ix.slug)}/ingest`, {}),
                     )
                   }
-                  className="rounded border border-white/[0.08] px-1.5 py-0.5 text-[10px] text-zinc-400 hover:border-white/20 disabled:opacity-40">
+                  className="disabled:opacity-40" variant="ghost">
                   {busy === `ingest:${ix.slug}` ? '…' : 'Ingest'}
-                </button>
-                <button
+                </AdminButton>
+                <AdminButton
                   disabled={busy !== null}
                   title="Ask Gemini to propose a classification for every unclassified section. Proposals land PROVISIONAL — they do nothing until confirmed."
                   onClick={() =>
@@ -229,36 +230,36 @@ export default function AuthorityCockpit({ onMutate }: { onMutate?: () => void }
                       api.post(`/admin/scope-registry/authority/${encodeURIComponent(ix.slug)}/classify`, {}),
                     )
                   }
-                  className="rounded border border-white/[0.08] px-1.5 py-0.5 text-[10px] text-zinc-400 hover:border-white/20 disabled:opacity-40">
+                  className="disabled:opacity-40" variant="ghost">
                   {busy === `classify:${ix.slug}` ? '…' : 'Classify'}
-                </button>
-                <button
+                </AdminButton>
+                <AdminButton
                   disabled={busy !== null}
                   onClick={() => {
                     const next = openSlug === ix.slug ? null : ix.slug
                     setOpenSlug(next)
                     if (next) loadItems(next)
                   }}
-                  className="rounded border border-white/[0.08] px-1.5 py-0.5 text-[10px] text-zinc-300 hover:border-white/20 disabled:opacity-40">
+                  className="disabled:opacity-40" variant="ghost">
                   {openSlug === ix.slug ? 'Close' : 'Review'}
-                </button>
+                </AdminButton>
               </div>
             </div>
             <FunnelBar index={ix} />
-          </div>
+          </AdminCard>
         ))}
       </div>
 
       {/* Confirm / override queue for the open index */}
       {openSlug && (
-        <div className="mt-4 rounded-lg border border-white/[0.06] bg-white/[0.02] p-3">
+        <AdminCard className="mt-4">
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <span className={LABEL}>Unconfirmed · {openSlug}</span>
               <HelpHint text="Sections with no confirmed classification. Confirming one is what makes it real: resolve, codify, strata and the completeness denominator all read confirmed rows only." />
             </div>
             <Button size="sm"
-              variant="primary"
+            variant="primary"
               disabled={!selected.size || busy !== null}
               onClick={confirmSelected}>
               {busy === 'confirm' ? 'Confirming…' : `Confirm ${selected.size || ''}`.trim()}
@@ -275,10 +276,10 @@ export default function AuthorityCockpit({ onMutate }: { onMutate?: () => void }
             </div>
           ) : (
             <div className="max-h-80 overflow-y-auto">
-              <table className="w-full text-left text-sm">
-                <thead className="sticky top-0 bg-zinc-950 text-[10px] uppercase tracking-wider text-zinc-500">
+              <AdminTable>
+                <thead className="sticky top-0">
                   <tr>
-                    <th className="w-8 py-1">
+                    <th className="w-8">
                       <input
                         type="checkbox"
                         checked={items.length > 0 && selected.size === items.length}
@@ -287,16 +288,16 @@ export default function AuthorityCockpit({ onMutate }: { onMutate?: () => void }
                         }
                       />
                     </th>
-                    <th className="py-1">Citation</th>
-                    <th className="py-1">Disposition</th>
-                    <th className="py-1">Key</th>
-                    <th className="py-1" />
+                    <th >Citation</th>
+                    <th >Disposition</th>
+                    <th >Key</th>
+                    <th  />
                   </tr>
                 </thead>
                 <tbody>
                   {items.map((it) => (
                     <tr key={it.id} className="border-t border-white/[0.04]">
-                      <td className="py-1.5">
+                      <td >
                         <input
                           type="checkbox"
                           checked={selected.has(it.id)}
@@ -308,13 +309,13 @@ export default function AuthorityCockpit({ onMutate }: { onMutate?: () => void }
                           }}
                         />
                       </td>
-                      <td className="py-1.5">
+                      <td >
                         <div className="font-mono text-[11px] text-zinc-300">{it.citation}</div>
                         {it.heading && (
                           <div className="truncate text-[11px] text-zinc-500">{it.heading}</div>
                         )}
                       </td>
-                      <td className="py-1.5">
+                      <td >
                         {it.disposition ? (
                           <>
                             <span
@@ -337,7 +338,7 @@ export default function AuthorityCockpit({ onMutate }: { onMutate?: () => void }
                           </span>
                         )}
                       </td>
-                      <td className="py-1.5">
+                      <td >
                         {it.regulation_key ? (
                           <span className="font-mono text-[10px] text-zinc-400">{it.regulation_key}</span>
                         ) : (
@@ -348,8 +349,8 @@ export default function AuthorityCockpit({ onMutate }: { onMutate?: () => void }
                           </span>
                         )}
                       </td>
-                      <td className="py-1.5 text-right">
-                        <button
+                      <td className="text-right">
+                        <AdminButton
                           type="button"
                           disabled={!vocab}
                           onClick={() => setEditing(editing?.id === it.id ? null : it)}
@@ -358,14 +359,14 @@ export default function AuthorityCockpit({ onMutate }: { onMutate?: () => void }
                               ? 'Assign a regulation key, or correct the disposition Gemini proposed. Saving lands it confirmed.'
                               : 'Vocabulary failed to load — reload the page.'
                           }
-                          className="rounded border border-white/[0.08] px-1.5 py-0.5 text-[10px] text-zinc-400 hover:border-white/20 disabled:opacity-40">
+                          className="disabled:opacity-40" variant="ghost">
                           {editing?.id === it.id ? 'Close' : it.regulation_key ? 'Edit' : 'Assign key'}
-                        </button>
+                        </AdminButton>
                       </td>
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </AdminTable>
             </div>
           )}
 
@@ -388,47 +389,47 @@ export default function AuthorityCockpit({ onMutate }: { onMutate?: () => void }
               }}
             />
           )}
-        </div>
+        </AdminCard>
       )}
 
       {/* Strata inspector */}
       {showStrata && (
-        <div className="mt-4 rounded-lg border border-white/[0.06] bg-white/[0.02] p-3">
+        <AdminCard className="mt-4">
           <div className={`${LABEL} mb-2`}>Strata</div>
           {!strata ? (
             <div className="text-xs text-zinc-500">Loading…</div>
           ) : strata.length === 0 ? (
             <div className="text-xs text-zinc-500">No strata materialized yet.</div>
           ) : (
-            <table className="w-full text-left text-sm">
-              <thead className="text-[10px] uppercase tracking-wider text-zinc-500">
+            <AdminTable>
+              <thead >
                 <tr>
-                  <th className="py-1">Level</th>
-                  <th className="py-1">Jurisdiction</th>
-                  <th className="py-1">Category</th>
-                  <th className="py-1 text-right">Items</th>
-                  <th className="py-1 text-right">Keys</th>
+                  <th >Level</th>
+                  <th >Jurisdiction</th>
+                  <th >Category</th>
+                  <th className="text-right">Items</th>
+                  <th className="text-right">Keys</th>
                 </tr>
               </thead>
               <tbody>
                 {strata.map((s) => (
                   <tr key={s.id} className="border-t border-white/[0.04] text-[11px]">
-                    <td className="py-1 text-zinc-400">{s.level}</td>
-                    <td className="py-1 text-zinc-300">{s.jurisdiction_label ?? '—'}</td>
-                    <td className="py-1 font-mono text-zinc-400">{s.category_slug ?? '—'}</td>
-                    <td className="py-1 text-right font-mono tabular-nums text-zinc-400">{s.item_count}</td>
-                    <td className="py-1 text-right font-mono tabular-nums text-zinc-400">{s.key_count}</td>
+                    <td className="text-zinc-400">{s.level}</td>
+                    <td className="text-zinc-300">{s.jurisdiction_label ?? '—'}</td>
+                    <td className="font-mono text-zinc-400">{s.category_slug ?? '—'}</td>
+                    <td className="text-right font-mono tabular-nums text-zinc-400">{s.item_count}</td>
+                    <td className="text-right font-mono tabular-nums text-zinc-400">{s.key_count}</td>
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </AdminTable>
           )}
-        </div>
+        </AdminCard>
       )}
 
       {/* Shadow log — the cutover go/no-go signal */}
       {showShadow && (
-        <div className="mt-4 rounded-lg border border-white/[0.06] bg-white/[0.02] p-3">
+        <AdminCard className="mt-4">
           <div className="mb-2 flex items-center gap-2">
             <span className={LABEL}>Shadow log</span>
             <HelpHint text="Every onboarding finalize runs the registry alongside the authoritative expand_scope path and records the diff. Agreement here is the evidence that justifies cutting a coordinate over to the engine (cutover.py's allowlist) — without this surface the shadow phase could never end." />
@@ -454,44 +455,44 @@ export default function AuthorityCockpit({ onMutate }: { onMutate?: () => void }
                   </div>
                 )
               })()}
-              <table className="w-full text-left text-sm">
-                <thead className="text-[10px] uppercase tracking-wider text-zinc-500">
+              <AdminTable>
+                <thead >
                   <tr>
-                    <th className="py-1">When</th>
-                    <th className="py-1">Company</th>
-                    <th className="py-1 text-right">Engine</th>
-                    <th className="py-1 text-right">Bank</th>
-                    <th className="py-1 text-right">Engine only</th>
-                    <th className="py-1 text-right">Bank only</th>
+                    <th >When</th>
+                    <th >Company</th>
+                    <th className="text-right">Engine</th>
+                    <th className="text-right">Bank</th>
+                    <th className="text-right">Engine only</th>
+                    <th className="text-right">Bank only</th>
                   </tr>
                 </thead>
                 <tbody>
                   {shadow.slice(0, 20).map((r) => (
                     <tr key={r.id} className="border-t border-white/[0.04] text-[11px]">
-                      <td className="py-1 text-zinc-400">
+                      <td className="text-zinc-400">
                         {new Date(r.created_at).toLocaleDateString()}
                       </td>
-                      <td className="py-1 truncate text-zinc-400">{r.company_name ?? '—'}</td>
-                      <td className="py-1 text-right font-mono tabular-nums text-zinc-300">
+                      <td className="truncate text-zinc-400">{r.company_name ?? '—'}</td>
+                      <td className="text-right font-mono tabular-nums text-zinc-300">
                         {r.resolve_keys.length}
                       </td>
-                      <td className="py-1 text-right font-mono tabular-nums text-zinc-300">
+                      <td className="text-right font-mono tabular-nums text-zinc-300">
                         {r.expand_keys.length}
                       </td>
-                      <td className="py-1 text-right font-mono tabular-nums text-emerald-400">
+                      <td className="text-right font-mono tabular-nums text-emerald-400">
                         {r.only_in_resolve.length || '—'}
                       </td>
-                      <td className="py-1 text-right font-mono tabular-nums text-amber-400">
+                      <td className="text-right font-mono tabular-nums text-amber-400">
                         {r.only_in_expand.length || '—'}
                       </td>
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </AdminTable>
             </>
           )}
-        </div>
+        </AdminCard>
       )}
-    </div>
+    </AdminCard>
   )
 }

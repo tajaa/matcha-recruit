@@ -1,6 +1,7 @@
+import { AdminSectionHeader, AdminCard as Card, AdminButton as Button, AdminCard } from './AdminUI'
 import { useEffect, useRef, useState } from 'react'
 import { Check, Loader2, Upload } from 'lucide-react'
-import { Card, Button } from '../ui'
+
 import { landingMedia } from '../../api/admin/landingMedia'
 import { EMPTY_COMMERCIAL, type CommercialSlot, type CommercialUploadProgress, type SchedulingCommercial } from '../../types/landingMedia'
 
@@ -67,7 +68,7 @@ export function SchedulingCommercialSettings() {
     <Card>
       <div className="space-y-6 p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
-          <div><h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-200">Scheduling commercial</h2><p className="mt-2 max-w-xl text-sm leading-relaxed text-zinc-400">Upload a desktop film, preview it, turn on the checkbox, then save. The film appears on the <a href="/" target="_blank" rel="noreferrer" className="underline">home page</a>. Uploading alone does not publish it.</p></div>
+          <AdminSectionHeader title={<>Scheduling commercial</>} description={<>Upload a desktop film, preview it, turn on the checkbox, then save. The film appears on the <a href="/" target="_blank" rel="noreferrer" className="underline">home page</a>. Uploading alone does not publish it.</>} />
           <Button type="button" disabled={!loaded || busy || (draft.enabled && !draft.desktop_video_url)} onClick={save}>{saving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}Save commercial</Button>
         </div>
         {!loaded && !error && <p className="text-sm text-zinc-400">Loading commercial settings…</p>}
@@ -97,12 +98,12 @@ export function SchedulingCommercialSettings() {
                     {url && <button type="button" disabled={busy} className="text-xs text-zinc-400 hover:text-red-300" onClick={() => setDraft((current) => ({ ...current, [key]: null, ...(item.slot === 'desktop_video' ? { enabled: false } : {}) }))}>Clear</button>}
                   </div>
                 </div>
-                {uploading === item.slot && <div className="mt-4 rounded-lg border border-zinc-700 bg-zinc-900 p-4">
+                {uploading === item.slot && <AdminCard className="mt-4">
                   <p className="break-all text-sm text-zinc-200">{selectedFile?.name}<span className="ml-2 whitespace-nowrap text-xs text-zinc-400">{selectedFile && `${(selectedFile.size / (1024 * 1024)).toLocaleString('en-US', { maximumFractionDigits: 1 })} MB`}</span></p>
                   <progress aria-label={`${item.label} upload progress`} value={progress.phase === 'uploading' && progress.percent !== null ? progress.percent : undefined} max={100} className="mt-3 h-2 w-full accent-emerald-500" />
                   <p role="status" className="mt-2 text-sm text-zinc-300">{progress.phase === 'preparing' ? 'Preparing secure upload…' : progress.phase === 'verifying' ? 'Transfer complete. Verifying the file…' : progress.percent === 100 ? '100% transferred. Waiting for storage confirmation…' : progress.percent === null ? 'Uploading… waiting for measurable transfer progress.' : `Uploading ${progress.percent}%…`}</p>
                   <p className="mt-1 text-xs text-zinc-500">Keep this page open. Your published commercial stays in place until you save a verified replacement.</p>
-                </div>}
+                </AdminCard>}
                 {url && isVideo && <video src={url} controls playsInline crossOrigin={draft.captions_url ? 'anonymous' : undefined} preload="metadata" poster={draft[item.slot === 'desktop_video' ? 'desktop_poster_url' : 'mobile_poster_url'] ?? undefined} className={`mt-4 max-h-80 rounded bg-black object-contain ${item.slot === 'mobile_video' ? 'aspect-[9/16] w-44' : 'aspect-video w-full max-w-xl'}`}>{draft.captions_url && <track kind="captions" src={draft.captions_url} srcLang="en" label="English" />}</video>}
                 {url && isPoster && <img src={url} alt={`${item.label} preview`} className="mt-4 max-h-40 max-w-xs rounded object-contain" />}
                 {url && item.slot === 'captions' && <a href={url} target="_blank" rel="noreferrer" className="mt-3 inline-block text-xs text-zinc-400 underline">Preview caption file</a>}

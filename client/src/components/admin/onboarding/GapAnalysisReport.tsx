@@ -1,3 +1,5 @@
+/* eslint-disable react-hooks/set-state-in-effect -- Effects intentionally synchronize this tool with loaded data, URL selections, and preview inputs. */
+import { AdminButton, AdminTable } from '../AdminUI'
 /**
  * Onboarding Gap-Analysis report — the team's durable handoff doc for a
  * compliance-complex company. Loads the assembled dossier from
@@ -50,28 +52,26 @@ function Table({ headers, rows }: { headers: string[]; rows: string[][] }) {
     return <div className="text-sm text-zinc-600 italic">None</div>
   }
   return (
-    <div className="overflow-x-auto rounded-md border border-vsc-border">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="bg-vsc-panel">
-            {headers.map((h) => (
-              <th key={h} className="text-left px-3 py-2 font-medium text-zinc-400 text-xs uppercase tracking-wider">
-                {h}
-              </th>
+    <AdminTable>
+      <thead>
+        <tr className="bg-vsc-panel">
+          {headers.map((h) => (
+            <th key={h} className="text-left text-zinc-400">
+              {h}
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((r, i) => (
+          <tr key={i} className="border-t border-vsc-border">
+            {r.map((c, j) => (
+              <td key={j} className="text-zinc-300 align-top">{c || '—'}</td>
             ))}
           </tr>
-        </thead>
-        <tbody>
-          {rows.map((r, i) => (
-            <tr key={i} className="border-t border-vsc-border">
-              {r.map((c, j) => (
-                <td key={j} className="px-3 py-2 text-zinc-300 align-top">{c || '—'}</td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+        ))}
+      </tbody>
+    </AdminTable>
   )
 }
 
@@ -156,22 +156,22 @@ export default function GapAnalysisReport() {
         description={<>{(co.industry || '—')}{co.specialty ? ` · ${co.specialty}` : ''} · {(dossier.locations || []).length} location{(dossier.locations || []).length === 1 ? '' : 's'} · {dossier.status || 'in progress'}</>}
         actions={
           <div className="flex gap-2 shrink-0">
-            <button
+            <AdminButton
               onClick={() => void exportAs('pdf')}
               disabled={!!exporting}
-              className="inline-flex items-center gap-1.5 rounded-md border border-vsc-border px-3 py-1.5 text-sm text-zinc-200 hover:bg-vsc-panel disabled:opacity-60"
+              className="gap-1.5 disabled:opacity-60" variant="ghost"
             >
               {exporting === 'pdf' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
               PDF
-            </button>
-            <button
+            </AdminButton>
+            <AdminButton
               onClick={() => void exportAs('md')}
               disabled={!!exporting}
-              className="inline-flex items-center gap-1.5 rounded-md border border-vsc-border px-3 py-1.5 text-sm text-zinc-200 hover:bg-vsc-panel disabled:opacity-60"
+              className="gap-1.5 disabled:opacity-60" variant="ghost"
             >
               {exporting === 'md' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
               Markdown
-            </button>
+            </AdminButton>
           </div>
         }
       />

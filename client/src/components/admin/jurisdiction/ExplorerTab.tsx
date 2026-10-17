@@ -1,5 +1,7 @@
+import { AdminButton as Button, AdminInput as Input, AdminSelect, AdminTable } from '../AdminUI'
+import { AdminTab, AdminTabBar } from '../AdminTabs'
 import { useState, useMemo } from 'react'
-import { Button, Input } from '../../ui'
+
 import type { FlatCity } from './types'
 import { fmtDate } from './utils'
 
@@ -150,33 +152,33 @@ export default function ExplorerTab({
     <div className="space-y-0">
       {/* Filter bar */}
       <div className="px-3 py-2 border border-zinc-800 rounded-t-lg flex flex-wrap items-center gap-2">
-        <div className="flex items-center gap-1 mr-2">
-          <button
+        <AdminTabBar className="mr-2">
+          <AdminTab
             onClick={() => { setRegionFilter('us'); setFilterState(''); setPage(0) }}
-            className={`text-xs px-2 py-1 rounded ${regionFilter === 'us' ? 'bg-zinc-700 text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'}`}
+           active={regionFilter === 'us'}
           >
             US
-          </button>
-          <button
+          </AdminTab>
+          <AdminTab
             onClick={() => { setRegionFilter('international'); setFilterState(''); setPage(0) }}
-            className={`text-xs px-2 py-1 rounded ${regionFilter === 'international' ? 'bg-zinc-700 text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'}`}
+           active={regionFilter === 'international'}
           >
             Intl{intlCount > 0 && <span className="ml-1 text-[10px] text-zinc-400">({intlCount})</span>}
-          </button>
+          </AdminTab>
           <span className="text-zinc-700 mx-0.5">|</span>
-          <button
+          <AdminTab
             onClick={() => { setViewMode('states'); setPage(0) }}
-            className={`text-xs px-2 py-1 rounded ${viewMode === 'states' ? 'bg-zinc-700 text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'}`}
+           active={viewMode === 'states'}
           >
             By State
-          </button>
-          <button
+          </AdminTab>
+          <AdminTab
             onClick={() => { setViewMode('cities'); setPage(0) }}
-            className={`text-xs px-2 py-1 rounded ${viewMode === 'cities' ? 'bg-zinc-700 text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'}`}
+           active={viewMode === 'cities'}
           >
             All Cities
-          </button>
-        </div>
+          </AdminTab>
+        </AdminTabBar>
         <div className="flex-1 min-w-[140px]">
           <Input
             label=""
@@ -185,14 +187,13 @@ export default function ExplorerTab({
             onChange={(e) => { setSearch(e.target.value); setPage(0) }}
           />
         </div>
-        <select
+        <AdminSelect
           value={filterState}
           onChange={(e) => { setFilterState(e.target.value); setPage(0) }}
-          className="bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-300 text-xs px-2.5 py-1.5"
         >
           <option value="">All States</option>
           {stateOptions.map((s) => <option key={s} value={s}>{s}</option>)}
-        </select>
+        </AdminSelect>
         {viewMode === 'cities' && (
           <button
             type="button"
@@ -209,18 +210,18 @@ export default function ExplorerTab({
 
       {/* ── States view ── */}
       {viewMode === 'states' && (
-        <div className="border border-t-0 border-zinc-800 rounded-b-lg max-h-[65vh] overflow-y-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-zinc-900/50 text-zinc-400 sticky top-0">
+        <div className="max-h-[65vh] overflow-y-auto">
+          <AdminTable>
+            <thead className="sticky top-0">
               <tr>
-                <th className="text-left py-2 px-3 text-[10px] uppercase tracking-wide w-16">State</th>
-                <th className="text-left py-2 px-3 text-[10px] uppercase tracking-wide">Cities</th>
-                <th className="text-left py-2 px-3 text-[10px] uppercase tracking-wide">Requirements</th>
-                <th className="text-left py-2 px-3 text-[10px] uppercase tracking-wide">Categories</th>
-                <th className="text-left py-2 px-3 text-[10px] uppercase tracking-wide">Verified</th>
+                <th className="text-left w-16">State</th>
+                <th className="text-left">Cities</th>
+                <th className="text-left">Requirements</th>
+                <th className="text-left">Categories</th>
+                <th className="text-left">Verified</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-zinc-800/50">
+            <tbody >
               {filteredStates.map((s) => (
                 <StateRow
                   key={s.state}
@@ -230,7 +231,7 @@ export default function ExplorerTab({
                 />
               ))}
             </tbody>
-          </table>
+          </AdminTable>
         </div>
       )}
 
@@ -238,8 +239,8 @@ export default function ExplorerTab({
       {viewMode === 'cities' && (
         <div className="border border-t-0 border-zinc-800 rounded-b-lg">
           <div className="max-h-[65vh] overflow-y-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-zinc-900/50 text-zinc-400 sticky top-0">
+            <AdminTable>
+              <thead className="sticky top-0">
                 <tr>
                   {([
                     ['state', 'ST'],
@@ -250,7 +251,7 @@ export default function ExplorerTab({
                   ] as [SortKey, string][]).map(([key, label]) => (
                     <th
                       key={key}
-                      className="text-left py-2 px-3 text-[10px] uppercase tracking-wide cursor-pointer hover:text-zinc-200 select-none"
+                      className="text-left cursor-pointer hover:text-zinc-200 select-none"
                       onClick={() => toggleSort(key)}
                     >
                       {label}{sortIcon(key)}
@@ -258,7 +259,7 @@ export default function ExplorerTab({
                   ))}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-zinc-800/50">
+              <tbody >
                 {paged.map((city, idx) => {
                   const hasData = city.presentCount > 0
                   return (
@@ -267,32 +268,32 @@ export default function ExplorerTab({
                       className={`cursor-pointer transition-colors ${selectedCityId === city.id ? 'bg-zinc-800/60' : 'hover:bg-zinc-800/30'}`}
                       onClick={() => onSelectCity(city)}
                     >
-                      <td className="py-2 px-3 font-mono font-bold text-zinc-200 w-16">
+                      <td className="font-mono text-zinc-200 w-16">
                         {city.stateName}
                         {city.country_code && city.country_code !== 'US' && (
                           <span className="text-zinc-500 ml-1 text-[10px]">{city.country_code}</span>
                         )}
                       </td>
-                      <td className={`py-2 px-3 ${hasData ? 'text-zinc-200' : 'text-zinc-500 italic'}`}>
+                      <td className={`${hasData ? 'text-zinc-200' : 'text-zinc-500 italic'}`}>
                         {city.city || <span className="text-zinc-600">(state level)</span>}
                         {!hasData && city.city && <span className="text-zinc-600 ml-1 text-[10px]">inherits</span>}
                       </td>
-                      <td className="py-2 px-3 font-mono text-xs">
+                      <td className="font-mono">
                         {hasData ? (
                           <span className="text-zinc-300">{city.presentCount} reqs</span>
                         ) : (
                           <span className="text-zinc-600">0</span>
                         )}
                       </td>
-                      <td className={`py-2 px-3 font-mono text-xs ${city.gapCount > 0 ? 'text-amber-400' : 'text-zinc-600'}`}>
+                      <td className={` font-mono ${city.gapCount > 0 ? 'text-amber-400' : 'text-zinc-600'}`}>
                         {city.gapCount > 0 ? city.gapCount : '—'}
                       </td>
-                      <td className="py-2 px-3 text-zinc-500 text-[11px]">{fmtDate(city.last_verified_at)}</td>
+                      <td className="text-zinc-500">{fmtDate(city.last_verified_at)}</td>
                     </tr>
                   )
                 })}
               </tbody>
-            </table>
+            </AdminTable>
           </div>
           {totalPages > 1 && (
             <div className="flex items-center justify-between px-3 py-2 border-t border-zinc-800/60">
@@ -340,27 +341,27 @@ function StateRow({
         className="cursor-pointer hover:bg-zinc-800/30"
         onClick={() => setExpanded(!expanded)}
       >
-        <td className="py-2.5 px-3">
+        <td >
           <span className="font-mono font-bold text-zinc-200">
             {state.state}
             {state.countryCode !== 'US' && <span className="text-zinc-500 ml-1 text-[10px]">{state.countryCode}</span>}
           </span>
           <span className="text-zinc-600 ml-1">{expanded ? '▾' : '▸'}</span>
         </td>
-        <td className="py-2.5 px-3 text-zinc-400 text-xs">
+        <td className="text-zinc-400">
           {citiesWithNames.length} {citiesWithNames.length === 1 ? 'city' : 'cities'}
           {state.cityWithout > 0 && (
             <span className="text-zinc-600 ml-1">({state.cityWithout} inheriting)</span>
           )}
         </td>
-        <td className="py-2.5 px-3 font-mono text-xs text-zinc-300">
+        <td className="font-mono text-zinc-300">
           {state.totalReqs} reqs
         </td>
-        <td className="py-2.5 px-3 text-xs">
+        <td >
           <span className="text-zinc-400">{state.catPresent.size}</span>
           <span className="text-zinc-600"> / {state.catPresent.size + state.catMissing.size} categories</span>
         </td>
-        <td className="py-2.5 px-3 text-zinc-500 text-[11px]">{fmtDate(state.lastVerified)}</td>
+        <td className="text-zinc-500">{fmtDate(state.lastVerified)}</td>
       </tr>
       {expanded && (
         <>
@@ -370,11 +371,11 @@ function StateRow({
               className={`bg-zinc-800/20 cursor-pointer hover:bg-zinc-800/40 ${selectedCityId === stateRow.id ? 'bg-zinc-700/40' : ''}`}
               onClick={() => onSelectCity(stateRow)}
             >
-              <td className="py-1.5 px-3 pl-8 text-[11px] text-zinc-500" colSpan={1}></td>
-              <td className="py-1.5 px-3 text-xs text-amber-400/80">State-level policies</td>
-              <td className="py-1.5 px-3 font-mono text-xs text-zinc-400">{stateRow.presentCount} reqs</td>
-              <td className="py-1.5 px-3 text-xs text-zinc-500">{stateRow.categories_present.length} categories</td>
-              <td className="py-1.5 px-3 text-[11px] text-zinc-500">{fmtDate(stateRow.last_verified_at)}</td>
+              <td className="pl-8 text-zinc-500" colSpan={1}></td>
+              <td className="text-amber-400/80">State-level policies</td>
+              <td className="font-mono text-zinc-400">{stateRow.presentCount} reqs</td>
+              <td className="text-zinc-500">{stateRow.categories_present.length} categories</td>
+              <td className="text-zinc-500">{fmtDate(stateRow.last_verified_at)}</td>
             </tr>
           )}
           {/* City rows */}
@@ -386,22 +387,22 @@ function StateRow({
                 className={`bg-zinc-800/10 cursor-pointer hover:bg-zinc-800/30 ${selectedCityId === city.id ? 'bg-zinc-700/30' : ''}`}
                 onClick={() => onSelectCity(city)}
               >
-                <td className="py-1.5 px-3 pl-8" />
-                <td className="py-1.5 px-3 text-xs text-zinc-300">
+                <td className="pl-8" />
+                <td className="text-zinc-300">
                   {city.city}
                   {city.presentCount === 0 && <span className="text-zinc-600 ml-1 text-[10px]">inherits</span>}
                 </td>
-                <td className="py-1.5 px-3 font-mono text-xs">
+                <td className="font-mono">
                   {city.presentCount > 0 ? (
                     <span className="text-zinc-300">{city.presentCount} reqs</span>
                   ) : (
                     <span className="text-zinc-600">0</span>
                   )}
                 </td>
-                <td className="py-1.5 px-3 text-xs text-zinc-500">
+                <td className="text-zinc-500">
                   {city.presentCount > 0 ? `${city.categories_present.length} categories` : ''}
                 </td>
-                <td className="py-1.5 px-3 text-[11px] text-zinc-500">{fmtDate(city.last_verified_at)}</td>
+                <td className="text-zinc-500">{fmtDate(city.last_verified_at)}</td>
               </tr>
             ))}
         </>

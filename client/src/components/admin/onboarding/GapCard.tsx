@@ -1,3 +1,5 @@
+import { humanizeCategory, jurisdictionLabel } from './gapLabels'
+import { AdminButton } from '../AdminUI'
 /**
  * One compliance gap, rendered richly — shared by the persistent Gap Dashboard
  * (pages/admin/GapDashboard.tsx) and the onboarding wizard's gap step so they
@@ -14,16 +16,9 @@ import { Loader2, Search, Square, CheckSquare, MapPin, ChevronRight } from 'luci
 import { useState } from 'react'
 import type { ResolvedScopeMissing } from '../../../api/admin/adminOnboarding'
 
-export function humanizeCategory(slug: string): string {
-  return slug
-    .replace(/_/g, ' ')
-    .replace(/\b\w/g, (c) => c.toUpperCase())
-}
 
-export function jurisdictionLabel(m: { city?: string | null; county?: string | null; state?: string | null }): string {
-  const parts = [m.city, m.county, m.state].filter(Boolean)
-  return parts.length ? parts.join(', ') : 'Federal'
-}
+
+
 
 type GapCardProps = {
   gap: ResolvedScopeMissing
@@ -94,14 +89,14 @@ export default function GapCard({ gap, selected, onToggle, onResearch, researchi
         </div>
 
         {onResearch && (
-          <button
+          <AdminButton
             onClick={onResearch}
             disabled={disabled || researching}
-            className="shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-vsc-accent text-vsc-bg text-[11px] font-medium hover:opacity-90 disabled:opacity-50"
+            className="shrink-0 gap-1.5 hover:opacity-90 disabled:opacity-50" variant="primary"
           >
             {researching ? <Loader2 className="w-3 h-3 animate-spin" /> : <Search className="w-3 h-3" />}
             Research
-          </button>
+          </AdminButton>
         )}
       </div>
     </div>
