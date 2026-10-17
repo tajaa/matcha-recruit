@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { Loader2, Maximize2, SlidersHorizontal, Sparkles, X } from 'lucide-react'
 import { ensureAssistantChannel } from '../api/matchaWork/assistant'
 import AssistantAbilities from '../components/assistant/AssistantAbilities'
@@ -15,6 +15,10 @@ import { useWorkBase } from '../routes/WorkSurfaceContext'
  *  into it. `id` changes per ask, so the same words can be asked twice. */
 export type AssistantAsk = { id: number; text: string }
 
+/** Navigation state that opens the conversation with words already in its
+ *  composer, for the person to finish and send (Job search's Ask Espresso). */
+export type AssistantDraftState = { draft: AssistantAsk }
+
 /**
  * A person's private conversation with Espresso. It is a channel underneath,
  * so messages, cards and quick replies are the chat's own; what is left out
@@ -22,9 +26,11 @@ export type AssistantAsk = { id: number; text: string }
  * are none here. Every message is addressed to Espresso: no mention needed.
  */
 
-function Conversation({ channelId, ask, onClose }: {
+function Conversation({ channelId, ask, draft, onClose }: {
   channelId: string
   ask?: AssistantAsk | null
+  /** Words to put in the composer, unsent. */
+  draft?: AssistantAsk | null
   /** Set when shown as Home's side panel: a close button and a way to the full page. */
   onClose?: () => void
 }) {
@@ -37,13 +43,27 @@ function Conversation({ channelId, ask, onClose }: {
   // Each ask is sent once, after the conversation has loaded (StrictMode runs
   // effects twice; the ref keeps it to one send).
   const sentAsk = useRef<number | null>(null)
-  const { loading, sendText } = view
+  const placedDraft = useRef<number | null>(null)
+  const { loading, sendText, setInput, inputTextareaRef } = view
 
   useEffect(() => {
     if (loading || !ask || sentAsk.current === ask.id) return
     sentAsk.current = ask.id
     sendText(ask.text)
   }, [loading, ask, sendText])
+
+  // A draft goes in once, with the caret at its end for the person's own words.
+  useEffect(() => {
+    if (loading || !draft || placedDraft.current === draft.id) return
+    placedDraft.current = draft.id
+    setInput(draft.text)
+    requestAnimationFrame(() => {
+      const box = inputTextareaRef.current
+      if (!box) return
+      box.focus()
+      box.setSelectionRange(draft.text.length, draft.text.length)
+    })
+  }, [loading, draft, setInput, inputTextareaRef])
 
   if (view.loading) {
     return <div className="flex h-full items-center justify-center"><Loader2 className="animate-spin text-w-dim" /></div>
@@ -133,6 +153,13 @@ function Conversation({ channelId, ask, onClose }: {
 
 export default function Assistant() {
   const { isPersonal } = useMe()
+  const location = useLocation()
+  const navigate = useNavigate()
+  // Read once, then dropped from history so a reload doesn't put it back.
+  const [draft] = useState(() => (location.state as Partial<AssistantDraftState> | null)?.draft ?? null)
+  useEffect(() => {
+    if (draft) navigate(location.pathname, { replace: true, state: null })
+  }, [draft, navigate, location.pathname])
   if (!isPersonal) {
     return (
       <p className="p-6 text-sm text-w-dim">
@@ -140,12 +167,16 @@ export default function Assistant() {
       </p>
     )
   }
-  return <AssistantConversation />
+  return <AssistantConversation draft={draft} />
 }
 
 /** The person's private conversation with Espresso: the full page, or (with
  *  `onClose`) the panel that slides in on Home when they ask from there. */
-export function AssistantConversation({ ask, onClose }: { ask?: AssistantAsk | null; onClose?: () => void } = {}) {
+export function AssistantConversation({ ask, draft, onClose }: {
+  ask?: AssistantAsk | null
+  draft?: AssistantAsk | null
+  onClose?: () => void
+} = {}) {
   const [channelId, setChannelId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -163,5 +194,5 @@ export function AssistantConversation({ ask, onClose }: { ask?: AssistantAsk | n
   if (!channelId) {
     return <div className="flex h-full items-center justify-center"><Loader2 className="animate-spin text-w-dim" /></div>
   }
-  return <Conversation channelId={channelId} ask={ask} onClose={onClose} />
+  return <Conversation channelId={channelId} ask={ask} draft={draft} onClose={onClose} />
 }

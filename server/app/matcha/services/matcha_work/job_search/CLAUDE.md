@@ -237,3 +237,20 @@ minimum base, saved résumé, the `jobs` disclosure) goes through
 `done` or `failed`, the chain's `on_terminal` (`orchestrator._stopped`) tells
 the person (bell + push, `agent_task_id` metadata) and posts the task card in
 that conversation; a redraft that ends later doesn't tell them again.
+
+## On the web
+
+The web has no Tasks section, so Job search is its own page on the personal
+surface: `/espresso/jobs` and `/espresso/jobs/:searchId?job=<lead id>`
+(`client/src/work/pages/JobSearch.tsx` + `pages/JobSearch/`, API module
+`client/src/work/api/matchaWork/jobSearch.ts`), with a sidebar entry for
+personal accounts. It is the Mac's job search on the same routes:
+`jobSearchLogic.ts` ports `JobSearchViewModel`'s rules (filters, the 3/5
+widen count, Next steps progress, `parseBaseFloor`, `retryIsNewRequest`, pay
+lines) with tests, and `useJobSearch.ts` polls `/status` every 5 s only while
+the search is live or a job is drafting, reloading the jobs only when the
+fingerprint, status or job count changes. Differences from the Mac: the page
+lists searches and deletes them itself (Tasks does that on the Mac); Draft
+email links to Gmail's own drafts folder, since the web has no Email ▸ Drafts
+view; Ask Espresso opens the one assistant conversation with the Mac's
+hand-off prompt in its composer, unsent.
