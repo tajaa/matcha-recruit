@@ -78,9 +78,10 @@ function JobSearchPage() {
     if (await js.remove(detail.id)) navigate(`${base}/jobs`)
   }
 
-  async function draftEmail(id: string) {
-    const draft = await js.draftEmail(id)
-    if (draft) setDraftedLeadId(id)
+  /** `existingOnly` is Edit draft: it finds the draft in Gmail and never makes one. */
+  async function draftEmail(id: string, existingOnly = false) {
+    const draft = await js.draftEmail(id, existingOnly)
+    setDraftedLeadId(draft ? id : null)
   }
 
   function askEspresso(lead: JobLeadDetail) {
@@ -137,16 +138,22 @@ function JobSearchPage() {
       {leadId && detail && (
         <LeadPane
           lead={js.lead}
+          loadError={js.leadLoadError}
+          error={js.leadError}
           canDraft={canDraft(detail)}
           busy={js.busy}
           emailNotConnected={js.emailNotConnected}
           emailDrafted={draftedLeadId === leadId}
+          emailDraftGone={js.emailDraftGone}
           emailPath={`${base}/email`}
           onClose={() => selectLead(null)}
+          onRetry={() => void js.reloadLead()}
+          onDismissError={() => js.setLeadError(null)}
           onSetState={(state, id) => void js.setLeadState(state, id)}
           onSaveNotes={(notes, id) => void js.saveNotes(notes, id)}
           onRedraft={() => void js.redraft()}
           onDraftEmail={(id) => void draftEmail(id)}
+          onEditDraft={(id) => void draftEmail(id, true)}
           onAskEspresso={askEspresso}
         />
       )}

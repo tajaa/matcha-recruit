@@ -196,8 +196,10 @@ export const rerankJobSearch = (id: string, weights: JobWeights) =>
 export const widenJobSearch = (id: string) => api.post<JobSearchDetail>(`${searchPath(id)}/widen`)
 export const redraftJobApproach = (searchId: string, leadId: string) =>
   api.post<JobSearchDetail>(`${leadPath(searchId, leadId)}/approach`)
-/** Put a job's first message in the person's Gmail drafts. Nothing is sent. */
-export const draftJobEmail = (searchId: string, leadId: string) =>
-  api.post<JobEmailDraftResult>(`${leadPath(searchId, leadId)}/email-draft`)
+/** Put a job's first message in the person's Gmail drafts. Nothing is sent.
+ *  `existingOnly` (Edit draft) never makes one: a draft that left Gmail is a
+ *  409 `email_draft_missing` carrying the job as it is now. */
+export const draftJobEmail = (searchId: string, leadId: string, existingOnly = false) =>
+  api.post<JobEmailDraftResult>(`${leadPath(searchId, leadId)}/email-draft`, existingOnly ? { existing_only: true } : undefined)
 export const cancelJobSearch = (id: string) => api.post<JobSearchDetail>(`${searchPath(id)}/cancel`)
 export const deleteJobSearch = (id: string) => api.delete<{ deleted: boolean }>(searchPath(id))

@@ -249,8 +249,22 @@ personal accounts. It is the Mac's job search on the same routes:
 widen count, Next steps progress, `parseBaseFloor`, `retryIsNewRequest`, pay
 lines) with tests, and `useJobSearch.ts` polls `/status` every 5 s only while
 the search is live or a job is drafting, reloading the jobs only when the
-fingerprint, status or job count changes. Differences from the Mac: the page
+fingerprint, status or job count changes. Its reads are numbered per kind
+(list, search, job), and a change (Redraft, Mark, notes, re-rank, widen,
+cancel, Draft email) takes a number when it starts and when it lands, so an
+older answer can't undo it; only reads of what is still open are dropped. A
+job's load and save failures show in its pane, which covers the search below
+`xl`. Differences from the Mac: the page
 lists searches and deletes them itself (Tasks does that on the Mac); Draft
 email links to Gmail's own drafts folder, since the web has no Email ▸ Drafts
 view; Ask Espresso opens the one assistant conversation with the Mac's
 hand-off prompt in its composer, unsent.
+
+Edit draft sends `{"existing_only": true}` to `…/email-draft`, which never
+makes a draft: when Gmail no longer has it (sent or deleted in Gmail itself,
+where Espresso can't see it), the job forgets it, as `note_email_draft` does
+for a draft deleted from Espresso's Email, and the call is a 409
+`email_draft_missing` carrying the job as it is now. The pane says so, and
+Draft email is the person's own click to make a new one. With no body the
+endpoint behaves as before (the Mac's Edit draft still recreates a missing
+draft).

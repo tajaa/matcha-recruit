@@ -333,15 +333,27 @@ export function retryIsNewRequest(error: unknown): boolean {
   return (error.status >= 400 && error.status < 500) || error.status === 503
 }
 
-/** The server's structured refusal code (`detail.code`), if it sent one. */
-export function errorCode(error: unknown): string | null {
+/** The server's structured refusal (`detail`), if it sent one. */
+function errorDetail(error: unknown): Record<string, unknown> | null {
   if (!(error instanceof ApiError)) return null
   const body = error.body
   if (!body || typeof body !== 'object' || !('detail' in body)) return null
   const detail = (body as { detail: unknown }).detail
-  if (!detail || typeof detail !== 'object' || !('code' in detail)) return null
-  const code = (detail as { code: unknown }).code
+  return detail && typeof detail === 'object' ? detail as Record<string, unknown> : null
+}
+
+/** The server's structured refusal code (`detail.code`), if it sent one. */
+export function errorCode(error: unknown): string | null {
+  const code = errorDetail(error)?.code
   return typeof code === 'string' ? code : null
+}
+
+/** The job as it is now, sent with a refusal about it (`email_draft_missing`). */
+export function errorLead(error: unknown): JobLeadDetail | null {
+  const lead = errorDetail(error)?.lead
+  return lead && typeof lead === 'object' && typeof (lead as { id?: unknown }).id === 'string'
+    ? lead as JobLeadDetail
+    : null
 }
 
 /** What went wrong, as one line: the server's own words, or the fallback. */

@@ -40,6 +40,8 @@ export default function NewJobSearchModal({ list, onCreate, onCreated, onClose }
   const [starting, setStarting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const requestId = useRef(crypto.randomUUID())
+  /** A résumé was uploaded here: the saved one's read, if still out, is older. */
+  const uploaded = useRef(false)
   const fileInput = useRef<HTMLInputElement>(null)
   const dialogRef = useRef<HTMLDivElement>(null)
 
@@ -53,7 +55,10 @@ export default function NewJobSearchModal({ list, onCreate, onCreated, onClose }
   useEffect(() => {
     let cancelled = false
     getMyResume()
-      .then((saved) => { if (!cancelled) { setResume(saved); setUseResume(!!saved) } })
+      .then((saved) => {
+        // An upload since says what the résumé is; this answer would undo it.
+        if (!cancelled && !uploaded.current) { setResume(saved); setUseResume(!!saved) }
+      })
       .catch(() => { /* no résumé is fine */ })
       .finally(() => { if (!cancelled) setResumeLoaded(true) })
     return () => { cancelled = true }
@@ -70,8 +75,11 @@ export default function NewJobSearchModal({ list, onCreate, onCreated, onClose }
     setUploading(true)
     setError(null)
     try {
-      setResume(await uploadMyResume(file))
+      const saved = await uploadMyResume(file)
+      uploaded.current = true
+      setResume(saved)
       setUseResume(true)
+      setResumeLoaded(true)
     } catch (e) {
       setError(errorText(e, "Couldn't read that résumé."))
     } finally {

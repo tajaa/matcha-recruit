@@ -89,3 +89,10 @@ class JobSearchCreate(Body):
 class LeadPatch(Body):
     user_state: UserState | None = None
     notes: str | None = Field(default=None, max_length=4000)
+
+
+class EmailDraftRequest(Body):
+    # Only the draft already in Gmail: never make one. A job's Edit draft asks
+    # this way, so a draft that was sent or deleted in Gmail isn't quietly made
+    # again; making a new one is its own click.
+    existing_only: bool = False

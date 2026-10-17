@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
-import { CheckCircle2, ChevronDown, ExternalLink, Link2, Loader2, Mail, MailOpen, Scale, Sparkles, X } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, ChevronDown, ExternalLink, Link2, Loader2, Mail, MailOpen, Scale, Sparkles, X } from 'lucide-react'
 import type { JobApproach, JobLeadDetail } from '../../api/matchaWork/jobSearch'
 import {
   GMAIL_DRAFTS_URL, channelLabel, compParts, evidenceLabel, fitText, hostOf, isDrafting, isIrrelevant, partLine, placeholders,
@@ -12,25 +12,38 @@ import {
  * (outreach, answers to the application's own questions, cover letter). Every
  * draft has Copy, and the first message can go to the person's Gmail drafts
  * (Draft email); nothing here sends or submits. Mirrors the macOS app's job pane.
+ * Below the widest layout it covers the search, so what goes wrong with the
+ * job (loading it, saving it, drafting it) is said here, not behind it.
  */
 export default function LeadPane({
-  lead, canDraft, busy, emailNotConnected, emailDrafted, emailPath, onClose, onSetState, onSaveNotes, onRedraft,
-  onDraftEmail, onAskEspresso,
+  lead, loadError, error, canDraft, busy, emailNotConnected, emailDrafted, emailDraftGone, emailPath, onClose, onRetry,
+  onDismissError, onSetState, onSaveNotes, onRedraft, onDraftEmail, onEditDraft, onAskEspresso,
 }: {
   lead: JobLeadDetail | null
+  /** It couldn't be loaded, and nothing of it is on screen. */
+  loadError: string | null
+  /** A change made from here didn't go through. */
+  error: string | null
   /** The search finished or was cancelled, so it can draft more approaches. */
   canDraft: boolean
   busy: boolean
   emailNotConnected: boolean
-  /** Draft email just put this job's first message in Gmail drafts. */
+  /** Draft email (or Edit draft) found this job's first message in Gmail drafts. */
   emailDrafted: boolean
+  /** Edit draft found the draft gone from Gmail (sent or deleted there). */
+  emailDraftGone: boolean
   /** Where Gmail is connected (the Email page). */
   emailPath: string
   onClose: () => void
+  onRetry: () => void
+  onDismissError: () => void
   onSetState: (state: string, leadId: string) => void
   onSaveNotes: (notes: string, leadId: string) => void
   onRedraft: () => void
+  /** Make the draft (or get back the one still in Gmail). */
   onDraftEmail: (leadId: string) => void
+  /** Only the draft already in Gmail: never makes one. */
+  onEditDraft: (leadId: string) => void
   onAskEspresso: (lead: JobLeadDetail) => void
 }) {
   return (
@@ -40,6 +53,15 @@ export default function LeadPane({
           <X size={14} />
         </button>
       </div>
+      {lead && error && (
+        <div role="alert" className="mx-5 mb-3 flex items-start gap-2 rounded-lg bg-amber-500/10 px-3 py-2 text-[11px] text-amber-500">
+          <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+          <span className="flex-1">{error}</span>
+          <button type="button" onClick={onDismissError} aria-label="Dismiss the message" className="shrink-0 rounded p-0.5 hover:bg-amber-500/10">
+            <X size={11} />
+          </button>
+        </div>
+      )}
       {lead ? (
         <LeadBody
           key={lead.id}
@@ -48,34 +70,46 @@ export default function LeadPane({
           busy={busy}
           emailNotConnected={emailNotConnected}
           emailDrafted={emailDrafted}
+          emailDraftGone={emailDraftGone}
           emailPath={emailPath}
           onSetState={onSetState}
           onSaveNotes={onSaveNotes}
           onRedraft={onRedraft}
           onDraftEmail={onDraftEmail}
+          onEditDraft={onEditDraft}
           onAskEspresso={onAskEspresso}
         />
+      ) : loadError ? (
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
+          <AlertTriangle size={24} className="text-w-faint" />
+          <p className="max-w-xs text-xs text-w-dim">{loadError}</p>
+          <button type="button" onClick={onRetry} className="rounded-md bg-w-accent px-3 py-1.5 text-xs font-semibold text-white hover:bg-w-accent-hi">
+            Try again
+          </button>
+        </div>
       ) : (
-        <div className="flex flex-1 items-center justify-center"><Loader2 className="animate-spin text-w-dim" /></div>
+        <div className="flex flex-1 items-center justify-center"><Loader2 aria-label="Loading" className="animate-spin text-w-dim" /></div>
       )}
     </aside>
   )
 }
 
 function LeadBody({
-  lead, canDraft, busy, emailNotConnected, emailDrafted, emailPath, onSetState, onSaveNotes, onRedraft, onDraftEmail,
-  onAskEspresso,
+  lead, canDraft, busy, emailNotConnected, emailDrafted, emailDraftGone, emailPath, onSetState, onSaveNotes, onRedraft,
+  onDraftEmail, onEditDraft, onAskEspresso,
 }: {
   lead: JobLeadDetail
   canDraft: boolean
   busy: boolean
   emailNotConnected: boolean
   emailDrafted: boolean
+  emailDraftGone: boolean
   emailPath: string
   onSetState: (state: string, leadId: string) => void
   onSaveNotes: (notes: string, leadId: string) => void
   onRedraft: () => void
   onDraftEmail: (leadId: string) => void
+  onEditDraft: (leadId: string) => void
   onAskEspresso: (lead: JobLeadDetail) => void
 }) {
   // Keyed by the job, so a different job starts from its own notes.
@@ -106,13 +140,20 @@ function LeadBody({
               <ExternalLink size={12} /> Open posting
             </a>
           )}
-          <EmailButton lead={lead} approach={approach} busy={busy} onDraftEmail={onDraftEmail} />
+          <EmailButton lead={lead} approach={approach} busy={busy} onDraftEmail={onDraftEmail} onEditDraft={onEditDraft} />
         </div>
         {emailDrafted && (
           <p className="flex flex-wrap items-center gap-1.5 text-[11px] text-w-dim">
             <CheckCircle2 size={12} className="text-emerald-500" />
             It's in your Gmail drafts, to edit and send.
             <a href={GMAIL_DRAFTS_URL} target="_blank" rel="noopener noreferrer" className="text-w-accent hover:underline">Open Gmail drafts</a>
+          </p>
+        )}
+        {emailDraftGone && (
+          <p className="flex flex-wrap items-center gap-1.5 text-[11px] text-w-dim">
+            <MailOpen size={12} className="text-amber-500" />
+            That draft isn't in your Gmail drafts any more, so it was sent or deleted there. Draft email makes a new
+            one if you still want it.
           </p>
         )}
         {emailNotConnected && (
@@ -213,11 +254,12 @@ function LeadBody({
 
 /** The first message, into Gmail drafts: Draft email, then a way back to it
  *  while it waits there, then that it was sent. */
-function EmailButton({ lead, approach, busy, onDraftEmail }: {
+function EmailButton({ lead, approach, busy, onDraftEmail, onEditDraft }: {
   lead: JobLeadDetail
   approach: JobApproach | null
   busy: boolean
   onDraftEmail: (leadId: string) => void
+  onEditDraft: (leadId: string) => void
 }) {
   if (!approach?.outreach?.body) return null
   const button = 'inline-flex items-center gap-1.5 rounded-md border border-w-line px-2.5 py-1 text-[11px] text-w-text hover:bg-w-surface2 disabled:opacity-40'
@@ -225,10 +267,10 @@ function EmailButton({ lead, approach, busy, onDraftEmail }: {
     return <span className="inline-flex items-center gap-1.5 text-[11px] text-w-dim"><CheckCircle2 size={12} /> Email sent</span>
   }
   if (lead.email_draft_id) {
-    // Asked again, the server returns the same draft while it's in Gmail, or
-    // makes a new one if it was sent or deleted there.
+    // Only the draft already in Gmail: if it was sent or deleted there, this
+    // says so and makes nothing, and Draft email is what makes a new one.
     return (
-      <button type="button" onClick={() => onDraftEmail(lead.id)} disabled={busy} title="It's in your Gmail drafts: edit it and send it from Gmail" className={button}>
+      <button type="button" onClick={() => onEditDraft(lead.id)} disabled={busy} title="It's in your Gmail drafts: edit it and send it from Gmail" className={button}>
         <MailOpen size={12} /> Edit draft in Gmail
       </button>
     )

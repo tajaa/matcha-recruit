@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.core.models.auth import CurrentUser
 from app.matcha.dependencies import get_client_company_id, require_admin_or_client
-from app.matcha.models.matcha_work.job_search import JobSearchCreate, JobWeights, LeadPatch
+from app.matcha.models.matcha_work.job_search import EmailDraftRequest, JobSearchCreate, JobWeights, LeadPatch
 from app.matcha.services.matcha_work.agent_runtime import consent
 from app.matcha.services.matcha_work.job_search import enqueue, quota, service
 
@@ -107,12 +107,15 @@ async def widen_job_search(search_id: UUID, current_user: CurrentUser = Depends(
 
 @router.post("/{search_id}/leads/{lead_id}/email-draft")
 async def draft_job_email(
-    search_id: UUID, lead_id: UUID, current_user: CurrentUser = Depends(require_admin_or_client),
+    search_id: UUID, lead_id: UUID, body: EmailDraftRequest | None = None,
+    current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Put this job's drafted first message in the caller's Gmail drafts, to
     edit and send from Email. Nothing is sent. Asking again returns the same
-    draft while it is still in Gmail."""
-    return await _call(service.draft_email(search_id, lead_id, current_user.id))
+    draft while it is still in Gmail. `existing_only` never makes one: a
+    draft that left Gmail is a 409 `email_draft_missing`."""
+    existing_only = bool(body and body.existing_only)
+    return await _call(service.draft_email(search_id, lead_id, current_user.id, existing_only=existing_only))
 
 
 @router.put("/{search_id}/weights")
