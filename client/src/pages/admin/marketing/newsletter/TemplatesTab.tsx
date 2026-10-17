@@ -72,7 +72,7 @@ export function TemplatesTab({
             <AdminButton
               key={s.key}
               onClick={() => onStartFrom(instantiateStarter(s), s.name)}
-              className="text-left group" variant="success"
+              className="flex-col items-start text-left group" variant="success"
             >
               <div className="flex items-center gap-2 mb-1.5">
                 <Wand2 size={13} className="text-zinc-500 group-hover:text-emerald-400" />

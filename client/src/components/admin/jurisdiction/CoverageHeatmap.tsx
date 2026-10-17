@@ -172,7 +172,7 @@ export default function CoverageHeatmap({ onCellClick }: CoverageHeatmapProps) {
         </div>
       ) : (<>
       {/* Heatmap grid */}
-      <div className="max-h-[60vh]">
+      <div className="max-h-[60vh] overflow-y-auto">
         <AdminTable>
           <thead className="sticky top-0 z-10">
             <tr>

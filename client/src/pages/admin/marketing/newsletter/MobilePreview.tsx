@@ -83,7 +83,7 @@ export function MobilePreview({ title, subject, preheader, html, designJson, def
           </AdminTab>
         ))}
       </AdminTabBar>
-      <AdminCard className="border-2" style={{ maxWidth: viewportPx + 16 }}>
+      <AdminCard className="border-2 p-2!" style={{ maxWidth: viewportPx + 16 }}>
         <div className="rounded-lg bg-zinc-950 overflow-hidden">
           <div className="px-3 py-2 border-b border-white/[0.06]">
             <p className="text-[11px] text-zinc-500">Inbox</p>
