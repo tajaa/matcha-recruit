@@ -10,6 +10,8 @@ interface Props {
   navigate: NavigateFunction
   isActive: (path: string) => boolean
   showProjects: boolean
+  showTasks: boolean
+  tasksBadge: { count: number; attention: boolean }
   totalChannelUnread: number
   pendingConnections: number
   inboxUnread: number
@@ -37,6 +39,8 @@ export default function CollapsedRail({
   navigate,
   isActive,
   showProjects,
+  showTasks,
+  tasksBadge,
   totalChannelUnread,
   pendingConnections,
   inboxUnread,
@@ -70,6 +74,19 @@ export default function CollapsedRail({
       <RailNavButton icon={Home} label="Home" active={isActive(base)} onClick={() => navigate(base)} />
       {showJobSearch && <RailNavButton icon={BriefcaseBusiness} label="Job search" active={pathname.startsWith(`${base}/jobs`)} onClick={() => navigate(`${base}/jobs`)} />}
       <RailNavButton icon={NotebookPen} label="Journals" active={pathname.startsWith(`${base}/journals`)} onClick={() => navigate(`${base}/journals`)} />
+      {showTasks && (
+        <RailNavButton
+          icon={ClipboardList}
+          label="Tasks"
+          active={pathname.startsWith(`${base}/tasks`)}
+          onClick={() => navigate(`${base}/tasks`)}
+          badge={(tasksBadge.count > 0 || tasksBadge.attention) && (
+            <span className={`absolute -top-0.5 -right-0.5 rounded-full flex items-center justify-center ${tasksBadge.count > 0 ? 'w-3.5 h-3.5 bg-w-accent text-[8px] font-bold text-white' : 'w-2 h-2 bg-w-accent'}`}>
+              {tasksBadge.count > 0 ? (tasksBadge.count > 9 ? '!' : tasksBadge.count) : null}
+            </span>
+          )}
+        />
+      )}
       <RailNavButton icon={CheckSquare} label="To-dos" active={pathname.startsWith(`${base}/productivity`)} onClick={() => navigate(`${base}/productivity`)} />
       {showSymChat && <RailNavButton icon={MessagesSquare} label="Sym-chats" active={pathname.startsWith(`${base}/sym-chat`)} onClick={() => navigate(`${base}/sym-chat`)} />}
       {showDrive && <RailNavButton icon={HardDrive} label="Drive" active={pathname.startsWith(`${base}/drive`)} onClick={() => navigate(`${base}/drive`)} />}

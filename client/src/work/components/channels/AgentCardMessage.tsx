@@ -13,6 +13,7 @@ import type {
 import { dayOffset, flightClock, flightDay, flightDuration, stopsText } from '../../utils/flightFormat'
 import { isAssistantPrompt } from './agentCardMessageHelpers'
 import { useWorkBase } from '../../routes/WorkSurfaceContext'
+import { IntakeFormCard, TaskCard } from '../tasks/TaskChatCards'
 
 /**
  * Espresso's agent-card messages in a project chat, rendered as cards instead
@@ -25,6 +26,9 @@ import { useWorkBase } from '../../routes/WorkSurfaceContext'
  * progress, its answer as typed blocks, a receipt for something it did, and
  * its questions, including the confirmation card that shows exactly what a
  * yes will carry out.
+ *
+ * And Espresso Tasks' (server: agent_tasks/chat.py): a task's card where it
+ * started and when it ends, and the form a task's details are asked with.
  *
  * Photos are server-rehosted https CDN URLs; links are http(s) only and open
  * in a new tab without referrer or opener.
@@ -658,6 +662,30 @@ function PromptCard({
   )
 }
 
+/** The form a task's details are asked with (`ask_form`): open until it is
+ *  answered, moved past or expired, and filled in only by the person asked. */
+function FormPrompt({ meta, view, heading, userId, channelId }: {
+  meta: AgentChatMetadata
+  view: AgentChatPromptView & { form: NonNullable<AgentChatPromptView['form']> }
+  heading: string
+  userId?: string
+  channelId?: string
+}) {
+  const expired = useExpired(meta.expires_at)
+  const status = meta.prompt_status && meta.prompt_status !== 'open' ? meta.prompt_status : expired ? 'expired' : 'open'
+  return (
+    <IntakeFormCard
+      question={heading}
+      form={view.form}
+      promptId={meta.prompt_id}
+      status={status}
+      closedText={closedText(meta, status)}
+      mine={!meta.owner_user_id || meta.owner_user_id === userId}
+      channelId={channelId}
+    />
+  )
+}
+
 const RECEIPT_TITLE: Record<AgentChatReceipt['status'], string> = {
   paid_test: 'Purchase complete',
   approved: 'Approved',
@@ -720,7 +748,7 @@ function ReceiptCard({ receipt: r }: { receipt: AgentChatReceipt }) {
 }
 
 export default function AgentCardMessage({
-  metadata, content, userId, onQuickReply,
+  metadata, content, userId, onQuickReply, channelId,
 }: {
   metadata: AgentChatMetadata
   /** Message text without the ticket marker (a question's heading fallback). */
@@ -729,6 +757,8 @@ export default function AgentCardMessage({
   userId?: string
   /** Sends the reply; false when it couldn't go out (offline). */
   onQuickReply?: (reply: string) => boolean
+  /** The conversation it is in: a task form uploads its files there. */
+  channelId?: string
 }) {
   if (metadata.kind === 'agent_card_result' && metadata.result) return <ResultCard result={metadata.result} />
   if (metadata.kind === 'agent_card_receipt' && metadata.receipt) return <ReceiptCard receipt={metadata.receipt} />
@@ -737,10 +767,17 @@ export default function AgentCardMessage({
   if (metadata.kind === 'agent_receipt' && metadata.action_receipt) {
     return <ActionReceiptCard receipt={metadata.action_receipt} />
   }
+  if (metadata.kind === 'agent_task' && metadata.task) return <TaskCard card={metadata.task} />
   if (metadata.kind === 'agent_card_prompt' && metadata.view) {
     // The heading is the server's fixed question text; the content holds the
     // user-written card title and is never parsed for it.
     const heading = metadata.view.question || content
+    const { form } = metadata.view
+    if (form) {
+      return (
+        <FormPrompt meta={metadata} view={{ ...metadata.view, form }} heading={heading} userId={userId} channelId={channelId} />
+      )
+    }
     return (
       <PromptCard meta={metadata} view={metadata.view} heading={heading} userId={userId} onQuickReply={onQuickReply} />
     )

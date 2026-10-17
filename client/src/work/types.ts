@@ -1350,6 +1350,8 @@ export type AgentChatPromptView = {
   action?: { title?: string | null; lines: { label: string; value: string; mono?: boolean }[] } | null
   offer?: { item_name: string; brand?: string | null; retailer?: string | null; price_text?: string | null; image_url?: string | null } | null
   buttons: AgentChatButton[]
+  /** `ask_form`: the form a task's details are asked with (built from its playbook). */
+  form?: IntakeForm | null
 }
 
 export type AgentChatReceipt = {
@@ -1434,7 +1436,9 @@ export type AgentChatMetadata = {
   kind?:
     | 'agent_card_result' | 'agent_card_prompt' | 'agent_card_receipt'
     | 'agent_progress' | 'agent_result' | 'agent_receipt'
-  prompt_kind?: 'show_result' | 'purchase' | 'pick_card' | 'ask_user' | 'confirm_action'
+    /** A task's card where it started, and again when it ends (server: agent_tasks/chat.py). */
+    | 'agent_task'
+  prompt_kind?: 'show_result' | 'purchase' | 'pick_card' | 'ask_user' | 'confirm_action' | 'ask_form'
   prompt_id?: string
   task_id?: string
   /** The assistant run this message belongs to. */
@@ -1456,6 +1460,304 @@ export type AgentChatMetadata = {
   view?: AgentChatPromptView
   result?: AgentChatResult
   receipt?: AgentChatReceipt
+  /** `agent_task`: the task's card. */
+  task?: AgentTaskCard
+}
+
+// ── Espresso Tasks (backend: server/app/matcha/routes/matcha_work/agent_tasks.py) ──
+// The same shapes the macOS app's Tasks section reads. Every field the server
+// may leave out is optional, so an older or newer server never breaks the page.
+
+export type AgentTaskProgress = {
+  note?: string | null
+  found?: number | null
+  shown?: number | null
+}
+
+/** Where one fact came from: the words on the page and the page. */
+export type AgentTaskEvidence = {
+  quote?: string | null
+  url?: string | null
+  /** `provider`, `jsonld`, `leasing`, `page_text`, `browser` or `model`. */
+  origin?: string | null
+}
+
+/** One fact about a finding, as the server shows it. */
+export type AgentTaskField = {
+  display: string | null
+  value?: unknown
+  /** `verified` (read on the finding's own page) or `claimed` (quoted from
+   *  some other page). A claimed fact never rules a finding in or out. */
+  status: string | null
+  unit?: string | null
+  currency?: string | null
+  /** Detail only. */
+  evidence?: AgentTaskEvidence | null
+}
+
+export type AgentTaskImage = {
+  url: string
+  page_url?: string | null
+  alt?: string | null
+}
+
+/** One home to let in an apartment building, as its leasing system lists it. */
+export type AgentTaskUnit = {
+  id?: string | null
+  number?: string | null
+  floor?: string | null
+  plan?: string | null
+  beds?: number | null
+  baths?: number | null
+  sqft?: number | null
+  rent?: number | null
+  /** A month's rent over the lease after a special that frees stated time. */
+  net_rent?: number | null
+  net_note?: string | null
+  /** ISO date it can be moved into. */
+  available?: string | null
+  lease_months?: number | null
+  special?: string | null
+  /** The floor plan, on our CDN (null when it couldn't be copied there). */
+  plan_image?: string | null
+  tour_url?: string | null
+  url?: string | null
+  /** Meets every one of the person's limits at once; null before ranking. */
+  fits?: boolean | null
+}
+
+/** A building's homes in brief: how many are listed, how many fit, the cheapest that does. */
+export type AgentTaskHomes = {
+  count: number
+  /** null before ranking. */
+  fit?: number | null
+  from?: number | null
+}
+
+export type AgentTaskViolation = {
+  field?: string | null
+  rule?: string | null
+  value?: string | null
+}
+
+/** A field an action or a form asks for. */
+export type IntakeFormField = {
+  key: string
+  label: string
+  /** text, number, money, date, time, select, multi_select, boolean,
+   *  location, list, file, consent. */
+  type: string
+  required?: boolean
+  help?: string | null
+  options?: string[]
+  accept?: string[]
+  max_count?: number
+  max_bytes?: number
+  optional?: boolean
+  /** What it starts with (known already, or the field's default). */
+  value?: unknown
+}
+
+/** Something a finding can do (buy it, apply), as the server declares it:
+ *  the page draws whatever it is sent, so a new action needs no change here. */
+export type AgentTaskAction = {
+  key: string
+  label: string
+  /** cart, calendar, envelope, link, phone. */
+  icon?: string | null
+  description?: string | null
+  confirm_label?: string | null
+  params?: IntakeFormField[]
+  available?: boolean
+  /** Why it can't be done for this finding. */
+  reason?: string | null
+}
+
+export type AgentTaskActionLine = {
+  label: string
+  value: string
+}
+
+/** One proposal: proposed, then running and done or failed (or cancelled). */
+export type AgentTaskActionRun = {
+  id: string
+  action?: string | null
+  label?: string | null
+  status: string
+  preview?: { title?: string | null; lines?: AgentTaskActionLine[]; note?: string | null } | null
+  confirm_label?: string | null
+  result?: { headline?: string | null; lines?: AgentTaskActionLine[]; url?: string | null } | null
+  error?: string | null
+  finished_at?: string | null
+}
+
+/** A finding, as the list shows it. */
+export type AgentTaskItem = {
+  id: string
+  kind?: string | null
+  title: string
+  subtitle?: string | null
+  url?: string | null
+  origin?: string | null
+  provider?: string | null
+  fields?: Record<string, AgentTaskField>
+  images?: AgentTaskImage[]
+  /** Its page as the browser drew it: never one of its photos. */
+  screenshots?: AgentTaskImage[]
+  status?: string | null
+  fit_score?: number | null
+  rank?: number | null
+  rank_band?: number | null
+  flags?: string[]
+  /** `new`, `saved`, `chosen` or `dismissed`. */
+  user_state?: string | null
+  homes?: AgentTaskHomes | null
+}
+
+/** A finding opened: every fact's evidence, its homes, and what it can do. */
+export type AgentTaskItemDetail = AgentTaskItem & {
+  violations?: AgentTaskViolation[]
+  fit_reasons?: string[]
+  notes?: string | null
+  units?: AgentTaskUnit[]
+  actions?: AgentTaskAction[]
+  /** What was done with it, newest first. */
+  action_history?: AgentTaskActionRun[]
+}
+
+export type AgentTaskColumn = {
+  key: string
+  label: string
+  type?: string
+}
+
+export type AgentTaskPlan = {
+  summary?: string | null
+  item_kind?: string | null
+  location?: string | null
+  columns?: AgentTaskColumn[]
+  constraints?: { field?: string | null; op?: string | null; label?: string | null }[]
+}
+
+/** What one round found, in words. */
+export type AgentTaskRoundSummary = {
+  headline?: string | null
+  summary?: string | null
+  sections?: { heading: string; body_md: string }[]
+  top?: { item_id: string; why: string }[]
+  counts?: { found?: number | null; shown?: number | null; hidden?: number | null } | null
+}
+
+/** One piece of work on a task: the first run, a refine, "search more", a document. */
+export type AgentTaskRound = {
+  id: string
+  n: number
+  /** `initial`, `refine`, `more`, `document`. */
+  kind: string
+  directive?: string | null
+  status: string
+  units?: number
+  items_added?: number
+  summary?: AgentTaskRoundSummary | null
+  document?: { journal_id?: string | null; title?: string | null; items?: number | null } | null
+  error?: string | null
+}
+
+/** A task, as the list and the detail both show it. */
+export type AgentTask = {
+  id: string
+  playbook?: string | null
+  /** What kind of task it is, in the person's words ("Apartments", "Products"). */
+  playbook_label?: string | null
+  /** `chain` (Espresso's own), `job_search` (a job search, opened in Job search). */
+  engine?: string | null
+  job_search_id?: string | null
+  title?: string | null
+  directive?: string | null
+  /** `queued` / `running` (live), `waiting` (needs the person), `done`, `failed`, `cancelled`. */
+  status: string
+  phase?: string | null
+  progress?: AgentTaskProgress | null
+  error?: string | null
+  current_round?: number
+  item_count?: number
+  shown_count?: number
+  unseen?: boolean
+  created_at?: string | null
+  completed_at?: string | null
+}
+
+/** `GET /agent-tasks/{id}`: the task, what it is looking for, its rounds and findings. */
+export type AgentTaskDetail = AgentTask & {
+  fingerprint: string
+  plan?: AgentTaskPlan | null
+  rounds?: AgentTaskRound[]
+  items?: AgentTaskItem[]
+}
+
+export type AgentTaskStatusView = {
+  id: string
+  status: string
+  fingerprint: string
+}
+
+export type AgentTaskUsage = {
+  limit: number
+  used: number
+  remaining: number
+  resets_at?: string | null
+}
+
+export type AgentTaskList = {
+  tasks: AgentTask[]
+  usage?: AgentTaskUsage | null
+}
+
+/** The sidebar row's counts. */
+export type AgentTasksSummary = {
+  running: number
+  waiting: number
+  unseen: number
+}
+
+/** The form Espresso asks a task's details with (`view.form` on an `ask_form` prompt). */
+export type IntakeForm = {
+  playbook?: string | null
+  label?: string | null
+  title?: string | null
+  directive?: string | null
+  fields?: IntakeFormField[]
+  known?: { key: string; label: string; shown: string }[]
+  /** The disclosure to agree to when the playbook needs one (job search's). */
+  consent?: { version: string; title: string; body: string[] } | null
+  units?: number
+  submit_label?: string | null
+}
+
+/** A task's card in the conversation it came from (`metadata.kind === 'agent_task'`). */
+export type AgentTaskCard = {
+  /** `started`, or `update` (finished, stopped, needs the person). */
+  event?: string | null
+  task_id: string
+  playbook?: string | null
+  title?: string | null
+  status?: string | null
+  note?: string | null
+  headline?: string | null
+  items?: {
+    id: string
+    title?: string | null
+    subtitle?: string | null
+    url?: string | null
+    fields?: Record<string, string | null>
+    image?: string | null
+  }[]
+}
+
+export type IntakeFormAnswer = {
+  values: Record<string, unknown>
+  input_ids: string[]
+  consent_version: string | null
 }
 
 // ── Matcha Drive (backend: server/app/matcha/routes/matcha_work/drive.py) ──

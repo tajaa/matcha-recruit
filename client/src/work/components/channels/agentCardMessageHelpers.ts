@@ -13,6 +13,8 @@ export function isAgentCardMessage(metadata: unknown): metadata is AgentChatMeta
     || (m.kind === 'agent_progress' && !!m.run_id)
     || (m.kind === 'agent_result' && !!m.result_v2)
     || (m.kind === 'agent_receipt' && !!m.action_receipt)
+    // Espresso Tasks: a task's card
+    || (m.kind === 'agent_task' && !!m.task)
   )
 }
 
@@ -20,6 +22,7 @@ export function isAgentCardMessage(metadata: unknown): metadata is AgentChatMeta
  *  not by an agent card (a buy / card question, answered by the buyer). */
 export function isAssistantPrompt(metadata: AgentChatMetadata): boolean {
   return metadata.prompt_kind === 'ask_user' || metadata.prompt_kind === 'confirm_action'
+    || metadata.prompt_kind === 'ask_form'
 }
 
 /** Strip the leading `⟦ticket:id|title|column⟧` marker; returns the title too. */

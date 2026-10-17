@@ -22,6 +22,7 @@ import InventoryForecast from '../pages/InventoryForecast'
 import InventoryWaste from '../pages/InventoryWaste'
 import InventoryBuying from '../pages/InventoryBuying'
 import AssetsHub from '../pages/AssetsHub'
+import Tasks from '../pages/Tasks'
 import Assistant from '../pages/Assistant'
 import JobSearch from '../pages/JobSearch'
 import SymChatList from '../pages/SymChat/SymChatList'
@@ -96,6 +97,10 @@ export function WorkRouteTree({ surface }: { surface: WorkSurface }) {
             <Route path="assets" element={<AssetsHub />} />
           <Route path="assets/:assetId" element={<AssetsHub />} />
           </Route>
+          {/* Espresso Tasks, the macOS app's Tasks on the web: personal
+              accounts only, like the assistant (the page says so to anyone else). */}
+          <Route path="tasks" element={<Tasks />} />
+          <Route path="tasks/:taskId" element={<Tasks />} />
           {/* The Espresso assistant: a private conversation per person, for
               personal accounts (the page says so to anyone else). */}
           <Route path="assistant" element={<Assistant />} />
