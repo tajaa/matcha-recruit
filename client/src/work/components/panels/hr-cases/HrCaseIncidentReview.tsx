@@ -15,7 +15,7 @@ interface Props {
 
 export default function HrCaseIncidentReview({ hrCase, onStartDraft, onSuggest, onAccept, onDismissSuggestion }: Props) {
   const suggestion = hrCase.review?.suggestion
-  const [reviewing, setReviewing] = useState(false)
+  const [reviewing, setReviewing] = useState(hrCase.stage === 'flagged' && !!hrCase.source_incident_id && !suggestion)
   const [query, setQuery] = useState('')
   const [employees, setEmployees] = useState<HrCaseEmployee[]>([])
   const [employeeId, setEmployeeId] = useState(hrCase.employee_id ?? '')
@@ -61,7 +61,10 @@ export default function HrCaseIncidentReview({ hrCase, onStartDraft, onSuggest, 
 
   return (
     <section className="space-y-3" aria-label="Incident HR review">
-      <h3 className="text-xs font-medium uppercase tracking-wide text-w-faint">Next step</h3>
+      <h3 className="text-xs font-medium uppercase tracking-wide text-w-faint">Draft action for HR review</h3>
+      {!suggestion && hrCase.allowed_events.includes('start_draft') && hrCase.gm_user_id && (
+        <button type="button" disabled={busy} onClick={() => void run(onStartDraft)} className="w-full rounded-lg border border-w-line px-3 py-1.5 text-sm text-w-text disabled:opacity-50">Request manager write-up</button>
+      )}
       {suggestion ? (
         <>
           <p className="text-xs text-w-dim">Suggested write-up for HR to edit. Accepting sends it to HR review; approval to deliver is a separate step.</p>
@@ -87,7 +90,7 @@ export default function HrCaseIncidentReview({ hrCase, onStartDraft, onSuggest, 
           const occurrenceDates = dates.split(',').map((d) => d.trim()).filter(Boolean)
           void run(() => onSuggest({ classification: 'policy_violation', employee_id: employeeId, action_type: actionType, infraction_type: infraction, occurrence_dates: occurrenceDates }))
         }}>
-          <p className="text-xs text-w-dim">Review the incident before confirming a violation. The letter uses your choices; the model only drafts wording.</p>
+          <p className="text-xs text-w-dim">Review the incident, choose the proposed action and confirm the employee and dates. Matcha will draft an editable letter for HR review. Nothing is approved or sent to the employee here.</p>
           <label className="block space-y-1 text-xs text-w-dim">
             <span>Search employee</span>
             <input className={field} value={query} onChange={(e) => setQuery(e.target.value)} />
@@ -131,11 +134,8 @@ export default function HrCaseIncidentReview({ hrCase, onStartDraft, onSuggest, 
       ) : (
         <div className="space-y-2">
           <p className="text-xs text-w-dim">Request a manager’s letter, or confirm a policy violation to get an editable suggestion.</p>
-          {hrCase.allowed_events.includes('start_draft') && hrCase.gm_user_id && (
-            <button type="button" disabled={busy} onClick={() => void run(onStartDraft)} className="w-full rounded-lg border border-w-line px-3 py-1.5 text-sm text-w-text disabled:opacity-50">Request manager write-up</button>
-          )}
           {hrCase.stage === 'drafting' && <p className="text-xs text-w-faint">Waiting on a draft. HR can also prepare one here.</p>}
-          {hrCase.source_incident_id && <button type="button" disabled={busy} onClick={() => setReviewing(true)} className="w-full rounded-lg bg-w-accent px-3 py-1.5 text-sm font-medium text-w-on-accent disabled:opacity-50">Review policy violation</button>}
+          {hrCase.source_incident_id && <button type="button" disabled={busy} onClick={() => setReviewing(true)} className="w-full rounded-lg bg-w-accent px-3 py-1.5 text-sm font-medium text-w-on-accent disabled:opacity-50">Draft action for HR review</button>}
         </div>
       )}
       {busy && <p role="status" className="flex items-center gap-2 text-xs text-w-dim"><Loader2 size={13} className="animate-spin" /> Saving review…</p>}

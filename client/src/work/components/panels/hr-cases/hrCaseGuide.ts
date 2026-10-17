@@ -51,7 +51,7 @@ export type ColumnGuide = { acts: string; lands: string; empty: string }
 export const COLUMN_GUIDE: Record<string, ColumnGuide> = {
   new: {
     acts: 'You',
-    lands: 'Review the incident, request a manager write-up, or confirm a policy violation to get an editable suggestion. Accept it into HR review, or dismiss with a reason.',
+    lands: 'Choose Draft action for HR review on a flagged case. Confirm the employee, proposed action and occurrence dates to get an editable letter, or request a manager write-up. Accept the letter into HR review, or dismiss with a reason.',
     empty: 'Nothing flagged. A case lands here when the handbook check finds a likely violation.',
   },
   review: {
@@ -79,7 +79,7 @@ export const COLUMN_GUIDE: Record<string, ColumnGuide> = {
 export const NEEDS_YOU_MOMENTS: Trigger[] = [
   {
     title: 'An incident is flagged',
-    body: 'Choose the next step on the case. HR confirmation of a policy violation produces a suggested letter after the protected-leave check. Edit and accept it into HR review, or dismiss it.',
+    body: 'Choose Draft action for HR review on the case. Confirm the employee, action and dates; HR confirmation of a policy violation produces a suggested letter after the protected-leave check. Edit and accept it into HR review, or dismiss it.',
   },
   {
     title: 'A write-up is in',
