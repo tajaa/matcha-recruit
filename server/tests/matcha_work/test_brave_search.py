@@ -72,6 +72,14 @@ async def test_the_request_and_what_the_model_sees():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(("asked", "sent", "kept"), [(20, "20", 20), (50, "20", 20), (0, "1", 1), (3, "3", 3)])
+async def test_a_search_asks_for_up_to_twenty_results(asked, sent, kept):
+    many = [{"title": f"r{i}", "url": f"https://r.example/{i}"} for i in range(25)]
+    found, seen = await _search(_ok(many), count=asked)
+    assert dict(seen[0].url.params)["count"] == sent and len(found) == kept
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("freshness", ["decade", ["week"], {"week": 1}, 7])
 async def test_an_unknown_freshness_is_left_out(freshness):
     _, seen = await _search(_ok([]), freshness=freshness)

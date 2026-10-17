@@ -14,7 +14,7 @@ and `discovery.py`; the order is in `orchestrator.PHASES`.
 Every write checks the search's dispatch token (`Guard`), so a cancelled
 search, or a chain a reconcile replaced, stops writing at the next check.
 
-Paid calls (Google Jobs, page and ATS fetches) are reserved on the search row
+Paid calls (Google Jobs, Brave's board searches, page and ATS fetches) are reserved on the search row
 BEFORE they are made (`grant`), and only what went unused is given back
 (`refund`). A task killed mid-phase gives nothing back, so its retry works
 from what is left and can never spend a second budget.
@@ -38,7 +38,7 @@ from app.matcha.services.matcha_work.agent_card.page_extract import job_postings
 from app.matcha.services.matcha_work.agent_runtime import chain
 from app.matcha.services.matcha_work.agent_runtime.chain import Budget, PhaseOutcome
 
-from . import ats, normalize, providers, ranking
+from . import ats, normalize, places, providers, ranking
 from . import comp as comp_mod
 from .service import fit_floor, rerank
 
@@ -48,7 +48,9 @@ MAX_QUERIES = 8
 PAGES_PER_QUERY = 3
 QUERY_CONCURRENCY = 3
 # Per search, across retries: a retried discover never buys a second budget.
-MAX_PROVIDER_CALLS = 30
+# Google Jobs takes at most MAX_QUERIES * PAGES_PER_QUERY (24), Brave's board
+# searches at most `boards.MAX_SEARCHES` (24).
+MAX_PROVIDER_CALLS = 48
 MAX_LEADS = 120
 ENRICH_BATCH = 24
 ENRICH_CONCURRENCY = 4
@@ -83,6 +85,12 @@ async def _default_fetch_page(url: str) -> tuple[dict, set[str]]:
     return await fetch_page_tool(url)
 
 
+async def _default_web_search(query: str, count: int) -> list[dict]:
+    from app.matcha.services.matcha_work import brave_search
+
+    return await brave_search.search(query, count=count)
+
+
 @dataclass
 class Deps:
     provider: Callable[[], Any] = providers.choose_provider
@@ -92,6 +100,8 @@ class Deps:
     # Model phases: the model client for a model id, and the model's fetch_page.
     client: Callable[[str], Any] = _default_client
     fetch_page: Callable[[str], Awaitable[tuple[dict, set[str]]]] = _default_fetch_page
+    # Code's own web search (Brave), for the board searches: (query, count) -> results.
+    web_search: Callable[[str, int], Awaitable[list[dict]]] = _default_web_search
 
 
 # The paid-call counters on the search row: `grant` and `refund` touch nothing else.
@@ -188,8 +198,9 @@ def lead_record(posting: providers.Posting) -> dict:
     }
 
 
-def keep_job(company: str, remote: bool | None, criteria: dict) -> bool:
-    """Not an employer they excluded, and remote the way they asked."""
+def keep_job(company: str, remote: bool | None, criteria: dict, location: str = "") -> bool:
+    """Not an employer they excluded, remote the way they asked, and in a
+    place they named when they named any (`places.fits`)."""
     excluded = {normalize.company_key(c) for c in criteria.get("exclude_companies") or []}
     if normalize.company_key(company) in excluded:
         return False
@@ -198,11 +209,11 @@ def keep_job(company: str, remote: bool | None, criteria: dict) -> bool:
         return False
     if wanted == "onsite_only" and remote is True:
         return False
-    return True
+    return places.fits(location, remote, criteria)
 
 
 def keep_posting(posting: providers.Posting, criteria: dict) -> bool:
-    return keep_job(posting.company, posting.remote, criteria)
+    return keep_job(posting.company, posting.remote, criteria, posting.location)
 
 
 async def insert_leads(search: dict, token: UUID, records: list[dict]) -> int:

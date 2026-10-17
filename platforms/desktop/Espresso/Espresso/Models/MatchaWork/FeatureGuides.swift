@@ -353,6 +353,7 @@ extension FeatureGuide {
              title: "Give it a few minutes",
              points: [
                 "It searches the web and employers' own job boards, scores each job's fit out of 5 and drops what doesn't fit.",
+                "It keeps only jobs that are still posted. If you named places, a job must be within \(jobSearchNearMiles) miles of one of them, or remote if you'll take remote.",
                 "It reads and ranks your strongest matches first: 4/5 and 5/5 (3/5 if nothing scores that high). Show more at 3/5 adds the next tier for free, once a search, and Show weaker matches lists the rest.",
                 "You can close Espresso while it works. The list fills in as it goes, Cancel stops it, and when it's done you get a notification and an email with the top jobs.",
                 "Ranking follows What matters. Change the weights to re-rank anytime.",
@@ -386,6 +387,8 @@ extension FeatureGuide {
     static let jobSearchDraftedJobs = 8
     /// Drafts and redrafts allowed per search (`MAX_REDRAFTS` in job_search/service.py).
     static let jobSearchRedrafts = 20
+    /// How far from a place the person named a job may be (`NEAR_MILES` in job_search/places.py).
+    static let jobSearchNearMiles = 50
 
     static let journals = FeatureGuide(id: .journals, name: "Journals", pages: [
         Page(stage: .overview, icon: "book.closed.fill",
