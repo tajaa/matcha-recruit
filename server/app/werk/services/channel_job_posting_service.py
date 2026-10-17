@@ -104,7 +104,6 @@ async def create_job_posting_checkout(
             mode="subscription",
             success_url=success_url,
             cancel_url=cancel_url,
-            payment_method_types=["card"],
             metadata=metadata,
             subscription_data={"metadata": metadata},
             line_items=[{"price": stripe_price_id, "quantity": 1}],
