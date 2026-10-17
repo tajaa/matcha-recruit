@@ -141,6 +141,19 @@ def test_saved_calendar_actions_and_apple_handoff_are_truthful():
     assert "private@example.com" not in event.model_dump_json()
 
 
+def test_local_calendar_change_keeps_timezone_and_old_new_times_without_private_fields():
+    from app.matcha.services.matcha_work.agent_runtime.abilities.calendar import _recap_snapshot
+    previous = {"title":"Old meeting", "start":"2026-11-01T01:30:00-07:00", "end":"2026-11-01T01:30:00-08:00"}
+    changed = {"title":"New meeting", "start":"2026-11-01T02:30:00-08:00", "end":"2026-11-01T03:30:00-08:00",
+               "notes":"Private note", "attendees":["private@example.com"]}
+    audit = _recap_snapshot(changed, "America/Los_Angeles", previous=previous)
+    event = adapters.step_event({"tool":"update_espresso_event", "kind":"draft", "status":"ok", "result":{"recap":audit}, "created_at":NOW})
+    text = event.model_dump_json()
+    assert all(value in text for value in ("Old meeting", "New meeting", previous["start"], changed["start"], "America/Los_Angeles"))
+    assert len(event.facts) == 6
+    assert "Private note" not in text and "private@example.com" not in text
+
+
 def test_media_settings_need_no_provider_or_auth_secrets(monkeypatch):
     import app.config as config
     with monkeypatch.context() as env:

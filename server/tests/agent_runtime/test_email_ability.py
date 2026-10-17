@@ -328,7 +328,7 @@ async def test_bulk_archive_is_denied_past_the_ceiling(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_a_reserved_domain_recipient_is_skipped_not_sent(monkeypatch):
-    wire_store(monkeypatch)
+    _, claim, resolve = wire_store(monkeypatch)
     gmail = FakeGmail()
     client = FakeClient([
         response(call("send_email", {"to": ["alice@example.com"], "subject": "Hi", "body": "Hello"})),
@@ -338,6 +338,13 @@ async def test_a_reserved_domain_recipient_is_skipped_not_sent(monkeypatch):
     assert gmail.sent == []
     assert '"sent":false' in client.calls[1]["input"][0]["output"]
     assert "nothing was sent" in out.receipts[0]["note"]
+    from datetime import datetime, timezone
+    from app.matcha.services.matcha_work.recaps.adapters import step_event
+    event = step_event({"tool":"send_email", "kind":"commit", "status":"ok",
+                        "result":{**claim.await_args.args[6], **resolve.await_args.kwargs["result"]},
+                        "created_at":datetime.now(timezone.utc)})
+    assert event.title == "Email was not sent" and event.outcome == "cancelled"
+    assert "alice@example.com" not in event.model_dump_json()
 
 
 @pytest.mark.asyncio

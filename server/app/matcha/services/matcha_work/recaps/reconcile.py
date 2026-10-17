@@ -53,13 +53,17 @@ async def collect(conn, recap):
     rows = await conn.fetch("SELECT snapshot,asset FROM mw_agent_recap_events WHERE recap_id=$1 ORDER BY occurred_at,id", recap["id"])
     events = [{"snapshot": decode_jsonb(row["snapshot"], {}), "asset": decode_jsonb(row["asset"], None)} for row in rows]
     groups = await conn.fetch(
-        """SELECT a.tool,a.kind,a.status,a.result->>'mode' AS mode,a.result->>'queued' AS queued,COUNT(*) AS count,MIN(a.created_at) AS created_at
+        """SELECT a.tool,a.kind,a.status,a.result->>'mode' AS mode,a.result->>'queued' AS queued,
+           a.result->>'sent' AS sent,COUNT(*) AS count,MIN(a.created_at) AS created_at
            FROM mw_project_agent_steps a JOIN mw_agent_recap_sources s ON s.run_id=a.run_id
-           WHERE s.recap_id=$1 GROUP BY a.tool,a.kind,a.status,a.result->>'mode',a.result->>'queued'""", recap["id"],
+           WHERE s.recap_id=$1 GROUP BY a.tool,a.kind,a.status,a.result->>'mode',a.result->>'queued',a.result->>'sent'""", recap["id"],
     )
     totals = {}
     for group in groups:
-        snapshot = adapters.step_event({**dict(group), "result": {"mode": group["mode"], "queued": group["queued"] == "true"}})
+        payload = {"mode": group["mode"], "queued": group["queued"] == "true"}
+        if group.get("sent") == "false":
+            payload["sent"] = False
+        snapshot = adapters.step_event({**dict(group), "result": payload})
         if snapshot and snapshot.outcome in storyboard.CONSEQUENTIAL:
             key = (snapshot.title, snapshot.outcome)
             previous, count = totals.get(key, (snapshot, 0))

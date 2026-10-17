@@ -30,6 +30,7 @@ def step_event(step: dict) -> Event | None:
     if tool not in TOOLS:
         return None
     value = decode_jsonb(step.get("result"), {}) or {}
+    title = TOOLS[tool]
     if status in ("claimed", "unknown"):
         outcome = "unknown"
     elif status in ("error", "denied", "skipped"):
@@ -38,6 +39,9 @@ def step_event(step: dict) -> Event | None:
         outcome = "held"
     elif kind == "commit" and value.get("mode") != "live":
         outcome = "dry_run"
+    elif tool == "send_email" and value.get("sent") is False:
+        outcome = "cancelled"
+        title = "Email was not sent"
     elif tool.endswith("_apple_event") and value.get("queued"):
         outcome = "handoff"
     elif kind == "commit":
@@ -49,6 +53,22 @@ def step_event(step: dict) -> Event | None:
     else:
         outcome = "observed"
     facts = [Fact(label="Outcome", value=outcome.replace("_", " "))]
+    if tool == "send_email" and value.get("sent") is False:
+        facts.append(Fact(label="Delivery", value="Nothing was sent"))
+    if tool in ("add_espresso_event", "update_espresso_event", "delete_espresso_event", "add_reminder"):
+        safe = value.get("recap") if isinstance(value.get("recap"), dict) else {}
+        for key, label in (("title", "Event"), ("date", "Due date")):
+            if safe.get(key):
+                facts.append(Fact(label=label, value=clip(safe[key], 160)))
+        if safe.get("start"):
+            facts.append(Fact(label="When", value=clip(f"{safe['start']} to {safe.get('end') or ''}", 300)))
+        if safe.get("timezone"):
+            facts.append(Fact(label="Timezone", value=clip(safe["timezone"], 80)))
+        previous = safe.get("previous") if isinstance(safe.get("previous"), dict) else {}
+        if previous.get("title") and previous["title"] != safe.get("title"):
+            facts.append(Fact(label="Previous title", value=clip(previous["title"], 160)))
+        if previous.get("start") and (previous["start"], previous.get("end")) != (safe.get("start"), safe.get("end")):
+            facts.append(Fact(label="Previous time", value=clip(f"{previous['start']} to {previous.get('end') or ''}", 300)))
     preview = value.get("preview") if isinstance(value.get("preview"), dict) else {}
     if tool in ("create_event", "update_event", "delete_event"):
         for line in preview.get("lines") or []:
@@ -62,8 +82,8 @@ def step_event(step: dict) -> Event | None:
         facts.append(Fact(label="Selected subject", value=clip(value["subject"], 160)))
     if tool in ("archive_email", "label_email") and isinstance(value.get("weight"), int) and 0 < value["weight"] <= 200:
         facts.append(Fact(label="Selected messages", value=str(value["weight"])))
-    # Never use args, preview lines, result bodies or free-form audit labels.
-    return Event(kind="action_resolved", title=TOOLS.get(tool, "Agent action"), outcome=outcome,
+    # Never use args, unapproved preview fields, result bodies or audit labels.
+    return Event(kind="action_resolved", title=title, outcome=outcome,
                  occurred_at=step.get("resolved_at") or step["created_at"],
                  facts=facts[:6])
 
@@ -82,7 +102,8 @@ async def search_event(conn, source, *, terminal=False, phase="") -> Event:
         )
         status = row["status"] if terminal and row["recap_status"] in ("queued", "running") else row["recap_status"] if terminal else row["status"]
         plan = decode_jsonb(row.get("plan"), {}) or {}
-        constraints = [str(item.get("label") or "") for item in plan.get("constraints") or [] if isinstance(item, dict)]
+        from ..agent_tasks.research.ranking import describe
+        constraints = [describe(item) for item in plan.get("constraints") or [] if isinstance(item, dict)]
         criteria = "; ".join(constraints[:4])
     else:
         row = await conn.fetchrow("SELECT * FROM mw_job_searches WHERE id=$1", source["job_search_id"])

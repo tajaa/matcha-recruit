@@ -9,6 +9,7 @@ import os
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 from uuid import UUID
@@ -65,11 +66,15 @@ def run(kind: str, identifier, *, seconds: int):
     # PR_SET_CHILD_SUBREAPER, available on the Linux production container host.
     if ctypes.CDLL(None, use_errno=True).prctl(36, 1, 0, 0, 0) != 0:
         raise RuntimeError("media child subreaper unavailable")
-    process = subprocess.Popen([sys.executable, "-m", "app.matcha.services.matcha_work.recaps.media_job", kind, str(identifier)],
-        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
-    try:
-        result = process.wait(timeout=seconds)
-        if result:
-            raise RuntimeError("media child failed")
-    finally:
-        stop_owned_children(os.getpid())
+    # The supervisor, rather than the killable child, owns all job scratch.
+    # Python and Playwright/Chromium inherit TMPDIR in their fresh processes.
+    with tempfile.TemporaryDirectory(prefix="espresso-recap-job-") as scratch:
+        process = subprocess.Popen([sys.executable, "-m", "app.matcha.services.matcha_work.recaps.media_job", kind, str(identifier)],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True, env={**os.environ, "TMPDIR": scratch})
+        try:
+            result = process.wait(timeout=seconds)
+            if result:
+                raise RuntimeError("media child failed")
+        finally:
+            stop_owned_children(os.getpid())

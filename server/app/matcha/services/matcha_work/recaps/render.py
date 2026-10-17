@@ -104,6 +104,7 @@ async def render(manifest: Manifest, directory: Path) -> dict:
             frames_dir = directory / f"frames{n:02d}"
             frames_dir.mkdir()
             frames = unpack_frames(archive, frames_dir)
+            archive.unlink()  # Do not retain a second copy of all source media.
             # Preserve observed intervals; stretch neither a long wait nor an
             # omitted operation. Captures fill at most eight seconds.
             lines = []

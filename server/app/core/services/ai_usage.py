@@ -216,6 +216,7 @@ _SPLIT_SERVICE_PACKAGES = {
     "agent_runtime",
     "agent_tasks",
     "browser",
+    "recaps",
     "project_service",
     "risk_assessment_service",
 }

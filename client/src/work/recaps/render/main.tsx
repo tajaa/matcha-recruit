@@ -11,7 +11,7 @@ declare global {
   }
 }
 
-function Card({ scene }: { scene: Scene }) {
+export function Card({ scene }: { scene: Scene }) {
   const event = scene.event
   return <main>
     <header><span>Espresso</span><span>Task recap · Saved result</span></header>

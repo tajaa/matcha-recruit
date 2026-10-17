@@ -116,6 +116,8 @@ async def window(page):
 async def _store(source, frames):
     token = uuid4()
     async with connection_or_direct() as conn, conn.transaction():
+        if not await scope.capture_current(conn, source, lock=True):
+            return
         event_id = await scope.event(conn, source, f"capture:{token}", Event(
             kind="phase_completed", title="Viewed a public page", occurred_at=datetime.now(timezone.utc),
         ))
@@ -139,7 +141,7 @@ async def _store(source, frames):
             package.writestr("frames.json", json.dumps(index))
         asset = await storage.upload(path, prefix + "frames.zip", "application/zip", limit=16 * 1024 * 1024)
         async with connection_or_direct() as conn, conn.transaction():
-            if not await scope.capture_current(conn, source):
+            if not await scope.capture_current(conn, source, lock=True):
                 return
             # Root lock fences freezing/deletion and makes the byte budget atomic.
             allowed = await conn.fetchval(

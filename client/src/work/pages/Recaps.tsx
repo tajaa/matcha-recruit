@@ -11,6 +11,12 @@ export default function Recaps() {
   const [query] = useSearchParams()
   const source = query.get('source_id')
   const owner = me?.user.id
+  return <RecapLibrary key={`${owner ?? ''}:${source ?? ''}:${isPersonal}`} owner={owner} isPersonal={isPersonal} loading={loading} base={base} source={source} />
+}
+
+function RecapLibrary({ owner, isPersonal, loading, base, source }: {
+  owner: string | undefined; isPersonal: boolean; loading: boolean; base: string; source: string | null
+}) {
   const [page, setPage] = useState<{ owner: string; source: string | null; recaps: RecapSummary[]; cursor: string | null } | null>(null)
   const [error, setError] = useState('')
   const [paging, setPaging] = useState<{ owner: string; source: string | null; cursor: string } | null>(null)

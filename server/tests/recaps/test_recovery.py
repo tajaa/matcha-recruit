@@ -37,13 +37,15 @@ async def test_missing_action_aggregation_preserves_recorded_subject(monkeypatch
     event = Event(title="Sent email", kind="action_resolved", outcome="unknown", occurred_at=NOW,
                   facts=[Fact(label="Subject", value="Selected message")])
     conn.fetch.side_effect = [[source()], [{"snapshot":event.model_dump(mode="json"), "asset":None}],
-        [{"tool":"send_email", "kind":"commit", "status":"unknown", "mode":"live", "queued":None, "count":3, "created_at":NOW}]]
+        [{"tool":"send_email", "kind":"commit", "status":"unknown", "mode":"live", "queued":None, "count":3, "created_at":NOW},
+         {"tool":"send_email", "kind":"commit", "status":"ok", "mode":"live", "queued":None, "sent":"false", "count":1, "created_at":NOW}]]
     await reconcile.collect(conn, row(source_completed_at=NOW, finalize_after=NOW-timedelta(seconds=1)))
     freeze = next(call for call in conn.execute.await_args_list if "manifest=$2" in call.args[0])
     manifest = Manifest.model_validate_json(freeze.args[2])
     assert any(f.value == "Selected message" for e in manifest.transcript for f in e.facts)
     assert any(f.label == "Additional actions with this outcome" and f.value == "2"
                for e in manifest.transcript for f in e.facts)
+    assert any(e.title == "Email was not sent" and e.outcome == "cancelled" for e in manifest.transcript)
 
 
 @pytest.mark.asyncio
@@ -129,3 +131,22 @@ def test_availability_requires_explicit_owner_and_private_bucket(monkeypatch):
     assert not settings.available(USER)
     config.espresso_recaps_enabled = False
     assert not settings.enabled()
+
+
+def test_child_results_take_priority_over_individual_warning_actions():
+    from app.matcha.services.matcha_work.recaps.storyboard import build
+    events = [Event(title="Request", kind="request", occurred_at=NOW)]
+    events += [Event(title=f"Action {n}", kind="action_resolved", outcome="unknown", occurred_at=NOW) for n in range(9)]
+    events += [Event(title=title, kind="result", occurred_at=NOW) for title in ("Apartments found", "Jobs found")]
+    manifest = build([{"snapshot":event.model_dump(mode="json")} for event in events])
+    assert {"Apartments found", "Jobs found", "Outcomes to review"} <= {s.event.title for s in manifest.scenes}
+    assert len(manifest.transcript) == 12
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind,table", [("jobs", "j"), ("research", "t")])
+async def test_phase_attachment_locks_owner_epoch_before_root(kind, table):
+    conn = Conn(); conn.fetchval.side_effect = [kind, True]
+    assert await scope.capture_current(conn, source(role="phase"), lock=True)
+    sql = conn.fetchval.await_args.args[0]
+    assert f"FOR SHARE OF {table}" in sql and "dispatch_token=s.execution_token" in sql

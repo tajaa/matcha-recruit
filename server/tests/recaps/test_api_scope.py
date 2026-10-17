@@ -131,11 +131,18 @@ async def test_accepted_outcome_snapshots_are_optional_and_terminal_aware(monkey
 @pytest.mark.asyncio
 async def test_research_and_jobs_snapshots_preserve_evidence_and_disclosure(monkeypatch):
     conn=Conn()
-    conn.fetchrow.return_value={"id":uuid4(),"title":"Apartments","status":"done","recap_status":"done","plan":{"constraints":[{"label":"Dogs allowed"}]},"progress":{},"completed_at":NOW}
+    from app.matcha.services.matcha_work.agent_tasks.research.contracts import clean_constraint
+    constraints = [clean_constraint(raw, today=NOW.date()) for raw in (
+        {"field":"price", "op":"lte", "value":3000, "unit":"month", "currency":"USD"},
+        {"field":"beds", "op":"gte", "value":2},
+    )]
+    assert all(constraints) and all("label" not in item for item in constraints)
+    conn.fetchrow.return_value={"id":uuid4(),"title":"Apartments","status":"done","recap_status":"done","plan":{"constraints":constraints},"progress":{},"completed_at":NOW}
     conn.fetch.return_value=[{"title":"Building A","subtitle":"Mission","fields":{"rent":{"display":"$2,900/mo","status":"verified"},"pets":{"display":"Allowed","status":"unknown"}},"fit_score":4,"fit_reasons":["Fits budget"]}]
     event=await adapters.search_event(conn,source(kind="research",task_round_id=uuid4()),terminal=True)
     text=event.model_dump_json()
-    assert "verified" in text and "unconfirmed" in text and "$2,900/mo" in text and "Dogs allowed" in text
+    assert "verified" in text and "unconfirmed" in text and "$2,900/mo" in text
+    assert "Price at most $3,000/mo" in text and "Beds at least 2" in text
     conn.fetchrow.return_value={"id":uuid4(),"title":"Jobs","status":"done","criteria":{"titles":["Engineer"],"locations":["SF"],"currency":"USD","base_floor":120000},"progress":{},"completed_at":NOW}
     conn.fetch.return_value=[{"title":"Engineer","company":"Example Labs","comp":{},"comp_status":"not_disclosed","fit_score":4,"fit_reasons":[],"approach_status":"done"}]
     event=await adapters.search_event(conn,source(kind="jobs",job_search_id=uuid4()),terminal=True)

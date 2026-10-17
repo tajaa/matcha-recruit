@@ -106,18 +106,26 @@ async def test_stale_or_opted_out_render_does_no_media_work(monkeypatch):
 
 
 def test_process_watchdog_is_independent_of_async_executor(monkeypatch):
+    from pathlib import Path
     monkeypatch.setattr(supervisor.sys,"platform","linux")
     monkeypatch.setattr(supervisor.ctypes,"CDLL",lambda *_,**__:SimpleNamespace(prctl=lambda *args:0))
     process=SimpleNamespace(wait=Mock(return_value=0))
     start=Mock(return_value=process);monkeypatch.setattr(supervisor.subprocess,"Popen",start)
+    def child_scratch(*args, **kwargs):
+        nested = Path(kwargs["env"]["TMPDIR"]) / "chromium-profile"
+        nested.mkdir(); (nested / "unfinished-download").write_bytes(b"partial")
+        return process
+    start.side_effect = child_scratch
     stop=Mock();monkeypatch.setattr(supervisor,"stop_owned_children",stop)
     supervisor.run("render",uuid4(),seconds=240)
     assert start.call_args.kwargs["start_new_session"] is True
+    assert not Path(start.call_args.kwargs["env"]["TMPDIR"]).exists()
     process.wait.assert_called_once_with(timeout=240)
     stop.assert_called_once()
     process.wait.side_effect=subprocess.TimeoutExpired("media",240)
     with pytest.raises(subprocess.TimeoutExpired):supervisor.run("render",uuid4(),seconds=240)
     assert stop.call_count==2
+    assert not Path(start.call_args.kwargs["env"]["TMPDIR"]).exists()
 
 
 def test_watchdog_does_not_accept_arbitrary_operations(monkeypatch):

@@ -157,9 +157,32 @@ async def phase_run(conn, run_id, owner):
         )
 
 
-async def capture_current(conn, source):
+async def capture_current(conn, source, *, lock=False):
     if source["role"] != "phase":
         return True
+    if lock:
+        # Capture attaches owner -> root, matching accepted chain writes. Keep
+        # this lock out of refresh_source, which already owns the root lock.
+        kind = await conn.fetchval(
+            """SELECT p.kind FROM mw_agent_recap_sources s JOIN mw_agent_recap_sources p
+               ON p.id=s.parent_source_id WHERE s.id=$1""", source["id"],
+        )
+        if kind == "jobs":
+            return bool(await conn.fetchval(
+                """SELECT 1 FROM mw_job_searches j JOIN mw_agent_recap_sources p ON p.job_search_id=j.id
+                   JOIN mw_agent_recap_sources s ON s.parent_source_id=p.id WHERE s.id=$1
+                   AND p.semantic_state<>'terminal' AND j.recap_generation=p.generation
+                   AND j.dispatch_token=s.execution_token FOR SHARE OF j""", source["id"],
+            ))
+        if kind == "research":
+            return bool(await conn.fetchval(
+                """SELECT 1 FROM mw_agent_tasks t JOIN mw_agent_task_rounds q ON q.task_id=t.id
+                   JOIN mw_agent_recap_sources p ON p.task_round_id=q.id
+                   JOIN mw_agent_recap_sources s ON s.parent_source_id=p.id WHERE s.id=$1
+                   AND p.semantic_state<>'terminal' AND t.current_round=q.n
+                   AND t.dispatch_token=s.execution_token FOR SHARE OF t""", source["id"],
+            ))
+        return False
     return bool(await conn.fetchval(
         """SELECT 1 FROM mw_agent_recap_sources s JOIN mw_agent_recap_sources p ON p.id=s.parent_source_id
            LEFT JOIN mw_job_searches j ON j.id=p.job_search_id

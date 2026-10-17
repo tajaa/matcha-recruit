@@ -12,7 +12,11 @@ def build(events: list[dict]) -> Manifest:
     # Always retain a request and final result, and summarize every warning.
     warnings = [event for event, _ in parsed if event.outcome in CONSEQUENTIAL]
     middle = list(enumerate(parsed[1:-1], start=1))
-    important = [(i, pair) for i, pair in middle if pair[0].outcome in CONSEQUENTIAL or pair[0].kind == "result"]
+    # Child results have no other visual summary. Overflow actions still appear
+    # in the explicit warning scene and full transcript.
+    results = [(i, pair) for i, pair in middle if pair[0].kind == "result"]
+    actions = [(i, pair) for i, pair in middle if pair[0].kind != "result" and pair[0].outcome in CONSEQUENTIAL]
+    important = [*results, *actions]
     ordinary = [(i, pair) for i, pair in middle if pair[0].outcome not in CONSEQUENTIAL and pair[0].kind != "result"]
     chosen = sorted([*important[:8], *ordinary[:max(0, 8-len(important))]], key=lambda entry: entry[0])
     selected = [parsed[0], *(pair for _, pair in chosen), *([] if len(parsed) == 1 else [parsed[-1]])]

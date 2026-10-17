@@ -12,7 +12,8 @@ The observer stores allowlisted outcome snapshots. Guarded public `view_page`
 activity can add real Chromium JPEG windows; API work uses deterministic React
 cards. Email bodies, raw tool arguments, BCC, attendees, login sessions and model
 reasoning are not copied. Search result facts are bounded and labeled with their
-recorded verification/pay status. Calendar previews retain recorded ISO offsets;
+recorded verification/pay status. Local calendar audits include selected title,
+old/new times and a validated account timezone. Calendar previews retain ISO offsets;
 v1 does not infer an IANA timezone when the source preview has none.
 
 The library/player live at `/espresso/recaps` and `/espresso/recaps/:id`, with links
@@ -63,6 +64,8 @@ the media worker rejects delivery tasks. IAM should restrict object access to
 `espresso-recaps/`, including object version listing/deletion. Keep bucket public
 access blocked. Configure short source-media lifecycle retention and a safety
 lifecycle for final/orphaned objects, including noncurrent versions. Configure
+automatic abort of incomplete multipart uploads so killed transfers cannot leave
+unlisted upload parts indefinitely. Configure
 private-bucket browser CORS for the actual Espresso origin and range playback.
 Verify that this prefix is never exposed through a public CloudFront distribution.
 
