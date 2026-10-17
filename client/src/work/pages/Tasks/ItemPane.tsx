@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react'
 import {
-  Bookmark, BookmarkCheck, Box, Building2, Check, CheckCircle2, EyeOff, ExternalLink, Loader2, Quote, ListPlus,
-  Sparkles, Tag, X, OctagonX, BadgeCheck,
+  AlertTriangle, Bookmark, BookmarkCheck, Box, Building2, Check, CheckCircle2, EyeOff, ExternalLink, Loader2, Quote,
+  ListPlus, Sparkles, Tag, X, OctagonX, BadgeCheck,
 } from 'lucide-react'
 import type {
   AgentTaskAction, AgentTaskColumn, AgentTaskField, AgentTaskImage, AgentTaskItemDetail, AgentTaskUnit,
@@ -16,17 +16,25 @@ import { ActionIcon } from './ActionModal'
  * One finding, as on the Mac (`TaskItemDetailView`): its photos and page,
  * every fact with the words and page it came from, an apartment building's
  * homes one by one, why it fits (or why it's hidden), the person's notes, and
- * what to do with it.
+ * what to do with it. Below the widest layout it covers the task, so what goes
+ * wrong with the finding (loading it, saving it) is said here, not behind it.
  */
 export default function ItemPane({
-  item, columns, canFollowUp, busy, onClose, onSetState, onSaveNotes, onMoreLikeThis, onAskEspresso, onAction,
+  item, loadError, error, columns, canFollowUp, busy, onClose, onRetry, onDismissError, onSetState, onSaveNotes,
+  onMoreLikeThis, onAskEspresso, onAction,
 }: {
   item: AgentTaskItemDetail | null
+  /** It couldn't be loaded, and nothing of it is on screen. */
+  loadError: string | null
+  /** A change made from here didn't go through. */
+  error: string | null
   columns: AgentTaskColumn[]
   /** The task can take "More like this" (it finished and isn't a job search). */
   canFollowUp: boolean
   busy: boolean
   onClose: () => void
+  onRetry: () => void
+  onDismissError: () => void
   onSetState: (state: string, itemId: string) => void
   onSaveNotes: (notes: string, itemId: string) => void
   onMoreLikeThis: (itemId: string) => void
@@ -40,6 +48,15 @@ export default function ItemPane({
           <X size={14} />
         </button>
       </div>
+      {item && error && (
+        <div role="alert" className="mx-5 mb-3 flex items-start gap-2 rounded-lg bg-amber-500/10 px-3 py-2 text-[11px] text-amber-500">
+          <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+          <span className="flex-1">{error}</span>
+          <button type="button" onClick={onDismissError} aria-label="Dismiss the message" className="shrink-0 rounded p-0.5 hover:bg-amber-500/10">
+            <X size={11} />
+          </button>
+        </div>
+      )}
       {item ? (
         <ItemBody
           key={item.id}
@@ -53,8 +70,16 @@ export default function ItemPane({
           onAskEspresso={onAskEspresso}
           onAction={onAction}
         />
+      ) : loadError ? (
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
+          <AlertTriangle size={24} className="text-w-faint" />
+          <p className="max-w-xs text-xs text-w-dim">{loadError}</p>
+          <button type="button" onClick={onRetry} className="rounded-md bg-w-accent px-3 py-1.5 text-xs font-semibold text-white hover:bg-w-accent-hi">
+            Try again
+          </button>
+        </div>
       ) : (
-        <div className="flex flex-1 items-center justify-center"><Loader2 className="animate-spin text-w-dim" /></div>
+        <div className="flex flex-1 items-center justify-center"><Loader2 aria-label="Loading" className="animate-spin text-w-dim" /></div>
       )}
     </aside>
   )

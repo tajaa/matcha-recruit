@@ -170,13 +170,17 @@ function TasksPage() {
       {itemId && detail && (
         <ItemPane
           item={t.item}
+          loadError={t.itemLoadError}
+          error={t.itemError}
           columns={detail.plan?.columns ?? []}
           canFollowUp={canFollowUp(detail)}
           busy={t.busy}
           onClose={() => setItemParam(null)}
+          onRetry={() => void t.reloadItem()}
+          onDismissError={() => t.setItemError(null)}
           onSetState={(state, id) => void t.setItemState(state, id)}
           onSaveNotes={(notes, id) => void t.saveNotes(notes, id)}
-          onMoreLikeThis={(id) => void t.startRound('more', '', [id])}
+          onMoreLikeThis={(id) => void t.startRound('more', '', [id], id)}
           onAskEspresso={(id) => askEspresso(askEspressoPrompt(detail.id, id))}
           onAction={(item, action) => setActing({ item, action })}
         />

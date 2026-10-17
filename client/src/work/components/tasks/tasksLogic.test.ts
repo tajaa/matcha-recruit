@@ -182,10 +182,12 @@ describe('homes', () => {
 })
 
 describe('actions', () => {
-  it('moves from details to review to finished', () => {
+  it('moves from details to review to working to finished', () => {
     expect(actionStage(null)).toBe('details')
     expect(actionStage({ id: 'r', status: 'proposed' })).toBe('review')
+    expect(actionStage({ id: 'r', status: 'running' })).toBe('working')
     expect(actionStage({ id: 'r', status: 'done' })).toBe('finished')
+    expect(actionStage({ id: 'r', status: 'failed' })).toBe('finished')
     expect(actionStage({ id: 'r', status: 'cancelled' })).toBe('finished')
   })
 
@@ -222,7 +224,13 @@ describe('forms', () => {
     expect(parseField(field({ type: 'boolean' }), 'maybe')).toBeUndefined()
     expect(parseField(field({ type: 'select', options: ['Cats', 'Dogs'] }), 'Dogs')).toBe('Dogs')
     expect(parseField(field({ type: 'select', options: ['Cats'] }), 'Dogs')).toBeUndefined()
-    expect(parseField(field({ type: 'list' }), 'a, b\nc,')).toEqual(['a', 'b', 'c'])
+    expect(parseField(field({ type: 'list' }), 'COO, VP Ops,')).toEqual(['COO', 'VP Ops'])
+    // Semicolons and new lines win, so a "City, ST" stays one place (as the server reads it).
+    expect(parseField(field({ type: 'list' }), 'New York, NY; Remote')).toEqual(['New York, NY', 'Remote'])
+    expect(parseField(field({ type: 'list' }), 'Austin, TX\nDenver, CO\n')).toEqual(['Austin, TX', 'Denver, CO'])
+    expect(parseField(field({ type: 'list' }), ' ; ')).toBeUndefined()
+    expect(parseField(field({ type: 'multi_select', options: ['Lunch, weekdays', 'Dinner'] }), 'Lunch, weekdays; Dinner'))
+      .toEqual(['Lunch, weekdays', 'Dinner'])
     expect(parseField(field({ type: 'multi_select', options: ['a', 'b'] }), 'a, z')).toBeUndefined()
     expect(parseField(field({ type: 'location' }), 'The Mission')).toBe('The Mission')
   })

@@ -283,12 +283,21 @@ export function unitTerms(unit: AgentTaskUnit, today: Date = new Date()): string
 
 // ─── Actions on a finding (Buy, Apply) ───
 
-export type ActionStage = 'details' | 'review' | 'finished'
+export type ActionStage = 'details' | 'review' | 'working' | 'finished'
 
+/** Where an action stands. `running` is a yes still being carried out (a
+ *  confirm that was retried while the first one ran), not an outcome. */
 export function actionStage(run: AgentTaskActionRun | null | undefined): ActionStage {
   if (!run) return 'details'
-  return run.status === 'proposed' ? 'review' : 'finished'
+  if (run.status === 'proposed') return 'review'
+  return run.status === 'running' ? 'working' : 'finished'
 }
+
+/** How often, and how many times, a running yes is read again before the
+ *  sheet stops and says it's still going (about a minute). Reading it again is
+ *  the same confirm call, which only reports a yes already given. */
+export const RUNNING_READ_MS = 1_500
+export const RUNNING_READS = 40
 
 /** What the person typed for an action's own fields, trimmed; blanks left out. */
 export function actionParams(values: Record<string, string>, fields: IntakeFormField[] | null | undefined): Record<string, string> {
@@ -326,10 +335,18 @@ export function placeholder(field: Pick<IntakeFormField, 'type'>): string {
     case 'number': return 'A number'
     case 'date': return 'YYYY-MM-DD'
     case 'time': return '19:30'
-    case 'list': case 'multi_select': return 'Separate with commas'
+    case 'list': case 'multi_select': return 'Separate with commas or semicolons'
     case 'location': return 'A city, neighborhood or address'
     default: return ''
   }
+}
+
+/** A typed list split the way the server splits it: semicolons and new lines
+ *  separate items when there are any, so "New York, NY; Remote" stays two
+ *  places; otherwise commas do ("COO, VP Ops"). */
+export function splitList(raw: string): string[] {
+  const parts = /[;\n]/.test(raw) ? raw.split(/[;\n]/) : raw.split(',')
+  return parts.map((s) => s.trim()).filter(Boolean)
 }
 
 /** One typed answer as the value the server takes, or undefined when it doesn't look right. */
@@ -365,7 +382,7 @@ export function parseField(field: IntakeFormField, raw: string): unknown {
     case 'select':
       return (field.options ?? []).includes(raw) ? raw : undefined
     case 'list': case 'multi_select': {
-      const items = raw.split(/[,\n]/).map((s) => s.trim()).filter(Boolean)
+      const items = splitList(raw)
       if (field.type === 'multi_select' && items.some((i) => !(field.options ?? []).includes(i))) return undefined
       return items.length ? items : undefined
     }
