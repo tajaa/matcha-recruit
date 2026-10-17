@@ -300,11 +300,11 @@ export default function HrCases() {
                   )}
                   <ul className="space-y-2">
                     {(byColumn[col.key] ?? []).map((c) => (
-                      <li key={c.id}>
+                      <li key={c.id} className={`overflow-hidden rounded-lg border bg-w-surface ${c.id === caseId ? 'border-w-accent/60' : 'border-w-line'}`}>
                         <button
                           type="button"
                           onClick={() => navigate(`${base}/hr-cases/${c.id}`)}
-                          className={`w-full space-y-1 rounded-lg border bg-w-surface px-3 py-2 text-left transition-colors hover:bg-w-surface2 ${c.id === caseId ? 'border-w-accent/60' : 'border-w-line'}`}
+                          className="w-full space-y-1 px-3 py-2 text-left transition-colors hover:bg-w-surface2"
                         >
                           <div className="flex items-center justify-between gap-2">
                             <span className="text-[11px] text-w-faint">{c.case_number}</span>
@@ -317,6 +317,16 @@ export default function HrCases() {
                             {[c.incident_number, c.employee_name].filter(Boolean).join(' · ') || 'No employee linked yet'}
                           </p>
                         </button>
+                        {c.id !== caseId && c.stage === 'flagged' && c.source_incident_id && !c.draft_file_id && (
+                          <button
+                            type="button"
+                            aria-label={`Draft action for ${c.case_number}`}
+                            onClick={() => navigate(`${base}/hr-cases/${c.id}`)}
+                            className="w-full border-t border-w-line bg-w-accent/10 px-3 py-2 text-left text-xs font-medium text-w-accent hover:bg-w-accent/20"
+                          >
+                            Draft action for HR review
+                          </button>
+                        )}
                       </li>
                     ))}
                   </ul>

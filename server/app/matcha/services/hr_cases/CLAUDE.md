@@ -92,7 +92,9 @@ skip a step.
 
 The business `/work/hr-cases` detail panel exposes the existing `start_draft`
 transition as **Request manager write-up** (with a manager notification), and
-**Review policy violation**. Triage matches remain candidate matches: only an
+**Draft action for HR review**, also directly on flagged board cards. Opening
+a flagged incident shows the confirmation form as the next step, without
+generating or submitting anything until HR confirms. Triage matches remain candidate matches: only an
 HR user's explicit `PolicyViolationReview.classification='policy_violation'`
 classifies the incident for drafting. HR chooses the employee, action, conduct
 type (attendance must be selected for absences) and occurrence dates. Gemini
