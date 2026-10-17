@@ -1,6 +1,7 @@
+import { AdminWorkspace } from '../../components/admin/AdminWorkspace'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useAsync } from '../../hooks/useAsync'
-import { ToggleLeft, Search, Loader2, Settings2 } from 'lucide-react'
+import { Search, Loader2, Settings2 } from 'lucide-react'
 import { Badge, Button, Input, Modal, Select, Toggle, useToast, LABEL } from '../../components/ui'
 import { api } from '../../api/client'
 import { featureLabel, FEATURE_REQUIRES, withOtherGroup } from '../../data/featureCatalog'
@@ -220,16 +221,19 @@ export default function Features() {
   }
 
   return (
-    <div className="flex h-[calc(100vh-7rem)] overflow-hidden rounded-xl border border-white/[0.06] bg-zinc-950">
+    <AdminWorkspace
+      title="Business Features"
+      description="Manage each company’s feature access and beta availability."
+      direction="row"
+      actions={
+        <Button size="sm" variant="secondary" onClick={() => setBetaModalOpen(true)}>
+          <Settings2 className="h-3.5 w-3.5" /> Manage beta
+        </Button>
+      }
+    >
       {/* Company list */}
-      <div className="flex w-72 shrink-0 flex-col border-r border-white/[0.06]">
-        <div className="flex items-center gap-2 border-b border-white/[0.06] px-3 py-3">
-          <ToggleLeft className="h-4 w-4 shrink-0 text-emerald-400" />
-          <h1 className="flex-1 text-sm font-semibold text-zinc-100">Features</h1>
-          <Button size="sm" variant="secondary" onClick={() => setBetaModalOpen(true)}>
-            <Settings2 className="h-3.5 w-3.5" /> Manage beta
-          </Button>
-        </div>
+      <div className="flex max-h-56 w-full shrink-0 flex-col border-b border-white/[0.06] md:max-h-none md:w-72 md:border-b-0 md:border-r">
+        <div className="border-b border-white/[0.06] px-3 py-3 text-sm font-medium text-zinc-300">Companies</div>
         <div className="border-b border-white/[0.06] p-2">
           <div className="relative">
             <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" />
@@ -242,7 +246,7 @@ export default function Features() {
             />
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto">
+        <div className="min-w-0 flex-1 overflow-y-auto">
           {loading ? (
             <div className="p-3"><Loader2 className="h-4 w-4 animate-spin text-zinc-500" /></div>
           ) : filtered.length === 0 ? (
@@ -451,7 +455,7 @@ export default function Features() {
           onSaved={reloadFlagStatuses}
         />
       )}
-    </div>
+    </AdminWorkspace>
   )
 }
 

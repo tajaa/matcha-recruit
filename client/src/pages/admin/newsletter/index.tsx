@@ -1,3 +1,4 @@
+import { AdminPageHeader } from '../../../components/admin/AdminPageHeader'
 import { useNavigate } from 'react-router-dom'
 import { Loader2, Plus } from 'lucide-react'
 import { api } from '../../../api/client'
@@ -52,19 +53,21 @@ export default function NewsletterAdmin() {
 
   return (
     <div>
-      <div className="rounded-xl border border-white/[0.06] bg-zinc-950 p-6">
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-xl font-semibold text-zinc-100">Newsletter</h1>
-        <button
-          onClick={() => {
-            if (isDirty && !confirm('Discard unsaved changes?')) return
-            navigate('/admin/newsletter/composer')
-          }}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded-lg transition-colors"
-        >
-          <Plus size={14} /> New Newsletter
-        </button>
-      </div>
+      <AdminPageHeader
+        title="Newsletter"
+        description="Create newsletters and manage your audience."
+        actions={
+          <button
+            onClick={() => {
+              if (isDirty && !confirm('Discard unsaved changes?')) return
+              navigate('/admin/newsletter/composer')
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded-lg transition-colors"
+          >
+            <Plus size={14} /> New Newsletter
+          </button>
+        }
+      />
 
       {/* Stats + growth sparkline */}
       {stats && <NewsletterStatsBar stats={stats} growth={growth} />}
@@ -139,7 +142,6 @@ export default function NewsletterAdmin() {
 
       {/* Templates tab */}
       {tab === 'templates' && <TemplatesTab templates={templates} onChange={loadData} onPickTemplate={fromTemplate} onStartFrom={startFromDesign} currentDesign={composeDesign} />}
-      </div>
 
       {/* Send modal */}
       {sendModal && (

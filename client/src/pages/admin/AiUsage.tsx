@@ -1,5 +1,6 @@
+import { AdminPageHeader } from '../../components/admin/AdminPageHeader'
 import { useState } from 'react'
-import { AlertCircle, Bot, ChevronDown, ChevronRight, Cpu, Image, RefreshCw, X } from 'lucide-react'
+import { AlertCircle, Bot, ChevronDown, ChevronRight, Image, RefreshCw, X } from 'lucide-react'
 import { useAsync } from '../../hooks/useAsync'
 import {
   getAiUsageCalls,
@@ -348,26 +349,20 @@ export default function AiUsage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <div className="flex items-center gap-2">
-            <Cpu size={20} className="text-emerald-500" />
-            <h1 className="text-xl font-semibold text-zinc-100">AI Usage</h1>
-          </div>
-          <p className="text-sm text-zinc-500 mt-0.5">
-            Exact provider-reported usage and paid search API requests, attributed to the Matcha feature that
-            made each call.
-          </p>
-        </div>
-        <button
-          onClick={refreshAll}
-          disabled={refreshing}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800 text-zinc-200 text-xs font-medium hover:bg-zinc-700 disabled:opacity-50 transition-colors"
-        >
-          <RefreshCw size={12} className={refreshing ? 'animate-spin' : ''} />
-          Refresh
-        </button>
-      </div>
+      <AdminPageHeader
+        title="AI Usage"
+        description="Exact provider-reported usage and paid search API requests, attributed to the Matcha feature that made each call."
+        actions={
+          <button
+            onClick={refreshAll}
+            disabled={refreshing}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800 text-zinc-200 text-xs font-medium hover:bg-zinc-700 disabled:opacity-50 transition-colors"
+          >
+            <RefreshCw size={12} className={refreshing ? 'animate-spin' : ''} />
+            Refresh
+          </button>
+        }
+      />
 
       <div className="flex items-center gap-2 mb-4">
         {RANGES.map((r) => (

@@ -6,6 +6,7 @@
  * step owns its own save + advance — the shell just tracks which step
  * is active and refetches on update.
  */
+import { AdminPageHeader } from '../../components/admin/AdminPageHeader'
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { ArrowLeft, Check, Loader2 } from 'lucide-react'
@@ -104,81 +105,87 @@ export default function AdminOnboardingWizard() {
   }
 
   return (
-    <div className="p-6 flex gap-8">
-      <aside className="w-56 shrink-0">
-        <Link
-          to="/admin/gap-analysis"
-          className="inline-flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-300 mb-4"
-        >
-          <ArrowLeft className="w-3 h-3" /> All sessions
-        </Link>
-        <h2 className="text-sm font-medium text-zinc-100 mb-3">
-          {session.basics?.business_name || 'New onboarding'}
-        </h2>
-        <ol className="space-y-1.5">
-          {STEP_ORDER.filter((s) => s !== 'done').map((step, idx) => {
-            const stepIdx = idx
-            const persistedIdx = STEP_ORDER.indexOf(session.step)
-            const completed = persistedIdx > stepIdx || session.status === 'finalized'
-            const active = step === activeStep
-            const reachable = stepIdx <= persistedIdx
-            return (
-              <li key={step}>
-                <button
-                  onClick={() => reachable && advanceTo(step)}
-                  disabled={!reachable}
-                  className={`w-full text-left flex items-center gap-2 px-2 py-1.5 rounded-md text-sm ${
-                    active
-                      ? 'bg-emerald-500/15 text-emerald-200'
-                      : completed
-                        ? 'text-zinc-300 hover:bg-vsc-panel'
-                        : 'text-zinc-500'
-                  } ${!reachable ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}
-                >
-                  <span
-                    className={`flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-semibold ${
-                      completed
-                        ? 'bg-emerald-500/30 text-emerald-200'
-                        : active
-                          ? 'bg-emerald-500 text-zinc-950'
-                          : 'bg-zinc-800 text-zinc-500'
-                    }`}
+    <div>
+      <AdminPageHeader
+        title={session.basics?.business_name || 'New onboarding'}
+        description="Review the company’s setup and compliance scope."
+      />
+      <div className="flex flex-col gap-8 md:flex-row">
+        <aside className="shrink-0 md:w-56">
+          <Link
+            to="/admin/gap-analysis"
+            className="inline-flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-300 mb-4"
+          >
+            <ArrowLeft className="w-3 h-3" /> All sessions
+          </Link>
+          <h2 className="text-sm font-medium text-zinc-100 mb-3">
+            {session.basics?.business_name || 'New onboarding'}
+          </h2>
+          <ol className="space-y-1.5">
+            {STEP_ORDER.filter((s) => s !== 'done').map((step, idx) => {
+              const stepIdx = idx
+              const persistedIdx = STEP_ORDER.indexOf(session.step)
+              const completed = persistedIdx > stepIdx || session.status === 'finalized'
+              const active = step === activeStep
+              const reachable = stepIdx <= persistedIdx
+              return (
+                <li key={step}>
+                  <button
+                    onClick={() => reachable && advanceTo(step)}
+                    disabled={!reachable}
+                    className={`w-full text-left flex items-center gap-2 px-2 py-1.5 rounded-md text-sm ${
+                      active
+                        ? 'bg-emerald-500/15 text-emerald-200'
+                        : completed
+                          ? 'text-zinc-300 hover:bg-vsc-panel'
+                          : 'text-zinc-500'
+                    } ${!reachable ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}
                   >
-                    {completed ? <Check className="w-3 h-3" /> : idx + 1}
-                  </span>
-                  {STEP_LABELS[step]}
-                </button>
-              </li>
-            )
-          })}
-        </ol>
-        {session.status === 'finalized' && (
-          <div className="mt-4 text-[11px] uppercase tracking-wider text-emerald-300">
-            Finalized
-          </div>
-        )}
-      </aside>
+                    <span
+                      className={`flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-semibold ${
+                        completed
+                          ? 'bg-emerald-500/30 text-emerald-200'
+                          : active
+                            ? 'bg-emerald-500 text-zinc-950'
+                            : 'bg-zinc-800 text-zinc-500'
+                      }`}
+                    >
+                      {completed ? <Check className="w-3 h-3" /> : idx + 1}
+                    </span>
+                    {STEP_LABELS[step]}
+                  </button>
+                </li>
+              )
+            })}
+          </ol>
+          {session.status === 'finalized' && (
+            <div className="mt-4 text-[11px] uppercase tracking-wider text-emerald-300">
+              Finalized
+            </div>
+          )}
+        </aside>
 
-      <section className="flex-1 min-w-0">
-        {activeStep === 'basics' && (
-          <Step1Basics session={session} onUpdated={onUpdated} onNext={next} />
-        )}
-        {activeStep === 'size' && (
-          <Step2Size session={session} onUpdated={onUpdated} onNext={next} />
-        )}
-        {activeStep === 'locations' && (
-          <Step3Locations session={session} onUpdated={onUpdated} onNext={next} />
-        )}
-        {activeStep === 'scope' && (
-          <Step4Scope session={session} onUpdated={onUpdated} onNext={next} />
-        )}
-        {activeStep === 'gaps' && (
-          <Step5GapAnalysis session={session} onUpdated={onUpdated} onNext={next} />
-        )}
-        {activeStep === 'review' && (
-          <Step6Review session={session} onUpdated={onUpdated} onNext={next} />
-        )}
-      </section>
+        <section className="flex-1 min-w-0">
+          {activeStep === 'basics' && (
+            <Step1Basics session={session} onUpdated={onUpdated} onNext={next} />
+          )}
+          {activeStep === 'size' && (
+            <Step2Size session={session} onUpdated={onUpdated} onNext={next} />
+          )}
+          {activeStep === 'locations' && (
+            <Step3Locations session={session} onUpdated={onUpdated} onNext={next} />
+          )}
+          {activeStep === 'scope' && (
+            <Step4Scope session={session} onUpdated={onUpdated} onNext={next} />
+          )}
+          {activeStep === 'gaps' && (
+            <Step5GapAnalysis session={session} onUpdated={onUpdated} onNext={next} />
+          )}
+          {activeStep === 'review' && (
+            <Step6Review session={session} onUpdated={onUpdated} onNext={next} />
+          )}
+        </section>
+      </div>
     </div>
   )
 }

@@ -1,4 +1,5 @@
-import { Loader2, Search, Users } from 'lucide-react'
+import { AdminWorkspace } from '../../components/admin/AdminWorkspace'
+import { Loader2, Search } from 'lucide-react'
 import { TAB_DEFS } from './Customers/constants'
 import { matchSearch } from './Customers/helpers'
 import { PersonalTable } from './Customers/PersonalTable'
@@ -29,24 +30,19 @@ export default function Customers() {
   const tabHelp = TAB_DEFS.find((t) => t.id === tab)?.help
 
   return (
-    <div className="flex h-[calc(100vh-7rem)] flex-col overflow-hidden rounded-xl border border-white/[0.06] bg-zinc-950">
-      {/* Header */}
-      <div className="flex items-center justify-between border-b border-white/[0.06] px-4 py-3">
-        <h1 className="flex items-center gap-2 text-sm font-semibold text-zinc-100">
-          <Users className="h-4 w-4 text-emerald-400" /> Customers
-        </h1>
-        <div className="flex items-center gap-4">
-          <span className="hidden text-xs text-zinc-500 md:block">{tabHelp}</span>
-          <button
-            onClick={refresh}
-            disabled={busy}
-            className="rounded-md border border-white/[0.08] px-2.5 py-1 text-xs font-medium text-zinc-400 transition-colors hover:bg-white/[0.04] hover:text-zinc-100 disabled:opacity-40"
-          >
-            {busy ? <Loader2 className="inline h-3 w-3 animate-spin" /> : 'Refresh'}
-          </button>
-        </div>
-      </div>
-
+    <AdminWorkspace
+      title="Customers"
+      description={tabHelp}
+      actions={
+        <button
+          onClick={refresh}
+          disabled={busy}
+          className="rounded-md border border-white/[0.08] px-2.5 py-1 text-xs font-medium text-zinc-400 transition-colors hover:bg-white/[0.04] hover:text-zinc-100 disabled:opacity-40"
+        >
+          {busy ? <Loader2 className="inline h-3 w-3 animate-spin" /> : 'Refresh'}
+        </button>
+      }
+    >
       {/* Tabs */}
       <div className="flex flex-wrap items-center gap-1 border-b border-white/[0.06] px-2 py-1.5">
         {TAB_DEFS.map((t) => (
@@ -116,6 +112,6 @@ export default function Customers() {
           />
         )}
       </div>
-    </div>
+    </AdminWorkspace>
   )
 }

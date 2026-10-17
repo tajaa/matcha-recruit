@@ -1,6 +1,7 @@
+import { AdminPageHeader } from '../../components/admin/AdminPageHeader'
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Building2, Copy, ExternalLink, Plus, ShieldCheck } from 'lucide-react'
+import { Building2, Copy, ExternalLink, Plus } from 'lucide-react'
 import { api } from '../../api/client'
 import { Badge, Button, DataTable, Input, Modal } from '../../components/ui'
 import { useAsync } from '../../hooks/useAsync'
@@ -99,20 +100,15 @@ export default function TestAccounts() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <ShieldCheck className="h-5 w-5 text-amber-300" />
-            <h1 className="text-2xl font-semibold text-zinc-100">Test Accounts</h1>
-          </div>
-          <p className="mt-1 max-w-3xl text-sm text-zinc-400">
-            Demo tenants may use beta features, sync between dev and production, and are preserved during a dev refresh. Never mark a live customer as a test account.
-          </p>
-        </div>
-        <Button onClick={() => { setError(''); setShowCreate(true) }}>
-          <Plus className="mr-1.5 h-4 w-4" /> Create test account
-        </Button>
-      </div>
+      <AdminPageHeader
+        title="Test Accounts"
+        description="Demo tenants may use beta features, sync between dev and production, and are preserved during a dev refresh. Never mark a live customer as a test account."
+        actions={
+          <Button onClick={() => { setError(''); setShowCreate(true) }}>
+            <Plus className="mr-1.5 h-4 w-4" /> Create test account
+          </Button>
+        }
+      />
 
       {loadError && <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">{loadError}</p>}
 

@@ -1,5 +1,6 @@
+import { AdminWorkspace } from '../../components/admin/AdminWorkspace'
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronDown, Loader2, Sparkles } from 'lucide-react'
+import { ChevronDown, Loader2 } from 'lucide-react'
 import { api } from '../../api/client'
 import { LABEL } from '../../components/ui'
 import type { AdminUpdate } from '../../types/adminUpdates'
@@ -149,14 +150,11 @@ export default function Updates() {
   const setAll = (open: boolean) => setOpenIds(new Set(open && updates ? updates.map((u) => u.id) : []))
 
   return (
-    <div className="flex h-[calc(100vh-7rem)] flex-col overflow-hidden rounded-xl border border-white/[0.06] bg-zinc-950">
-      {/* Header */}
-      <div className="flex items-center justify-between border-b border-white/[0.06] px-4 py-3">
-        <h1 className="flex items-center gap-2 text-sm font-semibold text-zinc-100">
-          <Sparkles className="h-4 w-4 text-emerald-400" /> Updates
-        </h1>
+    <AdminWorkspace
+      title="Updates"
+      description="New features and how to use them — newest first."
+      actions={
         <div className="flex items-center gap-4">
-          <span className="hidden text-xs text-zinc-500 md:block">New features and how to use them — newest first.</span>
           {updates && updates.length > 0 && (
             <button
               type="button"
@@ -167,8 +165,8 @@ export default function Updates() {
             </button>
           )}
         </div>
-      </div>
-
+      }
+    >
       {/* Stat bar */}
       <div className="flex flex-wrap items-center gap-x-6 gap-y-1 border-b border-white/[0.06] px-4 py-2 font-mono text-[11px] uppercase tracking-wide text-zinc-500">
         <span>Updates <b className="text-zinc-100">{updates?.length ?? '—'}</b></span>
@@ -220,6 +218,6 @@ export default function Updates() {
           </div>
         ))}
       </div>
-    </div>
+    </AdminWorkspace>
   )
 }

@@ -1,5 +1,5 @@
+import { AdminWorkspace } from '../../components/admin/AdminWorkspace'
 import { useEffect, useState } from 'react'
-import { Cog } from 'lucide-react'
 import { api } from '../../api/client'
 import { Button } from '../../components/ui'
 
@@ -83,14 +83,7 @@ export default function Automation() {
   }
 
   return (
-    <div className="flex h-[calc(100vh-7rem)] flex-col overflow-hidden rounded-xl border border-white/[0.06] bg-zinc-950">
-      <div className="flex items-center justify-between border-b border-white/[0.06] px-4 py-3">
-        <h1 className="flex items-center gap-2 text-sm font-semibold text-zinc-100">
-          <Cog className="h-4 w-4 text-emerald-400" /> Automation
-        </h1>
-        <span className="hidden text-xs text-zinc-500 md:block">Scheduled Celery jobs across the platform + their recent run logs.</span>
-      </div>
-
+    <AdminWorkspace title="Automation" description="Scheduled jobs across the platform and their recent run logs.">
       <div className="flex flex-wrap items-center gap-1 border-b border-white/[0.06] px-2 py-1.5">
         {([['jobs', 'Scheduled Jobs', schedulers.length], ['activity', 'Recent Activity', undefined]] as const).map(([id, label, count]) => (
           <button key={id} type="button" onClick={() => setTab(id)}
@@ -197,6 +190,6 @@ export default function Automation() {
           </div>
         )}
       </div>
-    </div>
+    </AdminWorkspace>
   )
 }

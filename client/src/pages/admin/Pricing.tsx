@@ -1,3 +1,4 @@
+import { AdminPageHeader } from '../../components/admin/AdminPageHeader'
 import { useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { ExternalLink, Info, Loader2 } from 'lucide-react'
@@ -194,9 +195,8 @@ export default function Pricing() {
   )
 
   return (
-    <div className="max-w-6xl">
-      <h1 className="text-2xl font-semibold text-zinc-100">Pricing</h1>
-      <p className="mt-2 text-sm text-zinc-500">What each product charges at Stripe checkout.</p>
+    <div>
+      <AdminPageHeader title="Pricing" description="What each product charges at Stripe checkout." />
 
       <div className="mt-6 flex items-start gap-3 rounded-lg border border-emerald-900/50 bg-emerald-950/20 px-4 py-3 text-sm text-emerald-100">
         <Info className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />

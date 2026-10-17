@@ -1,3 +1,4 @@
+import { AdminPageTitle } from '../../components/admin/AdminPageHeader'
 import { useState, useEffect, useMemo } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { api } from '../../api/client'
@@ -241,7 +242,7 @@ export default function PolicyDetailPage() {
 
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold text-zinc-100">{data.name}</h1>
+        <AdminPageTitle>{data.name}</AdminPageTitle>
         <p className="font-mono text-xs text-zinc-500 mt-1">{data.key}</p>
         <div className="flex items-center gap-2 mt-2">
           <VarianceBadge variance={data.state_variance} />

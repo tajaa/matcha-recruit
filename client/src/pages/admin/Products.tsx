@@ -1,5 +1,6 @@
+import { AdminWorkspace } from '../../components/admin/AdminWorkspace'
 import { useMemo, useState } from 'react'
-import { Boxes, Check, Copy, Loader2, Plus, RefreshCw } from 'lucide-react'
+import { Check, Copy, Loader2, Plus, RefreshCw } from 'lucide-react'
 import { useAsync } from '../../hooks/useAsync'
 import { api } from '../../api/client'
 import { Badge, Button, Input, Select, Textarea, Toggle, useToast } from '../../components/ui'
@@ -282,19 +283,20 @@ export default function Products() {
   }
 
   return (
-    <div className="flex h-[calc(100vh-7rem)] overflow-hidden rounded-xl border border-white/[0.06] bg-zinc-950">
+    <AdminWorkspace
+      title="Products"
+      description="Build product bundles and manage their signup experience."
+      direction="row"
+    >
       {/* Product list */}
-      <div className="flex w-72 shrink-0 flex-col border-r border-white/[0.06]">
-        <div className="flex items-center gap-2 border-b border-white/[0.06] px-3 py-3">
-          <Boxes className="h-4 w-4 shrink-0 text-emerald-400" />
-          <h1 className="text-sm font-semibold text-zinc-100">Products</h1>
-        </div>
+      <div className="flex max-h-56 w-full shrink-0 flex-col border-b border-white/[0.06] md:max-h-none md:w-72 md:border-b-0 md:border-r">
+        <div className="border-b border-white/[0.06] px-3 py-3 text-sm font-medium text-zinc-300">Catalog</div>
         <div className="border-b border-white/[0.06] p-2">
           <Button size="sm" onClick={startNew} className="w-full">
             <Plus className="h-3.5 w-3.5" /> New product
           </Button>
         </div>
-        <div className="flex-1 overflow-y-auto">
+        <div className="min-w-0 flex-1 overflow-y-auto">
           {builtinProducts.length > 0 && (
             <div className="border-b border-white/[0.06]">
               <p className="px-3 pt-2 text-[10px] font-medium uppercase tracking-wide text-zinc-600">
@@ -542,7 +544,7 @@ export default function Products() {
           </div>
         )}
       </div>
-    </div>
+    </AdminWorkspace>
   )
 }
 

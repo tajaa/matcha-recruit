@@ -1,3 +1,4 @@
+import { AdminPageHeader } from '../../components/admin/AdminPageHeader'
 import { useState, useEffect, useCallback } from 'react'
 import { Button } from '../../components/ui'
 import {
@@ -101,11 +102,8 @@ export default function PayerData() {
   const o = overview
 
   return (
-    <div className="max-w-7xl mx-auto px-4 py-6 space-y-4">
-      <div>
-        <h1 className="text-xl font-bold text-zinc-100">Payer Data</h1>
-        <p className="text-sm text-zinc-500">Medical coverage policies — Medicare NCDs/LCDs and commercial payer research</p>
-      </div>
+    <div className="space-y-6">
+      <AdminPageHeader title="Payer Data" description="Medical coverage policies — Medicare NCDs/LCDs and commercial payer research" />
 
       {/* KPI Bar */}
       {o && (

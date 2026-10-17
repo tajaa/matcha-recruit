@@ -1,3 +1,4 @@
+import { AdminPageTitle } from '../../components/admin/AdminPageHeader'
 import { useState, useEffect, useMemo } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { api } from '../../api/client'
@@ -110,7 +111,7 @@ export default function CategoryDetailPage() {
       {/* Header */}
       <div>
         <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-bold text-zinc-100">{data.name}</h1>
+          <AdminPageTitle>{data.name}</AdminPageTitle>
           <DomainBadge domain={data.domain} />
         </div>
         {data.description && (

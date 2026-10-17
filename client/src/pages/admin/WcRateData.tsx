@@ -1,3 +1,4 @@
+import { AdminPageHeader } from '../../components/admin/AdminPageHeader'
 import { useEffect, useState, type ChangeEvent } from 'react'
 import { Loader2, Upload, Download, Database, Search, TrendingUp, TrendingDown, Minus } from 'lucide-react'
 import { Card } from '../../components/ui'
@@ -31,13 +32,11 @@ export default function WcRateData() {
   const cRows = q ? classRows.filter((r) => r.state.includes(q) || r.class_code.includes(q)) : classRows
 
   return (
-    <div className="space-y-6 max-w-5xl">
-      <div>
-        <h1 className="text-2xl font-semibold text-zinc-100 tracking-tight flex items-center gap-2">
-          <Database className="h-5 w-5 text-zinc-400" /> WC Rate Data
-        </h1>
-        <p className="text-sm text-zinc-500 mt-1">State loss-cost trends + class-code base rates the Workers'-Comp surfaces read. View what's loaded by state, and import a licensed NCCI / state-bureau feed via CSV to replace the demo seed.</p>
-      </div>
+    <div className="space-y-6">
+      <AdminPageHeader
+        title={<><Database className="h-5 w-5 text-zinc-400" /> WC Rate Data</>}
+        description="State loss-cost trends + class-code base rates the Workers'-Comp surfaces read. View what's loaded by state, and import a licensed NCCI / state-bureau feed via CSV to replace the demo seed."
+      />
 
       {loading ? (
         <div className="flex items-center justify-center h-32"><Loader2 className="h-6 w-6 text-zinc-500 animate-spin" /></div>

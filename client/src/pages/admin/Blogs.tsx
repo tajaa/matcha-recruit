@@ -1,3 +1,4 @@
+import { AdminPageHeader } from '../../components/admin/AdminPageHeader'
 import { useEffect, useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { api } from '../../api/client'
@@ -38,21 +39,19 @@ export default function Blogs() {
 
   // ── Posts list view ──────────────────────────────────────────────────────
   return (
-    <div className="p-6 max-w-7xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-semibold text-zinc-100">Blog</h1>
-          <p className="text-xs text-zinc-500 mt-1">Posts publish to the public landing page at /blog.</p>
-        </div>
-        {tab === 'posts' && (
+    <div>
+      <AdminPageHeader
+        title="Blog"
+        description="Posts publish to the public landing page at /blog."
+        actions={tab === 'posts' ? (
           <button
             onClick={() => navigate('/admin/blogs/composer')}
             className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-2 rounded text-sm font-medium flex items-center gap-2"
           >
             <Plus className="w-4 h-4" /> New post
           </button>
-        )}
-      </div>
+        ) : null}
+      />
 
       <div className="flex gap-1 mb-5 border-b border-zinc-800">
         {(['posts', 'comments'] as AdminTab[]).map(t => (

@@ -11,6 +11,7 @@
  *   • "Re-run analysis" → full role-aware enrichment (picks up new locations /
  *     roster changes flagged by the drift banner).
  */
+import { AdminPageTitle } from '../../components/admin/AdminPageHeader'
 import { useCallback, useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import {
@@ -124,12 +125,12 @@ export default function GapDashboard() {
   const driftActive = !!drift && (drift.new_locations > 0 || drift.new_jurisdictions > 0)
 
   return (
-    <div className="p-6 max-w-6xl">
+    <div>
       {/* Header */}
       <div className="flex items-center gap-3 mb-1">
         <Link to="/admin/gap-analysis" className="text-zinc-500 hover:text-zinc-300"><ArrowLeft size={18} /></Link>
         <Sparkles className="w-5 h-5 text-vsc-accent" />
-        <h1 className="text-lg font-semibold text-zinc-100">Gap Analysis</h1>
+        <AdminPageTitle>Gap Analysis</AdminPageTitle>
         <span className="text-sm text-zinc-500">· {companyName}</span>
         {drift?.last_analyzed_at && (
           <span className="text-[11px] text-zinc-600 ml-2">last analyzed {new Date(drift.last_analyzed_at).toLocaleDateString()}</span>

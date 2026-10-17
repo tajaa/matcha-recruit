@@ -1,3 +1,4 @@
+import { AdminPageHeader } from '../../components/admin/AdminPageHeader'
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Badge, Button, DataTable, Input, Modal } from '../../components/ui'
@@ -213,19 +214,15 @@ export default function Companies() {
 
   return (
     <div>
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-zinc-100">
-            Companies
-          </h1>
-          <p className="mt-2 text-sm text-zinc-500">
-            Manage registered businesses and approvals.
-          </p>
-        </div>
-        <Button size="sm" onClick={() => setShowAdd(true)}>
-          Add Company
-        </Button>
-      </div>
+      <AdminPageHeader
+        title="Companies"
+        description="Manage registered businesses and approvals."
+        actions={
+          <Button size="sm" onClick={() => setShowAdd(true)}>
+            Add Company
+          </Button>
+        }
+      />
 
       {/* Filters */}
       <div className="mt-6 flex flex-col gap-3">

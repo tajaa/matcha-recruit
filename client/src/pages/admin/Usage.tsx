@@ -1,5 +1,6 @@
+import { AdminPageHeader } from '../../components/admin/AdminPageHeader'
 import { useCallback, useEffect, useState } from 'react'
-import { Activity, RefreshCw, Trash2 } from 'lucide-react'
+import { RefreshCw, Trash2 } from 'lucide-react'
 import { api } from '../../api/client'
 
 type Totals = {
@@ -45,9 +46,9 @@ const COLOR_VISITORS = '#6366f1'
 
 function StatCard({ label, value, hint }: { label: string; value: number; hint?: string }) {
   return (
-    <div className="rounded-lg border border-zinc-200 bg-white p-4">
+    <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
       <div className="text-xs font-medium uppercase tracking-wide text-zinc-500">{label}</div>
-      <div className="mt-1 text-2xl font-semibold text-zinc-900">{value.toLocaleString()}</div>
+      <div className="mt-1 text-2xl font-semibold text-zinc-100">{value.toLocaleString()}</div>
       {hint ? <div className="mt-0.5 text-xs text-zinc-500">{hint}</div> : null}
     </div>
   )
@@ -81,7 +82,7 @@ function DailyChart({ data }: { data: DailyPoint[] }) {
           const y = PAD_T + plotH - (t / max) * plotH
           return (
             <g key={t}>
-              <line x1={PAD_L} x2={W - 8} y1={y} y2={y} stroke="#e4e4e7" strokeWidth={1} />
+              <line x1={PAD_L} x2={W - 8} y1={y} y2={y} className="stroke-zinc-700" strokeWidth={1} />
               <text x={PAD_L - 6} y={y + 3} textAnchor="end" className="fill-zinc-400 text-[9px]">
                 {t}
               </text>
@@ -149,7 +150,7 @@ function DailyChart({ data }: { data: DailyPoint[] }) {
 
 function Legend() {
   return (
-    <div className="flex items-center gap-4 text-xs text-zinc-600">
+    <div className="flex items-center gap-4 text-xs text-zinc-400">
       <span className="flex items-center gap-1.5">
         <span
           className="inline-block h-2.5 w-2.5 rounded-sm"
@@ -202,46 +203,45 @@ export default function Usage() {
   }
 
   return (
-    <div className="p-4">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <Activity className="h-5 w-5 text-emerald-600" />
-          <h1 className="text-lg font-semibold text-zinc-900">Usage</h1>
-          <span className="text-xs text-zinc-500">who's active, and what they use</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="flex rounded-md border border-zinc-300">
-            {[7, 30].map((d) => (
-              <button
-                key={d}
-                onClick={() => setDays(d)}
-                className={`px-3 py-1.5 text-sm first:rounded-l-md last:rounded-r-md ${
-                  days === d ? 'bg-emerald-50 text-emerald-700' : 'text-zinc-600 hover:bg-zinc-50'
-                }`}
-              >
-                {d}d
-              </button>
-            ))}
+    <div>
+      <AdminPageHeader
+        title="Usage"
+        description="who's active, and what they use"
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex rounded-md border border-zinc-700">
+              {[7, 30].map((d) => (
+                <button
+                  key={d}
+                  onClick={() => setDays(d)}
+                  className={`px-3 py-1.5 text-sm first:rounded-l-md last:rounded-r-md ${
+                    days === d ? 'bg-emerald-500/15 text-emerald-400' : 'text-zinc-400 hover:bg-zinc-800'
+                  }`}
+                >
+                  {d}d
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => void load()}
+              className="flex items-center gap-1.5 rounded-md border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800"
+            >
+              <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+              Refresh
+            </button>
+            <button
+              onClick={() => void purge()}
+              className="flex items-center gap-1.5 rounded-md border border-zinc-700 px-3 py-1.5 text-sm text-zinc-400 hover:bg-zinc-800"
+            >
+              <Trash2 className="h-4 w-4" />
+              Purge 90d+
+            </button>
           </div>
-          <button
-            onClick={() => void load()}
-            className="flex items-center gap-1.5 rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-50"
-          >
-            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-            Refresh
-          </button>
-          <button
-            onClick={() => void purge()}
-            className="flex items-center gap-1.5 rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50"
-          >
-            <Trash2 className="h-4 w-4" />
-            Purge 90d+
-          </button>
-        </div>
-      </div>
+        }
+      />
 
       {error ? (
-        <div className="rounded-lg border border-zinc-200 p-6 text-sm text-zinc-600">{error}</div>
+        <div className="rounded-lg border border-zinc-800 p-6 text-sm text-zinc-400">{error}</div>
       ) : !data ? (
         <div className="p-6 text-sm text-zinc-500">Loading…</div>
       ) : (
@@ -254,9 +254,9 @@ export default function Usage() {
             <StatCard label="Visitors" value={data.totals.anon_visitors_7d} hint="anon, 7d" />
           </div>
 
-          <div className="rounded-lg border border-zinc-200 bg-white p-4">
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
             <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-zinc-900">
+              <h2 className="text-sm font-semibold text-zinc-100">
                 Daily activity — last {data.since_days} days
               </h2>
               <Legend />
@@ -265,8 +265,8 @@ export default function Usage() {
           </div>
 
           <div className="grid gap-4 lg:grid-cols-2">
-            <div className="rounded-lg border border-zinc-200 bg-white">
-              <h2 className="border-b border-zinc-200 px-4 py-2.5 text-sm font-semibold text-zinc-900">
+            <div className="rounded-lg border border-zinc-800 bg-zinc-900/50">
+              <h2 className="border-b border-zinc-800 px-4 py-2.5 text-sm font-semibold text-zinc-100">
                 Top pages
               </h2>
               <table className="w-full text-sm">
@@ -287,13 +287,13 @@ export default function Usage() {
                     </tr>
                   ) : (
                     data.top_pages.map((p) => (
-                      <tr key={`${p.surface}${p.path}`} className="border-t border-zinc-100">
-                        <td className="px-4 py-2 font-mono text-xs text-zinc-800">{p.path}</td>
+                      <tr key={`${p.surface}${p.path}`} className="border-t border-zinc-800/60">
+                        <td className="px-4 py-2 font-mono text-xs text-zinc-200">{p.path}</td>
                         <td className="px-4 py-2 text-xs text-zinc-500">{p.surface}</td>
-                        <td className="px-4 py-2 text-right tabular-nums text-zinc-700">
+                        <td className="px-4 py-2 text-right tabular-nums text-zinc-300">
                           {p.views.toLocaleString()}
                         </td>
-                        <td className="px-4 py-2 text-right tabular-nums text-zinc-700">
+                        <td className="px-4 py-2 text-right tabular-nums text-zinc-300">
                           {p.uniques.toLocaleString()}
                         </td>
                       </tr>
@@ -303,8 +303,8 @@ export default function Usage() {
               </table>
             </div>
 
-            <div className="rounded-lg border border-zinc-200 bg-white">
-              <h2 className="border-b border-zinc-200 px-4 py-2.5 text-sm font-semibold text-zinc-900">
+            <div className="rounded-lg border border-zinc-800 bg-zinc-900/50">
+              <h2 className="border-b border-zinc-800 px-4 py-2.5 text-sm font-semibold text-zinc-100">
                 Company activity
               </h2>
               <table className="w-full text-sm">
@@ -325,15 +325,15 @@ export default function Usage() {
                     </tr>
                   ) : (
                     data.companies.map((c) => (
-                      <tr key={c.id} className="border-t border-zinc-100">
-                        <td className="px-4 py-2 text-zinc-800">{c.name}</td>
+                      <tr key={c.id} className="border-t border-zinc-800/60">
+                        <td className="px-4 py-2 text-zinc-200">{c.name}</td>
                         <td className="px-4 py-2 text-xs text-zinc-500">
                           {c.last_seen ? new Date(c.last_seen).toLocaleString() : '—'}
                         </td>
-                        <td className="px-4 py-2 text-right tabular-nums text-zinc-700">
+                        <td className="px-4 py-2 text-right tabular-nums text-zinc-300">
                           {c.users}
                         </td>
-                        <td className="px-4 py-2 text-right tabular-nums text-zinc-700">
+                        <td className="px-4 py-2 text-right tabular-nums text-zinc-300">
                           {c.events.toLocaleString()}
                         </td>
                       </tr>
@@ -344,8 +344,8 @@ export default function Usage() {
             </div>
           </div>
 
-          <div className="rounded-lg border border-zinc-200 bg-white">
-            <h2 className="border-b border-zinc-200 px-4 py-2.5 text-sm font-semibold text-zinc-900">
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900/50">
+            <h2 className="border-b border-zinc-800 px-4 py-2.5 text-sm font-semibold text-zinc-100">
               API endpoints
             </h2>
             <div className="overflow-x-auto">
@@ -369,16 +369,16 @@ export default function Usage() {
                     </tr>
                   ) : (
                     data.endpoints.map((e) => (
-                      <tr key={`${e.method}${e.path}`} className="border-t border-zinc-100">
-                        <td className="px-4 py-2 font-mono text-xs text-zinc-800">{e.path}</td>
+                      <tr key={`${e.method}${e.path}`} className="border-t border-zinc-800/60">
+                        <td className="px-4 py-2 font-mono text-xs text-zinc-200">{e.path}</td>
                         <td className="px-4 py-2 text-xs text-zinc-500">{e.method}</td>
-                        <td className="px-4 py-2 text-right tabular-nums text-zinc-700">
+                        <td className="px-4 py-2 text-right tabular-nums text-zinc-300">
                           {e.calls.toLocaleString()}
                         </td>
-                        <td className="px-4 py-2 text-right tabular-nums text-zinc-700">
+                        <td className="px-4 py-2 text-right tabular-nums text-zinc-300">
                           {e.avg_ms}ms
                         </td>
-                        <td className="px-4 py-2 text-right tabular-nums text-zinc-700">
+                        <td className="px-4 py-2 text-right tabular-nums text-zinc-300">
                           {e.p95_ms}ms
                         </td>
                         <td

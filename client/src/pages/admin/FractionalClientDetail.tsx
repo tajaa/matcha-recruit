@@ -1,3 +1,4 @@
+import { AdminPageTitle } from '../../components/admin/AdminPageHeader'
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Badge, Button, Card, Input, Modal, PillTabs, Select, Textarea } from '../../components/ui'
@@ -86,17 +87,17 @@ export default function FractionalClientDetail() {
   const c = detail.client
 
   return (
-    <div className="p-6 space-y-5">
+    <div className="space-y-5">
       <Link to="/admin/fractional-hr" className="inline-flex items-center gap-1 text-sm text-zinc-400 hover:text-zinc-200">
         <ArrowLeft size={14} /> Book of business
       </Link>
 
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-xl font-semibold text-zinc-100 flex items-center gap-2">
+          <AdminPageTitle>
             {c.name}
             <Badge variant={STATUS_VARIANT[c.status] ?? 'neutral'}>{c.status}</Badge>
-          </h1>
+          </AdminPageTitle>
           <div className="text-sm text-zinc-500 mt-1 flex flex-wrap gap-x-4 gap-y-1">
             {c.industry && <span>{c.industry}</span>}
             {c.headcount != null && <span>{c.headcount} employees</span>}

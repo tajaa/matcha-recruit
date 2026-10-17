@@ -1,3 +1,4 @@
+import { AdminWorkspace } from '../../../components/admin/AdminWorkspace'
 import { useCallback, useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { BadgeCheck, Bot, Compass, Layers, Library, MessageCircle, Sparkles, Workflow } from 'lucide-react'
@@ -74,12 +75,10 @@ export default function ComplianceStudio() {
     ? Math.round((meters.codified / meters.requirements) * 100) : null
 
   return (
-    <div className="flex h-[calc(100vh-7rem)] flex-col overflow-hidden rounded-xl border border-white/[0.06] bg-zinc-950">
-      {/* Header */}
-      <div className="flex items-center justify-between border-b border-white/[0.06] px-4 py-3">
-        <h1 className="flex items-center gap-2 text-sm font-semibold text-zinc-100">
-          <Sparkles className="h-4 w-4 text-emerald-400" /> Compliance Studio
-        </h1>
+    <AdminWorkspace
+      title="Compliance Studio"
+      description="Research, codify, and maintain authoritative compliance data."
+      actions={
         <div className="flex items-center gap-4">
           {/* The two meters — everything in this studio serves one of these. */}
           <div className="hidden items-center gap-4 font-mono text-[11px] uppercase tracking-wide text-zinc-500 sm:flex">
@@ -121,7 +120,8 @@ export default function ComplianceStudio() {
             <MessageCircle className="h-3.5 w-3.5" /> Guide
           </button>
         </div>
-      </div>
+      }
+    >
 
       {/* Tabs */}
       <div className="flex flex-wrap items-center gap-1 border-b border-white/[0.06] px-2 py-1.5">
@@ -198,6 +198,6 @@ export default function ComplianceStudio() {
           </div>
         )}
       </div>
-    </div>
+    </AdminWorkspace>
   )
 }

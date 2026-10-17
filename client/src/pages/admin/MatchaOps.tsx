@@ -1,3 +1,4 @@
+import { AdminWorkspace } from '../../components/admin/AdminWorkspace'
 import { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Boxes, CalendarDays, ClipboardList, Loader2, MessageSquare, Search, Users } from 'lucide-react'
 import { getOpsCompany, getOpsOverview, listOpsCompanies, updateOpsCompanyFeatures, type OpsCompany, type OpsCompanyDetail, type OpsOverview } from '../../api/admin/matchaOps'
@@ -93,17 +94,21 @@ export default function MatchaOps() {
 
   if (loading) return <div className="flex min-h-[60vh] items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-zinc-500" /></div>
 
-  return <div className="flex h-[calc(100vh-7rem)] min-h-[520px] overflow-hidden rounded-xl border border-white/[0.06] bg-zinc-950">
-    <div className="flex w-72 shrink-0 flex-col border-r border-white/[0.06]">
-      <div className="border-b border-white/[0.06] p-4"><h1 className="text-lg font-semibold text-zinc-100">Matcha Ops</h1><p className="mt-1 text-xs text-zinc-500">Entitlements and operational health.</p></div>
+  return <AdminWorkspace
+    title="Matcha Ops"
+    description="Entitlements and operational health."
+    direction="row"
+  >
+    <div className="flex max-h-56 w-full shrink-0 flex-col border-b border-white/[0.06] md:max-h-none md:w-72 md:border-b-0 md:border-r">
+      <div className="border-b border-white/[0.06] px-3 py-3 text-sm font-medium text-zinc-300">Companies</div>
       <div className="border-b border-white/[0.06] p-3"><div className="relative"><Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" size={14} /><Input label="" placeholder="Search companies..." value={search} onChange={(event) => setSearch(event.target.value)} className="pl-8" /></div></div>
-      <div className="flex-1 overflow-y-auto">
+      <div className="min-w-0 flex-1 overflow-y-auto">
         {filtered.map((company) => <button key={company.company_id} type="button" onClick={() => setSelectedId(company.company_id)} className={`w-full border-l-2 px-3 py-3 text-left ${selectedId === company.company_id ? 'border-emerald-400 bg-white/[0.05]' : 'border-transparent hover:bg-white/[0.03]'}`}><div className="flex items-center justify-between gap-2"><span className="truncate text-sm text-zinc-200">{company.company_name}</span>{company.needs_attention && <AlertTriangle size={14} className="shrink-0 text-amber-400" />}</div><div className="mt-1 text-[11px] text-zinc-500">{company.matcha_ops_enabled ? `${company.operations_channel_count} Ops channels` : 'Ops disabled'}</div></button>)}
         {filtered.length === 0 && <p className="p-4 text-xs text-zinc-500">No companies found.</p>}
       </div>
       <div className="border-t border-white/[0.06] p-3 text-[10px] uppercase tracking-wider text-zinc-600">{companies.length} companies</div>
     </div>
-    <div className="flex-1 overflow-y-auto p-5">
+    <div className="min-w-0 flex-1 overflow-y-auto p-5">
       {overview && <div className="grid grid-cols-2 gap-3 md:grid-cols-4"><Stat label="Ops companies" value={overview.companies_enabled} icon={Users} /><Stat label="Channels" value={overview.operations_channels} icon={MessageSquare} /><Stat label="Open events" value={overview.open_events} icon={ClipboardList} /><Stat label="Upcoming shifts" value={overview.upcoming_shifts} icon={CalendarDays} /></div>}
       {!detail ? <div className="flex min-h-64 items-center justify-center text-sm text-zinc-500">Select a company.</div> : <div className="mt-6 space-y-5">
         <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-xl font-semibold text-zinc-100">{detail.company_name}</h2><p className="mt-1 text-xs text-zinc-500">{detail.signup_source ?? 'legacy company'} · {detail.status}</p></div><Badge variant={detail.needs_attention ? 'warning' : detail.matcha_ops_enabled ? 'success' : 'neutral'}>{detail.needs_attention ? 'Needs attention' : detail.matcha_ops_enabled ? 'Ops enabled' : 'Ops disabled'}</Badge></div>
@@ -113,5 +118,5 @@ export default function MatchaOps() {
         <Button variant="ghost" onClick={() => void load()}>Refresh</Button>
       </div>}
     </div>
-  </div>
+  </AdminWorkspace>
 }

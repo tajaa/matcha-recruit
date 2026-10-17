@@ -1,3 +1,4 @@
+import { AdminPageHeader } from '../../components/admin/AdminPageHeader'
 import { useState, useEffect } from 'react'
 import { Copy, Check, Link, Trash2 } from 'lucide-react'
 import { Link as RouterLink } from 'react-router-dom'
@@ -67,9 +68,8 @@ export default function MatchaLiteAdmin() {
   }
 
   return (
-    <div className="p-6 max-w-3xl">
-      <h1 className="text-xl font-semibold text-zinc-100 mb-1">Self-Serve Signup Links</h1>
-      <p className="text-sm text-zinc-500 mb-6">Comp signup links and pricing for Lite, Matcha-X, and Compliance.</p>
+    <div>
+      <AdminPageHeader title="Self-Serve Signup Links" description="Comp signup links and pricing for Lite, Matcha-X, and Compliance." />
 
       <div className="flex gap-1 mb-6 border-b border-zinc-800">
         <button

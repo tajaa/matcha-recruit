@@ -1,3 +1,4 @@
+import { AdminPageHeader } from '../../../components/admin/AdminPageHeader'
 import { type Dispatch, type SetStateAction } from 'react'
 import { Loader2, ArrowLeft } from 'lucide-react'
 import { api } from '../../../api/client'
@@ -28,7 +29,7 @@ export default function BlogComposer({
   } = useComposer({ isComposer, setPosts, load })
 
   return (
-    <div className="p-6 max-w-3xl mx-auto">
+    <div>
       <div className="flex items-center gap-3 mb-6">
         <button
           onClick={() => {
@@ -48,6 +49,7 @@ export default function BlogComposer({
         </div>
       </div>
 
+      <AdminPageHeader title="New post" description="Write and publish a post for the public blog." />
       <div className="space-y-4">
         <div>
           <label className="text-[10px] uppercase tracking-wider text-zinc-500">Title</label>

@@ -1,5 +1,6 @@
+import { AdminPageHeader } from '../../components/admin/AdminPageHeader'
 import { useState } from 'react'
-import { AlertTriangle, RefreshCw, Search, ChevronDown, ChevronRight, Copy, Check } from 'lucide-react'
+import { RefreshCw, Search, ChevronDown, ChevronRight, Copy, Check } from 'lucide-react'
 import { api } from '../../api/client'
 import { useAsync } from '../../hooks/useAsync'
 import { useDebounced } from '../../hooks/useDebounced'
@@ -207,25 +208,20 @@ export default function ServerErrors() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <div className="flex items-center gap-2">
-            <AlertTriangle size={20} className="text-red-500" />
-            <h1 className="text-xl font-semibold text-zinc-100">Server Errors</h1>
-          </div>
-          <p className="text-sm text-zinc-500 mt-0.5">
-            Backend errors — exceptions, HTTP 5xx, DB, Celery tasks — last {sinceHours} hours ({total} total)
-          </p>
-        </div>
-        <button
-          onClick={refresh}
-          disabled={loading}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800 text-zinc-200 text-xs font-medium hover:bg-zinc-700 disabled:opacity-50 transition-colors"
-        >
-          <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
-          Refresh
-        </button>
-      </div>
+      <AdminPageHeader
+        title="Server Errors"
+        description={<>Backend errors — exceptions, HTTP 5xx, DB, Celery tasks — last {sinceHours} hours ({total} total)</>}
+        actions={
+          <button
+            onClick={refresh}
+            disabled={loading}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-800 text-zinc-200 text-xs font-medium hover:bg-zinc-700 disabled:opacity-50 transition-colors"
+          >
+            <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
+            Refresh
+          </button>
+        }
+      />
 
       {/* Stats cards */}
       {stats && (

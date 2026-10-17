@@ -6,8 +6,9 @@
  *                  to a company's live gap dashboard.
  *   • Onboarding — take a new company through the wizard, or resume a session.
  */
+import { AdminPageHeader } from '../../components/admin/AdminPageHeader'
 import { useState } from 'react'
-import { Sparkles, LayoutGrid, ClipboardList } from 'lucide-react'
+import { LayoutGrid, ClipboardList } from 'lucide-react'
 import GapOverview from './GapOverview'
 import AdminOnboarding from './AdminOnboarding'
 
@@ -22,14 +23,8 @@ export default function GapAnalysisHome() {
     }`
 
   return (
-    <div className="p-6">
-      <div className="flex items-center gap-3 mb-1">
-        <Sparkles className="w-5 h-5 text-vsc-accent" />
-        <h1 className="text-lg font-semibold text-zinc-100">Gap Analysis</h1>
-      </div>
-      <p className="text-xs text-zinc-500 mb-4">
-        Compliance scope across all companies — initial and continuous onboarding.
-      </p>
+    <div>
+      <AdminPageHeader title="Gap Analysis" description="Compliance scope across all companies — initial and continuous onboarding." />
 
       <div className="flex gap-1 border-b border-vsc-border mb-5">
         <button onClick={() => setTab('dashboard')} className={tabClass('dashboard')}>

@@ -1,3 +1,4 @@
+import { AdminPageHeader } from '../../components/admin/AdminPageHeader'
 import { useState } from 'react'
 import { Card } from '../../components/ui'
 import { Button } from '../../components/ui'
@@ -259,9 +260,8 @@ export default function Settings() {
   const hasChanges = selectedMode !== null && selectedMode !== researchMode
 
   return (
-    <div className="max-w-6xl">
-      <h1 className="text-2xl font-semibold text-zinc-100">Settings</h1>
-      <p className="mt-2 text-sm text-zinc-500">Platform-wide configuration.</p>
+    <div>
+      <AdminPageHeader title="Settings" description="Platform-wide configuration." />
 
       {/* Two columns on wide screens: the short sections stack on the left
           against AutoPR's taller board list on the right; the wide ones (AI

@@ -1,3 +1,4 @@
+import { AdminPageHeader } from '../../components/admin/AdminPageHeader'
 import { useEffect, useState, useCallback } from 'react'
 import { api } from '../../api/client'
 import {
@@ -138,8 +139,7 @@ export default function ComplianceManagement() {
 
   return (
     <div>
-      <h1 className="text-2xl font-semibold text-zinc-100">Compliance Management</h1>
-      <p className="mt-1 text-sm text-zinc-500">View and manage compliance requirements for client companies.</p>
+      <AdminPageHeader title="Compliance Management" description="View and manage compliance requirements for client companies." />
 
       {error && (
         <div className="mt-3 p-2 rounded border border-red-800/50 bg-red-900/20 text-sm text-red-400 flex justify-between">

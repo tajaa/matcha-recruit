@@ -1,3 +1,4 @@
+import { AdminPageHeader } from '../../components/admin/AdminPageHeader'
 import { useEffect, useMemo, useState } from 'react'
 import { Loader2, Download, FileText } from 'lucide-react'
 import { Button, Input, Toggle } from '../../components/ui'
@@ -259,8 +260,10 @@ export default function DealFlow() {
 
   return (
     <div>
-      <h1 className="text-2xl font-semibold text-zinc-100">Deal Flow</h1>
-      <p className="mt-2 text-sm text-zinc-500">Generate Matcha proposals. Per-deal inputs are transient; Save persists the editable template for each tab.</p>
+      <AdminPageHeader
+        title="Deal Flow"
+        description="Generate Matcha proposals. Per-deal inputs are transient; Save persists the editable template for each tab."
+      />
 
       <div className="mt-5 flex gap-2 border-b border-zinc-800">
         {([

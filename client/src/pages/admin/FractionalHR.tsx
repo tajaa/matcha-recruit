@@ -1,3 +1,4 @@
+import { AdminPageHeader } from '../../components/admin/AdminPageHeader'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Badge, Button, Card, Input, Modal, Select } from '../../components/ui'
@@ -162,16 +163,16 @@ export default function FractionalHR() {
   const prospectCount = overview?.status_counts.prospect ?? 0
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold text-zinc-100">Fractional HR</h1>
-          <p className="text-sm text-zinc-500">Book of business — engagements we run HR for.</p>
-        </div>
-        <Button onClick={() => setShowAdd(true)}>
-          <Plus size={16} className="mr-1" /> New client
-        </Button>
-      </div>
+    <div className="space-y-6">
+      <AdminPageHeader
+        title="Fractional HR"
+        description="Book of business — engagements we run HR for."
+        actions={
+          <Button onClick={() => setShowAdd(true)}>
+            <Plus size={16} className="mr-1" /> New client
+          </Button>
+        }
+      />
 
       {/* KPIs */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">

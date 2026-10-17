@@ -120,6 +120,22 @@ client/src/
 
 ## Conventions
 
+### Admin pages
+
+`routes/AdminRoutes.tsx` mounts `layouts/AdminLayout.tsx` inside the authenticated
+app shell. That layout owns the centered `max-w-6xl` canvas and area navigation;
+pages should not add another outer width cap or page padding.
+
+- `components/admin/adminNavigation.ts` is the single index for the seven sidebar
+  areas and their page links. Add destinations there; keep existing detail URLs
+  under their owning page so direct links retain the right selection.
+- Use `AdminPageHeader` for a title, description, and optional actions. Dynamic
+  detail headers can use `AdminPageTitle` from the same file beside their badges.
+- Use `AdminWorkspace` for bounded list/detail or console tools. It supplies the
+  same page header, panel styling, and responsive row/column layout.
+- Use the existing `components/ui` primitives for controls and cards, and the
+  zinc/emerald theme tokens so both app themes continue to work.
+
 **Auth + identity**:
 - `useMe()` is the source of truth. Exposes `user`, `hasRole(role)`, `hasFeature(flag)`, `companyFeatures`. Never read token storage directly in components — go through this hook.
 - Tokens live in per-tab `sessionStorage` behind `api/authStorage.ts`; legacy persistent tokens are purged. `api/client.ts` attaches `Authorization: Bearer <token>` automatically and refreshes on 401.

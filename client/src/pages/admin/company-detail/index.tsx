@@ -1,3 +1,4 @@
+import { AdminPageTitle } from '../../../components/admin/AdminPageHeader'
 import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { ArrowLeft, Loader2, Users, Shield, AlertTriangle, Scale, FileText, Activity, Zap } from 'lucide-react'
@@ -121,7 +122,7 @@ export default function AdminCompanyDetail() {
         </Link>
         <div className="flex-1">
           <div className="flex items-center gap-3 flex-wrap">
-            <h1 className="text-2xl font-semibold text-zinc-100">{co.name}</h1>
+            <AdminPageTitle>{co.name}</AdminPageTitle>
             {registration && (
               <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded border ${TIER_BADGE[tierFromRegistration(registration)]}`}>
                 {TIER_LABEL[tierFromRegistration(registration)]}

@@ -1,3 +1,4 @@
+import { AdminPageHeader } from '../../components/admin/AdminPageHeader'
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Loader2, Users, Zap } from 'lucide-react'
@@ -143,10 +144,10 @@ export default function MatchaWork() {
   const [tab, setTab] = useState<Tab>('personal')
   return (
     <div>
-      <div>
-        <h1 className="text-2xl font-semibold text-zinc-100">Matcha Work</h1>
-        <p className="mt-2 text-sm text-zinc-500">Manage personal accounts, business workspaces, subscriptions, access, and token budgets.</p>
-      </div>
+      <AdminPageHeader
+        title="Matcha Work"
+        description="Manage personal accounts, business workspaces, subscriptions, access, and token budgets."
+      />
       <div className="mt-6"><PillTabs options={[{ value: 'personal', label: 'Personal accounts' }, { value: 'business', label: 'Business workspaces' }]} value={tab} onChange={setTab} /></div>
       <div className="mt-7">{tab === 'personal' ? <Individuals embedded /> : <BusinessWork />}</div>
     </div>

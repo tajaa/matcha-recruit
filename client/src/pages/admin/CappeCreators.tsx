@@ -1,3 +1,4 @@
+import { AdminPageHeader } from '../../components/admin/AdminPageHeader'
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { CheckCircle2, ChevronDown, ChevronRight, ExternalLink, XCircle } from 'lucide-react'
 import { api } from '../../api/client'
@@ -409,10 +410,10 @@ export default function CappeCreators() {
 
   return (
     <div>
-      <div>
-        <h1 className="text-2xl font-semibold text-zinc-100">Gummfit Creators</h1>
-        <p className="mt-2 text-sm text-zinc-500">Creator marketplace review queue, roster, social audits, and collab settings.</p>
-      </div>
+      <AdminPageHeader
+        title="Gummfit Creators"
+        description="Creator marketplace review queue, roster, social audits, and collab settings."
+      />
 
       <div className="mt-6">
         <PillTabs

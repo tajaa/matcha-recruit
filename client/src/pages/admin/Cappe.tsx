@@ -1,3 +1,4 @@
+import { AdminPageHeader } from '../../components/admin/AdminPageHeader'
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { ChevronDown, ChevronRight, ExternalLink } from 'lucide-react'
@@ -193,10 +194,7 @@ export default function Cappe() {
 
   return (
     <div>
-      <div>
-        <h1 className="text-2xl font-semibold text-zinc-100">Gummfit</h1>
-        <p className="mt-2 text-sm text-zinc-500">Manage websites, brand accounts, creators, marketplace reviews, and collaborations.</p>
-      </div>
+      <AdminPageHeader title="Gummfit" description="Manage websites, brand accounts, creators, marketplace reviews, and collaborations." />
 
       <div className="mt-6">
         <PillTabs
