@@ -104,7 +104,7 @@ export default function ScheduleNotifications({
           </div>
           <div className="space-y-3 rounded-xl border border-zinc-800 p-4">
             <h3 className="text-sm font-medium">Nightly sales email</h3>
-            <p className="text-xs leading-5 text-zinc-400">Schedule an itemized daily sales export from your POS, with a business date and sales amounts. Use a distinct sender for each store.</p>
+            <p className="text-xs leading-5 text-zinc-400">Schedule a nightly email with an itemized CSV attachment from your POS. Include the business date, sold items, quantities and sales amounts. Use a distinct sender for each store.</p>
             {status.mailbox_configured && status.mailbox_address && status.email_poll_enabled
               ? <p className="text-xs text-zinc-300">Send the nightly report to <strong>{status.mailbox_address}</strong>.</p>
               : <p className="text-xs text-amber-200">Nightly email intake is not ready. A Matcha administrator must configure the intake mailbox, provide its receiving address and enable processing. Registering a sender alone does not activate it.</p>}
