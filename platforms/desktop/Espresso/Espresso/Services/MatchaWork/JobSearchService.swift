@@ -68,6 +68,11 @@ final class JobSearchService {
         try await client.request(method: "PUT", path: "\(basePath)/\(searchId)/weights", body: weights)
     }
 
+    /// Read and rank the search's 3/5 jobs too (free, once a search).
+    func widen(_ searchId: String) async throws -> JobSearchDetail {
+        try await client.request(method: "POST", path: "\(basePath)/\(searchId)/widen")
+    }
+
     func redraft(_ searchId: String, _ leadId: String) async throws -> JobSearchDetail {
         try await client.request(method: "POST", path: "\(basePath)/\(searchId)/leads/\(leadId)/approach")
     }

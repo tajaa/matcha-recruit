@@ -69,6 +69,15 @@ Worker: `workers/tasks/job_search.py`. Migration: `mwjobs01`
 - **Page data reaching a model is bounded.** `page_extract` keeps only the
   scalar fields of JSON-LD `baseSalary` (currency, min/max/value, unit), so a
   page cannot ride a giant salary object into the model's input.
+- **The first pass is the strong matches only.** `enrich` settles the search's
+  fit floor (`progress.fit_floor`, `ranking.FIT_FLOOR` = 4, or 3 when
+  screening rated nothing 4 or higher; `service.fit_floor` reads it) and reads
+  only the postings at or above it. Ranking puts every job under the floor in
+  band 8 (`BELOW_FLOOR_BAND`), after every match, so the top 8 drafts, the
+  Tasks count, the done card and email, the assistant's list and the Mac list
+  all follow the floor without each re-checking fit. A failed screening batch
+  (unrated fit) still counts as a match. A search from before the floor has
+  none: nothing goes in band 8, and it can't widen.
 - **Ranking is deterministic.** Base is scored as a share of the best posted
   base in its currency (not a percentile: $10K apart should be 1.0 vs 0.96).
   Ties break on fit, then newest posting, then id.
@@ -140,7 +149,7 @@ ran out before is left unread (`NOT_TRIED`), not marked read.
 | `queued` → `planning` | `model_phases.plan` | Model: queries (≤8), titles, deal-breakers, profile summary, weights (applied only while `weights_source='default'`). Falls back to `plan_from_criteria`; what the person typed is always searched. Google's `location` only takes Google place names, so a city goes in the query text |
 | `discovering` | `discover` | Up to 3 pages per query, 3 at a time; dedupe on company + title + city; exclusions and remote preference applied. Every API refused for good: nothing more is asked and what was found goes on to screening; with nothing found, fails at once with `UNAVAILABLE` ("Job listings aren't available right now…", free), never retried. Passing errors on every query: retried |
 | `screening` | `model_phases.screen` | Model, batches of 40 by short id (J1…): relevant, fit 0-5, reasons, deal-breaker. A failed batch stays in (unranked fit) |
-| `enriching` | `enrich` | Batches of 24. Reads up to 2 ATS links (via the API), then up to 2 company pages (their JSON-LD `JobPosting`); a careers page that redirects into an ATS is read as that ATS. Only the lead's own job counts, see Invariants. If no link is it, `ats.find_on_board` looks the title up on the employer's Greenhouse, Lever and Ashby boards, by name. Then `service.rerank` and the top 8 are queued (`phase_cursor.approach_queue`) |
+| `enriching` | `enrich` | Batches of 24. Reads up to 2 ATS links (via the API), then up to 2 company pages (their JSON-LD `JobPosting`); a careers page that redirects into an ATS is read as that ATS. Only the lead's own job counts, see Invariants. If no link is it, `ats.find_on_board` looks the title up on the employer's Greenhouse, Lever and Ashby boards, by name. Only jobs at the fit floor (Invariants); the floor is written token-guarded before the re-rank reads it. Then `service.rerank` and the top 8 matches are queued (`phase_cursor.approach_queue`). A widen ends here, drafting nothing |
 | `approaching` | `model_phases.approach` | Model with web search + `fetch_page`, 2 jobs per task. A failed batch is `approach_status='failed'`; the person can redraft |
 | `done` / `failed` / `cancelled` | | |
 
@@ -179,7 +188,14 @@ Redraft: `POST …/leads/{lead}/approach` puts a `done` or `cancelled` search
 back into `approaching` for that one job (free; ≤20 per search, 10/hour). The
 cursor's `after` remembers which: a cancelled search goes back to `cancelled`
 when the draft finishes, fails or goes stale (`service.resting_status`), never
-to `done`. A `failed` search has no ranked jobs and can't redraft. The pay-law
+to `done`. A `failed` search has no ranked jobs and can't redraft.
+
+Widen ("Show N more at 3/5" on the Mac): `POST …/widen` puts a `done` or
+`cancelled` search still at floor 4 back into `enriching` with the floor at 3
+(`service.widen`; cursor `{after, widen: true}`), so its 3/5 postings are read
+and ranked with the rest; the phase then returns to `after` with nothing new
+queued (any job can still be drafted). Free and once per search: a search at
+floor 3 is refused 409, which is also the rate limit. The pay-law
 hint (`service.PAY_LAW_STATES`: the employer-side list plus MA) is set at
 re-rank for unposted pay and given to the approach phase.
 
@@ -187,7 +203,9 @@ re-rank for unposted pay and given to the approach phase.
 
 `agent_runtime/abilities/jobs.py` (`private_only`, `jobs-1`): list and read
 searches and jobs, keep the person's status and notes (`update_job_lead`),
-re-rank (`rank_job_search`). The `jobs` block is rebuilt from the jobs the run
+re-rank (`rank_job_search`). `read_job_search` lists the search's matches
+and counts the jobs under its floor (`weaker_matches`); `include_weaker` lists
+them too. The `jobs` block is rebuilt from the jobs the run
 read, so pay in chat is always the posting's own.
 
 ## In Tasks

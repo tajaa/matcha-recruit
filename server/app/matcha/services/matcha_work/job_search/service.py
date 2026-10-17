@@ -54,6 +54,17 @@ def _num(value):
     return float(value) if value is not None else None
 
 
+def fit_floor(search) -> int | None:
+    """The fit a job needs to be read, ranked among the matches and drafted
+    for: `ranking.FIT_FLOOR` (4/5) for a search's first pass, or
+    `WIDER_FIT_FLOOR` (3/5) once the person widened it (`widen`). Set when
+    enrich first runs (`progress.fit_floor`). None for a search from before
+    floors, or one stopped before then: every relevant job counts, as it did."""
+    progress = decode_jsonb(dict(search).get("progress"), {}) or {}
+    value = progress.get("fit_floor") if isinstance(progress, dict) else None
+    return int(value) if value in (ranking.FIT_FLOOR, ranking.WIDER_FIT_FLOOR) else None
+
+
 def search_view(row) -> dict:
     row = dict(row)
     return {
@@ -70,6 +81,7 @@ def search_view(row) -> dict:
         "error": row.get("error"),
         "lead_count": int(row.get("lead_count") or 0),
         "posted_pay_count": int(row.get("posted_pay_count") or 0),
+        "fit_floor": fit_floor(row),
         "created_at": _iso(row.get("created_at")),
         "updated_at": _iso(row.get("updated_at")),
         "started_at": _iso(row.get("started_at")),
@@ -480,6 +492,7 @@ async def rerank(conn, search) -> int:
         decode_jsonb(search.get("weights"), {}) or {},
         floor=criteria.get("base_floor"),
         currency=criteria.get("currency") or "USD",
+        fit_floor=fit_floor(search),
     )
     await conn.execute(
         """UPDATE mw_job_leads AS l
@@ -525,6 +538,40 @@ async def load_resume_for_model(user_id: UUID) -> str | None:
     if raw:
         text = f"{text}\n\n{raw}" if text else raw
     return text[:RESUME_CHARS] or None
+
+
+async def widen(search_id: UUID, user_id: UUID):
+    """Add a finished search's 3/5 matches: back to `enriching` with the floor
+    at `WIDER_FIT_FLOOR`, so their postings are read and they rank with the
+    rest. Nothing new is drafted (the person can draft any job). Free, and once
+    per search: only a search still at its first-pass floor can widen.
+
+    Returns (search row, new token) for the caller to dispatch.
+    """
+    token = uuid4()
+    async with connection_or_direct() as conn, conn.transaction():
+        search = await owned_search(conn, search_id, user_id, lock=True)
+        if search["status"] in LIVE:
+            raise JobSearchError("This search is still running. Try again when it finishes.", 409)
+        if search["status"] not in REDRAFTABLE:
+            raise JobSearchError("Only a finished or cancelled search can show more matches.", 409)
+        if fit_floor(search) != ranking.FIT_FLOOR:
+            raise JobSearchError("This search already shows its 3/5 matches.", 409)
+        try:
+            search = await conn.fetchrow(
+                """UPDATE mw_job_searches
+                   SET status = 'enriching', dispatch_token = $2, lease_until = NULL, attempts = 0,
+                       phase_cursor = $3::jsonb, completed_at = NULL,
+                       progress = progress || $4::jsonb, updated_at = NOW()
+                   WHERE id = $1 RETURNING *""",
+                search_id, token,
+                # `after` as a redraft's: a cancelled search stays cancelled.
+                json.dumps({"after": search["status"], "widen": True}),
+                json.dumps({"fit_floor": ranking.WIDER_FIT_FLOOR, "note": "Reading the 3/5 matches…"}),
+            )
+        except asyncpg.UniqueViolationError as exc:
+            raise JobSearchError("Another job search is running. Try again when it finishes.", 409) from exc
+    return search, token
 
 
 async def requeue_approach(search_id: UUID, lead_id: UUID, user_id: UUID):

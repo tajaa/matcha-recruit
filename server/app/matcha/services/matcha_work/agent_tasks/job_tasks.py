@@ -26,6 +26,7 @@ from typing import Any
 from uuid import UUID
 
 from app.database import decode_jsonb
+from app.matcha.services.matcha_work.job_search.ranking import BELOW_FLOOR_BAND
 
 from .playbook import IntakeField, Playbook
 
@@ -40,12 +41,16 @@ _STATUS = {"queued": "queued", "done": "done", "failed": "failed", "cancelled": 
 STATUS_SQL = "CASE s.status " + " ".join(f"WHEN '{k}' THEN '{v}'" for k, v in _STATUS.items()) + " ELSE 'running' END"
 
 JOIN = "LEFT JOIN mw_job_searches s ON s.id = t.job_search_id"
-COLUMNS = """s.status AS js_status, s.title AS js_title, s.ask AS js_ask, s.progress AS js_progress,
+# A job counts as shown when it is a match at the search's fit floor: once
+# ranked, a weaker fit sits in `BELOW_FLOOR_BAND` (`job_search.ranking`).
+_MATCH_BAND = f"(l.rank_band IS NULL OR l.rank_band < {BELOW_FLOOR_BAND})"
+COLUMNS = f"""s.status AS js_status, s.title AS js_title, s.ask AS js_ask, s.progress AS js_progress,
              s.error AS js_error, s.updated_at AS js_updated_at, s.started_at AS js_started_at,
              s.completed_at AS js_completed_at, s.deleted_at AS js_deleted_at,
              (SELECT COUNT(*) FROM mw_job_leads l WHERE l.search_id = s.id) AS js_lead_count,
              (SELECT COUNT(*) FROM mw_job_leads l WHERE l.search_id = s.id
-                AND l.screen_status <> 'irrelevant' AND l.user_state <> 'dismissed') AS js_shown_count"""
+                AND l.screen_status <> 'irrelevant' AND l.user_state <> 'dismissed'
+                AND {_MATCH_BAND}) AS js_shown_count"""
 # A pointer whose search is gone (deleted from an older app) isn't shown.
 VISIBLE = "(t.engine <> 'job_search' OR (s.id IS NOT NULL AND s.deleted_at IS NULL))"
 
@@ -243,7 +248,8 @@ async def search_stopped(conn, search_id: UUID) -> None:
         await conn.execute("UPDATE mw_agent_tasks SET completed_at = NOW() WHERE id = $1", task["id"])
         await notify.tell(conn, task)
         top = [lead_item(lead_summary(r)) for r in await conn.fetch(
-            f"""SELECT * FROM mw_job_leads WHERE search_id = $1 AND screen_status <> 'irrelevant'
+            f"""SELECT * FROM mw_job_leads l WHERE search_id = $1 AND screen_status <> 'irrelevant'
+                AND {_MATCH_BAND}
                 ORDER BY rank NULLS LAST, created_at LIMIT {TOP_LEADS}""",
             search_id,
         )] if task["status"] == "done" else []

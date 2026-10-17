@@ -164,6 +164,10 @@ struct JobSearchSummary: Decodable, Identifiable, Hashable {
     var weights: JobSearchWeights
     var useResume: Bool
     var createdAt: String?
+    /// The lowest fit (out of 5) the search reads, ranks first and drafts:
+    /// 4 for its first pass (3 when nothing scored 4), 3 once widened. nil
+    /// before it is settled, and for a search from before the floor.
+    var fitFloor: Int?
 
     enum CodingKeys: String, CodingKey {
         case id, title, ask, status, progress, error, weights
@@ -171,6 +175,7 @@ struct JobSearchSummary: Decodable, Identifiable, Hashable {
         case postedPayCount = "posted_pay_count"
         case useResume = "use_resume"
         case createdAt = "created_at"
+        case fitFloor = "fit_floor"
     }
 
     init(from decoder: Decoder) throws {
@@ -186,6 +191,7 @@ struct JobSearchSummary: Decodable, Identifiable, Hashable {
         weights = c.value(.weights) ?? .standard
         useResume = c.value(.useResume) ?? false
         createdAt = c.value(.createdAt)
+        fitFloor = c.value(.fitFloor)
     }
 
     var isLive: Bool { JobSearchStatus.isLive(status) }
@@ -278,6 +284,10 @@ struct JobLeadSummary: Decodable, Identifiable, Hashable {
     }
 
     var isIrrelevant: Bool { screenStatus == "irrelevant" }
+    /// Ranked after every match because its fit is under the search's floor
+    /// (the server's `BELOW_FLOOR_BAND`).
+    var isBelowFloor: Bool { rankBand == JobLeadSummary.belowFloorBand }
+    nonisolated static let belowFloorBand = 8
     var isDrafting: Bool { approachStatus == "queued" || approachStatus == "drafting" }
     var hasApproach: Bool { approachStatus == "done" }
     /// In Gmail drafts, waiting to be edited and sent.

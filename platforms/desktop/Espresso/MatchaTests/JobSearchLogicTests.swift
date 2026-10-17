@@ -65,6 +65,46 @@ final class JobSearchLogicTests: XCTestCase {
         XCTAssertTrue(JobSearchViewModel.filtered(leads, filter: .applied, showIrrelevant: true).isEmpty)
     }
 
+    private let flooredJSON = """
+    {"id": "s2", "title": "CPO", "status": "done", "fit_floor": 4, "fingerprint": "f",
+     "leads": [
+       {"id": "a", "fit_score": 5, "screen_status": "relevant", "rank": 1, "rank_band": 0, "user_state": "new"},
+       {"id": "b", "fit_score": 3, "screen_status": "relevant", "rank": 2, "rank_band": 8, "user_state": "new"},
+       {"id": "c", "fit_score": 3, "screen_status": "relevant", "rank": 3, "rank_band": 8, "user_state": "saved"},
+       {"id": "d", "fit_score": 2, "screen_status": "relevant", "rank": 4, "rank_band": 8, "user_state": "new"},
+       {"id": "e", "fit_score": 3, "screen_status": "relevant", "rank": 5, "rank_band": 8, "user_state": "dismissed"},
+       {"id": "f", "fit_score": 0, "screen_status": "irrelevant", "rank": 6, "rank_band": 9, "user_state": "new"}
+     ]}
+    """
+
+    func testJobsUnderTheFitFloorHideUntilAsked() throws {
+        let detail = try decode(JobSearchDetail.self, flooredJSON)
+        XCTAssertEqual(detail.search.fitFloor, 4)
+        XCTAssertEqual(detail.leads.map(\.isBelowFloor), [false, true, true, true, true, false])
+        XCTAssertEqual(JobSearchViewModel.filtered(detail.leads, filter: .all, showIrrelevant: false).map(\.id), ["a"])
+        XCTAssertEqual(JobSearchViewModel.filtered(detail.leads, filter: .all, showIrrelevant: true).map(\.id),
+                       ["a", "b", "c", "d", "f"])
+        // A job they saved stays in Saved, whatever its fit.
+        XCTAssertEqual(JobSearchViewModel.filtered(detail.leads, filter: .saved, showIrrelevant: false).map(\.id), ["c"])
+        XCTAssertEqual(JobSearchDetailView.statusText(detail.leads[1]), "Weaker fit")
+        XCTAssertEqual(JobSearchDetailView.statusText(detail.leads[2]), "Saved")
+        XCTAssertEqual(JobSearchDetailView.statusText(detail.leads[5]), "Screened out")
+    }
+
+    func testShowMoreCountsTheFinishedSearchsRelevant3Of5Jobs() throws {
+        var detail = try decode(JobSearchDetail.self, flooredJSON)
+        XCTAssertEqual(JobSearchViewModel.widerCount(detail), 2)  // b and c: not 2/5, dismissed or screened out
+        detail.search.status = "approaching"
+        XCTAssertEqual(JobSearchViewModel.widerCount(detail), 0)  // still running
+        detail.search.status = "cancelled"
+        XCTAssertEqual(JobSearchViewModel.widerCount(detail), 2)
+        detail.search.fitFloor = 3
+        XCTAssertEqual(JobSearchViewModel.widerCount(detail), 0)  // widened already
+        detail.search.fitFloor = nil
+        XCTAssertEqual(JobSearchViewModel.widerCount(detail), 0)  // from before the floor
+        XCTAssertNil(try decode(JobSearchDetail.self, detailJSON).search.fitFloor)
+    }
+
     func testDraftedShowsTheJobsWithAnApproach() throws {
         var leads = try decode(JobSearchDetail.self, detailJSON).leads
         XCTAssertEqual(JobSearchViewModel.filtered(leads, filter: .drafted, showIrrelevant: false).map(\.id), ["l1"])

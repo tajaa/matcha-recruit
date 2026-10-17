@@ -8,6 +8,9 @@ a 0..1 score per component; the rank is the weighted sum, inside a band:
      currencies: base is scored within that currency)
   2  base pay not posted: base drops out and the other weights are
      renormalized. Undisclosed pay is unknown, never $0.
+  8  screened a weaker fit than the search's fit floor (`fit_floor`): a
+     search shows its strong matches first (`FIT_FLOOR`, 4/5) and adds the
+     3/5 ones only when the person asks (`WIDER_FIT_FLOOR`). Not drafted for.
   9  marked irrelevant by screening, or dismissed by the person
 
 A bonus is scored against the base it is paid on: its score is scaled by the
@@ -26,6 +29,12 @@ from typing import Any
 from . import comp as comp_mod
 
 DEFAULT_WEIGHTS = {"base": 0.45, "bonus": 0.2, "equity": 0.2, "fit": 0.15}
+# A search's first pass reads, ranks and drafts for its 4/5 and 5/5 matches;
+# the person can widen it once to 3/5. Jobs under the floor rank in
+# `BELOW_FLOOR_BAND`, after every match and before the screened-out ones.
+FIT_FLOOR = 4
+WIDER_FIT_FLOOR = 3
+BELOW_FLOOR_BAND = 8
 COMPONENTS = ("base", "bonus", "equity", "fit")
 BONUS_CAP_PCT = 50.0
 EQUITY_CAP_PCT = 2.0
@@ -95,10 +104,12 @@ def _posted_key(lead: dict) -> float:
 
 
 def rank(leads: list[dict], weights: dict | None, *, floor: float | None = None,
-         currency: str = "USD") -> list[Ranked]:
+         currency: str = "USD", fit_floor: int | None = None) -> list[Ranked]:
     """Rank `leads` (dicts with id, comp, fit_score, screen_status, user_state).
 
-    `posted_order` (optional, larger = newer) breaks ties after fit.
+    `posted_order` (optional, larger = newer) breaks ties after fit. With a
+    `fit_floor`, a lead screened below it ranks in `BELOW_FLOOR_BAND`; one
+    with no fit score (its screening batch failed) is not held below it.
     """
     weights = clean_weights(weights)
     currency = (currency or "USD").upper()
@@ -125,6 +136,8 @@ def rank(leads: list[dict], weights: dict | None, *, floor: float | None = None,
         }
         if lead.get("screen_status") == "irrelevant" or lead.get("user_state") == "dismissed":
             band = 9
+        elif fit_floor is not None and isinstance(fit, (int, float)) and fit < fit_floor:
+            band = BELOW_FLOOR_BAND
         elif lo is None:
             band = 2
         else:

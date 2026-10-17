@@ -103,6 +103,22 @@ async def test_rank_with_new_weights(run, monkeypatch):
     assert "error" in bad
 
 
+@pytest.mark.asyncio
+async def test_jobs_below_the_fit_floor_are_counted_not_listed(run, monkeypatch):
+    _ability, state, _ctx, call = run
+    weak = [lead(id=str(uuid4()), fit_score=3, rank_band=8) for _ in range(3)]
+    view = {**search_view([lead(rank_band=0)] + weak), "fit_floor": 4}
+    monkeypatch.setattr(jobs.store, "get_search", AsyncMock(return_value=view))
+    page = await call("read_job_search", search_id=SEARCH)
+    assert [j["id"] for j in page["jobs"]] == [LEAD] and page["weaker_matches"] == 3
+    assert page["search"]["fit_floor"] == 4 and page["next_offset"] is None
+    wide = await call("read_job_search", search_id=SEARCH, include_weaker=True)
+    assert len(wide["jobs"]) == 4 and wide["weaker_matches"] == 3
+    monkeypatch.setattr(jobs.store, "update_weights", AsyncMock(return_value=view))
+    ranked = await call("rank_job_search", search_id=SEARCH, base=1, bonus=0, equity=0, fit=0)
+    assert [j["id"] for j in ranked["jobs"]] == [LEAD]
+
+
 def test_block_is_rebuilt_from_what_was_read(run):
     ability, state, _ctx, _call = run
     jobs._remember(jobs.session_of(state), SEARCH, [lead(comp_line="$250K–$300K")])

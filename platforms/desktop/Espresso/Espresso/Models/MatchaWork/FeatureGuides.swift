@@ -352,7 +352,8 @@ extension FeatureGuide {
         Page(stage: .expect, icon: "clock.fill",
              title: "Give it a few minutes",
              points: [
-                "It searches Google Jobs and company job boards, drops what doesn't fit, reads the postings and ranks them.",
+                "It searches Google Jobs and company job boards, scores each job's fit out of 5 and drops what doesn't fit.",
+                "It reads and ranks your strongest matches first: 4/5 and 5/5 (3/5 if nothing scores that high). Show more at 3/5 adds the next tier for free, once a search, and Show weaker matches lists the rest.",
                 "You can close Espresso while it works. The list fills in as it goes, Cancel stops it, and when it's done you get a notification and an email with the top jobs.",
                 "Ranking follows What matters. Change the weights to re-rank anytime.",
              ]),

@@ -322,7 +322,7 @@ async def test_enrich_phase_batches_then_ranks(conn, monkeypatch):
     rerank = AsyncMock(return_value=2)
     monkeypatch.setattr(phases, "rerank", rerank)
     leads = [lead([GH_URL]), lead(["https://www.linkedin.com/x"])]
-    conn.on("WHERE search_id = $1 AND enriched_at IS NULL AND screen_status <> 'irrelevant'\n                ORDER BY",
+    conn.on("AND enriched_at IS NULL AND screen_status <> 'irrelevant' AND (fit_score IS NULL OR fit_score >= $2)\n                ORDER BY",
             leads)
     conn.on("SELECT COUNT(*) FROM mw_job_leads WHERE search_id = $1\n               AND enriched_at IS NULL", 5)
     conn.on("COUNT(*) FILTER", {"total": 7, "posted": 3})
@@ -340,7 +340,7 @@ async def test_enrich_phase_batches_then_ranks(conn, monkeypatch):
 
     conn.on("SELECT COUNT(*) FROM mw_job_leads WHERE search_id = $1\n               AND enriched_at IS NULL", 0)
     conn.on("SELECT 1 FROM mw_job_searches WHERE id = $1 AND dispatch_token = $2", 1)
-    conn.on("SELECT * FROM mw_job_searches WHERE id = $1", search)
+    conn.on("SET progress = progress || $2::jsonb", search)
     out = await phases.enrich(search, deps, guard())
     assert out.status == "done" and out.progress["posted_pay"] == 3 and out.progress["ranked"] is True
     rerank.assert_awaited_once()
@@ -367,12 +367,13 @@ async def test_enrich_phase_batches_then_ranks(conn, monkeypatch):
 async def test_a_budget_that_runs_out_mid_batch_leaves_the_rest_unread(conn, monkeypatch):
     monkeypatch.setattr(phases, "rerank", AsyncMock(return_value=2))
     leads = [lead([GH_URL]), lead([GH_URL])]
-    conn.on("WHERE search_id = $1 AND enriched_at IS NULL AND screen_status <> 'irrelevant'\n                ORDER BY",
+    conn.on("AND enriched_at IS NULL AND screen_status <> 'irrelevant' AND (fit_score IS NULL OR fit_score >= $2)\n                ORDER BY",
             leads)
     conn.on("COUNT(*) FILTER", {"total": 2, "posted": 1})
     conn.on("SELECT COUNT(*) FROM mw_job_leads WHERE search_id = $1\n               AND enriched_at IS NULL", 1)
     conn.on("SELECT 1 FROM mw_job_searches WHERE id = $1 AND dispatch_token = $2", 1)
     conn.on("RETURNING GREATEST(LEAST($2, $3 - cur.before), 0)", 1)
+    conn.on("SET progress = progress || $2::jsonb", search_row(status="enriching"))
     deps = phases.Deps(ats_fetch=AsyncMock(return_value=ats_posting()), page_fetch=AsyncMock())
     out = await phases.enrich(search_row(status="enriching"), deps, guard())
     # One lead read; the other was never tried, so it is not marked read, and
