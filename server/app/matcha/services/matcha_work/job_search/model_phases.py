@@ -1,4 +1,5 @@
-"""The job search phases that call a model: plan, screen, approach.
+"""The job search phases that call a model: plan, screen, approach (the web
+search in discover is `discovery.py`).
 
 Each is one bounded agent-runtime run (`agent_phase.run_model_phase`) whose
 output is its finish contract (`contracts.py`). The model never writes: this
@@ -89,7 +90,7 @@ async def plan(search: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
             json.dumps(ranking.clean_weights(weights)) if weights else None,
         )
     return PhaseOutcome(
-        status="discovering",
+        status="discovering", cursor={},
         progress={"note": f"Searching {len(planned['queries'])} ways…", "queries": len(planned["queries"])},
     )
 

@@ -1,4 +1,5 @@
 """The REST layer: switched off by default, personal-only, owner-scoped, thin."""
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -59,17 +60,19 @@ async def test_errors_and_gates(monkeypatch):
     monkeypatch.setattr(routes, "get_client_company_id", AsyncMock(return_value=None))
     with pytest.raises(HTTPException):
         await routes.list_agent_tasks(USER)
-    from app.matcha.services.matcha_work.job_search import providers
-
     monkeypatch.setattr(routes.enqueue, "tasks_enabled", lambda user: False)
-    monkeypatch.setattr(providers, "configured", lambda: False)
+    # Job search isn't behind the Tasks switch: its searches are here either way.
+    assert await routes.require_tasks(USER) is USER
+    assert routes._engines(USER) == ("job_search",)
+    # Unless its playbook can't run here.
+    real = routes.job_tasks
+    monkeypatch.setattr(routes, "job_tasks",
+                        SimpleNamespace(ENGINE="job_search", PLAYBOOK=SimpleNamespace(env_ready=lambda: False)))
     with pytest.raises(HTTPException) as exc:
         await routes.require_tasks(USER)
     assert exc.value.detail["code"] == "feature_disabled"
-    # Job search isn't behind the Tasks switch: its searches are here either way.
-    monkeypatch.setattr(providers, "configured", lambda: True)
-    assert await routes.require_tasks(USER) is USER
-    assert routes._engines(USER) == ("job_search",)
+    monkeypatch.setattr(routes, "job_tasks", real)
+    monkeypatch.setattr(routes.enqueue, "tasks_enabled", lambda user: True)
     monkeypatch.setattr(routes.enqueue, "tasks_enabled", lambda user: True)
     assert await routes.require_tasks(USER) is USER
     assert routes._engines(USER) == ("chain", "job_search")

@@ -81,17 +81,13 @@ def test_a_job_reads_as_a_finding():
 
 # ── the playbook ──────────────────────────────────────────────────────────────
 
-def test_the_job_search_playbook(monkeypatch):
+def test_the_job_search_playbook():
     book = playbooks.get("job_search")
     assert book is job_tasks.PLAYBOOK and book.engine == "job_search" and book.consent == "jobs"
     book.validate()
     assert "job_search" in playbooks.startable_keys() and "research" in playbooks.startable_keys()
-    from app.matcha.services.matcha_work.job_search import providers
-
-    monkeypatch.setattr(providers, "configured", lambda: True)
-    assert playbooks.startable(book)
-    monkeypatch.setattr(providers, "configured", lambda: False)
-    assert not playbooks.startable(book) and not playbooks.startable(None)
+    # No listings key needed: a search finds its postings on the web.
+    assert playbooks.startable(book) and not playbooks.startable(None)
     assert book.view()["intake"][2]["options"] == ["Any", "Remote only", "On-site only"]
 
 

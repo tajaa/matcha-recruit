@@ -18,7 +18,8 @@ costs 5 units of Pro's 60 / Business's 150, so 12 searches with nothing else;
 
 | Piece | File | What it owns |
 |---|---|---|
-| Listings | `providers.py` | Google Jobs via SearchAPI (`SEARCH_API_KEY`), then SerpApi (`SERP_API_KEY`) (`FallbackJobs`). Requests and moving between them are `matcha_work/search_apis.py`'s, shared with research tasks: one that refuses for good (a refused key, or no searches left: a 402, or a 429 in the API's own words, `out_of_searches`; never a per-minute quota) is dropped for the phase and logged as an error (Admin → Server Errors); one still down after its retry is passed over when another follows. Only query + location leave the server |
+| Discovery | `discovery.py` | The `discovering` phase in three steps: Google Jobs (`phases.listings`), a model web search for postings on employers' own boards, then reading each one (ATS API or JSON-LD) into an already-read lead. Works with no listings key |
+| Listings | `providers.py` | Google Jobs via SearchAPI (`SEARCH_API_KEY`), then SerpApi (`SERP_API_KEY`) (`FallbackJobs`), as extra coverage: with neither, the web alone. Requests and moving between them are `matcha_work/search_apis.py`'s, shared with research tasks: one that refuses for good (a refused key, or no searches left: a 402, or a 429 in the API's own words, `out_of_searches`; never a per-minute quota) is dropped for the rest of the search and logged as an error (Admin → Server Errors); one still down after its retry is passed over when another follows. Only query + location leave the server |
 | ATS | `ats.py` | Greenhouse / Lever / Ashby detection from apply links, their public APIs, application questions; `find_on_board`, the employer's own board found by name |
 | Pay | `comp.py` (pure) | Text scanning, structured mappers, `combine`, claim checks (`verify_quote`, `numbers_supported`) |
 | Ranking | `ranking.py` (pure) | Weighted score inside bands; `comp_line` |
@@ -27,10 +28,10 @@ costs 5 units of Pro's 60 / Business's 150, so 12 searches with nothing else;
 | Allowance | `quota.py` | The monthly count |
 | Start | `enqueue.py` | `preflight`, `create_search`, `dispatch`, `queue_for` |
 | Chain | `orchestrator.py` | `PHASES`, `_ending`, `JOB_CHAIN` (the search's `ChainSpec`); `claim` / `advance` / `run_phase`, `nudge`, `reconcile` are the engine's (`agent_runtime/chain.py`) bound to it |
-| Phases | `phases.py` | `discover`, `enrich` (+ ranking, + queue the top 8 for approaches); `plan_from_criteria`; `Guard`, `grant`, `refund` bound to the search row |
-| Model phases | `model_phases.py` | `plan`, `screen`, `approach` |
+| Phases | `phases.py` | `listings` (Google Jobs), `enrich` (+ ranking, + queue the top 8 for approaches); `plan_from_criteria`; `read_job_page`; `Guard`, `grant`, `refund` bound to the search row |
+| Model phases | `model_phases.py` | `plan`, `screen`, `approach` (the web search is in `discovery.py`) |
 | One model run | `agent_phase.py` | The search as a `phase_run.RunOwner` (kind `job_search`, counted on the search row); the run itself is `agent_runtime/phase_run.py` |
-| Model contracts | `contracts.py` (pure) | Finish tools + `normalize_plan` / `normalize_screen` / `normalize_approaches` |
+| Model contracts | `contracts.py` (pure) | Finish tools + `normalize_plan` / `normalize_postings` / `normalize_screen` / `normalize_approaches` |
 | Prompts | `prompts.py` | Phase instructions and user turns |
 
 REST: `routes/matcha_work/job_search.py` (`/matcha-work/job-searches`).
@@ -48,6 +49,13 @@ Worker: `workers/tasks/job_search.py`. Migration: `mwjobs01`
   names an employer, it must also pass `normalize.same_employer`: Greenhouse's
   `company_name`, an ATS board's name, or a page's hiring organization. A
   posting that fails is passed over and the next link tried, never kept.
+- **A posting found on the web is kept only once it has been read.** The web
+  run hands back links, and each link must be one its searches or page loads
+  returned (`contracts.normalize_postings`). Code then reads each one, from
+  the ATS's public API or the page's JobPosting data. A posting the ATS no
+  longer has, one past its `validThrough`, or a page with no posting on it is
+  dropped. So a model can't add a job that isn't there, and the title, the
+  pay and the questions come from the posting, never from the model.
 - **No pay figure without evidence.** Every base/bonus/equity value carries
   `evidence {quote, origin, url}`. From text, the quote is a slice of the text
   it came from; from a structured field (Lever `salaryRange`, Greenhouse pay
@@ -94,10 +102,13 @@ Worker: `workers/tasks/job_search.py`. Migration: `mwjobs01`
   keeps a blanked row for that reason. Re-ranking never counts.
 - **The server chooses where it connects.** ATS API URLs are built from tokens
   matched by strict patterns, on fixed hosts, through `safe_fetch.fetch_public`.
-  The tokens come from an apply link, or from a board name guessed from the
-  employer's name (`ats.board_names`).
+  The tokens come from an apply link, a link the web run found, or a board
+  name guessed from the employer's name (`ats.board_names`).
   Company pages go through the same fetcher; aggregators (LinkedIn, Indeed, …)
   are skipped, not scraped.
+- **The résumé never goes to the web run.** Its searches leave for the open
+  web, so it gets only the ask, what the person set, the planned titles and
+  what was already found (`prompts.discover_turn`).
 
 ## The chain
 
@@ -135,8 +146,8 @@ replacing `JOB_CHAIN` (`dataclasses.replace(..., dispatch=...)`).
   (main-worker start, next to the sales reconcile) give an idle live search a
   new token and dispatch it. Celery does not redeliver a killed task.
 
-Budgets per search, across retries: 30 provider calls, 120 leads, 240 page/API
-fetches (`MAX_FETCHES`), at most `LEAD_FETCHES` (10) for one lead. Calls are reserved on the search row before they are made
+Budgets per search, across retries: 30 provider calls, 120 leads, 400 page/API
+fetches (`MAX_FETCHES`, shared: discovery's reads first, then enrich), at most `LEAD_FETCHES` (10) for one lead. Calls are reserved on the search row before they are made
 (`phases.grant` → `chain.grant`, one statement under a row lock) and only the unused part is
 given back (`refund`). A task killed mid-phase gives nothing back, so a retry
 works from what is left: it can never buy a second budget. A lead the budget
@@ -147,7 +158,7 @@ ran out before is left unread (`NOT_TRIED`), not marked read.
 | Status | Phase | Notes |
 |---|---|---|
 | `queued` → `planning` | `model_phases.plan` | Model: queries (≤8), titles, deal-breakers, profile summary, weights (applied only while `weights_source='default'`). Falls back to `plan_from_criteria`; what the person typed is always searched. Google's `location` only takes Google place names, so a city goes in the query text |
-| `discovering` | `discover` | Up to 3 pages per query, 3 at a time; dedupe on company + title + city; exclusions and remote preference applied. Every API refused for good: nothing more is asked and what was found goes on to screening; with nothing found, fails at once with `UNAVAILABLE` ("Job listings aren't available right now…", free), never retried. Passing errors on every query: retried |
+| `discovering` | `discovery.discover` | Three steps, each its own task (`phase_cursor.step`). `listings`: Google Jobs when a key is set, up to 3 pages per query, 3 at a time; dedupe on company + title + city; exclusions and remote preference applied. No key, a refusal or failing queries never stop the search. `web`: one model run with web search only (no page loads: code reads every posting; with them a run spent its turns re-checking pages), ≤300 s, ≤16 searches, finds ≤40 postings on Greenhouse, Lever, Ashby and careers pages; the links wait in the cursor. Code writes the searches it starts from (`web_searches`: each of 3 titles on each board, then each title in each place, ≤14), half to each run, because a model left to choose ran one search and stopped. Workday isn't asked for: its pages are scripts with no posting data, and its API refuses servers (checked 2026-10-16). `read`: each is read (4 fetches reserved each, 6 at a time, 240 s; what's still loading then is dropped). A careers page that can't be read (a bot check, a script page) is looked up on the employer's own board (`ats.find_on_board`, same title and employer). Known links and aggregators are skipped, and duplicates of a lead are dropped (`dedupe_key`, `same_posting`). Kept leads are `enriched_at` set with `source` greenhouse/lever/ashby/web and their `ats` questions. The web runs a second time when fewer than 30 came from the web and the first added jobs or searches are left. Nothing found: `UNAVAILABLE` (free) when no source could be searched, else "No postings matched" |
 | `screening` | `model_phases.screen` | Model, batches of 40 by short id (J1…): relevant, fit 0-5, reasons, deal-breaker. A failed batch stays in (unranked fit) |
 | `enriching` | `enrich` | Batches of 24. Reads up to 2 ATS links (via the API), then up to 2 company pages (their JSON-LD `JobPosting`); a careers page that redirects into an ATS is read as that ATS. Only the lead's own job counts, see Invariants. If no link is it, `ats.find_on_board` looks the title up on the employer's Greenhouse, Lever and Ashby boards, by name. Only jobs at the fit floor (Invariants); the floor is written token-guarded before the re-rank reads it. Then `service.rerank` and the top 8 matches are queued (`phase_cursor.approach_queue`). A widen ends here, drafting nothing |
 | `approaching` | `model_phases.approach` | Model with web search + `fetch_page`, 2 jobs per task. A failed batch is `approach_status='failed'`; the person can redraft |
@@ -171,6 +182,7 @@ The output of each phase is its **finish contract**, not draft tools (a finish
 next to a write is refused by the runner, and the last turn forces finish).
 `contracts.py` checks it; the orchestrator writes what survives:
 
+- a found posting's link must be one this run's searches or loads returned;
 - ids must be the batch's short ids;
 - a contact must be named on a page `fetch_page` loaded in this run, with that
   page as its source;

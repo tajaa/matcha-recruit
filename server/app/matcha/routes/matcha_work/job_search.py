@@ -15,7 +15,7 @@ from app.core.models.auth import CurrentUser
 from app.matcha.dependencies import get_client_company_id, require_admin_or_client
 from app.matcha.models.matcha_work.job_search import JobSearchCreate, JobWeights, LeadPatch
 from app.matcha.services.matcha_work.agent_runtime import consent
-from app.matcha.services.matcha_work.job_search import enqueue, providers, quota, service
+from app.matcha.services.matcha_work.job_search import enqueue, quota, service
 
 from .assistant import require_personal_workspace
 
@@ -49,7 +49,9 @@ async def list_job_searches(current_user: CurrentUser = Depends(require_admin_or
             "granted": await enqueue.consent_granted(current_user.id),
             "disclosure": consent.disclosure_view(enqueue.ABILITY_KEY),
         },
-        "available": providers.configured(),
+        # Always: with no listings key a search finds postings on the web.
+        # Kept for app builds that hide job search when it is false.
+        "available": True,
     }
 
 

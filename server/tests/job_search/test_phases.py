@@ -1,4 +1,4 @@
-"""Plan, discover and enrich, against a scripted provider, ATS and web."""
+"""Plan, Google Jobs listings and enrich, against a scripted provider, ATS and web."""
 import json
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -70,13 +70,8 @@ def discover_search(queries, **over):
     return search_row(**fields)
 
 
-def count_script(*values):
-    queue = list(values)
-    return lambda *_args: queue.pop(0) if len(queue) > 1 else queue[0]
-
-
 @pytest.mark.asyncio
-async def test_discover_dedupes_filters_and_counts_calls(conn):
+async def test_listings_dedupe_filter_and_count_calls(conn):
     provider = FakeProvider({
         "COO": [([posting("COO", "Acme Inc.", salary_text="250K–300K a year",
                           apply_links=[{"url": GH_URL, "source": "Greenhouse"}]),
@@ -84,13 +79,12 @@ async def test_discover_dedupes_filters_and_counts_calls(conn):
                 ([posting("COO", "ACME", location="Austin, Texas")], None)],
         "Chief Operating Officer": [([posting("Chief Operating Officer", "Beta", remote=True)], None)],
     })
-    conn.on("SELECT COUNT(*) FROM mw_job_leads", count_script(0, 2))
+    conn.on("SELECT COUNT(*) FROM mw_job_leads", 0)
     conn.on("INSERT INTO mw_job_leads", 2)
     conn.on("RETURNING GREATEST(LEAST($2, $3 - cur.before), 0)", 6)
     search = discover_search(["COO", "Chief Operating Officer"],
                              criteria=json.dumps({"exclude_companies": ["excluded co"]}))
-    out = await phases.discover(search, phases.Deps(provider=lambda: provider), guard())
-    assert out.status == "screening" and out.progress["found"] == 2
+    assert await phases.listings(search, phases.Deps(provider=lambda: provider), guard()) == phases.LISTED
     assert len(provider.calls) == 3
     # Reserved up front (2 queries x 3 pages), the 3 unused given back after.
     [granted] = conn.ran("SET provider_calls = cur.before")
@@ -103,29 +97,32 @@ async def test_discover_dedupes_filters_and_counts_calls(conn):
     acme = next(r for r in records if r["company"] == "Acme Inc.")
     assert acme["comp_status"] == "posted" and acme["comp"]["base"]["evidence"]["origin"] == "google_jobs"
     assert acme["state_code"] == "TX" and insert[2][3] == TOKEN
+    # A Google Jobs lead: the default source, read later by enrich.
+    assert "source" not in acme and "enriched" not in acme
+    assert "COALESCE(r.source, 'google_jobs')" in insert[1] and "CASE WHEN r.enriched THEN NOW() END" in insert[1]
 
 
 @pytest.mark.asyncio
-async def test_discover_drops_the_same_posting_under_another_employer_name(conn):
+async def test_listings_drop_the_same_posting_under_another_employer_name(conn):
     title = "Senior Vice President and Chief Operating Officer"
     provider = FakeProvider({"COO": [([posting(title, "Beth Israel Lahey Health", location="Burlington, MA"),
                                        posting(title, "Lahey Clinic Hospital, Inc.", location="United States"),
                                        posting(title, "Northwind Health", location="Austin, TX")], None)]})
-    conn.on("SELECT COUNT(*) FROM mw_job_leads", count_script(0, 2))
+    conn.on("SELECT COUNT(*) FROM mw_job_leads", 0)
     conn.on("RETURNING GREATEST(LEAST($2, $3 - cur.before), 0)", 3)
-    await phases.discover(discover_search(["COO"]), phases.Deps(provider=lambda: provider), guard())
+    await phases.listings(discover_search(["COO"]), phases.Deps(provider=lambda: provider), guard())
     records = json.loads(conn.ran("INSERT INTO mw_job_leads")[0][2][2])
     assert sorted(r["company"] for r in records) == ["Beth Israel Lahey Health", "Northwind Health"]
 
 
 @pytest.mark.asyncio
-async def test_discover_respects_remote_preference_and_budget(conn):
+async def test_listings_respect_remote_preference_and_budget(conn):
     provider = FakeProvider({"COO": [([posting("COO", "Acme"), posting("COO", "Remote Co", remote=True)], "1"),
                                      ([posting("COO", "Later")], None)]})
     conn.on("SELECT COUNT(*) FROM mw_job_leads", 1)
     conn.on("RETURNING GREATEST(LEAST($2, $3 - cur.before), 0)", 1)  # one call left in the search's lifetime budget
     search = discover_search(["COO"], criteria=json.dumps({"remote": "remote_only"}))
-    await phases.discover(search, phases.Deps(provider=lambda: provider), guard())
+    await phases.listings(search, phases.Deps(provider=lambda: provider), guard())
     assert len(provider.calls) == 1
     records = json.loads(conn.ran("INSERT INTO mw_job_leads")[0][2][2])
     assert [r["company"] for r in records] == ["Remote Co"]
@@ -133,37 +130,46 @@ async def test_discover_respects_remote_preference_and_budget(conn):
 
 
 @pytest.mark.asyncio
-async def test_discover_failures(conn):
+async def test_listings_never_stop_the_search(conn):
+    """No API, one that refused for good, or every query failing: each is
+    reported, and the web is searched next (`discovery.py`)."""
     conn.on("RETURNING GREATEST(LEAST($2, $3 - cur.before), 0)", 3)
-    with pytest.raises(phases.PhaseFailed, match="isn't set up"):
-        await phases.discover(discover_search(["COO"]), phases.Deps(provider=lambda: None), guard())
-
-    fatal = FakeProvider({"COO": [providers.ProviderError("bad key", fatal=True)]})
-    with pytest.raises(phases.PhaseFailed, match="aren't available right now") as failed:
-        await phases.discover(discover_search(["COO"]), phases.Deps(provider=lambda: fatal), guard())
-    assert "allowance" in str(failed.value)  # a failed search is free
-
     conn.on("SELECT COUNT(*) FROM mw_job_leads", 0)
-    flaky = FakeProvider({"COO": [providers.ProviderError("503")]})
-    with pytest.raises(RuntimeError, match="every job listing query failed"):
-        await phases.discover(discover_search(["COO"]), phases.Deps(provider=lambda: flaky), guard())
 
-    empty = FakeProvider({})
-    with pytest.raises(phases.PhaseFailed, match="No postings matched"):
-        await phases.discover(discover_search(["COO"]), phases.Deps(provider=lambda: empty), guard())
+    async def run(provider):
+        return await phases.listings(discover_search(["COO"]), phases.Deps(provider=lambda: provider), guard())
+
+    assert await run(None) == phases.NO_LISTINGS
+    assert await run(FakeProvider({"COO": [providers.ProviderError("bad key", fatal=True)]})) == phases.REFUSED
+    assert await run(FakeProvider({"COO": [providers.ProviderError("503")]})) == phases.LISTINGS_FAILED
+    assert await run(FakeProvider({})) == phases.LISTED
+    # What other queries found before a refusal is kept.
+    mixed = FakeProvider({"COO": [([posting("COO", "Acme")], None)],
+                          "CEO": [providers.ProviderError("no searches left", fatal=True)]})
+    conn.on("INSERT INTO mw_job_leads", 1)
+    search = discover_search(["COO", "CEO"])
+    assert await phases.listings(search, phases.Deps(provider=lambda: mixed), guard()) == phases.REFUSED
+    assert [r["company"] for r in json.loads(conn.ran("INSERT INTO mw_job_leads")[-1][2][2])] == ["Acme"]
+
+    class Broken:
+        async def search(self, *_args, **_kwargs):
+            raise KeyError("a bug, not a refusal")
+
+    with pytest.raises(KeyError):
+        await run(Broken())
 
 
 @pytest.mark.asyncio
-async def test_discover_keeps_what_it_found_before_the_listings_ran_out(conn, monkeypatch):
+async def test_listings_keep_what_they_found_before_the_apis_ran_out(conn, monkeypatch):
     monkeypatch.setattr(phases, "QUERY_CONCURRENCY", 1)
     spent = providers.ProviderError("no job listings API left", fatal=True)
     provider = FakeProvider({"COO": [([posting("COO", "Acme"), posting("COO", "Beta")], None)], "CFO": [spent],
                              "CEO": [([posting("CEO", "Never asked")], None)]})
-    conn.on("SELECT COUNT(*) FROM mw_job_leads", count_script(0, 2))
+    conn.on("SELECT COUNT(*) FROM mw_job_leads", 0)
     conn.on("RETURNING GREATEST(LEAST($2, $3 - cur.before), 0)", 9)
-    out = await phases.discover(discover_search(["COO", "CFO", "CEO"]), phases.Deps(provider=lambda: provider),
+    out = await phases.listings(discover_search(["COO", "CFO", "CEO"]), phases.Deps(provider=lambda: provider),
                                 guard())
-    assert out.status == "screening" and out.progress["found"] == 2
+    assert out == phases.REFUSED
     assert [c[0] for c in provider.calls] == ["COO", "CFO"]  # nothing asked after the refusal
     records = json.loads(conn.ran("INSERT INTO mw_job_leads")[0][2][2])
     assert sorted(r["company"] for r in records) == ["Acme", "Beta"]

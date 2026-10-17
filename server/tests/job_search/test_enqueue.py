@@ -35,7 +35,6 @@ def gates(monkeypatch):
         dispatch=AsyncMock(return_value=None),
     )
     monkeypatch.setattr(assistant_enqueue, "workspace_enabled", g.workspace)
-    monkeypatch.setattr(enqueue.providers, "configured", lambda: True)
     monkeypatch.setattr(enqueue, "require_plan", g.plan)
     monkeypatch.setattr(enqueue, "job_search_usage", g.usage)
     monkeypatch.setattr(enqueue, "consent_granted", g.consent)
@@ -67,12 +66,6 @@ async def test_preflight_refusals(gates, monkeypatch):
         await enqueue.preflight(CLIENT, COMPANY)
     assert exc.value.status_code == 403 and exc.value.detail["code"] == "feature_disabled"
     gates.workspace.return_value = True
-
-    monkeypatch.setattr(enqueue.providers, "configured", lambda: False)
-    with pytest.raises(HTTPException) as exc:
-        await enqueue.preflight(CLIENT, COMPANY)
-    assert exc.value.status_code == 503
-    monkeypatch.setattr(enqueue.providers, "configured", lambda: True)
 
     gates.usage.return_value = {"limit": 4, "used": 4, "remaining": 0}
     with pytest.raises(HTTPException) as exc:

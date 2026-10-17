@@ -2,9 +2,10 @@
 
 Both serve Google's job results as JSON (`engine=google_jobs`); only the field
 names differ. SearchAPI (`SEARCH_API_KEY`) is tried first, then SerpApi
-(`SERP_API_KEY`); with neither, job search is not offered. Requests, retries
-and moving to the next API (one that refuses for good, or is down) are
-`search_apis`' (`FallbackJobs` is its `Fallback`).
+(`SERP_API_KEY`). Either is extra coverage: with neither, a search finds its
+postings on the web alone (`discovery.py`). Requests, retries and moving to
+the next API (one that refuses for good, or is down) are `search_apis`'
+(`FallbackJobs` is its `Fallback`).
 
 Only the query and location leave the server: never the person's résumé or
 name. Every call counts against the search's provider budget.
@@ -192,11 +193,3 @@ def choose_provider(*, transport: httpx.AsyncBaseTransport | None = None,
     apis = ([SearchApiJobs(search_api, transport=transport, sleep=sleep)] if search_api else []) + (
         [SerpApiJobs(serp_api, transport=transport, sleep=sleep)] if serp_api else [])
     return FallbackJobs(apis) if apis else None
-
-
-def configured() -> bool:
-    try:
-        return any(_keys())
-    except Exception:
-        logger.warning("job search provider check failed", exc_info=True)
-        return False

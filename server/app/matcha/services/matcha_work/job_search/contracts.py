@@ -5,10 +5,12 @@ call; its arguments go through a `normalize_*` here, and the orchestrator
 persists only what survives. A ValueError gets the model one repair.
 
   plan       queries and what to rank on, from the ask (and résumé)
+  discover   links to current postings found on the web (code reads each one)
   screen     relevant or not, and a 0-5 fit, for a batch of jobs by short id
   approach   per job: how to approach, drafts, answers to the real questions
 
 Checks that matter:
+  * a posting's link must be one this run's searches or page loads returned
   * ids must be ones the batch showed (short ids like J3, mapped back here)
   * a contact must be named on a page fetched in this run
   * an email must be printed on a fetched page or typed by the person
@@ -118,6 +120,58 @@ def normalize_plan(args: dict, _state=None) -> tuple[dict, list[str]]:
         plan["weights"] = {k: weights[k] for k in ("base", "bonus", "equity", "fit")
                            if isinstance(weights.get(k), (int, float))}
     return plan, []
+
+
+# ── discover ─────────────────────────────────────────────────────────────────
+
+MAX_POSTINGS = 40
+DISCOVER_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "postings": {
+            "type": "array", "maxItems": MAX_POSTINGS,
+            "items": {"type": "object", "properties": {
+                "url": {"type": "string",
+                        "description": "The posting's own page, exactly as a search or page load returned it"},
+                "title": {"type": "string", "description": "As the posting shows it"},
+                "company": {"type": "string"},
+                "location": {"type": "string"},
+            }, "required": ["url", "title", "company", "location"]},
+        },
+    },
+    "required": ["postings"],
+}
+DISCOVER_FINISH = _finish("Found postings", "Finish with the postings you found.", DISCOVER_SCHEMA)
+
+
+def normalize_postings(args: dict, *, citable: set[str]) -> tuple[dict, list[str]]:
+    """The postings whose links this run's searches or page loads returned,
+    once each. None at all is a fine answer (nothing current fits); some, and
+    not one of them traceable, gets the model one repair."""
+    result = _result(args)
+    postings: list[dict] = []
+    warnings: list[str] = []
+    seen: set[str] = set()
+    given = 0
+    for item in result.get("postings") or []:
+        if not isinstance(item, dict):
+            continue
+        given += 1
+        url = str(item.get("url") or "").strip()
+        title = _text(item.get("title"), 200)
+        if url not in citable or not url.startswith(("https://", "http://")):
+            warnings.append(f"Dropped {url[:80]!r}: not a link this run's searches or page loads returned")
+            continue
+        if url in seen or not title:
+            continue
+        seen.add(url)
+        postings.append({"url": url, "title": title, "company": _text(item.get("company"), 200),
+                         "location": _text(item.get("location"), 200)})
+        if len(postings) >= MAX_POSTINGS:
+            break
+    if given and not postings:
+        raise ValueError("give each posting's url exactly as a search or page load in this run returned it")
+    return {"postings": postings}, warnings
 
 
 # ── screen ───────────────────────────────────────────────────────────────────

@@ -19,7 +19,7 @@ from app.database import connection_or_direct
 from app.matcha.models.matcha_work.job_search import JobSearchCreate
 from app.matcha.services.billing.entitlements_service import PLAN_PRO, require_plan
 
-from . import providers, ranking
+from . import ranking
 from ..agent_tasks import allowance
 from .quota import job_search_usage
 from .service import end_stale, find_by_request, search_view
@@ -67,8 +67,6 @@ async def preflight(user, company_id: UUID, *, consent_version: str | None = Non
             "code": "feature_disabled",
             "message": "Job search comes with a personal Espresso account.",
         })
-    if not providers.configured():
-        raise HTTPException(status_code=503, detail="Job search isn't available right now.")
     plan = None
     if not _is_admin(user):
         plan = await require_plan(user.id, PLAN_PRO, ENTITLEMENT)

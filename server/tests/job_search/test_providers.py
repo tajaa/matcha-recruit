@@ -178,14 +178,8 @@ def test_provider_choice(monkeypatch):
     settings("a", "b")
     chosen = providers.choose_provider()
     assert [type(api) for api in chosen.apis] == [providers.SearchApiJobs, providers.SerpApiJobs]
-    assert providers.configured()
+    assert chosen.apis[0].name == "SearchAPI"
     settings(None, "b")
     assert [type(api) for api in providers.choose_provider().apis] == [providers.SerpApiJobs]
     settings(None, None)
-    assert providers.choose_provider() is None and not providers.configured()
-
-    def broken():
-        raise RuntimeError("no settings")
-
-    monkeypatch.setattr(config, "get_settings", broken)
-    assert providers.configured() is False
+    assert providers.choose_provider() is None
