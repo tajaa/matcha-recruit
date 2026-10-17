@@ -35,6 +35,7 @@ import ReviewPane from '../../components/employees/schedule-pilot/ReviewPane'
 import AutopilotWizard from '../../components/employees/schedule-pilot/AutopilotWizard'
 import ScenariosStrip, { type StagedChip } from '../../components/employees/schedule-pilot/ScenariosStrip'
 import SchedulePilotToolbar, { type CenterView } from '../../components/employees/schedule-pilot/SchedulePilotToolbar'
+import ScheduleNotifications from '../../components/employees/schedule-pilot/ScheduleNotifications'
 import { asScheduleReview } from '../../components/employees/schedule-pilot/reviewShape'
 import { approvalVerdict, demandCoverage, proposalPreviewShifts } from '../../components/employees/schedule-pilot/reviewVerdict'
 import { changedShiftIds, proposalMarks, shiftSignature } from '../../components/employees/schedule-pilot/boardMarks'
@@ -55,7 +56,7 @@ function parseWeek(value: string | null, weekStartWeekday: number): string {
 }
 
 type Drawer = null | 'jobs' | 'weekSetup'
-type MobileTab = 'inputs' | 'board' | 'review' | 'huume'
+type MobileTab = 'inputs' | 'board' | 'review' | 'huume' | 'notifications'
 type ReviewSource = { kind: 'staged' } | { kind: 'scenario'; id: string }
 
 /** The Schedule Pilot: the working surface for a week. Inputs on the left
@@ -98,16 +99,16 @@ export default function SchedulePilot() {
   const [activeDrag, setActiveDrag] = useState<ScheduleDragData | null>(null)
   const [publishing, setPublishing] = useState(false)
   const [guideOpen, setGuideOpen] = useState(() => shouldAutoOpenScheduleTour(GUIDE_STORAGE_KEY))
-  const [centerView, setCenterView] = useState<CenterView>('board')
+  const [centerView, setCenterView] = useState<CenterView>(searchParams.get('setup') === 'sales' ? 'notifications' : 'board')
   const [drawer, setDrawer] = useState<Drawer>(null)
   // The people/inputs rail is a drawer over the board now; the board and the
   // Huume thread are what stay on screen.
   const [railOpen, setRailOpen] = useState(false)
   const [threadOpen, setThreadOpen] = useState(true)
-  const [mobileTab, setMobileTab] = useState<MobileTab>('board')
+  const [mobileTab, setMobileTab] = useState<MobileTab>(searchParams.get('setup') === 'sales' ? 'notifications' : 'board')
   // Huume-first on a phone too: once we know the plan has Huume, open on it
   // (only if the manager hasn't already picked a tab).
-  const mobileTabPickedRef = useRef(false)
+  const mobileTabPickedRef = useRef(searchParams.get('setup') === 'sales')
   const [reviewSource, setReviewSource] = useState<ReviewSource>({ kind: 'staged' })
   const [automaticSuggestion, setAutomaticSuggestion] = useState<ScheduleSuggestionStatus | null>(null)
   const [weekRules, setWeekRules] = useState<LocationScheduleProfile['week_rules'] | null>(null)
@@ -558,14 +559,24 @@ export default function SchedulePilot() {
 
   const mobileTabs: Array<[MobileTab, string]> = [
     ...(huumeEnabled ? [['huume', 'Huume'] as [MobileTab, string]] : []),
-    ['board', 'Board'], ['review', 'Review'], ['inputs', 'Inputs'],
+    ['board', 'Board'], ['review', 'Review'], ['inputs', 'Inputs'], ['notifications', 'Notifications'],
   ]
   const showRail = railOpen
   const showThread = threadOpen && huumeEnabled
 
   const showWeek = () => { setShowProposal(true); setCenterView('board'); setMobileTab('board') }
   const openReview = () => { setCenterView('review'); setMobileTab('review') }
-  const centerContent = centerView === 'review' ? (
+  const centerContent = centerView === 'notifications' ? (
+    <ScheduleNotifications
+      key={locationId}
+      locationId={locationId}
+      locationName={currentLocationName}
+      canManage={canManageStores}
+      salesEnabled={hasFeature('matcha_ops') && hasFeature('inventory') && hasFeature('sales_intake')}
+      hasProposal={!!review}
+      onOpenReview={openReview}
+    />
+  ) : centerView === 'review' ? (
     <ReviewPane
       review={review}
       title={reviewTitle}
@@ -781,7 +792,7 @@ export default function SchedulePilot() {
             {/* Mobile: one pane at a time. */}
             <div className="flex shrink-0 gap-1 border-b border-white/[0.06] bg-zinc-950 p-1.5 lg:hidden" role="tablist" aria-label="Workspace panes">
               {mobileTabs.map(([tab, label]) => (
-                <button key={tab} role="tab" aria-selected={mobileTab === tab} onClick={() => { mobileTabPickedRef.current = true; setMobileTab(tab); if (tab === 'board' || tab === 'review') setCenterView(tab) }} className={`relative flex-1 rounded-lg py-2 text-xs font-medium ${mobileTab === tab ? 'bg-white/[0.08] text-zinc-100' : 'text-zinc-500 active:bg-white/[0.04]'}`}>
+                <button key={tab} role="tab" aria-selected={mobileTab === tab} onClick={() => { mobileTabPickedRef.current = true; setMobileTab(tab); if (tab === 'board' || tab === 'review' || tab === 'notifications') setCenterView(tab) }} className={`relative flex-1 rounded-lg py-2 text-xs font-medium ${mobileTab === tab ? 'bg-white/[0.08] text-zinc-100' : 'text-zinc-500 active:bg-white/[0.04]'}`}>
                   {label}
                   {tab === 'review' && stagedReview && <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-emerald-400" aria-hidden />}
                 </button>
@@ -802,7 +813,7 @@ export default function SchedulePilot() {
                 <button type="button" onClick={() => setRailOpen(false)} className="absolute right-2 top-2 z-10 hidden rounded p-1 text-zinc-500 hover:text-zinc-100 lg:block" aria-label="Close people and inputs"><X className="h-4 w-4" /></button>
                 {railContent}
               </div>
-              <div className={`relative min-h-0 min-w-0 flex-1 ${mobileTab === 'board' || mobileTab === 'review' ? 'block' : 'hidden'} lg:block`}>
+              <div className={`relative min-h-0 min-w-0 flex-1 ${mobileTab === 'board' || mobileTab === 'review' || mobileTab === 'notifications' ? 'block' : 'hidden'} lg:block`}>
                 {centerContent}
                 {drawer && (
                   <div className="absolute inset-0 z-20 flex flex-col overflow-y-auto bg-zinc-950/98 backdrop-blur" role="dialog" aria-label={drawer === 'jobs' ? 'Jobs' : 'Week setup'}>

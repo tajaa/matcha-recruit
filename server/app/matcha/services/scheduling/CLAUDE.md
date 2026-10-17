@@ -1380,6 +1380,8 @@ access is missing, because a caller must never mistake "no access" for "free".
 
 ## Schedule Autopilot (`schedule_autopilot`, 2026-09-22)
 
+The Schedule Pilot has a **Notifications** pane on desktop and mobile. Sales-enabled S&C onboarding opens it with `?setup=sales`; this choice takes precedence over the first-visit Huume tab. It reads `/inventory/sales/setup` (admin/client, existing sales gates) for the selected store, offers Square setup or nightly-email sender registration, and distinguishes missing data, paused ingestion, pending mappings and actual received sales. See `services/inventory/CLAUDE.md` for mailbox configuration. It also links a staged schedule to Review and explains that generation is a proposal: confirmation creates draft shifts, and publishing is separate. It never enables integrations or applies a proposal automatically.
+
 Premium, deterministic whole-week generation from the location's operating
 hours/buffers/leader rule, qualified roster, committed location-scoped sales,
 persisted Google Weather daily forecasts, and eight weeks of published schedule

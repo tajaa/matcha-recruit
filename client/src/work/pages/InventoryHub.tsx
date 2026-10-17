@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   Activity,
   AlertTriangle,
@@ -61,6 +61,7 @@ import { formatDateTimePacific } from '../../utils/dateFormat'
 export default function InventoryHub() {
   const { itemId } = useParams<{ itemId: string }>()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const base = useWorkBase()
   const { toast } = useToast()
   const { hasFeature, me } = useMe()
@@ -71,7 +72,7 @@ export default function InventoryHub() {
   const [suggestions, setSuggestions] = useState<Record<string, InventorySuggestion>>({})
   const [connections, setConnections] = useState<POSConnection[]>([])
   const [locations, setLocations] = useState<ChannelLocation[]>([])
-  const [locFilter, setLocFilter] = useState<'all' | 'none' | string>('all')
+  const [locFilter, setLocFilter] = useState<'all' | 'none' | string>(searchParams.get('location') || 'all')
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [newItemName, setNewItemName] = useState('')
@@ -79,12 +80,18 @@ export default function InventoryHub() {
   const [adding, setAdding] = useState(false)
   const [receiveOpen, setReceiveOpen] = useState(false)
   const [salesOpen, setSalesOpen] = useState(false)
-  const [mappingsOpen, setMappingsOpen] = useState(false)
+  const [mappingsOpen, setMappingsOpen] = useState(searchParams.get('setup') === 'sales')
   const [draftCount, setDraftCount] = useState(0)
   const [reviewImportId, setReviewImportId] = useState<string | null>(null)
   const [salesWizardOpen, setSalesWizardOpen] = useState(false)
   const [inventoryGuideOpen, setInventoryGuideOpen] = useState(false)
   const [help, setHelp] = useState<InventorySectionHelp | null>(null)
+
+  useEffect(() => {
+    if (!loading && searchParams.get('setup') === 'sales') {
+      document.getElementById('sales-connection')?.scrollIntoView({ block: 'start' })
+    }
+  }, [loading, searchParams])
 
   const load = useCallback(() => {
     setLoading(true)
@@ -103,6 +110,8 @@ export default function InventoryHub() {
   }, [canSales, toast])
 
   useEffect(() => {
+    // Initial load shares the same loading indicator as an explicit refresh.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (!itemId) load()
   }, [load, itemId])
 
@@ -360,7 +369,7 @@ export default function InventoryHub() {
           <ReorderPanel recommendations={insights.recommendations} onSelect={(itemId) => navigate(`${base}/inventory/${itemId}`)} onHelp={() => setHelp(INVENTORY_HELP.reorder)} />
         </div>
 
-        {canSales && <section className="rounded-xl border border-w-line bg-w-surface p-4"><div className="flex items-start gap-2"><Link2 className="mt-0.5 h-4 w-4 text-w-accent" /><div><h2 className="text-sm font-medium text-w-text">Sales connection</h2><p className="mt-1 text-xs text-w-dim">Connect Square here when you are setting up inventory data. Forecasting uses the committed sales ledger after mapping.</p></div></div>{connections.length > 0 && <div className="mt-3 space-y-1.5">{connections.map((connection) => <div key={connection.id} className="rounded-lg bg-w-surface2 px-3 py-2 text-xs"><div className="flex items-center justify-between"><span className="font-medium capitalize text-w-text">{connection.provider}</span><span className={connection.status === 'connected' ? 'text-w-accent' : 'text-amber-300'}>{connection.status}</span></div><POSConnectionPanel connection={connection} locations={locations} onConnect={connectSquare} /></div>)}</div>}{connections.length === 0 && <div className="mt-3"><POSConnectionPanel connection={null} locations={locations} onConnect={connectSquare} /></div>}</section>}
+        {canSales && <section id="sales-connection" className="rounded-xl border border-w-line bg-w-surface p-4"><div className="flex items-start gap-2"><Link2 className="mt-0.5 h-4 w-4 text-w-accent" /><div><h2 className="text-sm font-medium text-w-text">Sales connection</h2><p className="mt-1 text-xs text-w-dim">Connect Square here when you are setting up inventory data. Forecasting uses the committed sales ledger after mapping.</p></div></div>{connections.length > 0 && <div className="mt-3 space-y-1.5">{connections.map((connection) => <div key={connection.id} className="rounded-lg bg-w-surface2 px-3 py-2 text-xs"><div className="flex items-center justify-between"><span className="font-medium capitalize text-w-text">{connection.provider}</span><span className={connection.status === 'connected' ? 'text-w-accent' : 'text-amber-300'}>{connection.status}</span></div><POSConnectionPanel connection={connection} locations={locations} onConnect={connectSquare} /></div>)}</div>}{connections.length === 0 && <div className="mt-3"><POSConnectionPanel connection={null} locations={locations} onConnect={connectSquare} /></div>}</section>}
 
         <OrderQueue orders={visibleOrders} items={visibleItems} onChange={load} onHelp={() => setHelp(INVENTORY_HELP.orders)} />
 
