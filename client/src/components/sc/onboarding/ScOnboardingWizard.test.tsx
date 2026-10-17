@@ -124,7 +124,7 @@ describe('ScOnboardingWizard', () => {
     expect(parseLocationsMock).toHaveBeenCalledWith(file)
   })
 
-  async function reachJobsWithCafeRoster(user: ReturnType<typeof userEvent.setup>) {
+  async function reachReviewWithCafeRoster(user: ReturnType<typeof userEvent.setup>) {
     statusMock.mockResolvedValue({
       company_name: 'Cafe Adore', completed: false, completed_at: null,
       csv_columns: { locations: ['name'], employees: ['email'] },
@@ -144,25 +144,23 @@ describe('ScOnboardingWizard', () => {
     await user.click(screen.getByRole('button', { name: 'Continue' })) // → Employees
     await user.upload(fileInput(), new File(['x'], 'e.csv', { type: 'text/csv' }))
     await waitFor(() => expect(screen.getByText('3 employees ready to import')).toBeInTheDocument())
-    await user.click(screen.getByRole('button', { name: 'Continue' })) // → Jobs
+    await user.click(screen.getByRole('button', { name: 'Continue' })) // → Review
   }
 
-  it('lists every roster job title as a job, so a certificate-less Shift Supervisor completes setup', async () => {
+  it('goes straight from employees to review and creates their jobs without certificate setup', async () => {
     const user = userEvent.setup()
     completeMock.mockResolvedValue({ already_completed: false, completed_at: '2026-09-28T00:00:00Z' })
-    await reachJobsWithCafeRoster(user)
-
-    // One row per distinct title (Barista/barista collapse); the blank starter row is gone.
-    const jobNames = screen.getAllByLabelText('Job name') as HTMLInputElement[]
-    expect(jobNames.map((input) => input.value)).toEqual(['Shift Supervisor', 'Barista'])
-    expect(screen.getAllByText('No certificate required for this job.')).toHaveLength(2)
-
-    await user.click(screen.getAllByRole('button', { name: 'Add certificate' })[1])
-    await user.type(screen.getByLabelText('Certificate'), 'Food Handler Card')
-    await user.click(screen.getByRole('button', { name: 'Continue' }))
+    await reachReviewWithCafeRoster(user)
 
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     expect(screen.getByText('Review setup')).toBeInTheDocument()
+    expect(screen.getByRole('list', { name: 'Setup progress' }).children).toHaveLength(4)
+    expect(screen.queryByText('Jobs & certificates')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Job name')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Certificate')).not.toBeInTheDocument()
+    expect(screen.getByText('Jobs from employee titles (2)')).toBeInTheDocument()
+    expect(screen.getByText('Shift Supervisor')).toBeInTheDocument()
+    expect(screen.getByText('Barista')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Complete setup' }))
     // Setup hands off to the schedule, not the generic dashboard.
@@ -172,31 +170,54 @@ describe('ScOnboardingWizard', () => {
       .toEqual(['Shift Supervisor', 'Barista', 'barista'])
     expect(submission.jobs).toEqual([
       { name: 'Shift Supervisor', credential_grace_days: 7, certificates: [] },
-      {
-        name: 'Barista',
-        credential_grace_days: 7,
-        certificates: [{ name: 'Food Handler Card', is_required: true, schedule_blocking: true }],
-      },
+      { name: 'Barista', credential_grace_days: 7, certificates: [] },
     ])
   })
 
-  it('names every employee title left without a job and how to fix it', async () => {
+  it('replaces derived jobs when a roster is replaced after going back', async () => {
     const user = userEvent.setup()
-    await reachJobsWithCafeRoster(user)
-
-    const [supervisor, barista] = screen.getAllByLabelText('Job name')
-    await user.clear(supervisor)
-    await user.type(supervisor, 'Shift Lead')
-    await user.clear(barista)
-    await user.type(barista, 'Coffee')
-    await user.click(screen.getAllByRole('button', { name: 'Add certificate' })[0])
-    await user.type(screen.getByLabelText('Certificate'), 'Food Handler Card')
+    await reachReviewWithCafeRoster(user)
+    await user.click(screen.getByRole('button', { name: 'Back' }))
+    expect(screen.getByRole('heading', { name: 'Employees' })).toBeInTheDocument()
+    parseEmployeesMock.mockResolvedValue([
+      { email: 'mat@example.com', first_name: 'Ana', last_name: 'Ruiz', work_state: 'CA', job_title: 'Mat Instructor', department: 'Studio' },
+    ])
+    await user.upload(fileInput(), new File(['x'], 'studio.csv', { type: 'text/csv' }))
+    await waitFor(() => expect(screen.getByText('1 employees ready to import')).toBeInTheDocument())
     await user.click(screen.getByRole('button', { name: 'Continue' }))
+    await user.click(screen.getByRole('button', { name: 'Complete setup' }))
 
-    expect(screen.getByRole('alert')).toHaveTextContent(
-      'Every employee job title needs a job. Add a job with the same name, or correct the title in the employee CSV and upload it again. Missing: Barista, Shift Supervisor',
-    )
-    expect(screen.queryByText('Review setup')).not.toBeInTheDocument()
+    await waitFor(() => expect(completeMock).toHaveBeenCalled())
+    expect(completeMock.mock.calls[0][0].jobs).toEqual([
+      { name: 'Mat Instructor', credential_grace_days: 7, certificates: [] },
+    ])
+  })
+
+  it('clears derived jobs when employees are skipped after going back', async () => {
+    const user = userEvent.setup()
+    await reachReviewWithCafeRoster(user)
+    await user.click(screen.getByRole('button', { name: 'Back' }))
+    await user.click(screen.getByRole('button', { name: 'Skip and clear employees' }))
+    await user.click(screen.getByRole('button', { name: 'Continue' }))
+    await user.click(screen.getByRole('button', { name: 'Complete setup' }))
+
+    await waitFor(() => expect(completeMock).toHaveBeenCalled())
+    expect(completeMock.mock.calls[0][0]).toMatchObject({ employees: [], jobs: [] })
+  })
+
+  it('completes company setup without locations, employees, jobs, or certificates', async () => {
+    const user = userEvent.setup()
+    await reachLocationsFromCafe(user)
+    await user.click(screen.getByRole('button', { name: 'Continue' })) // → Employees
+    await user.click(screen.getByRole('button', { name: 'Continue' })) // → Review
+    expect(screen.getByText('Review setup')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Complete setup' }))
+
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/ops/schedule', { replace: true }))
+    expect(completeMock.mock.calls[0][0]).toEqual({
+      company: { company_size: '11-50', naics_code: '72' },
+      locations: [], employees: [], jobs: [],
+    })
   })
 
   it('surfaces the server row error and imports nothing', async () => {
@@ -315,8 +336,6 @@ describe('ScOnboardingWizard', () => {
     expect(screen.getByText('optional: location')).toBeInTheDocument()
     await user.upload(fileInput(), new File(['x'], 'e.csv', { type: 'text/csv' }))
     await waitFor(() => expect(screen.getByText('Everyone will be scheduled at Downtown.')).toBeInTheDocument())
-    await user.click(screen.getByRole('button', { name: 'Continue' })) // → Jobs
-    // No certificate anywhere, and setup still goes through.
     await user.click(screen.getByRole('button', { name: 'Continue' })) // → Review
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Complete setup' }))
@@ -373,7 +392,7 @@ describe('ScOnboardingWizard', () => {
     await user.click(screen.getByRole('button', { name: 'Continue' }))
 
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Jobs and certificates' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Review setup' })).toBeInTheDocument()
   })
 
   it('does not put an out-of-state employee at the only store without being told to', async () => {
@@ -397,7 +416,6 @@ describe('ScOnboardingWizard', () => {
     expect(screen.getByText(/Their work state isn't CA, where Downtown is/)).toBeInTheDocument()
     expect(screen.queryByText('Everyone will be scheduled at Downtown.')).not.toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: 'Continue' })) // → Jobs
     await user.click(screen.getByRole('button', { name: 'Continue' })) // → Review
     expect(screen.getByText(/Nev Two — nv@example.com; Barista, Front; no store yet/)).toBeInTheDocument()
     expect(screen.getByText(/Nam Three — named@example.com; Barista, Front; Downtown/)).toBeInTheDocument()
