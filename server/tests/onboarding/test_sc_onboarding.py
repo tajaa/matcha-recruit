@@ -177,6 +177,40 @@ def test_optional_imports_can_be_skipped():
     service.validate_sc_submission(submission())
 
 
+def test_jobs_can_be_empty_or_cover_every_row_in_a_full_roster():
+    company = ScCompanySetup(company_size="11-50", naics_code="722511")
+    body = ScOnboardingComplete(company=company, jobs=[])
+    service.validate_sc_submission(body)
+
+    jobs = [ScJobSetup(name=f"Role {index}") for index in range(500)]
+    employees = [_employee(f"employee{index}@example.com", job.name) for index, job in enumerate(jobs)]
+    service.validate_sc_submission(ScOnboardingComplete(company=company, jobs=jobs, employees=employees))
+    with pytest.raises(ValidationError):
+        ScOnboardingComplete(company=company, jobs=[*jobs, ScJobSetup(name="Over the limit")])
+
+
+@pytest.mark.asyncio
+async def test_company_only_setup_completes_without_creating_jobs_or_credentials(monkeypatch):
+    _allow_sc_product(monkeypatch)
+    _capture_location_sync(monkeypatch)
+    conn = _Connection()
+    body = ScOnboardingComplete.model_validate({
+        "company": {"company_size": "11-50", "naics_code": "72"},
+        "locations": [], "employees": [], "jobs": [],
+    })
+
+    result = await service.complete_sc_onboarding(
+        conn, company_id=uuid4(), actor_user_id=uuid4(), body=body,
+    )
+
+    assert result == {"already_completed": False, "completed_at": conn.now.isoformat()}
+    assert "UPDATE companies SET size" in conn.queries()
+    assert "UPDATE companies SET sc_onboarding_completed_at" in conn.queries()
+    assert "INSERT INTO schedule_jobs" not in conn.queries()
+    assert "INSERT INTO credential_types" not in conn.queries()
+    assert conn.rolled_back is False
+
+
 def test_duplicate_location_rejects_exact_rows_but_allows_two_sites_in_one_city():
     locations = [
         ScLocationImport(name="North", address="1 Main", city="Austin", state="TX", timezone="America/Chicago", zipcode="78701"),
