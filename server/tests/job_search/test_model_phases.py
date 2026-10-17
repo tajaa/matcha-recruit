@@ -73,9 +73,17 @@ async def test_a_failed_run_is_marked_and_raised(conn):
     assert phase_run.store.mark_run.await_args.kwargs["status"] == "failed"
 
 
-def test_models_and_progress(monkeypatch):
-    assert agent_phase.model_for({"model": "retired-model"}) == "gpt-5.6-luna"
-    assert agent_phase.model_for({"model": "gpt-5.6-luna"}) == "gpt-5.6-luna"
+@pytest.mark.asyncio
+async def test_a_search_keeps_an_offered_model_and_restamps_one_that_is_not(conn, monkeypatch):
+    # conftest blanks the Anthropic key: Luna is the one model offered.
+    assert await agent_phase.model_for(search_row(model="gpt-5.6-luna")) == "gpt-5.6-luna"
+    assert conn.ran("UPDATE mw_job_searches") == []
+    from app.core.services import anthropic_messages
+
+    monkeypatch.setattr(anthropic_messages, "surface_model", AsyncMock(return_value="gpt-5.6-luna"))
+    assert await agent_phase.model_for(search_row(model="retired-model")) == "gpt-5.6-luna"
+    anthropic_messages.surface_model.assert_awaited_with("espresso.job_search")
+    assert conn.ran("UPDATE mw_job_searches SET model")[0][2] == (SEARCH, "gpt-5.6-luna")
 
 
 @pytest.mark.asyncio

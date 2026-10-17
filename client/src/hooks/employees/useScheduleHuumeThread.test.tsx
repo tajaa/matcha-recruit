@@ -462,8 +462,8 @@ describe('useScheduleHuumeThread — taking a turn', () => {
 
 describe('useScheduleHuumeThread — model picker', () => {
   const claudeModels = [
-    { id: 'gpt-5.6-luna', label: 'Luna', provider: 'openai' },
     { id: 'claude-haiku-5-5', label: 'Claude Haiku 5.5', provider: 'anthropic' },
+    { id: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5', provider: 'anthropic' },
   ]
 
   function memoryStorage(): Storage {
@@ -481,36 +481,46 @@ describe('useScheduleHuumeThread — model picker', () => {
   beforeEach(() => { vi.stubGlobal('localStorage', memoryStorage()) })
   afterEach(() => vi.unstubAllGlobals())
 
-  it('runs Luna until the manager picks another model, then sends and remembers it', async () => {
+  it('runs Haiku until the manager picks another model, then sends and remembers it', async () => {
     getSessionMock.mockResolvedValue({ ...session(), available_models: claudeModels })
     const { result } = render()
     await waitFor(() => expect(result.current.models).toHaveLength(2))
-    expect(result.current.model).toBe('gpt-5.6-luna')
+    expect(result.current.model).toBe('claude-haiku-5-5')
 
     await act(async () => { await result.current.send('What is open?') })
-    expect(sendMessageStreamMock.mock.calls[0][3]).toEqual({ huume_model: 'gpt-5.6-luna' })
+    expect(sendMessageStreamMock.mock.calls[0][3]).toEqual({ huume_model: 'claude-haiku-5-5' })
     act(() => streamCallbacks().onError('stop'))
 
-    act(() => result.current.setModel('claude-haiku-5-5'))
+    act(() => result.current.setModel('claude-sonnet-5-5'))
     await act(async () => { await result.current.send('And now?') })
-    expect(sendMessageStreamMock.mock.calls[1][3]).toEqual({ huume_model: 'claude-haiku-5-5' })
-    expect(window.localStorage.getItem('matcha.scheduleAssistant.model')).toBe('claude-haiku-5-5')
+    expect(sendMessageStreamMock.mock.calls[1][3]).toEqual({ huume_model: 'claude-sonnet-5-5' })
+    expect(window.localStorage.getItem('matcha.scheduleAssistant.model')).toBe('claude-sonnet-5-5')
   })
 
   it('starts on the server default when the manager never picked', async () => {
+    getSessionMock.mockResolvedValue({ ...session(), available_models: claudeModels, default_model: 'claude-sonnet-5-5' })
+    const { result } = render()
+    await waitFor(() => expect(result.current.models).toHaveLength(2))
+    expect(result.current.model).toBe('claude-sonnet-5-5')
+    act(() => result.current.setModel('claude-haiku-5-5'))
+    expect(result.current.model).toBe('claude-haiku-5-5')
+  })
+
+  it('drops a remembered Luna pick the server no longer offers', async () => {
+    window.localStorage.setItem('matcha.scheduleAssistant.model', 'gpt-5.6-luna')
     getSessionMock.mockResolvedValue({ ...session(), available_models: claudeModels, default_model: 'claude-haiku-5-5' })
     const { result } = render()
     await waitFor(() => expect(result.current.models).toHaveLength(2))
     expect(result.current.model).toBe('claude-haiku-5-5')
-    act(() => result.current.setModel('gpt-5.6-luna'))
-    expect(result.current.model).toBe('gpt-5.6-luna')
   })
 
-  it('falls back to Luna when a remembered model is not offered', async () => {
+  it('follows a server with no Anthropic key onto its only model', async () => {
     window.localStorage.setItem('matcha.scheduleAssistant.model', 'claude-haiku-5-5')
+    getSessionMock.mockResolvedValue({
+      ...session(), available_models: [{ id: 'gpt-5.6-luna', label: 'Luna', provider: 'openai' }],
+    })
     const { result } = render()
-    await waitFor(() => expect(result.current.threadId).toBeTruthy())
-    expect(result.current.models.map((option) => option.id)).toEqual(['gpt-5.6-luna'])
+    await waitFor(() => expect(result.current.models.map((option) => option.id)).toEqual(['gpt-5.6-luna']))
     expect(result.current.model).toBe('gpt-5.6-luna')
   })
 

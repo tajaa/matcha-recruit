@@ -15,14 +15,14 @@ def claude(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_the_menu_is_luna_then_claude_and_starts_on_the_admin_setting(claude):
+async def test_with_a_key_the_menu_is_claude_only_and_starts_on_the_admin_setting(claude):
     rows, default = await models.picker()
     assert rows == [
-        {"id": "gpt-5.6-luna", "label": "OpenAI Luna"},
         {"id": "claude-haiku-5-5", "label": "Claude Haiku 5.5"},
         {"id": "claude-sonnet-5-5", "label": "Claude Sonnet 5.5"},
     ]
-    assert default == "gpt-5.6-luna"
+    # An admin "default" (no Claude routing) runs Haiku, never Luna.
+    assert default == "claude-haiku-5-5"
     claude.return_value = "claude-sonnet-5-5"
     assert (await models.picker())[1] == "claude-sonnet-5-5"
     claude.assert_awaited_with(agent_surfaces.ESPRESSO_ASSISTANT)
@@ -35,12 +35,21 @@ async def test_no_anthropic_key_means_luna_only():
     assert await models.resolve("claude-haiku-5-5") == "gpt-5.6-luna"
 
 
+def test_the_assistant_menu_and_the_schedule_picker_share_one_rule():
+    from app.matcha.services.huume import routing
+
+    for configured in (True, False):
+        menu = models.anthropic_messages.offered_models(configured=configured)
+        assert tuple(c.id for c in routing.schedule_choices(anthropic_configured=configured)) == menu
+    assert models.offered() == models.anthropic_messages.offered_models()
+
+
 @pytest.mark.asyncio
 async def test_resolve_keeps_only_an_offered_pick(claude):
     claude.return_value = "claude-haiku-5-5"
     assert await models.resolve("claude-sonnet-5-5") == "claude-sonnet-5-5"
-    assert await models.resolve("gpt-5.6-luna") == "gpt-5.6-luna"
-    for junk in (None, "", "gpt-4o", 7, ["claude-sonnet-5-5"]):
+    # A stale Luna pick from an older app runs the default.
+    for junk in (None, "", "gpt-4o", "gpt-5.6-luna", 7, ["claude-sonnet-5-5"]):
         assert await models.resolve(junk) == "claude-haiku-5-5"
     assert models.is_claude("claude-sonnet-5-5") and not models.is_claude("gpt-5.6-luna")
 

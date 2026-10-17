@@ -80,9 +80,10 @@ async def run_repo_question(
 ) -> dict:
     """Answer one question with bounded repo reads and no mutation tools."""
     started = time.monotonic()
-    # Luna unless the admin "AI models" setting routes projects to Claude
-    # (Matcha Work for a business account, Espresso for a personal one).
-    claude_model = await anthropic_messages.claude_override(await work_surface(company_id, "projects"))
+    # Claude Haiku unless the admin "AI models" setting picks Sonnet for
+    # projects (Matcha Work for a business account, Espresso for a personal
+    # one); Luna only on a server with no Anthropic key (`claude_default`).
+    claude_model = await anthropic_messages.claude_default(await work_surface(company_id, "projects"))
     model = claude_model or LUNA
     client = get_claude_client() if claude_model else get_luna_client()
     if claude_model:

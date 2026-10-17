@@ -1,5 +1,6 @@
-"""Grounded, optional Luna interpretation for inventory conclusions — or
-Claude, when the admin "AI models" setting routes agent workloads there.
+"""Grounded, optional AI interpretation for inventory conclusions, on Claude
+(`claude_default`: Haiku unless the admin "AI models" setting picks Sonnet;
+OpenAI Luna only on a server with no Anthropic key).
 
 The model only sees server-formatted display tokens. It may choose wording and
 an allowed action, but never numbers, raw ids, or a diagnosis outside the
@@ -87,7 +88,7 @@ async def interpret(*, surface: str, diagnosis: str, tokens: dict[str, str]) -> 
         f"Diagnosis must be {diagnosis!r}. Action must be exactly {_ACTION_FOR_DIAGNOSIS.get(diagnosis, 'none')!r}. "
         f"Surface: {surface}. Available tokens: {json.dumps(tokens, separators=(',', ':'))}."
     )
-    claude_model = await anthropic_messages.claude_override(agent_surfaces.MATCHA_INVENTORY)
+    claude_model = await anthropic_messages.claude_default(agent_surfaces.MATCHA_INVENTORY)
     if claude_model:
         try:
             text = await anthropic_messages.generate_text(

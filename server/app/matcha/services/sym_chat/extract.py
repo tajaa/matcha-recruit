@@ -1,4 +1,5 @@
-"""The sym-chat tunnel turn — one bounded OpenAI Luna call per participant message.
+"""The sym-chat tunnel turn — one bounded model call per participant message:
+Claude (`claude_default`), or OpenAI Luna on a server with no Anthropic key.
 
 Same engine shape as `services/symlink/chat.py` (transcript in, structured
 state out, never raises, never persists), but on Luna through the Responses
@@ -249,7 +250,7 @@ async def _call_luna(prompt: str) -> dict:
     When the admin "AI models" setting routes agent workloads to Claude,
     the same prompt goes to that model instead, with the same contract.
     """
-    claude_model = await anthropic_messages.claude_override(agent_surfaces.MATCHA_SYM_CHAT)
+    claude_model = await anthropic_messages.claude_default(agent_surfaces.MATCHA_SYM_CHAT)
     if claude_model:
         with feature_scope("sym_chat"):
             text = await anthropic_messages.generate_text(

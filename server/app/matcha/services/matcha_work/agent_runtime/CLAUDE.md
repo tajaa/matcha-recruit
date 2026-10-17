@@ -189,11 +189,11 @@ column as `<playbook>.<phase>`).
   every call: the request, each response's output items as returned (reasoning
   comes back as `reasoning.encrypted_content` and goes back as is), and the
   tool outputs. A stored run sends only what is new.
-- **The model is settled at enqueue.** `models.py` owns the menu: OpenAI Luna,
-  plus Claude Haiku/Sonnet 5.5 when the server has an Anthropic key. Espresso's
+- **The model is settled at enqueue.** `models.py` owns the menu: Claude Haiku/Sonnet 5.5
+  when the server has an Anthropic key, OpenAI Luna alone only when it has none. Espresso's
   assistant header sends the pick as `assistant_model` on each socket message;
   `models.resolve` keeps it only if offered, else uses the default (Admin →
-  Settings → *AI models* for `espresso.assistant`, else Luna). An explicit pick
+  Settings → *AI models* for `espresso.assistant`, else Haiku: `claude_default`). An explicit pick
   wins over that setting. The row's `model` is what the worker runs; a model
   the server stopped offering by then runs the default and is re-stamped. The
   menu reaches the apps as `entitlements.workspace.assistant_models` /

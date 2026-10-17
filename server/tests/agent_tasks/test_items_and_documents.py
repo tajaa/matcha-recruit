@@ -150,22 +150,29 @@ async def test_create_notification_can_use_the_callers_connection(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_a_tasks_model_runs_are_its_own(monkeypatch):
+    from app.core.services import anthropic_messages
     from app.matcha.services.matcha_work.agent_runtime import models, phase_run
 
-    monkeypatch.setattr(models, "offered", lambda: {"luna", "claude-x"})
-    owner = model_run.run_owner(task_row(model="claude-x"))
-    assert (owner.kind, owner.fk_column, owner.surface) == ("agent_task", "agent_task_id", "agent_task")
-    assert owner.usage_feature == "matcha.espresso.tasks.research" and owner.model == "claude-x"
-    assert model_run.model_for({"model": "gone"}) == model_run.LUNA
+    monkeypatch.setattr(models, "offered", lambda: ("claude-x", "claude-y"))
     conn = FakeConn()
     monkeypatch.setattr(model_run, "connection_or_direct", connection(conn))
+    owner = await model_run.run_owner(task_row(model="claude-x"))
+    assert (owner.kind, owner.fk_column, owner.surface) == ("agent_task", "agent_task_id", "agent_task")
+    assert owner.usage_feature == "matcha.espresso.tasks.research" and owner.model == "claude-x"
+    assert conn.calls == []  # an offered model is kept as is
+    # A model no longer offered (a Luna task once Claude is configured) runs
+    # what a new task would, the admin's choice included, and says so on the row.
+    with monkeypatch.context() as m:
+        surface_model = AsyncMock(return_value="claude-y")
+        m.setattr(anthropic_messages, "surface_model", surface_model)
+        assert await model_run.model_for(task_row(model="gpt-5.6-luna")) == "claude-y"
+    surface_model.assert_awaited_with("espresso.tasks")
+    assert conn.ran("UPDATE mw_agent_tasks SET model")[0][2] == (TASK, "claude-y")
     await owner.account({"token_usage": {"total_tokens": 40}})
     assert conn.ran("model_runs = model_runs + 1")[0][2] == (TASK, 40)
     run = AsyncMock(return_value="outcome")
     monkeypatch.setattr(phase_run, "run_model_phase", run)
     assert await model_run.run_model_phase(task_row(), phase="plan") == "outcome"
     assert run.await_args.kwargs == {"phase": "plan"}
-    from app.core.services import anthropic_messages
-
     monkeypatch.setattr(anthropic_messages, "claude_override", AsyncMock(return_value=None))
-    assert await model_run.default_model() == model_run.LUNA
+    assert await model_run.default_model() == anthropic_messages.LUNA

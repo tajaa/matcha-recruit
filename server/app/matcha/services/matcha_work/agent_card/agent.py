@@ -133,9 +133,10 @@ async def run_card_agent(
     # Links a previous round already verified stay usable in a revision.
     provenance = set(verified_links(previous_result))
 
-    # Luna unless the admin "AI models" setting routes agent cards to Claude
-    # (Matcha Work for a business account, Espresso's purchase agent for a personal one).
-    claude_model = await anthropic_messages.claude_override(await work_surface(company_id, "agent_cards"))
+    # Claude Haiku unless the admin "AI models" setting picks Sonnet for agent
+    # cards (Matcha Work for a business account, Espresso's purchase agent for
+    # a personal one); Luna only on a server with no Anthropic key.
+    claude_model = await anthropic_messages.claude_default(await work_surface(company_id, "agent_cards"))
     if claude_model:
         await store.set_run_model(run_id, claude_model)
     ctx = RunContext(

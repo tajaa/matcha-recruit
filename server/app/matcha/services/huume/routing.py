@@ -26,14 +26,14 @@ from typing import Any, Iterable, Optional
 
 from .tools import TOOLS, HuumeTool
 
-# Public — agent.py's `_MODEL` alias reads this so every Huume turn has one
-# canonical, auditable model id.
-LUNA = "gpt-5.6-luna"
-
-# The schedule assistant's model picker. Luna stays the default everywhere;
-# the schedule panel may opt a turn into Claude instead. Ids are the exact
-# provider model ids, and they are what the client sends as `huume_model`.
-from app.core.services.anthropic_messages import CLAUDE_HAIKU, CLAUDE_SONNET  # noqa: E402
+# The schedule assistant's model picker. Ids are the exact provider model ids,
+# and they are what the client sends as `huume_model`. Which of them this
+# server offers is `anthropic_messages.offered_models`, the Espresso menu's
+# rule too: Claude with an Anthropic key, Luna (offered and run) only without.
+# `LUNA` is public: agent.py's `_MODEL` alias reads it so every Huume turn has
+# one canonical, auditable model id.
+from app.core.services import anthropic_messages  # noqa: E402
+from app.core.services.anthropic_messages import CLAUDE_HAIKU, CLAUDE_SONNET, LUNA  # noqa: E402
 
 
 @dataclass(frozen=True)
@@ -56,15 +56,24 @@ def resolve_model_choice(model: Optional[str]) -> HuumeModelChoice:
     return _CHOICES_BY_ID.get(model or "", _CHOICES_BY_ID[LUNA])
 
 
+def schedule_choices(*, anthropic_configured: bool) -> tuple[HuumeModelChoice, ...]:
+    """The picker's entries on this server (`anthropic_messages.offered_models`)."""
+    return tuple(_CHOICES_BY_ID[m] for m in anthropic_messages.offered_models(configured=anthropic_configured))
+
+
 def schedule_model_options(*, anthropic_configured: bool) -> list[dict[str, Any]]:
-    """What the schedule panel's dropdown offers. Claude entries are listed
-    only when an Anthropic key is configured, so the picker can never offer a
-    model every turn would fail on."""
+    """What the schedule panel's dropdown offers (`schedule_choices`)."""
     return [
         {"id": choice.id, "label": choice.label, "provider": choice.provider}
-        for choice in SCHEDULE_MODEL_CHOICES
-        if choice.provider != "anthropic" or anthropic_configured
+        for choice in schedule_choices(anthropic_configured=anthropic_configured)
     ]
+
+
+def honored_pick(model: Optional[str], *, anthropic_configured: bool) -> Optional[str]:
+    """A panel pick this server still offers, else None (the surface default).
+    A manager's stored Luna pick is dropped once Claude is configured."""
+    offered = {c.id for c in schedule_choices(anthropic_configured=anthropic_configured)}
+    return model if model in offered else None
 
 
 @dataclass(frozen=True)

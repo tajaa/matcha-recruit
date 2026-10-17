@@ -1,5 +1,5 @@
-"""One-shot Luna-backed kanban task drafting (title / description / priority /
-category / column) independent of the thread turn loop.
+"""One-shot kanban task drafting (title / description / priority / category /
+column) independent of the thread turn loop, on Claude (`claude_default`).
 """
 import json
 import logging
@@ -141,11 +141,12 @@ Request:
 {prompt}"""
 
     # Task drafting ignores the thread model picker (which cannot route a draft
-    # back to Gemini), so this takes no model argument: it runs on Luna, or on
-    # the Claude model the admin "AI models" setting routes projects to
-    # (Matcha Work or Espresso by `company_id`; none → Matcha Work). Both
-    # sessions take the same call, JSON mode included.
-    claude_model = await anthropic_messages.claude_override(await work_surface(company_id, "projects"))
+    # back to Gemini), so this takes no model argument: it runs on the Claude
+    # model the admin "AI models" setting routes projects to, Haiku by default
+    # (Matcha Work or Espresso by `company_id`; none → Matcha Work), and on Luna
+    # only on a server with no Anthropic key. Both sessions take the same call,
+    # JSON mode included.
+    claude_model = await anthropic_messages.claude_default(await work_surface(company_id, "projects"))
     model = claude_model or LUNA
     client = get_claude_client() if claude_model else get_luna_client()
     with feature_scope(_AI_USAGE_FEATURE):

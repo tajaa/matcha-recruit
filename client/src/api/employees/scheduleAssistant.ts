@@ -21,8 +21,9 @@ export interface ScheduleHuumeSession {
   current_state: Record<string, unknown>
   version: number
   available_models?: ScheduleHuumeModel[]
-  /** What a turn runs on when the manager never picked: the platform
-   *  "Agent model" setting, else Luna. */
+  /** What a turn runs on when the manager never picked: the admin
+   *  "AI models" setting for the Scheduler, else Claude Haiku (Luna only on a
+   *  server with no Anthropic key). */
   default_model?: string
 }
 

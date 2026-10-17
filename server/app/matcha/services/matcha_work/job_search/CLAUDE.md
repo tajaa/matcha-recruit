@@ -154,7 +154,9 @@ agent cards. There is still one loop. The run row is `kind='job_search'`,
 not stored by the provider (`store_responses=False`): the ask and, when the
 person chose "use my résumé", their résumé (`user_resumes`, ≤6k chars) are in
 the input. The model is settled at create (`agent_surfaces.ESPRESSO_JOB_SEARCH`,
-Admin → AI models; else Luna) and re-checked against `models.offered()`.
+Admin → AI models; else Claude Haiku, `anthropic_messages.surface_model`) and re-checked against
+`models.offered()`: a model no longer offered (a Luna search from before the Anthropic key) runs what
+a new search would get, the admin's choice included, and the row is re-stamped with it.
 
 The output of each phase is its **finish contract**, not draft tools (a finish
 next to a write is refused by the runner, and the last turn forces finish).
