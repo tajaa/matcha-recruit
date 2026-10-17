@@ -15,5 +15,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends fonts-noto-core
 COPY --from=scenes --chown=matcha:matcha /client/dist-recap /app/recap-render
 COPY --chown=matcha:matcha server/app /app/app
 USER matcha
+ENV ESPRESSO_RECAPS_WORKER=1
 HEALTHCHECK NONE
 CMD ["celery", "-A", "app.workers.celery_app", "worker", "--pool=solo", "-Q", "espresso_recaps_render", "--concurrency=1", "--loglevel=info"]

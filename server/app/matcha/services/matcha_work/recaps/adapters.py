@@ -38,40 +38,64 @@ def step_event(step: dict) -> Event | None:
         outcome = "held"
     elif kind == "commit" and value.get("mode") != "live":
         outcome = "dry_run"
+    elif tool.endswith("_apple_event") and value.get("queued"):
+        outcome = "handoff"
     elif kind == "commit":
+        outcome = "confirmed"
+    elif tool in ("add_espresso_event", "update_espresso_event", "delete_espresso_event", "add_reminder"):
         outcome = "confirmed"
     elif kind == "draft":
         outcome = "drafted"
     else:
         outcome = "observed"
     facts = [Fact(label="Outcome", value=outcome.replace("_", " "))]
+    preview = value.get("preview") if isinstance(value.get("preview"), dict) else {}
+    if tool in ("create_event", "update_event", "delete_event"):
+        for line in preview.get("lines") or []:
+            if isinstance(line, dict) and line.get("label") in ("Event", "When", "New title", "New time"):
+                facts.append(Fact(label=line["label"], value=clip(line.get("value"), 300)))
+    if tool == "send_email":
+        for line in preview.get("lines") or []:
+            if isinstance(line, dict) and line.get("label") == "Subject":
+                facts.append(Fact(label="Subject", value=clip(line.get("value"), 160)))
+    if tool == "read_email" and value.get("subject"):
+        facts.append(Fact(label="Selected subject", value=clip(value["subject"], 160)))
     if tool in ("archive_email", "label_email") and isinstance(value.get("weight"), int) and 0 < value["weight"] <= 200:
         facts.append(Fact(label="Selected messages", value=str(value["weight"])))
     # Never use args, preview lines, result bodies or free-form audit labels.
     return Event(kind="action_resolved", title=TOOLS.get(tool, "Agent action"), outcome=outcome,
                  occurred_at=step.get("resolved_at") or step["created_at"],
-                 facts=facts)
+                 facts=facts[:6])
 
 
 async def search_event(conn, source, *, terminal=False, phase="") -> Event:
     research = source["kind"] == "research"
     if research:
         row = await conn.fetchrow(
-            """SELECT t.*, q.n AS recap_round, q.status AS recap_status FROM mw_agent_task_rounds q
-               JOIN mw_agent_tasks t ON t.id=q.task_id WHERE q.id=$1""", source["task_round_id"],
+            """SELECT t.*, q.n AS recap_round, q.status AS recap_status, q.completed_at AS recap_completed_at
+               FROM mw_agent_task_rounds q JOIN mw_agent_tasks t ON t.id=q.task_id WHERE q.id=$1""",
+            source["task_round_id"],
         )
         items = await conn.fetch(
-            """SELECT title,subtitle,status FROM mw_agent_task_items WHERE task_id=$1
+            """SELECT title,subtitle,fields,fit_score,fit_reasons FROM mw_agent_task_items WHERE task_id=$1
                AND rank_band < 9 ORDER BY rank NULLS LAST, id LIMIT 3""", row["id"],
         )
         status = row["status"] if terminal and row["recap_status"] in ("queued", "running") else row["recap_status"] if terminal else row["status"]
+        plan = decode_jsonb(row.get("plan"), {}) or {}
+        constraints = [str(item.get("label") or "") for item in plan.get("constraints") or [] if isinstance(item, dict)]
+        criteria = "; ".join(constraints[:4])
     else:
         row = await conn.fetchrow("SELECT * FROM mw_job_searches WHERE id=$1", source["job_search_id"])
         items = await conn.fetch(
-            """SELECT title,company AS subtitle,comp_status AS status FROM mw_job_leads WHERE search_id=$1
-               AND screen_status <> 'irrelevant' ORDER BY rank NULLS LAST, id LIMIT 3""", row["id"],
+            """SELECT title,company,comp,comp_status,comp_currency,fit_score,fit_reasons,approach_status
+               FROM mw_job_leads WHERE search_id=$1 AND screen_status <> 'irrelevant'
+               ORDER BY rank NULLS LAST, id LIMIT 3""", row["id"],
         )
         status = row["status"]
+        wanted = decode_jsonb(row.get("criteria"), {}) or {}
+        criteria = "; ".join([", ".join(wanted.get("titles") or []), ", ".join(wanted.get("locations") or []),
+                              str(wanted.get("remote") or ""),
+                              f"Base floor {wanted.get('base_floor')} {wanted.get('currency') or 'USD'}" if wanted.get("base_floor") is not None else ""])
     progress = decode_jsonb(row.get("progress"), {}) or {}
     outcome = "observed"
     if status in ("failed", "cancelled"):
@@ -79,9 +103,39 @@ async def search_event(conn, source, *, terminal=False, phase="") -> Event:
     elif str(progress.get("note") or "").startswith("Stopped early"):
         outcome = "partial"
     facts = [Fact(label="Status", value=clip(status, 80))]
+    if criteria.strip("; "):
+        facts.append(Fact(label="Criteria", value=clip(criteria, 300)))
     if terminal:
         for item in items:
-            facts.append(Fact(label=clip(item["title"], 80), value=clip(item["subtitle"], 240) or "See source for evidence"))
+            parts = []
+            if research:
+                parts.append(str(item.get("subtitle") or ""))
+                fields = decode_jsonb(item.get("fields"), {}) or {}
+                for key, value in list(fields.items())[:3]:
+                    if not isinstance(value, dict) or not value.get("display"):
+                        continue
+                    evidence = "verified" if value.get("status") == "verified" else "unconfirmed"
+                    parts.append(f"{key}: {value['display']} ({evidence})")
+            else:
+                from ..job_search.ranking import comp_line
+                comp = decode_jsonb(item.get("comp"), {}) or {}
+                parts.append(str(item.get("company") or ""))
+                pay_status = item.get("comp_status") or "not_disclosed"
+                parts.append(f"{comp_line(comp)} (posting pay)" if pay_status == "posted" else
+                             "Pay mentioned, unverified" if pay_status == "mentioned" else "Pay not disclosed")
+                parts.append(f"Approach: {item.get('approach_status') or 'none'}")
+            if item.get("fit_score") is not None:
+                parts.append(f"Fit: {item['fit_score']}/5")
+            reasons = decode_jsonb(item.get("fit_reasons"), []) or []
+            if reasons:
+                parts.append(clip(reasons[0], 100))
+            facts.append(Fact(label=clip(item["title"], 80), value=clip("; ".join(p for p in parts if p), 300) or "See source for evidence"))
+    else:
+        for key in ("found", "screened", "enriched", "ranked", "checked"):
+            count = progress.get(key)
+            if type(count) is int and 0 <= count <= 1_000_000 and len(facts) < 6:
+                facts.append(Fact(label=key.capitalize(), value=str(count)))
+    occurred = (row.get("recap_completed_at") or row.get("completed_at")) if terminal else row.get("updated_at")
     return Event(kind="result" if terminal else "phase_completed",
-                 title=clip((row["title"] or "Research results") if terminal else f"Stage: {phase}"),
-                 outcome=outcome, occurred_at=datetime.now(timezone.utc), facts=facts)
+                 title=clip((row["title"] or "Research results") if terminal else f"{phase}: {row['title'] or 'Research'}"),
+                 outcome=outcome, occurred_at=occurred or datetime.now(timezone.utc), facts=facts[:6])

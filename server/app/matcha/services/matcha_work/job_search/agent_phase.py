@@ -68,6 +68,8 @@ async def run_owner(search: dict) -> phase_run.RunOwner:
         storage_prefix=f"matcha-work/{search['company_id']}/job-search/{search['id']}",
         surface="job_search",
         account=partial(_count_run, search["id"]),
+        dispatch_token=search.get("dispatch_token"),
+        recap_generation=search.get("recap_generation"),
     )
 
 

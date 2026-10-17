@@ -15,6 +15,7 @@ services:
       - /tmp:size=268435456,mode=1777
     environment:
       PYTHONDONTWRITEBYTECODE: '1'
+      ESPRESSO_RECAPS_WORKER: '1'
     security_opt:
       - no-new-privileges:true
     cap_drop: [ALL]

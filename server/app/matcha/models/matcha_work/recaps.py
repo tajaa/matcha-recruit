@@ -8,9 +8,9 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
-Outcome = Literal["observed", "drafted", "confirmed", "dry_run", "held", "declined", "failed", "unknown", "partial", "cancelled"]
+Outcome = Literal["observed", "drafted", "confirmed", "dry_run", "held", "handoff", "declined", "failed", "unknown", "partial", "cancelled"]
 State = Literal["collecting", "waiting", "queued", "rendering", "ready", "failed", "skipped", "expired", "deleted"]
 
 
@@ -67,6 +67,7 @@ class Manifest(Strict):
     schema_version: Literal[1] = 1
     template_version: Literal["espresso-recap.v1"] = "espresso-recap.v1"
     scenes: list[Scene] = Field(min_length=1, max_length=12)
+    transcript: list[Event] = Field(default_factory=list, max_length=256)
 
     @model_validator(mode="after")
     def budget(self):
@@ -90,3 +91,8 @@ class Retry(Strict):
 
 class Statuses(Strict):
     ids: list[UUID] = Field(max_length=50)
+
+
+class Cursor(Strict):
+    at: AwareDatetime
+    id: UUID

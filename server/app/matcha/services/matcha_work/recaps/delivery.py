@@ -13,7 +13,7 @@ from .service import VALID
 
 
 async def own_mail(conn, *, kind, source_id, message):
-    if not settings.enabled():
+    if not settings.enabled() and not await conn.fetchval("SELECT to_regclass('mw_agent_recaps')"):
         return False
     if kind == "research":
         source = await conn.fetchrow(
@@ -77,7 +77,8 @@ async def deliver(delivery_id):
         messages = [decode_jsonb(s["mail_payload"], {}) for s in sources if s["mail_payload"]]
         # Ordinary search email eligibility remains intact when recap email is
         # off. A quick round without a legacy payload never gains a new email.
-        should_send = bool(row and (messages or row["email_enabled"]))
+        standalone = bool(row and row["email_enabled"] and row["last_error_code"] != "no_useful_evidence")
+        should_send = bool(row and (messages or standalone))
         if not should_send:
             await conn.execute("UPDATE mw_agent_recap_deliveries SET state='suppressed' WHERE id=$1 AND claim_token=$2", delivery_id, token)
             return

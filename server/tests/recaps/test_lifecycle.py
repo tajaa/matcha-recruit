@@ -35,7 +35,7 @@ def wire(monkeypatch, module, conn):
 
 def source(**over):
     return {"id": SOURCE, "recap_id": RECAP, "kind": "run", "run_id": RUN,
-            "owner_user_id": USER, "company_id": COMPANY, "semantic_state": "live", "role": "root", **over}
+            "owner_user_id": USER, "company_id": COMPANY, "state": "collecting", "semantic_state": "live", "role": "root", **over}
 
 
 def row(**over):

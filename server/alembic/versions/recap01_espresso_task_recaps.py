@@ -16,14 +16,14 @@ depends_on = None
 
 def upgrade():
     op.execute("ALTER TABLE mw_job_searches ADD COLUMN recap_generation INTEGER NOT NULL DEFAULT 0 CHECK (recap_generation >= 0)")
-    op.execute("""
-        CREATE TABLE mw_agent_recap_preferences (
+    statements = (
+        """CREATE TABLE mw_agent_recap_preferences (
             company_id UUID REFERENCES companies(id) ON DELETE CASCADE,
             user_id UUID REFERENCES users(id) ON DELETE CASCADE,
             enabled BOOLEAN NOT NULL DEFAULT FALSE, email_enabled BOOLEAN NOT NULL DEFAULT FALSE,
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY(company_id, user_id)
-        );
-        CREATE TABLE mw_agent_recaps (
+        )""",
+        """CREATE TABLE mw_agent_recaps (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
             owner_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -44,11 +44,11 @@ def upgrade():
             source_completed_at TIMESTAMPTZ, finalize_after TIMESTAMPTZ, ready_at TIMESTAMPTZ,
             expires_at TIMESTAMPTZ, deleted_at TIMESTAMPTZ,
             UNIQUE(company_id, owner_user_id, root_key)
-        );
-        CREATE INDEX idx_recap_owner ON mw_agent_recaps(company_id, owner_user_id, created_at DESC, id);
-        CREATE INDEX idx_recap_work ON mw_agent_recaps(state, next_attempt_at) WHERE state IN ('queued','rendering','collecting','waiting');
-        CREATE INDEX idx_recap_expiry ON mw_agent_recaps(expires_at) WHERE state = 'ready';
-        CREATE TABLE mw_agent_recap_sources (
+        )""",
+        """CREATE INDEX idx_recap_owner ON mw_agent_recaps(company_id, owner_user_id, created_at DESC, id)""",
+        """CREATE INDEX idx_recap_work ON mw_agent_recaps(state, next_attempt_at) WHERE state IN ('queued','rendering','collecting','waiting')""",
+        """CREATE INDEX idx_recap_expiry ON mw_agent_recaps(expires_at) WHERE state = 'ready'""",
+        """CREATE TABLE mw_agent_recap_sources (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(), recap_id UUID NOT NULL REFERENCES mw_agent_recaps(id) ON DELETE CASCADE,
             kind TEXT NOT NULL CHECK (kind IN ('run','research','jobs')),
             run_id UUID REFERENCES mw_project_agent_runs(id) ON DELETE CASCADE,
@@ -57,18 +57,19 @@ def upgrade():
             generation INTEGER NOT NULL DEFAULT 0 CHECK (generation >= 0),
             role TEXT NOT NULL DEFAULT 'root' CHECK (role IN ('root','child','continuation','phase')),
             parent_source_id UUID REFERENCES mw_agent_recap_sources(id) ON DELETE SET NULL,
+            execution_token UUID,
             semantic_state TEXT NOT NULL DEFAULT 'live' CHECK (semantic_state IN ('live','waiting','terminal')),
             completion_mail_owner TEXT NOT NULL CHECK (completion_mail_owner IN ('legacy','recap','none')),
             mail_payload JSONB CHECK (octet_length(mail_payload::text) <= 65536),
             CHECK ((kind = 'run' AND run_id IS NOT NULL AND task_round_id IS NULL AND job_search_id IS NULL)
                 OR (kind = 'research' AND run_id IS NULL AND task_round_id IS NOT NULL AND job_search_id IS NULL)
                 OR (kind = 'jobs' AND run_id IS NULL AND task_round_id IS NULL AND job_search_id IS NOT NULL))
-        );
-        CREATE UNIQUE INDEX uq_recap_run ON mw_agent_recap_sources(run_id) WHERE kind = 'run';
-        CREATE UNIQUE INDEX uq_recap_round ON mw_agent_recap_sources(task_round_id) WHERE kind = 'research';
-        CREATE UNIQUE INDEX uq_recap_job ON mw_agent_recap_sources(job_search_id, generation) WHERE kind = 'jobs';
-        CREATE INDEX idx_recap_sources_root ON mw_agent_recap_sources(recap_id);
-        CREATE TABLE mw_agent_recap_events (
+        )""",
+        """CREATE UNIQUE INDEX uq_recap_run ON mw_agent_recap_sources(run_id) WHERE kind = 'run'""",
+        """CREATE UNIQUE INDEX uq_recap_round ON mw_agent_recap_sources(task_round_id) WHERE kind = 'research'""",
+        """CREATE UNIQUE INDEX uq_recap_job ON mw_agent_recap_sources(job_search_id, generation) WHERE kind = 'jobs'""",
+        """CREATE INDEX idx_recap_sources_root ON mw_agent_recap_sources(recap_id)""",
+        """CREATE TABLE mw_agent_recap_events (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(), recap_id UUID NOT NULL REFERENCES mw_agent_recaps(id) ON DELETE CASCADE,
             source_id UUID NOT NULL REFERENCES mw_agent_recap_sources(id) ON DELETE CASCADE,
             event_key TEXT NOT NULL CHECK (octet_length(event_key) <= 240),
@@ -76,23 +77,25 @@ def upgrade():
             asset JSONB CHECK (octet_length(asset::text) <= 2048), capture_token UUID,
             occurred_at TIMESTAMPTZ NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             UNIQUE(recap_id, event_key)
-        );
-        CREATE INDEX idx_recap_events_order ON mw_agent_recap_events(recap_id, occurred_at, id);
-        CREATE TABLE mw_agent_recap_deliveries (
+        )""",
+        """CREATE INDEX idx_recap_events_order ON mw_agent_recap_events(recap_id, occurred_at, id)""",
+        """CREATE TABLE mw_agent_recap_deliveries (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(), recap_id UUID NOT NULL UNIQUE REFERENCES mw_agent_recaps(id) ON DELETE CASCADE,
             state TEXT NOT NULL DEFAULT 'pending' CHECK (state IN ('pending','sending','retry_wait','sent','unknown','suppressed','failed')),
             attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts BETWEEN 0 AND 3), claim_token UUID, lease_until TIMESTAMPTZ,
             not_before TIMESTAMPTZ NOT NULL DEFAULT NOW(), deadline_at TIMESTAMPTZ,
             provider TEXT, provider_message_id TEXT, sent_at TIMESTAMPTZ, last_error_code TEXT
-        );
-        CREATE INDEX idx_recap_delivery_due ON mw_agent_recap_deliveries(state, not_before);
-        CREATE TABLE mw_agent_recap_cleanup_jobs (
+        )""",
+        """CREATE INDEX idx_recap_delivery_due ON mw_agent_recap_deliveries(state, not_before)""",
+        """CREATE TABLE mw_agent_recap_cleanup_jobs (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(), bucket TEXT NOT NULL, prefix TEXT NOT NULL,
             state TEXT NOT NULL DEFAULT 'pending' CHECK (state IN ('pending','done')),
             not_before TIMESTAMPTZ NOT NULL DEFAULT NOW(), attempts INTEGER NOT NULL DEFAULT 0,
             UNIQUE(bucket, prefix), CHECK (prefix ~ '^espresso-recaps/[a-f0-9-]+/[a-f0-9-]+/[a-f0-9-]+/')
-        );
-    """)
+        )""",
+    )
+    for statement in statements:
+        op.execute(statement)
 
 
 def downgrade():

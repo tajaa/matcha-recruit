@@ -1,10 +1,13 @@
 # Espresso web task recaps — mechanical technical plan
 
-Status: proposed; implementation has not started.
+Status: implemented for review; rollout remains disabled. Operational steps and
+validation limits are in [the recap runbook](../ops/ESPRESSO_RECAPS.md).
 
 Prepared: 2026-10-17. Repository baseline: `d0b8e4d6eb1115d145c5d048913d9bf244651110`.
-The inspected checkout was clean and detached. This document is the only planned change in this planning task.
-Re-resolve the baseline, applicable instructions, consumers, and migration heads before implementation.
+The implementation branch starts from main at `2faec1812bfd6338acf3c58bc76ddb88b34d7dda`.
+Main added the Tasks web interface after planning; recap links now integrate with
+that interface as well as Assistant and Job search. The original design below
+records intent; the runbook records the shipped limits and remaining rollout gates.
 
 ## 1. Outcome and scope
 

@@ -98,6 +98,9 @@ celery_app = Celery(
     ],
 )
 
+if os.getenv("ESPRESSO_RECAPS_WORKER") == "1":
+    celery_app.conf.include = ["app.workers.tasks.recaps"]
+
 celery_app.conf.update(
     # Serialization
     task_serializer="json",

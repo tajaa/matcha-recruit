@@ -21,3 +21,12 @@ Backend package is `server/app/matcha/routes/matcha_work/` (own `CLAUDE.md`) + `
 ## Cross-cutting rules
 
 Placement rules and the boundary rules between the three client apps live in `client/CLAUDE.md` — read that before adding a file here. DB/deploy/test-data rules are in root `CLAUDE.md`.
+
+## Personal task recaps
+
+`pages/Recaps.tsx`, `pages/Recap.tsx`, `components/recaps/` and the recap hooks serve
+`/espresso/recaps` only. Preferences are owner-scoped and cleared by auth cache
+reset; private playback reads use request sequencing and signed URL refresh.
+Source links use the library's `source_id` filter. `recaps/render/` builds a separate
+trusted bundle with `npm run build:recaps`; the media worker never loads the
+authenticated application. Rollout: `docs/ops/ESPRESSO_RECAPS.md`.

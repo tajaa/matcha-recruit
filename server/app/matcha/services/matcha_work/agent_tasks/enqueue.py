@@ -348,6 +348,8 @@ async def _new_round(conn, user, task: dict, *, kind: str, directive: str, item_
             used = await allowance.used_units(conn, user.id) if limit is not None else 0
             if allowance.over(limit, used, cost):
                 raise _limit_error(allowance.usage_payload(limit, used), cost)
+    from ..recaps.scope import supersede_round
+    await supersede_round(conn, task)
     await conn.execute(
         """INSERT INTO mw_agent_task_rounds (task_id, user_id, n, kind, request_id, directive, scope, units, status)
            VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, 'running')""",

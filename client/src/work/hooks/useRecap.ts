@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { ApiError } from '../../api/client'
 import { useMe } from '../../hooks/useMe'
 import { getRecap } from '../api/matchaWork/recaps'
 import type { RecapDetail } from '../types'
@@ -15,20 +16,29 @@ export function useRecap(id: string, revision: number) {
     let alive = true
     let timer: ReturnType<typeof setTimeout> | undefined
     const started = Date.now()
+    let sequence = 0
     async function load() {
       clearTimeout(timer)
       if (document.hidden || !alive) return
+      const request = ++sequence
       try {
         const value = await getRecap(id)
-        if (!alive) return
+        if (!alive || request !== sequence) return
         setStored({ owner: owner!, id, value })
         setError(null)
         if (!TERMINAL.has(value.state)) timer = setTimeout(() => void load(), Date.now() - started > 60_000 ? 15_000 : 5000)
-      } catch {
-        if (alive) setError('This recap is unavailable. It may have been removed or access may have changed.')
+      } catch (caught) {
+        if (!alive || request !== sequence) return
+        if (caught instanceof ApiError && [401, 403, 404, 410].includes(caught.status)) {
+          setStored(null)
+          setError('This recap is unavailable. It may have been removed or access may have changed.')
+        } else {
+          setError('Connection interrupted. Retrying…')
+          timer = setTimeout(() => void load(), 15_000)
+        }
       }
     }
-    const visibility = () => { clearTimeout(timer); if (!document.hidden) void load() }
+    const visibility = () => { ++sequence; clearTimeout(timer); if (!document.hidden) void load() }
     document.addEventListener('visibilitychange', visibility)
     void load()
     return () => { alive = false; clearTimeout(timer); document.removeEventListener('visibilitychange', visibility) }

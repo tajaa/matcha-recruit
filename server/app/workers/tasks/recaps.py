@@ -1,6 +1,7 @@
 """Media stays on a dedicated queue/host. Default worker does light recovery/mail."""
 import asyncio
 import logging
+import os
 from uuid import UUID
 
 from app.workers.celery_app import celery_app, consumes_queue
@@ -29,12 +30,14 @@ def require_media_queue():
 @celery_app.task(name="recaps.render", soft_time_limit=240, time_limit=300)
 def render_recap(recap_id: str):
     require_media_queue()
-    from app.matcha.services.matcha_work.recaps.reconcile import render_job
-    asyncio.run(asyncio.wait_for(render_job(UUID(recap_id)), timeout=240))
+    from app.matcha.services.matcha_work.recaps.supervisor import run
+    run("render", UUID(recap_id), seconds=240)
 
 
 @celery_app.task(name="recaps.deliver", soft_time_limit=55, time_limit=60)
 def deliver_recap(delivery_id: str):
+    if os.getenv("ESPRESSO_RECAPS_WORKER") == "1":
+        raise RuntimeError("media worker cannot deliver email")
     from app.matcha.services.matcha_work.recaps.delivery import deliver
     asyncio.run(deliver(UUID(delivery_id)))
 
@@ -42,5 +45,5 @@ def deliver_recap(delivery_id: str):
 @celery_app.task(name="recaps.cleanup", soft_time_limit=90, time_limit=120)
 def cleanup_recap(cleanup_id: str):
     require_media_queue()
-    from app.matcha.services.matcha_work.recaps.reconcile import cleanup_job
-    asyncio.run(asyncio.wait_for(cleanup_job(UUID(cleanup_id)), timeout=90))
+    from app.matcha.services.matcha_work.recaps.supervisor import run
+    run("cleanup", UUID(cleanup_id), seconds=90)

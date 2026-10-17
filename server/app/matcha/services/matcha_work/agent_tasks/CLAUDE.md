@@ -468,3 +468,13 @@ metadata as `[String: String]`; `task_id` is a kanban card there).
 Agent cards as tasks (`engine` `board`; the columns exist). Book (places) and
 Email-about-it (apartments) actions; a travel playbook. Distance for places
 (the same `near` on the places kind).
+
+## Optional web recaps
+
+Enrollment binds the actual round before dispatch, including intake and trusted
+assistant-parent lineage. Following up a waiting task snapshots/closes only the
+superseded recap source; it does not settle or rewrite domain round accounting.
+The job-search Tasks pointer remains a pointer, not the recap lifecycle. Existing
+completion mail hands off only after durable recap ownership; ownership remains
+authoritative when creation is disabled. Delete revokes containing recaps.
+Runbook: `docs/ops/ESPRESSO_RECAPS.md`.

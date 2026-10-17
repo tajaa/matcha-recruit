@@ -42,18 +42,24 @@ async def refresh_source(conn, source) -> str:
     if source["semantic_state"] == "terminal":
         return "terminal"
     if source["kind"] == "run":
-        run = await conn.fetchrow("SELECT status,result,created_at FROM mw_project_agent_runs WHERE id=$1", source["run_id"])
+        run = await conn.fetchrow("SELECT status,result,created_at,completed_at FROM mw_project_agent_runs WHERE id=$1", source["run_id"])
         if not run:
             return "deleted"
         if run["status"] in ("queued", "running"):
-            return "live"
+            # Phase runs are supplementary evidence. A killed phase process
+            # can leave its run row running after its owner advances/restarts.
+            # The durable dispatch epoch, rather than that stale row, decides
+            # whether it can still produce evidence for this recap.
+            if source["role"] != "phase" or await scope.capture_current(conn, source):
+                return "live"
         steps = await conn.fetch(
             "SELECT * FROM mw_project_agent_steps WHERE run_id=$1 ORDER BY seq LIMIT 128", source["run_id"],
         )
         for step in steps:
             snapshot = adapters.step_event(dict(step))
             if snapshot:
-                await scope.event(conn, source, f"step:{source['run_id']}:{step['seq']}:{step['status']}", snapshot)
+                await scope.event(conn, source, f"step:{source['run_id']}:{step['seq']}:{step['status']}", snapshot,
+                                  reserve_final=snapshot.outcome in ("unknown", "failed", "partial", "cancelled", "declined"))
         result = decode_jsonb(run["result"], {}) or {}
         if result.get("question") or result.get("held"):
             prompt = await conn.fetchrow(
@@ -75,14 +81,20 @@ async def refresh_source(conn, source) -> str:
             await scope.event(conn, source, f"run-end:{source['run_id']}", Event(
                 kind="result", title="Request finished" if run["status"] == "done" else "Request stopped",
                 outcome="observed" if run["status"] == "done" else "failed",
-                occurred_at=datetime.now(timezone.utc), facts=[Fact(label="Recorded actions", value=str(len(steps)))],
+                occurred_at=run.get("completed_at") or run.get("created_at") or datetime.now(timezone.utc), facts=[Fact(label="Recorded actions", value=str(len(steps)))],
             ), reserve_final=True)
         return "terminal"
     if source["kind"] == "research":
         row = await conn.fetchrow(
-            """SELECT q.status,t.status AS task_status,t.deleted_at FROM mw_agent_task_rounds q
+            """SELECT q.status,q.n,t.current_round,t.status AS task_status,t.deleted_at FROM mw_agent_task_rounds q
                JOIN mw_agent_tasks t ON t.id=q.task_id WHERE q.id=$1""", source["task_round_id"],
         )
+        if row and row.get("n", row.get("current_round")) != row.get("current_round"):
+            await scope.event(conn, source, f"superseded:{source['id']}", Event(
+                kind="result", title="Continued in a follow-up", outcome="partial",
+                occurred_at=datetime.now(timezone.utc),
+            ), reserve_final=True)
+            return "terminal"
         state = "waiting" if row and row["task_status"] == "waiting" and row["status"] in ("queued", "running") else "live"
     else:
         row = await conn.fetchrow("SELECT status,deleted_at,recap_generation FROM mw_job_searches WHERE id=$1", source["job_search_id"])

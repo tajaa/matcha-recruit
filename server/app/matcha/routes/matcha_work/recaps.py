@@ -1,5 +1,4 @@
 """Personal, owner-only recap API. Media URLs are short-lived bearer links."""
-from datetime import datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
@@ -30,7 +29,7 @@ async def statuses(body: Statuses, user: CurrentUser = Depends(require_personal_
 
 
 @router.get("")
-async def listing(limit: int = Query(25, ge=1, le=50), before: datetime | None = None,
+async def listing(limit: int = Query(25, ge=1, le=50), before: str | None = Query(None, max_length=512),
                   source_id: UUID | None = None, user: CurrentUser = Depends(require_personal_workspace)):
     return await service.listing(user.id, await get_client_company_id(user), limit=limit, before=before, source_id=source_id)
 

@@ -55,6 +55,9 @@ class RunOwner:
     # The workspace's token budget is charged here, not by the owner.
     account: Callable[[dict], Awaitable[None]]
     role: str = "client"
+    dispatch_token: UUID | None = None
+    recap_generation: int | None = None
+    recap_round: int | None = None
 
     def __post_init__(self) -> None:
         if self.kind not in get_args(RunKind):

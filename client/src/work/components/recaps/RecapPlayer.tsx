@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { ApiError } from '../../../api/client'
 import { getRecapPlayback } from '../../api/matchaWork/recaps'
 import type { RecapDetail, RecapPlayback } from '../../types'
 
@@ -11,22 +12,30 @@ export default function RecapPlayer({ recap }: { recap: RecapDetail }) {
   const [revision, setRevision] = useState(0)
   useEffect(() => {
     let alive = true
+    let sequence = 0
     let timer: ReturnType<typeof setTimeout> | undefined
     async function refresh() {
       clearTimeout(timer)
       if (!alive || document.hidden) return
+      const request = ++sequence
       try {
         const value = await getRecapPlayback(recap.id)
-        if (!alive) return
+        if (!alive || request !== sequence) return
         position.current = video.current?.currentTime ?? position.current
         setPlayback(value)
         setError('')
         timer = setTimeout(() => void refresh(), Math.max(1000, (value.expires_in - 45) * 1000))
-      } catch {
-        if (alive) { setPlayback(null); setError('Playback is unavailable. Reopen the recap to check access.') }
+      } catch (caught) {
+        if (!alive || request !== sequence) return
+        if (caught instanceof ApiError && [401, 403, 404, 409, 410].includes(caught.status)) {
+          setPlayback(null); setError('Playback is unavailable. Reopen the recap to check access.')
+        } else {
+          setError('Connection interrupted. Retrying playback…')
+          timer = setTimeout(() => void refresh(), 15_000)
+        }
       }
     }
-    const visibility = () => { clearTimeout(timer); if (document.hidden) video.current?.pause(); else void refresh() }
+    const visibility = () => { ++sequence; clearTimeout(timer); if (document.hidden) video.current?.pause(); else void refresh() }
     document.addEventListener('visibilitychange', visibility)
     void refresh()
     return () => { alive = false; clearTimeout(timer); document.removeEventListener('visibilitychange', visibility) }

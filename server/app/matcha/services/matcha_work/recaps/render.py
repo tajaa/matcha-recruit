@@ -138,7 +138,8 @@ async def render(manifest: Manifest, directory: Path) -> dict:
     if video.get("codec_name") != "h264" or (video.get("width"), video.get("height")) != (1920, 1080) or not 0 < duration <= 120.1:
         raise ValueError("invalid_output_stream")
     await command(["ffmpeg", "-v", "error", "-threads", "2", "-i", str(output), "-f", "null", "-"], timeout=30)
-    poster = directory / "poster.webp"
-    await command(["ffmpeg", "-v", "error", "-y", "-i", str(directory / "card00.png"), "-frames:v", "1", str(poster)], timeout=10)
+    # A native scene PNG is already a bounded, readable poster and needs no
+    # optional FFmpeg image encoder.
+    poster = directory / "card00.png"
     scratch_budget(directory)
     return {"video_path": output, "poster_path": poster, "duration_ms": round(duration * 1000), "chapters": chapters}

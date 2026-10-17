@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import binascii
 import json
 import logging
 import tempfile
@@ -37,15 +38,20 @@ async def window(page):
     cdp = None
     timer = None
     frames = []
+    reserved = False
     started = time.monotonic()
     try:
         async with connection_or_direct() as conn, conn.transaction():
             source = await scope.source_for_run(conn, run_id)
-            if source and settings.available(source["owner_user_id"]):
+            if source and not settings.available(source["owner_user_id"]):
+                source = None
+            if source and not await scope.capture_current(conn, source):
+                source = None
+            if source:
                 reserved = await conn.fetchval(
                     """UPDATE mw_agent_recaps r SET capture_windows_reserved=capture_windows_reserved+1
-                       WHERE id=$1 AND state IN ('collecting','waiting') AND capture_windows_reserved<10
-                       AND capture_bytes_stored < 117440512 AND EXISTS (
+                       WHERE id=$1 AND state IN ('collecting','waiting') AND capture_windows_reserved<8
+                       AND capture_bytes_stored < 134217728 AND EXISTS (
                            SELECT 1 FROM mw_agent_recap_preferences p WHERE p.user_id=r.owner_user_id
                            AND p.company_id=r.company_id AND p.enabled) RETURNING true""", source["recap_id"],
                 )
@@ -63,11 +69,14 @@ async def window(page):
                 raw = event.get("data", "")
                 if len(raw) > 350_000:
                     return
-                data = base64.b64decode(raw, validate=True)
+                try:
+                    data = base64.b64decode(raw, validate=True)
+                except (ValueError, binascii.Error):
+                    return
                 if len(data) <= 256 * 1024:
                     frames.append((elapsed, data))
             cdp.on("Page.screencastFrame", frame)
-            await cdp.send("Page.startScreencast", {"format": "jpeg", "quality": 65, "maxWidth": 1440, "maxHeight": 900, "everyNthFrame": 8})
+            await cdp.send("Page.startScreencast", {"format": "jpeg", "quality": 65, "maxWidth": 1440, "maxHeight": 900, "everyNthFrame": 1})
             async def stop_later():
                 await asyncio.sleep(8)
                 try:
@@ -78,7 +87,8 @@ async def window(page):
     except Exception:
         # CDP is Chromium-specific. The result card/checkpoint remains valid.
         logger.info("recap capture unavailable run=%s", run_id)
-        source = None
+        if not reserved:
+            source = None
     try:
         yield result
     finally:
@@ -91,7 +101,7 @@ async def window(page):
                 await cdp.detach()
             except Exception:
                 pass
-        if source and result.accepted:
+        if source and result.accepted and not asyncio.current_task().cancelling():
             try:
                 if not frames:
                     data = await page.screenshot(type="jpeg", quality=65)
@@ -129,6 +139,8 @@ async def _store(source, frames):
             package.writestr("frames.json", json.dumps(index))
         asset = await storage.upload(path, prefix + "frames.zip", "application/zip", limit=16 * 1024 * 1024)
         async with connection_or_direct() as conn, conn.transaction():
+            if not await scope.capture_current(conn, source):
+                return
             # Root lock fences freezing/deletion and makes the byte budget atomic.
             allowed = await conn.fetchval(
                 """UPDATE mw_agent_recaps SET capture_bytes_stored=capture_bytes_stored+$2

@@ -1,10 +1,12 @@
 import { useState } from 'react'
 import { saveRecapPreferences } from '../../api/matchaWork/recaps'
-import { useRecapPreferences } from '../../hooks/useRecapPreferences'
+import { useMe } from '../../../hooks/useMe'
+import { rememberRecapPreferences, useRecapPreferences } from '../../hooks/useRecapPreferences'
 import type { RecapPreferences as Preferences } from '../../types'
 
 export default function RecapPreferences() {
   const initial = useRecapPreferences()
+  const { me } = useMe()
   const [saved, setSaved] = useState<Preferences | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -14,7 +16,7 @@ export default function RecapPreferences() {
     if (!value) return
     setBusy(true)
     setError('')
-    try { setSaved(await saveRecapPreferences({ enabled: value.enabled, email_enabled: value.email_enabled, ...patch })) }
+    try { const updated = await saveRecapPreferences({ enabled: value.enabled, email_enabled: value.email_enabled, ...patch }); setSaved(updated); if (me) rememberRecapPreferences(me.user.id, updated) }
     catch { setError('Could not save recap preferences. Try again.') }
     finally { setBusy(false) }
   }

@@ -12,7 +12,7 @@ from uuid import uuid4
 from app.config import get_settings
 from app.database import connection_or_direct, decode_jsonb
 
-from . import observe, scope, settings, storage, storyboard
+from . import adapters, observe, scope, settings, storage, storyboard
 from app.matcha.models.matcha_work.recaps import Event, Fact, Manifest
 from .service import VALID, tombstone
 
@@ -52,6 +52,29 @@ async def collect(conn, recap):
         return
     rows = await conn.fetch("SELECT snapshot,asset FROM mw_agent_recap_events WHERE recap_id=$1 ORDER BY occurred_at,id", recap["id"])
     events = [{"snapshot": decode_jsonb(row["snapshot"], {}), "asset": decode_jsonb(row["asset"], None)} for row in rows]
+    groups = await conn.fetch(
+        """SELECT a.tool,a.kind,a.status,a.result->>'mode' AS mode,a.result->>'queued' AS queued,COUNT(*) AS count,MIN(a.created_at) AS created_at
+           FROM mw_project_agent_steps a JOIN mw_agent_recap_sources s ON s.run_id=a.run_id
+           WHERE s.recap_id=$1 GROUP BY a.tool,a.kind,a.status,a.result->>'mode',a.result->>'queued'""", recap["id"],
+    )
+    totals = {}
+    for group in groups:
+        snapshot = adapters.step_event({**dict(group), "result": {"mode": group["mode"], "queued": group["queued"] == "true"}})
+        if snapshot and snapshot.outcome in storyboard.CONSEQUENTIAL:
+            key = (snapshot.title, snapshot.outcome)
+            previous, count = totals.get(key, (snapshot, 0))
+            totals[key] = (previous, count + group["count"])
+    aggregates = []
+    for (title, outcome), (snapshot, total) in totals.items():
+        recorded = sum(1 for entry in events if entry["snapshot"]["kind"] == "action_resolved"
+                       and (entry["snapshot"]["title"], entry["snapshot"]["outcome"]) == (title, outcome))
+        missing = total - recorded
+        if missing > 0:
+            snapshot = snapshot.model_copy(update={"facts": [*snapshot.facts, Fact(label="Additional actions with this outcome", value=str(missing))][:6]})
+            aggregates.append({"snapshot": snapshot.model_dump(mode="json"), "asset": None})
+    if aggregates:
+        events += aggregates
+        events.sort(key=lambda entry: entry["snapshot"]["occurred_at"])
     useful = any(e["snapshot"]["kind"] in ("action_resolved", "phase_completed") for e in events)
     if not useful or not settings.available(recap["owner_user_id"]):
         await conn.execute("UPDATE mw_agent_recaps SET state='skipped',last_error_code=$2 WHERE id=$1", recap["id"], "no_useful_evidence" if not useful else "disabled")
@@ -161,7 +184,7 @@ async def render_job(recap_id):
         with tempfile.TemporaryDirectory(prefix="espresso-recap-") as scratch:
             result = await asyncio.wait_for(render(manifest, Path(scratch)), timeout=225)
             video = await storage.upload(result.pop("video_path"), prefix + "video.mp4", "video/mp4", limit=settings.OUTPUT_BYTES)
-            poster = await storage.upload(result.pop("poster_path"), prefix + "poster.webp", "image/webp", limit=4 * 1024 * 1024)
+            poster = await storage.upload(result.pop("poster_path"), prefix + "poster.png", "image/png", limit=4 * 1024 * 1024)
             result.update(video=video.model_dump(), poster=poster.model_dump())
         async with connection_or_direct() as conn:
             ready = await conn.fetchval(

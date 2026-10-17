@@ -13,7 +13,8 @@ export default function Recaps() {
   const owner = me?.user.id
   const [page, setPage] = useState<{ owner: string; source: string | null; recaps: RecapSummary[]; cursor: string | null } | null>(null)
   const [error, setError] = useState('')
-  const [cursor, setCursor] = useState<string | null>(null)
+  const [paging, setPaging] = useState<{ owner: string; source: string | null; cursor: string } | null>(null)
+  const cursor = paging?.owner === owner && paging?.source === source ? paging.cursor : null
   useEffect(() => {
     let active = true
     if (owner && isPersonal) void listRecaps(cursor, source).then((result) => {
@@ -30,6 +31,6 @@ export default function Recaps() {
     {!shown && !error && <p role="status">Loading recaps…</p>}
     {shown?.recaps.length === 0 && <p>No recaps yet.</p>}
     <ul className="space-y-3">{shown?.recaps.map((recap) => <li key={recap.id}><Link className="block rounded-xl border border-w-line p-4 hover:bg-w-surface2" to={`${base}/recaps/${recap.id}`}><h2 className="font-medium">{recap.title}</h2><p className="mt-1 text-xs text-w-dim">{recap.state} · {new Date(recap.created_at).toLocaleString()}{recap.duration_ms ? ` · ${Math.round(recap.duration_ms / 1000)} seconds` : ''}</p></Link></li>)}</ul>
-    {shown?.cursor && <button onClick={() => setCursor(shown.cursor)} className="rounded border border-w-line px-3 py-2 text-sm">Load older recaps</button>}
+    {shown?.cursor && <button onClick={() => { if (owner && shown.cursor) setPaging({ owner, source, cursor: shown.cursor }) }} className="rounded border border-w-line px-3 py-2 text-sm">Load older recaps</button>}
   </main>
 }

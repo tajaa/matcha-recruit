@@ -656,3 +656,13 @@ output budget and return `next_offset`; large text is explicitly marked partial.
   in batches of at most 50, before a durable worker sends each message
   separately. Opt-outs (`mw_sales_suppressions`) are honoured at import,
   approval and claim. Details and recovery: `docs/ESPRESSO_SALES.md`.
+
+## Optional task recap observation
+
+`../recaps/scope.py` binds owner-scoped roots before enqueue, carries trusted
+confirmation/question lineage and decorates this same runner with a ContextVar.
+Phase RunOwner carries the dispatch token and generation/round for late-worker
+fencing. Accepted chain snapshots share the source mutation transaction; terminal
+callbacks/network stay outside it. Public screenshot windows may collect bounded
+CDP frames; authenticated API work uses allowlisted cards. Never replay an action
+to obtain footage or repair a recap. Flags default off; see `docs/ops/ESPRESSO_RECAPS.md`.

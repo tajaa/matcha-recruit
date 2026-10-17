@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import time
+import base64
+import binascii
+import re
 
 from fastapi import HTTPException
 
@@ -9,7 +12,7 @@ from app.config import get_settings
 from app.database import connection_or_direct, decode_jsonb
 
 from . import settings
-from app.matcha.models.matcha_work.recaps import Asset, Manifest
+from app.matcha.models.matcha_work.recaps import Asset, Cursor, Manifest
 
 # Every read and every asynchronous publication re-checks source retention.
 VALID = """EXISTS (SELECT 1 FROM companies c WHERE c.id=r.company_id AND c.is_personal)
@@ -50,7 +53,7 @@ def view(row, *, detail=False):
     if detail:
         manifest = decode_jsonb(row.get("manifest"), {}) or {}
         result["chapters"] = output.get("chapters", [])
-        result["transcript"] = [s["event"] for s in manifest.get("scenes", [])]
+        result["transcript"] = manifest.get("transcript") or [s["event"] for s in manifest.get("scenes", [])]
         result["source_completed_at"] = row["source_completed_at"]
     return result
 
@@ -82,19 +85,28 @@ async def set_preferences(user_id, company_id, body):
 
 
 async def listing(user_id, company_id, *, limit=25, before=None, ids=None, source_id=None):
+    cursor = None
+    if before is not None:
+        try:
+            if not isinstance(before, str) or len(before) > 512 or not re.fullmatch(r"[A-Za-z0-9_-]+", before):
+                raise ValueError("invalid cursor")
+            cursor = Cursor.model_validate_json(base64.urlsafe_b64decode(before + "=" * (-len(before) % 4)))
+        except (ValueError, binascii.Error) as exc:
+            raise HTTPException(422, "Invalid recap cursor.") from exc
     async with connection_or_direct() as conn:
         if not settings.enabled() and not await conn.fetchval("SELECT to_regclass('mw_agent_recaps')"):
             return {"recaps": [], "next_cursor": None}
         rows = await conn.fetch(
             f"""SELECT r.* FROM mw_agent_recaps r WHERE r.owner_user_id=$1 AND r.company_id=$2 AND r.state<>'deleted'
-                AND ($3::timestamptz IS NULL OR r.created_at<$3) AND ($4::uuid[] IS NULL OR r.id=ANY($4))
+                AND ($3::timestamptz IS NULL OR (r.created_at,r.id)<($3,$7::uuid)) AND ($4::uuid[] IS NULL OR r.id=ANY($4))
                 AND ($5::uuid IS NULL OR EXISTS (SELECT 1 FROM mw_agent_recap_sources s
                     LEFT JOIN mw_agent_task_rounds q ON q.id=s.task_round_id WHERE s.recap_id=r.id
                     AND (s.run_id=$5 OR s.job_search_id=$5 OR q.task_id=$5)))
                 AND {VALID} ORDER BY r.created_at DESC,r.id DESC LIMIT $6""",
-            user_id, company_id, before, ids, source_id, limit,
+            user_id, company_id, cursor.at if cursor else None, ids, source_id, limit, cursor.id if cursor else None,
         )
-    return {"recaps": [view(dict(row)) for row in rows], "next_cursor": rows[-1]["created_at"] if len(rows) == limit else None}
+    next_cursor = base64.urlsafe_b64encode(Cursor(at=rows[-1]["created_at"], id=rows[-1]["id"]).model_dump_json().encode()).decode().rstrip("=") if len(rows) == limit else None
+    return {"recaps": [view(dict(row)) for row in rows], "next_cursor": next_cursor}
 
 
 async def detail(user_id, company_id, recap_id):
@@ -126,6 +138,9 @@ async def retry(user_id, company_id, recap_id, request_id):
         row = await owned(conn, recap_id, user_id, company_id, lock=True)
         if row["manual_retry_request_id"] == request_id:
             return view(dict(row))
+        pref = await conn.fetchval("SELECT enabled FROM mw_agent_recap_preferences WHERE user_id=$1 AND company_id=$2", user_id, company_id)
+        if not pref:
+            raise HTTPException(409, "Enable task recaps before retrying.")
         if not view(dict(row))["can_retry"] or not row["manifest"]:
             raise HTTPException(409, "A retry is unavailable or has already been requested.")
         Manifest.model_validate(decode_jsonb(row["manifest"], {}))
@@ -155,6 +170,8 @@ async def tombstone(conn, recap_id, *, state="deleted"):
 
 async def delete(user_id, company_id, recap_id):
     async with connection_or_direct() as conn, conn.transaction():
+        if not settings.enabled() and not await conn.fetchval("SELECT to_regclass('mw_agent_recaps')"):
+            raise HTTPException(404, "Recap not found.")
         existing = await conn.fetchrow("SELECT state FROM mw_agent_recaps WHERE id=$1 AND owner_user_id=$2 AND company_id=$3", recap_id,user_id,company_id)
         if existing and existing["state"] == "deleted":
             return {"deleted": True}
