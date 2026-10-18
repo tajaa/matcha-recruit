@@ -33,10 +33,10 @@ def test_migration_has_individually_executable_ddl(monkeypatch):
 @pytest.mark.asyncio
 async def test_flag_off_honors_existing_delivery_ownership(monkeypatch):
     monkeypatch.setattr(settings,"enabled",lambda:False)
-    conn=Conn();conn.fetchval.return_value="mw_agent_recaps"
-    conn.fetchrow.return_value={"id":uuid4(),"completion_mail_owner":"recap"}
+    conn=Conn();conn.fetchval.side_effect=["mw_agent_recaps",True]
+    conn.fetchrow.return_value={"id":uuid4(),"recap_id":RECAP,"completion_mail_owner":"recap"}
     assert await delivery.own_mail(conn,kind="jobs",source_id=uuid4(),message={"text":"existing result"})
-    assert "mail_payload" in conn.execute.await_args.args[0]
+    assert "mail_payload" in conn.fetchval.await_args.args[0]
 
 
 @pytest.mark.asyncio
@@ -47,7 +47,7 @@ async def test_empty_chat_has_no_completion_email(monkeypatch):
     send=AsyncMock();monkeypatch.setattr(transport,"send",send)
     await delivery.deliver(uuid4())
     send.assert_not_awaited()
-    assert "suppressed" in conn.execute.await_args.args[0]
+    assert any("suppressed" in call.args[0] for call in conn.execute.await_args_list)
 
 
 @pytest.mark.asyncio

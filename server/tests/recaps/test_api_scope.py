@@ -59,12 +59,19 @@ async def test_successful_retry_uses_frozen_manifest_and_one_grant(monkeypatch):
     conn=Conn();wire(monkeypatch,service,conn);conn.fetchval.return_value=True
     monkeypatch.setattr(settings,"available",lambda _:True)
     manifest=Manifest(scenes=[Scene(event=Event(title="Existing result",kind="result",occurred_at=NOW),seconds=4)])
-    failed=row(state="failed",manifest=manifest.model_dump(mode="json"))
+    failed=row(state="failed",manifest=manifest.model_dump(mode="json"),manifest_sha256=manifest.digest())
     monkeypatch.setattr(service,"owned",AsyncMock(return_value=failed))
     conn.fetchrow.return_value={**failed,"state":"queued","manual_retry_request_id":uuid4()}
     await service.retry(USER,COMPANY,RECAP,uuid4())
     assert "manual_retry_request_id=$2" in conn.fetchrow.await_args.args[0]
     assert "manifest=" not in conn.fetchrow.await_args.args[0]
+    assert "dispatched_at=NULL" in conn.fetchrow.await_args.args[0]
+
+
+def test_a_recap_that_failed_before_it_had_a_manifest_offers_no_retry():
+    # Collection failed: a retry button would only answer 409.
+    assert not service.view(row(state="failed", manifest_sha256=None))["can_retry"]
+    assert service.view(row(state="failed", manifest_sha256="a" * 64))["can_retry"]
 
 
 @pytest.mark.asyncio

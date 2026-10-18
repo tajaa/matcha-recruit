@@ -451,8 +451,10 @@ async def test_local_calendar_recap_uses_persisted_safe_audit(monkeypatch):
     from datetime import datetime, timezone
     from unittest.mock import AsyncMock
     from app.matcha.services.matcha_work.recaps.adapters import step_event
+    from app.matcha.services.matcha_work.recaps import scope as recap_scope
     record, _, _ = wire_store(monkeypatch)
     monkeypatch.setattr(calendar, "_insert_reminder", AsyncMock(return_value="card-1"))
+    monkeypatch.setattr(recap_scope, "enrolled", AsyncMock(return_value=True))
     new_id = "7a2b3c4d-0000-4000-8000-000000000001"
     client = FakeClient([
         response(call("add_espresso_event", {"title":"Dentist", "start":START, "notes":"Private notes"})),
@@ -475,6 +477,26 @@ async def test_local_calendar_recap_uses_persisted_safe_audit(monkeypatch):
     assert "Previous title" in text and "Renew lease" in text and "2026-10-02" in text
     assert "Private notes" not in text
     assert all(event.outcome == "confirmed" for event in snapshots)
+
+
+@pytest.mark.asyncio
+async def test_a_run_without_a_recap_keeps_no_event_details_in_its_audit(monkeypatch):
+    from unittest.mock import AsyncMock
+    from app.matcha.services.matcha_work.recaps import scope as recap_scope
+    record, _, _ = wire_store(monkeypatch)
+    monkeypatch.setattr(calendar, "_insert_reminder", AsyncMock(return_value="card-1"))
+    enrolled = AsyncMock(return_value=False)
+    monkeypatch.setattr(recap_scope, "enrolled", enrolled)
+    client = FakeClient([
+        response(call("add_espresso_event", {"title":"Dentist", "start":START})),
+        response(call("add_reminder", {"title":"Renew lease", "date":"2026-10-02"})),
+        response(call("finish", FINISH)),
+    ])
+    await run_espresso(client, FakeStore(), _ctx("add my dentist; remind me to renew lease", scopes=frozenset()))
+    audits = [entry.args[6] for entry in record.await_args_list if entry.args[2] in ("add_espresso_event", "add_reminder")]
+    assert len(audits) == 2 and enrolled.await_count == 2
+    assert all("recap" not in audit for audit in audits)
+    assert "Dentist" not in str(audits) and "Renew lease" not in str(audits)
 
 
 @pytest.mark.asyncio

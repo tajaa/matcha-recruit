@@ -48,7 +48,10 @@ to `failed`.
 ## Espresso recaps
 
 `tasks/recaps.py` dispatches a DB-claimed 60-second recovery sweep and structured
-completion delivery on the default queue. Render/cleanup consume only
+completion delivery on the default queue. Its `scheduler_settings` row is inserted
+enabled (handed-over completion email depends on it, as with
+`schedule_auto_generation`), and with `ESPRESSO_RECAPS_ENABLED` off the sweep runs only
+while handed-over email or due cleanup is outstanding. Render/cleanup consume only
 `espresso_recaps_render` on separate compute. The Linux media worker sets
 `ESPRESSO_RECAPS_WORKER=1`, loads restricted settings without AI/auth/provider
 secrets, and supervises a separate child with an OS deadline (solo Celery limits

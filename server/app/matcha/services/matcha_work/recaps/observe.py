@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from app.database import decode_jsonb
 
@@ -10,6 +10,29 @@ from . import adapters, scope, settings
 from app.matcha.models.matcha_work.recaps import Event, Fact
 
 logger = logging.getLogger(__name__)
+
+# An answer starts its continuation a moment after it is recorded; until
+# then the question is being acted on, not over.
+CONTINUE_WINDOW = timedelta(minutes=5)
+
+
+def prompt_end(prompt, now) -> tuple[str, str] | None:
+    """How a run's last question ended, as (title, outcome); None while it can
+    still be answered or its answer is still starting the next run. A new
+    message supersedes a confirmation and answers a question
+    (`prompts.close_open`), with no continuation linked to this run."""
+    if prompt is None:
+        return None
+    confirm = prompt["kind"] == "confirm_action"
+    if prompt["answer"] in ("no", "cancel"):
+        return "Action declined", "declined"
+    if prompt["status"] == "open":
+        return None if prompt["expires_at"] > now else ("Question expired", "partial")
+    if prompt["status"] == "answered":
+        if prompt["answered_at"] and prompt["answered_at"] > now - CONTINUE_WINDOW:
+            return None
+        return ("Approved; continued in a new request", "partial") if confirm else ("Answered in a new request", "observed")
+    return ("Action not confirmed", "cancelled") if confirm else ("Closed by a new request", "partial")
 
 
 async def accepted(conn, table, source_id, token, *, phase, terminal, retry=False):
@@ -63,19 +86,19 @@ async def refresh_source(conn, source) -> str:
         result = decode_jsonb(run["result"], {}) or {}
         if result.get("question") or result.get("held"):
             prompt = await conn.fetchrow(
-                """SELECT status,answer,expires_at FROM mw_agent_card_prompts WHERE run_id=$1
+                """SELECT kind,status,answer,expires_at,answered_at FROM mw_agent_card_prompts WHERE run_id=$1
                    ORDER BY created_at DESC, id LIMIT 1""", source["run_id"],
             )
             continued = await conn.fetchval(
                 "SELECT 1 FROM mw_agent_recap_sources WHERE parent_source_id=$1 LIMIT 1", source["id"],
             )
             if not continued:
-                if not prompt or (prompt["expires_at"] > datetime.now(timezone.utc) and prompt["answer"] not in ("no", "cancel")):
+                now = datetime.now(timezone.utc)
+                ended = prompt_end(prompt, now)
+                if ended is None:
                     return "waiting"
-                outcome = "declined" if prompt["answer"] in ("no", "cancel") else "partial"
                 await scope.event(conn, source, f"prompt-end:{source['id']}", Event(
-                    kind="question_resolved", title="Action declined" if outcome == "declined" else "Question expired",
-                    outcome=outcome, occurred_at=datetime.now(timezone.utc),
+                    kind="question_resolved", title=ended[0], outcome=ended[1], occurred_at=now,
                 ), reserve_final=True)
         if source["role"] != "phase":
             await scope.event(conn, source, f"run-end:{source['run_id']}", Event(

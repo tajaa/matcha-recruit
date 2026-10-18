@@ -132,6 +132,14 @@ def _recap_snapshot(event: dict, timezone_name: str | None, *, previous=None) ->
     return snapshot
 
 
+async def _recap_audit(ctx: RunContext, build) -> dict:
+    """`{"recap": build()}` only while this run feeds a recap still
+    collecting: step audits are kept for every run, long after a recap's own
+    retention, and the recap scrubs this key again once it has its copy."""
+    from ...recaps.scope import enrolled
+    return {"recap": build()} if await enrolled(ctx.run_id) else {}
+
+
 def _known_espresso(args: dict, state: RunState) -> dict:
     event = _session(state).espresso_events.get(str(args.get("event_id") or ""))
     if event is None:
@@ -337,7 +345,8 @@ def _tools(insert_reminder) -> tuple[AgentTool, ...]:
         return ToolOutput(
             payload={"ok": True, "card_id": card_id, "note": "Added to your Espresso to-dos and calendar."},
             label=f"Added a reminder: {title[:80]}",
-            audit={"card_id": card_id, "recap": {"title": title[:160], "date": due.isoformat()}},
+            audit={"card_id": card_id,
+                   **await _recap_audit(ctx, lambda: {"title": title[:160], "date": due.isoformat()})},
         )
 
     async def list_espresso(ctx: RunContext, state: RunState, args: dict, _left: float) -> ToolOutput:
@@ -383,7 +392,8 @@ def _tools(insert_reminder) -> tuple[AgentTool, ...]:
         return ToolOutput(
             payload={"ok": True, **_espresso_row(made)},
             label=f"Added to your calendar: {fields['title'][:80]}",
-            audit={"event_id": made.get("id"), "source": kind, "recap": _recap_snapshot(made, ctx.timezone)},
+            audit={"event_id": made.get("id"), "source": kind,
+                   **await _recap_audit(ctx, lambda: _recap_snapshot(made, ctx.timezone))},
         )
 
     async def update_espresso(ctx: RunContext, state: RunState, args: dict, _left: float) -> ToolOutput:
@@ -409,7 +419,7 @@ def _tools(insert_reminder) -> tuple[AgentTool, ...]:
             payload={"ok": True, **_espresso_row(changed)},
             label=f"Changed on your calendar: {str(changed.get('title') or '')[:80]}",
             audit={"event_id": changed.get("id"), "fields": sorted(patch),
-                   "recap": _recap_snapshot(changed, ctx.timezone, previous=event)},
+                   **await _recap_audit(ctx, lambda: _recap_snapshot(changed, ctx.timezone, previous=event))},
         )
 
     async def delete_espresso(ctx: RunContext, state: RunState, args: dict, _left: float) -> ToolOutput:
@@ -424,7 +434,8 @@ def _tools(insert_reminder) -> tuple[AgentTool, ...]:
             payload={"ok": True, "deleted": event["id"]} if gone else
             {"error": "That event is no longer on the calendar."},
             label=f"Removed from your calendar: {str(event.get('title') or '')[:80]}" if gone else None,
-            audit={"event_id": event["id"], "deleted": gone, "recap": _recap_snapshot(event, ctx.timezone)},
+            audit={"event_id": event["id"], "deleted": gone,
+                   **await _recap_audit(ctx, lambda: _recap_snapshot(event, ctx.timezone))},
         )
 
     event_fields = {

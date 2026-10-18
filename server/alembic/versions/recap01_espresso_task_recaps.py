@@ -36,7 +36,7 @@ def upgrade():
             output_manifest JSONB CHECK (octet_length(output_manifest::text) <= 32768),
             render_attempts INTEGER NOT NULL DEFAULT 0 CHECK (render_attempts BETWEEN 0 AND 4),
             render_token UUID, lease_until TIMESTAMPTZ, next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            manual_retry_request_id UUID, last_error_code TEXT,
+            manual_retry_request_id UUID, last_error_code TEXT, dispatched_at TIMESTAMPTZ,
             capture_windows_reserved INTEGER NOT NULL DEFAULT 0 CHECK (capture_windows_reserved BETWEEN 0 AND 10),
             capture_bytes_stored BIGINT NOT NULL DEFAULT 0 CHECK (capture_bytes_stored BETWEEN 0 AND 134217728),
             event_count INTEGER NOT NULL DEFAULT 0 CHECK (event_count BETWEEN 0 AND 128),
@@ -84,14 +84,15 @@ def upgrade():
             state TEXT NOT NULL DEFAULT 'pending' CHECK (state IN ('pending','sending','retry_wait','sent','unknown','suppressed','failed')),
             attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts BETWEEN 0 AND 3), claim_token UUID, lease_until TIMESTAMPTZ,
             not_before TIMESTAMPTZ NOT NULL DEFAULT NOW(), deadline_at TIMESTAMPTZ,
-            provider TEXT, provider_message_id TEXT, sent_at TIMESTAMPTZ, last_error_code TEXT
+            provider TEXT, provider_message_id TEXT, sent_at TIMESTAMPTZ, last_error_code TEXT,
+            dispatched_at TIMESTAMPTZ
         )""",
         """CREATE INDEX idx_recap_delivery_due ON mw_agent_recap_deliveries(state, not_before)""",
         """CREATE TABLE mw_agent_recap_cleanup_jobs (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(), bucket TEXT NOT NULL, prefix TEXT NOT NULL,
             state TEXT NOT NULL DEFAULT 'pending' CHECK (state IN ('pending','done')),
             not_before TIMESTAMPTZ NOT NULL DEFAULT NOW(), attempts INTEGER NOT NULL DEFAULT 0,
-            UNIQUE(bucket, prefix), CHECK (prefix ~ '^espresso-recaps/[a-f0-9-]+/[a-f0-9-]+/[a-f0-9-]+/')
+            dispatched_at TIMESTAMPTZ, UNIQUE(bucket, prefix), CHECK (prefix ~ '^espresso-recaps/[a-f0-9-]+/[a-f0-9-]+/[a-f0-9-]+/')
         )""",
     )
     for statement in statements:

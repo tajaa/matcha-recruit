@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
+import io
 import json
 import logging
 import tempfile
@@ -23,13 +24,53 @@ from app.matcha.models.matcha_work.recaps import Event
 logger = logging.getLogger(__name__)
 
 
+FRAME_BYTES = 256 * 1024
+
+
 class Window:
+    """One capture window. Leaving it only stops the screencast; `store`
+    keeps an accepted window afterwards, outside the caller's time budget, so
+    recap storage never turns a page that loaded fine into a timeout."""
     accepted = False
+
+    def __init__(self):
+        self._kept = None
+        self._fallback = None
+
+    def accept(self, fallback_png: bytes | None = None):
+        """The view succeeded. `fallback_png`: the screenshot it already took,
+        kept as the one frame if the screencast sent none."""
+        self.accepted = True
+        self._fallback = fallback_png
+
+    async def store(self):
+        """Keep the accepted window. Never raises; bounded to ten seconds."""
+        kept, self._kept = self._kept, None
+        if kept is None:
+            return
+        source, frames = kept
+        try:
+            if not frames and self._fallback:
+                data = await asyncio.to_thread(_jpeg, self._fallback)
+                if len(data) <= FRAME_BYTES:
+                    frames.append((0.0, data))
+            if frames:
+                await asyncio.wait_for(_store(source, frames), timeout=10)
+        except Exception:
+            logger.info("recap capture omitted run=%s", source.get("run_id"))
+
+
+def _jpeg(png: bytes) -> bytes:
+    from PIL import Image
+    with Image.open(io.BytesIO(png)) as image:
+        out = io.BytesIO()
+        image.convert("RGB").save(out, format="JPEG", quality=65)
+    return out.getvalue()
 
 
 @asynccontextmanager
-async def window(page):
-    result = Window()
+async def window(page, result: Window | None = None):
+    result = Window() if result is None else result
     run_id = scope.current_run.get()
     if not settings.enabled() or not get_settings().espresso_recaps_capture_enabled or run_id is None:
         yield result
@@ -73,7 +114,7 @@ async def window(page):
                     data = base64.b64decode(raw, validate=True)
                 except (ValueError, binascii.Error):
                     return
-                if len(data) <= 256 * 1024:
+                if len(data) <= FRAME_BYTES:
                     frames.append((elapsed, data))
             cdp.on("Page.screencastFrame", frame)
             await cdp.send("Page.startScreencast", {"format": "jpeg", "quality": 65, "maxWidth": 1440, "maxHeight": 900, "everyNthFrame": 1})
@@ -97,20 +138,16 @@ async def window(page):
             await asyncio.gather(timer, return_exceptions=True)
         if cdp:
             try:
-                await cdp.send("Page.stopScreencast")
-                await cdp.detach()
+                await asyncio.wait_for(_stop(cdp), timeout=2)
             except Exception:
                 pass
         if source and result.accepted and not asyncio.current_task().cancelling():
-            try:
-                if not frames:
-                    data = await page.screenshot(type="jpeg", quality=65)
-                    if len(data) <= 256 * 1024:
-                        frames.append((0.0, data))
-                if frames:
-                    await asyncio.wait_for(_store(source, frames), timeout=10)
-            except Exception:
-                logger.info("recap capture omitted run=%s", run_id)
+            result._kept = (source, list(frames))
+
+
+async def _stop(cdp):
+    await cdp.send("Page.stopScreencast")
+    await cdp.detach()
 
 
 async def _store(source, frames):

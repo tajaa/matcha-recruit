@@ -431,11 +431,11 @@ Example safe recap status payload:
 
 ### 13.1 One coordinated completion message
 
-Keep in-app task completion immediate. For recap-enabled search sources, reserve `completion_mail_owner='recap'` and create the durable delivery record before suppressing the existing `mail.round_finished` / `mail.search_finished` send. If registration fails before this ownership decision commits, existing mail remains responsible.
+Keep in-app task completion immediate. Only when the owner turned on recap email, reserve `completion_mail_owner='recap'` for search sources and create the durable delivery record before suppressing the existing `mail.round_finished` / `mail.search_finished` send; with recap email off the source is `legacy` and its email is unchanged. If registration fails before this ownership decision commits, existing mail remains responsible. At source completion the hand-over (`delivery.own_mail`) succeeds only while the recap's delivery is still pending and the recap is neither deleted nor expired; otherwise the source sends its own email.
 
-Freeze the normal result-email data at source completion using existing composition logic. Multiple child searches in one logical request contribute bounded child summaries to one root delivery. Only the root delivery sends; child sources cannot also send their legacy completion message.
+Freeze the normal result email at source completion exactly as its composer built it (subject and HTML). Multiple child searches in one logical request contribute their emails to one root delivery. Only the root delivery sends; child sources cannot also send their legacy completion message. Deleting the recap after the hand-over still sends the task email, without a link.
 
-Delivery becomes due when the video is ready, or 120 seconds after logical completion, whichever comes first:
+Delivery becomes due when the video is ready, or 120 seconds after the first handed-over source finished (or after logical completion, for a standalone recap email), whichever comes first. An unrelated source still waiting (for example on a confirmation) does not hold a finished task's email:
 
 - Ready: one combined summary plus “Watch recap” linking to the Espresso page.
 - Still rendering at deadline: one summary plus “View recap” linking to the preparing page.

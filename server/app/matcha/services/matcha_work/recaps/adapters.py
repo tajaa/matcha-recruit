@@ -22,15 +22,27 @@ TOOLS = {
     "list_apple_events": "Checked Apple calendar", "create_apple_event": "Created Apple calendar event",
     "update_apple_event": "Updated Apple calendar event", "delete_apple_event": "Removed Apple calendar event",
     "add_reminder": "Saved a reminder",
+    "buy_item": "Purchased an item", "prepare_purchase": "Prepared a purchase",
+    "book_reservation": "Booked a reservation", "register_domain": "Registered a domain",
+    "check_domains": "Checked domain availability", "search_flights": "Searched flights",
+    "read_file": "Read an attached file",
 }
+# Steps that act, or were held or refused before acting. Each is kept even
+# when its tool has no title above: an unknown or failed action is never dropped.
+ACTING = frozenset({"commit", "policy", "draft"})
 
 
 def step_event(step: dict) -> Event | None:
     tool, status, kind = step["tool"], step["status"], step["kind"]
-    if tool not in TOOLS:
+    acting = kind in ACTING
+    if tool not in TOOLS and not acting:
+        return None
+    if not acting and status in ("error", "denied", "skipped"):
+        # A read that found nothing changed nothing; the run's result says
+        # what it did find. Only actions earn a warning.
         return None
     value = decode_jsonb(step.get("result"), {}) or {}
-    title = TOOLS[tool]
+    title = TOOLS.get(tool) or ("Prepared a draft" if kind == "draft" else "Took an action")
     if status in ("claimed", "unknown"):
         outcome = "unknown"
     elif status in ("error", "denied", "skipped"):

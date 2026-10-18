@@ -48,7 +48,7 @@ def view(row, *, detail=False):
     result = {k: row[k] for k in ("id", "title", "state", "outcome", "created_at", "ready_at", "expires_at", "last_error_code")}
     result.update(schema_version=1, duration_ms=output.get("duration_ms"), can_retry=(
         row["state"] == "failed" and row["manual_retry_request_id"] is None and row["render_attempts"] < 4
-        and row["created_at"].timestamp() > time.time() - 7 * 86400
+        and row["created_at"].timestamp() > time.time() - 7 * 86400 and bool(row.get("manifest_sha256"))
     ))
     if detail:
         manifest = decode_jsonb(row.get("manifest"), {}) or {}
@@ -146,17 +146,35 @@ async def retry(user_id, company_id, recap_id, request_id):
         Manifest.model_validate(decode_jsonb(row["manifest"], {}))
         row = await conn.fetchrow(
             """UPDATE mw_agent_recaps SET state='queued',manual_retry_request_id=$2,next_attempt_at=NOW(),
-               render_token=NULL,last_error_code=NULL,updated_at=NOW() WHERE id=$1 RETURNING *""", recap_id, request_id,
+               render_token=NULL,dispatched_at=NULL,last_error_code=NULL,updated_at=NOW() WHERE id=$1 RETURNING *""", recap_id, request_id,
         )
     return view(dict(row))
 
 
-async def tombstone(conn, recap_id, *, state="deleted"):
+async def scrub_steps(conn, recap_id):
+    """Display evidence a tool kept for this recap leaves its step rows once
+    the recap has its own copy (or needs none): step audits outlive recaps."""
+    await conn.execute(
+        """UPDATE mw_project_agent_steps a SET result=a.result-'recap' FROM mw_agent_recap_sources s
+           WHERE s.recap_id=$1 AND s.run_id=a.run_id AND a.result ? 'recap'""", recap_id,
+    )
+
+
+async def tombstone(conn, recap_id, *, state="deleted", keep_mail=False):
+    """Remove a recap's media and evidence. `keep_mail`: the person removed
+    the video, not the task, so a task email already handed to the recap
+    still goes (without a link); every other caller suppresses it."""
     row = await conn.fetchrow(
         """UPDATE mw_agent_recaps SET state=$2,deleted_at=NOW(),render_token=NULL,output_manifest=NULL,
            manifest=NULL,updated_at=NOW() WHERE id=$1 RETURNING company_id,owner_user_id""", recap_id, state,
     )
     if row:
+        # Recap row, then delivery row, like every other writer. Waiting here
+        # lets a concurrent hand-over (`delivery.own_mail`) commit first, so
+        # the payload check below sees it.
+        delivery = await conn.fetchrow(
+            "SELECT state FROM mw_agent_recap_deliveries WHERE recap_id=$1 FOR UPDATE", recap_id,
+        )
         bucket = get_settings().s3_private_bucket
         if bucket:
             await conn.execute(
@@ -164,8 +182,20 @@ async def tombstone(conn, recap_id, *, state="deleted"):
                 bucket, f"espresso-recaps/{row['company_id']}/{row['owner_user_id']}/{recap_id}/",
             )
         await conn.execute("DELETE FROM mw_agent_recap_events WHERE recap_id=$1", recap_id)
-        await conn.execute("UPDATE mw_agent_recap_sources SET mail_payload=NULL WHERE recap_id=$1", recap_id)
-        await conn.execute("UPDATE mw_agent_recap_deliveries SET state='suppressed',claim_token=NULL WHERE recap_id=$1 AND state IN ('pending','retry_wait')", recap_id)
+        await scrub_steps(conn, recap_id)
+        handed = bool(keep_mail and delivery and delivery["state"] in ("pending", "retry_wait", "sending")
+                      and await conn.fetchval(
+                          "SELECT 1 FROM mw_agent_recap_sources WHERE recap_id=$1 AND mail_payload IS NOT NULL LIMIT 1",
+                          recap_id))
+        if handed:
+            # Nothing left to wait for: send it on the next sweep.
+            await conn.execute(
+                """UPDATE mw_agent_recap_deliveries SET deadline_at=COALESCE(deadline_at,NOW()),not_before=NOW()
+                   WHERE recap_id=$1 AND state='pending'""", recap_id,
+            )
+        else:
+            await conn.execute("UPDATE mw_agent_recap_sources SET mail_payload=NULL WHERE recap_id=$1", recap_id)
+            await conn.execute("UPDATE mw_agent_recap_deliveries SET state='suppressed',claim_token=NULL WHERE recap_id=$1 AND state IN ('pending','retry_wait')", recap_id)
 
 
 async def delete(user_id, company_id, recap_id):
@@ -176,5 +206,5 @@ async def delete(user_id, company_id, recap_id):
         if existing and existing["state"] == "deleted":
             return {"deleted": True}
         await owned(conn, recap_id, user_id, company_id, lock=True)
-        await tombstone(conn, recap_id)
+        await tombstone(conn, recap_id, keep_mail=True)
     return {"deleted": True}

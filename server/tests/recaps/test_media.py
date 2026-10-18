@@ -147,6 +147,7 @@ async def test_real_transition_capture_and_stitch(tmp_path, monkeypatch):
                         await page.evaluate("n => {document.getElementById('stage').textContent='Step '+n;document.body.style.background=n%2?'#eadbc2':'#f5f1e9'}", n+1)
                         await asyncio.sleep(0.2)
                     window.accepted = True
+                await window.store()
             finally:
                 await browser.close()
     finally:

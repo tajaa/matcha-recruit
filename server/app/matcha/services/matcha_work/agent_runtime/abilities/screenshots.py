@@ -88,7 +88,9 @@ def _off_site(url: str) -> ViewRefused:
     return ViewRefused(f"it redirected to {away[:80]}, off its own site, which is not allowed")
 
 
-async def _view_in_browser(url: str) -> tuple[dict, bytes | None]:
+async def _view_in_browser(url: str, recap=None) -> tuple[dict, bytes | None]:
+    """`recap`: the `recaps.capture.Window` this view fills, stored later by
+    `view_and_store` outside VIEW_SECONDS."""
     from app.matcha.services.matcha_work.browser.session import BrowsePolicy, host_allowed, open_page
 
     _, host = _checked(url)
@@ -96,7 +98,7 @@ async def _view_in_browser(url: str) -> tuple[dict, bytes | None]:
     async with open_page(BrowsePolicy(allowed_hosts=allowed)) as session:
         page = session.page
         from ...recaps.capture import window
-        async with window(page) as capture:
+        async with window(page, recap) as capture:
             try:
                 response = await page.goto(url, wait_until="domcontentloaded", timeout=_GOTO_MS)
             except Exception:
@@ -123,7 +125,7 @@ async def _view_in_browser(url: str) -> tuple[dict, bytes | None]:
             out = {"url": page.url, "title": (title or "")[:200], "text": _page_text(text)}
             if session.blocked_navigations:
                 out["note"] = "The page tried to leave its own site; that was blocked."
-            capture.accepted = True
+            capture.accept(shot)
             return out, shot
 
 
@@ -142,8 +144,11 @@ async def view_and_store(url: str, prefix: str) -> dict:
     where Chromium does. Always a JSON-safe dict, since it is also the
     browser task's result: the page with `screenshot_url` (or None), or
     `{"url", "error"}`."""
+    from ...recaps.capture import Window
+
+    recap = Window()
     try:
-        out, png = await asyncio.wait_for(_view_in_browser(url), timeout=VIEW_SECONDS)
+        out, png = await asyncio.wait_for(_view_in_browser(url, recap), timeout=VIEW_SECONDS)
     except ViewRefused as exc:
         return {"url": url, "error": str(exc)}
     except TimeoutError:
@@ -152,8 +157,15 @@ async def view_and_store(url: str, prefix: str) -> dict:
         # The site refused, timed out or is not public: a definite no, said plainly.
         logger.info("view_page could not open url=%s", url[:200], exc_info=True)
         return {"url": url, "error": type(exc).__name__}
-    out["screenshot_url"] = (await _store_screenshot(png, prefix)) if png else None
+    # The recap keeps its window beside the screenshot, after the view's
+    # budget: storing it never makes a page that loaded fine time out.
+    shot, _ = await asyncio.gather(_store_screenshot(png, prefix) if png else _nothing(), recap.store())
+    out["screenshot_url"] = shot
     return out
+
+
+async def _nothing() -> None:
+    return None
 
 
 def browser_here() -> bool:

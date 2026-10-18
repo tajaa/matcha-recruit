@@ -12,9 +12,11 @@ The observer stores allowlisted outcome snapshots. Guarded public `view_page`
 activity can add real Chromium JPEG windows; API work uses deterministic React
 cards. Email bodies, raw tool arguments, BCC, attendees, login sessions and model
 reasoning are not copied. Search result facts are bounded and labeled with their
-recorded verification/pay status. Local calendar audits include selected title,
-old/new times and a validated account timezone. Calendar previews retain ISO offsets;
-v1 does not infer an IANA timezone when the source preview has none.
+recorded verification/pay status. While a run feeds a collecting recap, local
+calendar audits include selected title, old/new times and a validated account
+timezone; other runs keep none, and the recap removes that key from the step rows
+once its manifest is frozen (or it is skipped or deleted). Calendar previews retain
+ISO offsets; v1 does not infer an IANA timezone when the source preview has none.
 
 The library/player live at `/espresso/recaps` and `/espresso/recaps/:id`, with links
 from task/search details and assistant results. Settings separates video creation
@@ -77,9 +79,16 @@ Verify that this prefix is never exposed through a public CloudFront distributio
 - Collect up to 128 event snapshots. Reserve final capacity and evict decorative
   events for consequential outcomes. At freeze, recover missing consequential
   action counts from authoritative step rows without discarding recorded details.
-- Wait for every source and open prompt. Follow-up research closes its superseded
+- Wait for every source and open prompt. A prompt stops blocking once it is
+  answered (after five minutes for its continuation to register), declined,
+  expired, or closed by a new message: a lapsed confirmation reads "Action not
+  confirmed", never "Question expired". Follow-up research closes its superseded
   recap source without changing domain round accounting. Stale internal phase runs
   stop blocking when their parent dispatch epoch advances.
+- Hooks inside task/search operations (freeze before a widen or redraft, round
+  supersede, registration, deletion revocation) run in their own savepoint and never
+  fail the operation. An unfrozen job generation's recap is skipped; a failed
+  revocation is still hidden by VALID and tombstoned by the sweep.
 - After source completion, allow 30 seconds for outstanding capture uploads. Freeze
   the manifest once. Select at most 12 scenes/120 seconds with a bounded transcript;
   preserve action warnings and result snapshots before decorative phases.
@@ -98,13 +107,27 @@ Verify that this prefix is never exposed through a public CloudFront distributio
 - The default worker self-reschedules a 60-second sweep, claimed through
   `scheduler_settings.espresso_recaps`. It repairs lost publications/expired leases,
   bounds queued rendering to one hour and ends uncompleted recap collection after
-  seven days. Creation-off does not discard existing delivery ownership.
-- Existing search completion summaries use durable recap ownership. One combined
-  email includes the ready recap or a stable preparing link after 120 seconds.
-  A late render sends no second email. Ordinary chat without useful evidence sends
-  no standalone completion email. Ambiguous provider acceptance becomes `unknown`;
-  do not blindly resend or fall back to a second provider. Definite failures have
-  a separate bounded delivery budget.
+  seven days. With `ESPRESSO_RECAPS_ENABLED` off it runs (and reschedules) only while
+  a handed-over email or a due cleanup is outstanding, so it never idles on the main
+  worker. The row is inserted enabled once there is work, like
+  `schedule_auto_generation`, because handed-over email depends on it; disabling it
+  hands new completions back to their own senders. Each render, delivery and cleanup
+  dispatch is leased for ten minutes (`dispatched_at`, broker message `expires`), so a
+  busy or absent media worker never accumulates duplicates. A recap whose collection
+  raises is moved to the back of the queue, and fails at once unless the error is
+  transient (connection, timeout, deadlock), so it cannot starve the rest.
+- Task completion emails change hands only for owners who also turned on recap
+  email. Otherwise they go exactly as before, from their own senders. When they do,
+  the source's own email (subject and formatting) is stored with the recap's one
+  sender, which sends it 120 seconds after that source finished, whatever the
+  recap's other sources are doing, adding the ready recap or a stable preparing
+  link (`APP_BASE_URL`). A recap that is deleted, expired or already sent never takes
+  an email, so the source sends its own. Deleting the video after the handover still
+  sends the task email, without a link. A late render sends no second email.
+  Ordinary chat without useful evidence sends no standalone completion email. Sends
+  go through `EmailService.send_with_result`: ambiguous provider acceptance becomes
+  `unknown`; do not blindly resend or fall back to a second provider. Definite
+  failures have a separate bounded delivery budget.
 - Final artifacts expire after thirty days; raw packages after seven days. Source
   deletion, account/source invalidation and explicit Delete tombstone publication
   immediately and enqueue independent cleanup. Already issued signed URLs remain

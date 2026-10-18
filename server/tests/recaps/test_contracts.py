@@ -88,7 +88,30 @@ def test_action_adapter_never_infers_success_from_ok(status, kind, result, expec
     snapshot = adapters.step_event(step)
     assert snapshot.outcome == expected
     assert "secret" not in snapshot.model_dump_json() and "bcc" not in snapshot.model_dump_json()
-    assert adapters.step_event({**step, "tool": "unknown_tool"}) is None
+    unknown = adapters.step_event({**step, "tool": "unknown_tool"})
+    if kind in adapters.ACTING:
+        # An action with no title of its own is still kept, with none of its payload.
+        assert unknown.outcome == expected and "secret" not in unknown.model_dump_json()
+    else:
+        assert unknown is None
+
+
+@pytest.mark.parametrize("tool", ["buy_item", "book_reservation", "register_domain", "a_future_commit_tool"])
+def test_uncertain_or_failed_actions_outside_the_title_list_are_kept(tool):
+    for status, expected in (("unknown", "unknown"), ("claimed", "unknown"), ("error", "failed")):
+        event = adapters.step_event({"tool": tool, "kind": "commit", "status": status,
+                                     "result": {"mode": "live"}, "created_at": NOW})
+        assert event.outcome == expected and event.outcome in storyboard.CONSEQUENTIAL
+
+
+@pytest.mark.parametrize("tool,kind", [("fetch_page", "fetch"), ("web_search", "search"),
+                                       ("view_page", "browse"), ("read_email", "read")])
+def test_a_read_that_failed_is_not_a_warning(tool, kind):
+    for status in ("error", "skipped"):
+        assert adapters.step_event({"tool": tool, "kind": kind, "status": status, "result": {},
+                                    "created_at": NOW}) is None
+    assert adapters.step_event({"tool": tool, "kind": kind, "status": "ok", "result": {},
+                                "created_at": NOW}).outcome == "observed"
 
 
 def test_bulk_email_count_is_allowlisted_without_recipients():

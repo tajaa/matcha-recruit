@@ -119,21 +119,46 @@ async def test_prompt_gap_and_continuation_do_not_close_prematurely(monkeypatch)
     assert await observe.refresh_source(conn, source()) == "waiting"
     conn.fetchrow.side_effect = [{"status": "done", "result": {"held": {}}}, None]
     # An explicit nonempty held payload is how actual runs persist it.
-    conn.fetchrow.side_effect = [{"status": "done", "result": {"held": {"tool": "send_email"}}}, {"answer": "yes", "expires_at": NOW + timedelta(hours=1)}]
+    yes = {"kind": "confirm_action", "status": "answered", "answer": "yes", "answered_at": NOW, "expires_at": NOW + timedelta(hours=1)}
+    conn.fetchrow.side_effect = [{"status": "done", "result": {"held": {"tool": "send_email"}}}, yes]
     assert await observe.refresh_source(conn, source()) == "waiting"
     conn.fetchval.return_value = 1
-    conn.fetchrow.side_effect = [{"status": "done", "result": {"held": {"tool": "send_email"}}}, {"answer": "yes", "expires_at": NOW + timedelta(hours=1)}]
+    conn.fetchrow.side_effect = [{"status": "done", "result": {"held": {"tool": "send_email"}}}, yes]
     assert await observe.refresh_source(conn, source()) == "terminal"
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("answer,expiry,outcome", [("no", NOW + timedelta(hours=1), "declined"), (None, NOW - timedelta(hours=1), "partial")])
-async def test_decline_and_expiry_are_visible(monkeypatch, answer, expiry, outcome):
+@pytest.mark.parametrize("status,answer,expiry,outcome", [("answered", "no", NOW + timedelta(hours=1), "declined"),
+                                                           ("open", None, NOW - timedelta(hours=1), "partial")])
+async def test_decline_and_expiry_are_visible(monkeypatch, status, answer, expiry, outcome):
     conn = Conn(); conn.fetch.return_value = []; conn.fetchval.return_value = None
-    conn.fetchrow.side_effect = [{"status": "done", "result": {"held": {"tool": "send_email"}}}, {"answer": answer, "expires_at": expiry}]
+    conn.fetchrow.side_effect = [{"status": "done", "result": {"held": {"tool": "send_email"}}},
+                                 {"kind": "confirm_action", "status": status, "answer": answer, "answered_at": NOW, "expires_at": expiry}]
     record = AsyncMock(); monkeypatch.setattr(scope, "event", record)
     assert await observe.refresh_source(conn, source()) == "terminal"
     assert record.await_args_list[0].args[3].outcome == outcome
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind,status,answer,answered,state,title,outcome", [
+    # A new message lapses a confirmation: nothing was done, and no expiry is invented.
+    ("confirm_action", "superseded", None, None, "terminal", "Action not confirmed", "cancelled"),
+    # A new message answers a question in a run of its own.
+    ("ask_user", "answered", "text", timedelta(minutes=10), "terminal", "Answered in a new request", "observed"),
+    # Just answered: its continuation is still being started.
+    ("ask_user", "answered", "text", timedelta(seconds=5), "waiting", None, None),
+    ("ask_user", "open", None, None, "waiting", None, None),
+])
+async def test_a_question_closed_by_a_new_message_ends_the_wait(monkeypatch, kind, status, answer, answered, state, title, outcome):
+    conn = Conn(); conn.fetch.return_value = []; conn.fetchval.return_value = None
+    conn.fetchrow.side_effect = [{"status": "done", "result": {"question": {"question": "Which city?"}}},
+                                 {"kind": kind, "status": status, "answer": answer, "expires_at": NOW + timedelta(days=2),
+                                  "answered_at": NOW - answered if answered else None}]
+    record = AsyncMock(); monkeypatch.setattr(scope, "event", record)
+    assert await observe.refresh_source(conn, source()) == state
+    if title:
+        ended = record.await_args_list[0].args[3]
+        assert (ended.title, ended.outcome) == (title, outcome) and "expired" not in ended.title
 
 
 @pytest.mark.asyncio
@@ -198,7 +223,67 @@ async def test_tombstone_persists_independent_cleanup_and_fences_publish(monkeyp
     conn = Conn(); conn.fetchrow.return_value = {"company_id": COMPANY, "owner_user_id": USER}
     monkeypatch.setattr(service, "get_settings", lambda: SimpleNamespace(s3_private_bucket="private"))
     await service.tombstone(conn, RECAP)
-    assert "render_token=NULL" in conn.fetchrow.await_args.args[0]
-    assert "manifest=NULL" in conn.fetchrow.await_args.args[0]
+    assert "render_token=NULL" in conn.fetchrow.await_args_list[0].args[0]
+    assert "manifest=NULL" in conn.fetchrow.await_args_list[0].args[0]
+    assert "FOR UPDATE" in conn.fetchrow.await_args_list[1].args[0]
     assert any("cleanup_jobs" in c.args[0] for c in conn.execute.await_args_list)
     assert any("state='suppressed'" in c.args[0] for c in conn.execute.await_args_list)
+    assert any("result-'recap'" in c.args[0] for c in conn.execute.await_args_list)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("handed", [True, False])
+async def test_deleting_a_video_keeps_a_task_email_already_handed_to_it(monkeypatch, handed):
+    conn = Conn()
+    conn.fetchrow.side_effect = [{"company_id": COMPANY, "owner_user_id": USER}, {"state": "pending"}]
+    conn.fetchval.return_value = 1 if handed else None
+    monkeypatch.setattr(service, "get_settings", lambda: SimpleNamespace(s3_private_bucket="private"))
+    await service.tombstone(conn, RECAP, keep_mail=True)
+    sql = [c.args[0] for c in conn.execute.await_args_list]
+    assert any("state='suppressed'" in q for q in sql) is not handed
+    assert any("SET mail_payload=NULL" in q for q in sql) is not handed
+    assert any("not_before=NOW()" in q for q in sql) is handed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind,email,owner", [("research", False, "legacy"), ("jobs", False, "legacy"), ("run", False, "none"),
+                                              ("research", True, "recap"), ("jobs", True, "recap"), ("run", True, "recap")])
+async def test_a_task_email_changes_hands_only_when_recap_email_is_on(monkeypatch, kind, email, owner):
+    # Recaps on, recap email off: every task email goes exactly as it always has.
+    monkeypatch.setattr(settings, "enabled", lambda: True); monkeypatch.setattr(settings, "available", lambda _: True)
+    monkeypatch.setattr(scope, "source_for_run", AsyncMock(return_value=None))
+    conn = Conn(); conn.fetchrow.return_value = {"enabled": True, "email_enabled": email}
+    conn.fetchval.side_effect = [True, 0, RECAP]  # personal, today's count, the new recap
+    assert await scope.register(conn, kind=kind, source_id=uuid4(), user_id=USER, company_id=COMPANY, title="Task") == RECAP
+    insert = next(c for c in conn.execute.await_args_list if "INSERT INTO mw_agent_recap_sources" in c.args[0])
+    assert insert.args[6] == owner
+    assert any("mw_agent_recap_deliveries" in c.args[0] for c in conn.execute.await_args_list) is (owner == "recap")
+
+
+@pytest.mark.asyncio
+async def test_a_failing_recap_hook_never_fails_the_operation_it_observes(monkeypatch):
+    monkeypatch.setattr(settings, "enabled", lambda: True)
+    conn = Conn(); conn.fetchrow.side_effect = RuntimeError("unexpected row shape")
+    await scope.before_job_restart(conn, uuid4())
+    # Unfrozen, the resting generation's recap is skipped rather than shown the newer search.
+    fence = conn.execute.await_args.args[0]
+    assert "source_hook_failed" in fence and "j.recap_generation=s.generation" in fence
+    await scope.supersede_round(conn, {"id": uuid4(), "current_round": 2})
+    conn.fetch.side_effect = RuntimeError("recap table unavailable")
+    await scope.revoke_source(conn, "research", uuid4())
+    conn.fetchval.side_effect = RuntimeError("no recap_generation column")
+    assert await scope.register_job(conn, {"id": uuid4(), "user_id": USER, "company_id": COMPANY, "title": "Jobs"}) is None
+    assert await scope.register_task(conn, {"id": uuid4(), "current_round": 1, "user_id": USER, "company_id": COMPANY}) is None
+
+
+@pytest.mark.asyncio
+async def test_enrollment_check_is_free_when_off(monkeypatch):
+    conn = Conn(); wire(monkeypatch, scope, conn)
+    monkeypatch.setattr(settings, "enabled", lambda: False)
+    assert not await scope.enrolled(RUN)
+    conn.fetchval.assert_not_awaited()
+    monkeypatch.setattr(settings, "enabled", lambda: True); conn.fetchval.return_value = 1
+    assert await scope.enrolled(RUN)
+    assert "r.state IN ('collecting','waiting')" in conn.fetchval.await_args.args[0]
+    conn.fetchval.side_effect = OSError("pool closed")
+    assert not await scope.enrolled(RUN)

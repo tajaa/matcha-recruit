@@ -81,8 +81,12 @@ async def test_capture_acks_frames_and_stops_without_replaying_browser_actions(m
     try:
         async with capture.window(page) as window:window.accepted=True
     finally:scope.current_run.reset(token)
+    # Leaving the window stops the screencast; storing waits for the caller.
+    keep.assert_not_awaited()
+    await window.store()
     keep.assert_awaited_once()
     assert len(keep.await_args.args[1])==1
+    await window.store(); keep.assert_awaited_once()
     assert {name for name,_ in cdp.commands} >= {"Page.startScreencast","Page.screencastFrameAck","Page.stopScreencast"}
     assert cdp.detached
 

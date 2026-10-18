@@ -664,5 +664,8 @@ confirmation/question lineage and decorates this same runner with a ContextVar.
 Phase RunOwner carries the dispatch token and generation/round for late-worker
 fencing. Accepted chain snapshots share the source mutation transaction; terminal
 callbacks/network stay outside it. Public screenshot windows may collect bounded
-CDP frames; authenticated API work uses allowlisted cards. Never replay an action
-to obtain footage or repair a recap. Flags default off; see `docs/ops/ESPRESSO_RECAPS.md`.
+CDP frames, stored by `view_and_store` after VIEW_SECONDS, never inside it;
+authenticated API work uses allowlisted cards (any commit/draft/policy step is kept,
+titled or not; a failed read is not a warning). A tool adds recap display data to its
+step audit only while `recaps.scope.enrolled(run_id)`; the recap scrubs it once frozen.
+Never replay an action to obtain footage or repair a recap. Flags default off; see `docs/ops/ESPRESSO_RECAPS.md`.

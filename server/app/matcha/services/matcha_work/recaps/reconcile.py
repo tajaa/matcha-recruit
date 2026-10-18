@@ -9,14 +9,29 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
+import asyncpg
+
 from app.config import get_settings
 from app.database import connection_or_direct, decode_jsonb
 
-from . import adapters, observe, scope, settings, storage, storyboard
+from . import adapters, observe, settings, storage, storyboard
 from app.matcha.models.matcha_work.recaps import Event, Fact, Manifest
-from .service import VALID, tombstone
+from .service import VALID, scrub_steps, tombstone
 
 logger = logging.getLogger(__name__)
+
+# A dispatched render, delivery or cleanup is not dispatched again (and its
+# broker message expires) until this lease passes: a busy or absent media
+# worker never collects a pile of duplicate messages.
+DISPATCH_SECONDS = 600
+# Failures a later sweep may not repeat. Anything else fails the recap.
+TRANSIENT = (OSError, TimeoutError, asyncpg.PostgresConnectionError, asyncpg.InterfaceError,
+             asyncpg.TransactionRollbackError, asyncpg.QueryCanceledError, asyncpg.LockNotAvailableError)
+# Off, the sweep only finishes what was already handed to it; it never idles
+# on the single main worker.
+OUTSTANDING = """SELECT EXISTS (SELECT 1 FROM mw_agent_recap_deliveries
+        WHERE state IN ('pending','retry_wait','sending') AND deadline_at IS NOT NULL)
+    OR EXISTS (SELECT 1 FROM mw_agent_recap_cleanup_jobs WHERE state='pending' AND not_before<=NOW())"""
 
 
 async def collect(conn, recap):
@@ -35,6 +50,7 @@ async def collect(conn, recap):
     if any(state != "terminal" for state in states):
         if recap["created_at"].timestamp() < datetime.now(timezone.utc).timestamp() - 7 * 86400:
             await conn.execute("UPDATE mw_agent_recaps SET state='skipped',last_error_code='waiting_expired' WHERE id=$1", recap["id"])
+            await scrub_steps(conn, recap["id"])
         elif recap["state"] in ("collecting", "waiting"):
             await conn.execute("UPDATE mw_agent_recaps SET state=$2 WHERE id=$1", recap["id"], "waiting" if "waiting" in states else "collecting")
         return
@@ -82,6 +98,7 @@ async def collect(conn, recap):
     useful = any(e["snapshot"]["kind"] in ("action_resolved", "phase_completed") for e in events)
     if not useful or not settings.available(recap["owner_user_id"]):
         await conn.execute("UPDATE mw_agent_recaps SET state='skipped',last_error_code=$2 WHERE id=$1", recap["id"], "no_useful_evidence" if not useful else "disabled")
+        await scrub_steps(conn, recap["id"])
         return
     # The request card contains only a bounded root title; never the raw chat.
     request = Event(kind="request", title=recap["title"], occurred_at=recap["created_at"],
@@ -94,6 +111,28 @@ async def collect(conn, recap):
         recap["id"], manifest.model_dump_json(), manifest.digest(),
         "partial" if any(s.event.outcome in storyboard.CONSEQUENTIAL for s in manifest.scenes) else "observed",
     )
+    # The manifest holds its own copy now.
+    await scrub_steps(conn, recap["id"])
+
+
+async def _collect_failed(conn, recap_id, exc):
+    """Rolled back, a candidate still moves: to the back of the queue when
+    the failure may pass, else (or after a week) to `failed`, so one bad
+    recap never starves the rest of collection."""
+    final = not isinstance(exc, TRANSIENT)
+    try:
+        await conn.execute(
+            """UPDATE mw_agent_recaps SET updated_at=NOW(),
+                   source_completed_at=CASE WHEN $2 AND state='skipped' THEN COALESCE(source_completed_at,NOW())
+                       ELSE source_completed_at END,
+                   last_error_code=CASE WHEN ($2 OR created_at<NOW()-INTERVAL '7 days') AND state<>'skipped'
+                       THEN 'collect_failed' ELSE last_error_code END,
+                   state=CASE WHEN ($2 OR created_at<NOW()-INTERVAL '7 days') AND state<>'skipped'
+                       THEN 'failed' ELSE state END
+               WHERE id=$1 AND state IN ('collecting','waiting','skipped')""", recap_id, final,
+        )
+    except Exception:
+        logger.warning("recap collection failure not recorded recap=%s", recap_id, exc_info=True)
 
 
 async def sweep() -> bool:
@@ -101,6 +140,11 @@ async def sweep() -> bool:
     async with connection_or_direct() as conn:
         if not await conn.fetchval("SELECT to_regclass('mw_agent_recaps')"):
             return False
+        if not settings.enabled() and not await conn.fetchval(OUTSTANDING):
+            return False
+        # Inserted enabled, like schedule_auto_generation's: completion email
+        # handed to a recap depends on this sweep. Disabling it hands new
+        # completions back to their own senders (`delivery.own_mail`).
         await conn.execute(
             """INSERT INTO scheduler_settings(task_key,display_name,enabled,max_per_cycle)
                VALUES('espresso_recaps','Espresso recap recovery',TRUE,50) ON CONFLICT DO NOTHING""",
@@ -136,8 +180,9 @@ async def sweep() -> bool:
                     if recap:
                         await collect(conn, recap)
                         await conn.execute("UPDATE mw_agent_recaps SET updated_at=NOW() WHERE id=$1", recap["id"])
-            except Exception:
+            except Exception as exc:
                 logger.warning("recap reconciliation failed recap=%s", candidate["id"], exc_info=True)
+                await _collect_failed(conn, candidate["id"], exc)
         # Removing a source/account can cascade bindings outside our services.
         invalid = await conn.fetch(f"SELECT r.id FROM mw_agent_recaps r WHERE state NOT IN ('deleted','expired') AND NOT ({VALID}) LIMIT 50")
         expired = await conn.fetch("SELECT id FROM mw_agent_recaps WHERE state='ready' AND expires_at<=NOW() LIMIT 50")
@@ -149,14 +194,26 @@ async def sweep() -> bool:
                WHERE d.recap_id=r.id AND d.state='pending' AND d.deadline_at IS NOT NULL
                AND r.state IN ('ready','failed','skipped') AND d.not_before>NOW()""",
         )
-        renders = await conn.fetch("SELECT id FROM mw_agent_recaps WHERE state='queued' AND next_attempt_at<=NOW() ORDER BY next_attempt_at LIMIT 50")
-        deliveries = await conn.fetch("SELECT id FROM mw_agent_recap_deliveries WHERE state IN ('pending','retry_wait') AND deadline_at IS NOT NULL AND not_before<=NOW() ORDER BY not_before LIMIT 50")
-        cleanup = await conn.fetch("SELECT id FROM mw_agent_recap_cleanup_jobs WHERE state='pending' AND not_before<=NOW() ORDER BY not_before LIMIT 50")
+        renders = await _lease(conn, "mw_agent_recaps", "state='queued' AND next_attempt_at<=NOW()", "next_attempt_at")
+        deliveries = await _lease(conn, "mw_agent_recap_deliveries",
+                                  "state IN ('pending','retry_wait') AND deadline_at IS NOT NULL AND not_before<=NOW()", "not_before")
+        cleanup = await _lease(conn, "mw_agent_recap_cleanup_jobs", "state='pending' AND not_before<=NOW()", "not_before")
     from app.workers.tasks.recaps import cleanup_recap, deliver_recap, render_recap
     for task, rows, queue in ((render_recap, renders, settings.RENDER_QUEUE), (deliver_recap, deliveries, "celery"), (cleanup_recap, cleanup, settings.RENDER_QUEUE)):
         for row in rows:
-            task.apply_async(args=[str(row["id"])], queue=queue)
+            task.apply_async(args=[str(row["id"])], queue=queue, expires=DISPATCH_SECONDS)
     return True
+
+
+async def _lease(conn, table, due, order):
+    """Mark up to 50 due rows dispatched and return them. A row is due again
+    only once its job claims it (clearing the mark) or the lease runs out."""
+    return await conn.fetch(
+        f"""UPDATE {table} SET dispatched_at=NOW() WHERE id IN (
+               SELECT id FROM {table} WHERE {due}
+               AND (dispatched_at IS NULL OR dispatched_at<NOW()-make_interval(secs=>$1))
+               ORDER BY {order} LIMIT 50 FOR UPDATE SKIP LOCKED) RETURNING id""", float(DISPATCH_SECONDS),
+    )
 
 
 async def render_job(recap_id):
@@ -164,7 +221,7 @@ async def render_job(recap_id):
     async with connection_or_direct() as conn, conn.transaction():
         row = await conn.fetchrow(
             f"""UPDATE mw_agent_recaps r SET state='rendering',render_token=$2,render_attempts=render_attempts+1,
-                lease_until=NOW()+INTERVAL '6 minutes',updated_at=NOW()
+                lease_until=NOW()+INTERVAL '6 minutes',dispatched_at=NULL,updated_at=NOW()
                 WHERE id=$1 AND state='queued' AND next_attempt_at<=NOW()
                 AND (render_attempts<3 OR (manual_retry_request_id IS NOT NULL AND render_attempts<4))
                 AND {VALID} RETURNING r.*""", recap_id, token,
@@ -220,4 +277,4 @@ async def cleanup_job(cleanup_id):
         return
     done = await storage.cleanup(row["bucket"], row["prefix"])
     async with connection_or_direct() as conn:
-        await conn.execute("UPDATE mw_agent_recap_cleanup_jobs SET state=$2,attempts=attempts+1,not_before=NOW()+INTERVAL '1 minute' WHERE id=$1", cleanup_id, "done" if done else "pending")
+        await conn.execute("UPDATE mw_agent_recap_cleanup_jobs SET state=$2,attempts=attempts+1,not_before=NOW()+INTERVAL '1 minute',dispatched_at=NULL WHERE id=$1", cleanup_id, "done" if done else "pending")
