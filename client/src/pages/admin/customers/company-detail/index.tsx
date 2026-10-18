@@ -52,7 +52,7 @@ function StatCard({ label, value, sub, icon: Icon, color }: { label: string; val
     <AdminCard >
       <div className="flex items-center gap-2 mb-2">
         <Icon className={`w-4 h-4 ${color ?? 'text-zinc-500'}`} />
-        <span className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium">{label}</span>
+        <span className="text-[11px] text-zinc-500 font-medium">{label}</span>
       </div>
       <div className="text-2xl font-semibold text-zinc-100">{value}</div>
       {sub && <div className="text-[11px] text-zinc-500 mt-0.5">{sub}</div>}
@@ -127,18 +127,18 @@ export default function AdminCompanyDetail() {
           <div className="flex items-center gap-3 flex-wrap">
             <AdminPageTitle>{co.name}</AdminPageTitle>
             {registration && (
-              <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded border ${TIER_BADGE[tierFromRegistration(registration)]}`}>
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${TIER_BADGE[tierFromRegistration(registration)]}`}>
                 {TIER_LABEL[tierFromRegistration(registration)]}
               </span>
             )}
-            <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded border ${co.status === 'approved' ? 'bg-emerald-900/30 text-emerald-400 border-emerald-800/40' : 'bg-amber-900/30 text-amber-400 border-amber-800/40'}`}>
+            <span className={`text-[10px] font-bold capitalize px-2 py-0.5 rounded border ${co.status === 'approved' ? 'bg-emerald-900/30 text-emerald-400 border-emerald-800/40' : 'bg-amber-900/30 text-amber-400 border-amber-800/40'}`}>
               {co.status}
             </span>
             {registration && (
               <button
                 type="button"
                 onClick={handleToggleIsTest}
-                className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded border transition-colors ${
+                className={`text-[10px] font-bold px-2 py-0.5 rounded border transition-colors ${
                   registration.is_test
                     ? 'bg-amber-900/30 text-amber-400 border-amber-800/40'
                     : 'bg-zinc-900/40 text-zinc-600 border-zinc-800 hover:text-zinc-400'
@@ -154,19 +154,19 @@ export default function AdminCompanyDetail() {
             )}
             {registration?.is_suspended && (
               <span
-                className="text-[10px] font-bold uppercase px-2 py-0.5 rounded border bg-red-900/30 text-red-400 border-red-800/40"
+                className="text-[10px] font-bold px-2 py-0.5 rounded border bg-red-900/30 text-red-400 border-red-800/40"
                 title="Owner is suspended"
               >
                 Owner suspended
               </span>
             )}
             {registration?.deleted_at && (
-              <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded border bg-zinc-900/40 text-zinc-400 border-zinc-700">
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded border bg-zinc-900/40 text-zinc-400 border-zinc-700">
                 Deleted
               </span>
             )}
             {risk && (
-              <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded border ${BAND_COLORS[risk.overall_band] ?? BAND_COLORS.moderate}`}>
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${BAND_COLORS[risk.overall_band] ?? BAND_COLORS.moderate}`}>
                 Risk: {risk.overall_score} ({risk.overall_band})
               </span>
             )}
@@ -191,26 +191,26 @@ export default function AdminCompanyDetail() {
         <AdminCard className="mb-6">
           <div className="flex items-center gap-2 mb-3">
             <Zap className="w-4 h-4 text-amber-400" />
-            <span className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium">Billing</span>
+            <span className="text-[11px] text-zinc-500 font-medium">Billing</span>
           </div>
           {registration.subscription ? (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
               <div>
-                <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-1">Pack</div>
+                <div className="text-[11px] text-zinc-500 mb-1">Pack</div>
                 <div className="text-zinc-200 font-medium">{registration.subscription.pack_id}</div>
               </div>
               <div>
-                <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-1">Status</div>
+                <div className="text-[11px] text-zinc-500 mb-1">Status</div>
                 <div className={`font-medium ${registration.subscription.status === 'active' ? 'text-emerald-300' : 'text-zinc-400'}`}>
                   {registration.subscription.status}
                 </div>
               </div>
               <div>
-                <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-1">Amount</div>
+                <div className="text-[11px] text-zinc-500 mb-1">Amount</div>
                 <div className="text-zinc-200 font-medium">{fmtUsd(registration.subscription.amount_cents)}</div>
               </div>
               <div>
-                <div className="text-[10px] text-zinc-500 uppercase tracking-wider mb-1">Renews</div>
+                <div className="text-[11px] text-zinc-500 mb-1">Renews</div>
                 <div className="text-zinc-200 font-medium">
                   {registration.subscription.current_period_end
                     ? new Date(registration.subscription.current_period_end).toLocaleDateString()
@@ -306,7 +306,7 @@ export default function AdminCompanyDetail() {
               <div className="flex items-center gap-4 mb-3">
                 <div className="text-4xl font-bold text-zinc-100">{risk.overall_score}</div>
                 <div>
-                  <span className={`text-xs font-bold uppercase px-2 py-0.5 rounded border ${BAND_COLORS[risk.overall_band] ?? ''}`}>{risk.overall_band}</span>
+                  <span className={`text-xs font-bold capitalize px-2 py-0.5 rounded border ${BAND_COLORS[risk.overall_band] ?? ''}`}>{risk.overall_band}</span>
                   <p className="text-[10px] text-zinc-500 mt-1">Computed {relTime(risk.computed_at)}</p>
                 </div>
               </div>
@@ -378,19 +378,19 @@ export default function AdminCompanyDetail() {
         <div className="space-y-4">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <AdminCard >
-              <div className="text-[10px] text-zinc-500 uppercase">Locations</div>
+              <div className="text-[11px] text-zinc-500">Locations</div>
               <div className="text-xl font-semibold text-zinc-100 mt-1">{comp.total_locations}</div>
             </AdminCard>
             <AdminCard >
-              <div className="text-[10px] text-zinc-500 uppercase">Requirements</div>
+              <div className="text-[11px] text-zinc-500">Requirements</div>
               <div className="text-xl font-semibold text-zinc-100 mt-1">{comp.total_requirements}</div>
             </AdminCard>
             <AdminCard >
-              <div className="text-[10px] text-zinc-500 uppercase">Critical Alerts</div>
+              <div className="text-[11px] text-zinc-500">Critical Alerts</div>
               <div className={`text-xl font-semibold mt-1 ${comp.critical_alerts > 0 ? 'text-red-400' : 'text-zinc-100'}`}>{comp.critical_alerts}</div>
             </AdminCard>
             <AdminCard >
-              <div className="text-[10px] text-zinc-500 uppercase">Warnings</div>
+              <div className="text-[11px] text-zinc-500">Warnings</div>
               <div className={`text-xl font-semibold mt-1 ${comp.warning_alerts > 0 ? 'text-amber-400' : 'text-zinc-100'}`}>{comp.warning_alerts}</div>
             </AdminCard>
           </div>

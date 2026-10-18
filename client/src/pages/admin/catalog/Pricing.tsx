@@ -143,7 +143,7 @@ function ProductPriceCard({
         </a>
       </div>
       <label className="block">
-        <span className="text-xs uppercase tracking-wide text-zinc-400">Price ($) {unitLabel(product)}</span>
+        <span className="text-xs text-zinc-400">Price ($) {unitLabel(product)}</span>
         <AdminInput
           type="number"
           min={0}

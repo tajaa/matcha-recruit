@@ -64,7 +64,7 @@ export default function CoverageTab({
             <AdminCard className="inline-flex shrink-0 items-center gap-2 px-2.5 py-1.5"
                  title={`Research model: ${info.model}`}>
               <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />
-              <span className="font-mono text-[10px] uppercase tracking-[0.15em] text-zinc-300">{info.label}</span>
+              <span className="font-mono text-[11px] text-zinc-300">{info.label}</span>
               <span className="hidden font-mono text-[10px] tracking-wide text-zinc-600 sm:inline">{info.model}</span>
             </AdminCard>
           )
@@ -74,19 +74,19 @@ export default function CoverageTab({
       {/* Coordinate bar */}
       <AdminCard className="mb-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
         <div>
-          <label className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.15em] text-zinc-500">Industry</label>
+          <label className="mb-1.5 block text-[11px] font-medium text-zinc-500">Industry</label>
           <Select options={INDUSTRIES} value={industry} onChange={(e) => setIndustry(e.target.value)} />
         </div>
         <div>
-          <label className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.15em] text-zinc-500">State</label>
+          <label className="mb-1.5 block text-[11px] font-medium text-zinc-500">State</label>
           <Input value={state} onChange={(e) => setState(e.target.value)} placeholder="CA" maxLength={2} className="uppercase" />
         </div>
         <div>
-          <label className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.15em] text-zinc-500">City (optional)</label>
+          <label className="mb-1.5 block text-[11px] font-medium text-zinc-500">City (optional)</label>
           <Input value={city} onChange={(e) => setCity(e.target.value)} placeholder="Los Angeles" />
         </div>
         <div>
-          <label className="mb-1.5 block text-[10px] font-medium uppercase tracking-[0.15em] text-zinc-500">Headcount</label>
+          <label className="mb-1.5 block text-[11px] font-medium text-zinc-500">Headcount</label>
           <Select options={HEADCOUNTS.map((h) => ({ value: h, label: h || 'Any' }))} value={headcount}
                   onChange={(e) => setHeadcount(e.target.value)} />
         </div>

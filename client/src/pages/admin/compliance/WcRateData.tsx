@@ -101,7 +101,7 @@ function StateRateTable({ rows }: { rows: WcStateRateRow[] }) {
   return (
     <AdminTable>
       <thead>
-        <tr className="text-[10px] uppercase tracking-wider text-zinc-600 border-b border-zinc-800">
+        <tr className="text-[11px] text-zinc-600 border-b border-zinc-800">
           <th className="text-left pr-3">State</th>
           <th className="text-right pr-3">Δ Loss cost</th>
           <th className="text-left pr-3">Trend</th>
@@ -133,7 +133,7 @@ function ClassCodeTable({ rows }: { rows: WcClassCodeRow[] }) {
   return (
     <AdminTable>
       <thead>
-        <tr className="text-[10px] uppercase tracking-wider text-zinc-600 border-b border-zinc-800">
+        <tr className="text-[11px] text-zinc-600 border-b border-zinc-800">
           <th className="text-left pr-3">State</th>
           <th className="text-left pr-3">Code</th>
           <th className="text-left pr-3">Description</th>
@@ -161,7 +161,7 @@ function SourceCard({ title, counts }: { title: string; counts: Record<string, n
   const total = entries.reduce((s, [, n]) => s + n, 0)
   return (
     <Card className="p-4">
-      <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold">{title}</div>
+      <div className="text-[11px] text-zinc-600 font-bold">{title}</div>
       <div className="text-2xl font-light font-mono mt-1.5 text-zinc-200">{total}</div>
       <div className="mt-2 space-y-0.5">
         {entries.length === 0 ? <div className="text-[11px] text-zinc-600">none</div> : entries.map(([src, n]) => (

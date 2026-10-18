@@ -1,4 +1,5 @@
 /* eslint-disable react-hooks/set-state-in-effect -- Effects intentionally synchronize this tool with loaded data, URL selections, and preview inputs. */
+import { AdminTab, AdminTabBar } from '../../../components/admin/AdminTabs'
 import { AdminStat as StatCard, AdminCard, AdminButton, AdminTable } from '../../../components/admin/AdminUI'
 import { AdminPageHeader } from '../../../components/admin/AdminPageHeader'
 import { useCallback, useEffect, useState } from 'react'
@@ -201,19 +202,13 @@ export default function Usage() {
         description="who's active, and what they use"
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            <div className="flex rounded-md border border-zinc-700">
+            <AdminTabBar className="mb-0!" role="group" aria-label="Time range">
               {[7, 30].map((d) => (
-                <button
-                  key={d}
-                  onClick={() => setDays(d)}
-                  className={`px-3 py-1.5 text-sm first:rounded-l-md last:rounded-r-md ${
-                    days === d ? 'bg-emerald-500/15 text-emerald-400' : 'text-zinc-400 hover:bg-zinc-800'
-                  }`}
-                >
+                <AdminTab key={d} active={days === d} onClick={() => setDays(d)}>
                   {d}d
-                </button>
+                </AdminTab>
               ))}
-            </div>
+            </AdminTabBar>
             <AdminButton
               onClick={() => void load()}
               className="gap-1.5" variant="secondary"

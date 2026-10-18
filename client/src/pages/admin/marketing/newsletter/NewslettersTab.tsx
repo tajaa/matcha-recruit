@@ -64,7 +64,7 @@ export function NewslettersTab({
   return (
     <div className="space-y-6">
       <div>
-        <p className="text-[10px] text-zinc-500 uppercase tracking-wider mb-2">Drafts</p>
+        <p className="text-[11px] text-zinc-500 mb-2">Drafts</p>
         {drafts.length === 0
           ? <p className="text-zinc-600 text-xs py-3 text-center border border-dashed border-zinc-800 rounded-xl">No drafts — click <span className="text-zinc-400">+ New Newsletter</span> to start one.</p>
           : <div className="space-y-2">{drafts.map(nl => <NlRow key={nl.id} nl={nl} />)}</div>
@@ -72,7 +72,7 @@ export function NewslettersTab({
       </div>
       {sent.length > 0 && (
         <div>
-          <p className="text-[10px] text-zinc-500 uppercase tracking-wider mb-2">Sent &amp; Scheduled</p>
+          <p className="text-[11px] text-zinc-500 mb-2">Sent &amp; Scheduled</p>
           <div className="space-y-2">{sent.map(nl => <NlRow key={nl.id} nl={nl} />)}</div>
         </div>
       )}

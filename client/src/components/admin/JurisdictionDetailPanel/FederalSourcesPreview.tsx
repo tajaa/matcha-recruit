@@ -36,7 +36,7 @@ export default function FederalSourcesPreview({ fedPreview, fedApplying, setFedP
       <div className="max-h-64 overflow-y-auto space-y-2">
         {Object.entries(fedPreview.by_category).sort(([a], [b]) => a.localeCompare(b)).map(([cat, items]) => (
           <div key={cat}>
-            <p className="text-[10px] font-medium text-zinc-300 uppercase tracking-wider mb-0.5">
+            <p className="text-[11px] font-medium text-zinc-300 mb-0.5">
               {getCategoryLabel(cat)} <span className="text-zinc-600">({items.length})</span>
             </p>
             {items.map((item, i) => (

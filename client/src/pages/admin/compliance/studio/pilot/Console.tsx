@@ -141,7 +141,7 @@ export default function Console({ session, onRefetch, onSessionsChanged }: Props
     <div className="flex flex-col h-full rounded-xl border border-white/[0.06] bg-black">
       <div className="border-b border-white/[0.06] px-4 py-2.5">
         <p className="text-sm font-medium text-zinc-100">{session.title}</p>
-        <p className="text-[10px] uppercase tracking-wide text-emerald-400/70">{session.mode}</p>
+        <p className="text-[10px] capitalize text-emerald-400/70">{session.mode}</p>
       </div>
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
@@ -171,7 +171,7 @@ export default function Console({ session, onRefetch, onSessionsChanged }: Props
 
         {actions.length > 0 && (
           <div className="space-y-2 pt-2">
-            <p className="text-[10px] uppercase tracking-wide text-zinc-500">Runs</p>
+            <p className="text-[11px] text-zinc-500">Runs</p>
             {actions.map((a) => (
               <ActionCard key={a.id} action={a} onApproved={onRefetch} onChanged={onRefetch}
                 committedRowIds={committedRowIds} />
@@ -540,7 +540,7 @@ function ResearchCard({ action, committedRowIds, onApproved }: {
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5 flex-wrap">
                   <span className="text-[12px] text-zinc-200">{row.title}</span>
-                  <span className="text-[9px] uppercase tracking-wide text-zinc-500">{row.jurisdiction_level}</span>
+                  <span className="text-[9px] capitalize text-zinc-500">{row.jurisdiction_level}</span>
                   <span className={`text-[9px] px-1 py-0.5 rounded ${DOMAIN_BADGE[row.source_domain_class] ?? DOMAIN_BADGE.unknown}`}>
                     {row.source_domain_class}
                   </span>

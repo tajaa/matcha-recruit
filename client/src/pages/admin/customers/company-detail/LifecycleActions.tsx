@@ -101,7 +101,7 @@ export function LifecycleActions({
       )}
 
       <section className="rounded-xl border border-zinc-800 bg-zinc-900/30 p-4">
-        <h3 className="text-[10px] uppercase tracking-wider text-zinc-500 mb-3">Account</h3>
+        <h3 className="text-[11px] text-zinc-500 mb-3">Account</h3>
         <div className="flex flex-wrap gap-2">
           <button
             onClick={suspendOrUnsuspend}
@@ -141,7 +141,7 @@ export function LifecycleActions({
         </div>
         {resetUrl && (
           <div className="mt-3 p-3 rounded-lg border border-emerald-700/40 bg-emerald-900/20">
-            <div className="text-[10px] text-emerald-300 uppercase tracking-wider mb-1">Reset link (1h)</div>
+            <div className="text-[11px] text-emerald-300 mb-1">Reset link (1h)</div>
             <code className="text-[11px] break-all text-emerald-100">{resetUrl}</code>
             <button
               onClick={() => { navigator.clipboard?.writeText(resetUrl); }}
@@ -154,7 +154,7 @@ export function LifecycleActions({
       </section>
 
       <section className="rounded-xl border border-zinc-800 bg-zinc-900/30 p-4">
-        <h3 className="text-[10px] uppercase tracking-wider text-zinc-500 mb-3">Billing</h3>
+        <h3 className="text-[11px] text-zinc-500 mb-3">Billing</h3>
         {registration.subscription ? (
           <div className="flex flex-wrap gap-2">
             <AdminButton
@@ -185,7 +185,7 @@ export function LifecycleActions({
       </section>
 
       <section className="rounded-xl border border-zinc-800 bg-zinc-900/30 p-4">
-        <h3 className="text-[10px] uppercase tracking-wider text-zinc-500 mb-3">Tier</h3>
+        <h3 className="text-[11px] text-zinc-500 mb-3">Tier</h3>
         <div className="flex items-center gap-2">
           <AdminSelect
             value={tierTarget}
@@ -270,7 +270,7 @@ function RefundModal({
         <p className="text-xs text-zinc-500 mb-4">Pick a charge. Leave amount blank for a full refund.</p>
         <div className="space-y-3">
           <div>
-            <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1">Charge</label>
+            <label className="block text-[11px] text-zinc-500 mb-1">Charge</label>
             {charges === null ? (
               <p className="text-xs text-zinc-500">Loading charges…</p>
             ) : charges.length === 0 ? (
@@ -293,7 +293,7 @@ function RefundModal({
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1">Amount (cents) — optional</label>
+              <label className="block text-[11px] text-zinc-500 mb-1">Amount (cents) — optional</label>
               <AdminInput
                 value={amount}
                 onChange={(e) => setAmount(e.target.value.replace(/\D/g, ''))}
@@ -301,7 +301,7 @@ function RefundModal({
               />
             </div>
             <div>
-              <label className="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1">Reason</label>
+              <label className="block text-[11px] text-zinc-500 mb-1">Reason</label>
               <AdminSelect
                 value={reason}
                 onChange={(e) => setReason(e.target.value)} className="w-full"

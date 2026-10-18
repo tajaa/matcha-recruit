@@ -136,7 +136,7 @@ export default function GapOverview() {
                 <td >
                   <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded border ${complexityBandClass(r.complexity_band)}`}>
                     <span className="text-sm font-semibold tabular-nums">{r.complexity}</span>
-                    <span className="text-[10px] uppercase tracking-wide opacity-80">{r.complexity_band}</span>
+                    <span className="text-[10px] capitalize opacity-80">{r.complexity_band}</span>
                   </span>
                 </td>
                 <td >

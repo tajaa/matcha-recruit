@@ -268,7 +268,7 @@ export default function LibraryTab({ initialState, initialCity, initialIndustry,
           ].map((s) => (
             <div key={s.label} className="border border-zinc-800 rounded-lg px-4 py-3 text-center">
               <p className="text-xl font-semibold text-zinc-100">{s.value}</p>
-              <p className="text-[11px] text-zinc-500 uppercase tracking-wide mt-0.5">{s.label}</p>
+              <p className="text-[11px] text-zinc-500 mt-0.5">{s.label}</p>
             </div>
           ))}
         </div>
@@ -370,7 +370,7 @@ export default function LibraryTab({ initialState, initialCity, initialIndustry,
       {/* ── Needs-research baseline worklist ── */}
       <div className="mt-6">
         <div className="flex items-center justify-between mb-2">
-          <h2 className="text-xs font-medium text-zinc-400 uppercase tracking-wide">
+          <h2 className="text-xs font-medium text-zinc-400">
             Baseline research {researchQueue.filter((r) => r.status === 'needs_research').length > 0 &&
               <span className="text-zinc-500">· {researchQueue.filter((r) => r.status === 'needs_research').length} need research</span>}
           </h2>

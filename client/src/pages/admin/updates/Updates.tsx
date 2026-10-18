@@ -25,7 +25,7 @@ function UpdateRow({ u, open, onToggle }: { u: AdminUpdate; open: boolean; onTog
           className={`mt-1 h-4 w-4 shrink-0 text-zinc-600 transition-transform ${open ? 'rotate-0' : '-rotate-90'}`}
         />
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-3 font-mono text-[10px] uppercase tracking-wide text-zinc-500">
+          <div className="flex flex-wrap items-center gap-3 font-mono text-[11px] text-zinc-500">
             <span className="tabular-nums">{fmtDate(u.date)}</span>
             <span>{u.category}</span>
             {u.tag === 'action-needed' && <span className="text-amber-400">Setup needed</span>}
@@ -76,7 +76,7 @@ function UpdateRow({ u, open, onToggle }: { u: AdminUpdate; open: boolean; onTog
                 )}
                 {u.setup && u.setup.length > 0 && (
                   <>
-                    <div className={`mb-1 text-[10px] font-medium uppercase tracking-[0.15em] text-amber-400 ${u.notes?.length ? 'mt-3' : ''}`}>
+                    <div className={`mb-1 text-[11px] font-medium text-amber-400 ${u.notes?.length ? 'mt-3' : ''}`}>
                       Setup before it works
                     </div>
                     <ul className="space-y-1 text-sm leading-normal text-amber-100/80">
@@ -170,7 +170,7 @@ export default function Updates() {
       }
     >
       {/* Stat bar */}
-      <div className="flex flex-wrap items-center gap-x-6 gap-y-1 border-b border-white/[0.06] px-4 py-2 font-mono text-[11px] uppercase tracking-wide text-zinc-500">
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-1 border-b border-white/[0.06] px-4 py-2 font-mono text-[11px] text-zinc-500">
         <span>Updates <b className="text-zinc-100">{updates?.length ?? '—'}</b></span>
         <span>Categories <b className="text-zinc-100">{categories.length || '—'}</b></span>
         <span className={setupNeededCount > 0 ? 'text-amber-400' : ''}>

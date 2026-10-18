@@ -130,7 +130,7 @@ export function PricingForm({ productCode }: { productCode: MatchaLiteProductCod
       <AdminCard className="mb-4 space-y-4">
         <div className="grid grid-cols-2 gap-4">
           <label className="block">
-            <span className="text-xs text-zinc-400 uppercase tracking-wide">
+            <span className="text-xs text-zinc-400">
               {isFlatPlan ? 'Price per month ($)' : 'Price per block ($)'}
             </span>
             <AdminInput
@@ -143,7 +143,7 @@ export function PricingForm({ productCode }: { productCode: MatchaLiteProductCod
             />
           </label>
           {!isFlatPlan && <label className="block">
-            <span className="text-xs text-zinc-400 uppercase tracking-wide">Block size (employees)</span>
+            <span className="text-xs text-zinc-400">Block size (employees)</span>
             <AdminInput
               type="number"
               min={1}
@@ -167,7 +167,7 @@ export function PricingForm({ productCode }: { productCode: MatchaLiteProductCod
 
         {!isFlatPlan && <div className="grid grid-cols-2 gap-4">
           <label className="block">
-            <span className="text-xs text-zinc-400 uppercase tracking-wide">
+            <span className="text-xs text-zinc-400">
               Min {productCode === 'tellus_brand' ? 'stores' : 'headcount'}
             </span>
             <AdminInput
@@ -180,7 +180,7 @@ export function PricingForm({ productCode }: { productCode: MatchaLiteProductCod
             />
           </label>
           <label className="block">
-            <span className="text-xs text-zinc-400 uppercase tracking-wide">
+            <span className="text-xs text-zinc-400">
               Max {productCode === 'tellus_brand' ? 'stores' : 'headcount'}
             </span>
             <AdminInput
@@ -205,7 +205,7 @@ export function PricingForm({ productCode }: { productCode: MatchaLiteProductCod
             <span className="text-sm text-zinc-300">Sale active</span>
           </label>
           <label className="block">
-            <span className="text-xs text-zinc-400 uppercase tracking-wide">
+            <span className="text-xs text-zinc-400">
               {isFlatPlan ? 'Sale price per month ($)' : 'Sale price per block ($)'}
             </span>
             <AdminInput

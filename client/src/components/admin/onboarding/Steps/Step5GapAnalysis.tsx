@@ -173,7 +173,7 @@ export function Step5GapAnalysis({ session, onUpdated, onNext }: StepProps) {
               return (
                 <div key={jKey}>
                   <div className="flex items-center justify-between mb-1">
-                    <div className="text-[11px] uppercase tracking-wider text-zinc-400">
+                    <div className="text-[11px] text-zinc-400">
                       {jKey} · {items.length}
                     </div>
                     <button
@@ -228,7 +228,7 @@ export function Step5GapAnalysis({ session, onUpdated, onNext }: StepProps) {
       {existing.length > 0 && (
         <details className="group rounded-md border border-vsc-border bg-vsc-panel p-4 mb-4">
           <summary className="cursor-pointer list-none flex items-center justify-between [&::-webkit-details-marker]:hidden">
-            <div className="text-[11px] uppercase tracking-wider text-emerald-400">
+            <div className="text-[11px] text-emerald-400">
               Already covered · {existing.length}
             </div>
             <span className="text-[11px] text-zinc-500 group-open:hidden">Show</span>
@@ -237,7 +237,7 @@ export function Step5GapAnalysis({ session, onUpdated, onNext }: StepProps) {
           <div className="mt-3 space-y-3 max-h-72 overflow-auto pr-1">
             {Array.from(existingByCategory.entries()).map(([cat, items]) => (
               <div key={cat}>
-                <div className="text-[11px] uppercase tracking-wider text-zinc-500 mb-1">
+                <div className="text-[11px] text-zinc-500 mb-1">
                   {cat.replace(/_/g, ' ')} · {items.length}
                 </div>
                 <ul className="text-sm text-zinc-300 space-y-0.5">
@@ -287,7 +287,7 @@ export function Step5GapAnalysis({ session, onUpdated, onNext }: StepProps) {
 
             {gap.suggested_jurisdictions.length > 0 && (
               <div>
-                <div className="text-[11px] uppercase tracking-wider text-amber-300 mb-1">
+                <div className="text-[11px] text-amber-300 mb-1">
                   New jurisdictions to track
                 </div>
                 <div className="space-y-2">
@@ -314,13 +314,13 @@ export function Step5GapAnalysis({ session, onUpdated, onNext }: StepProps) {
               gap.suggested_certifications.length > 0 ||
               gap.suggested_licenses.length > 0) && (
               <div>
-                <div className="text-[11px] uppercase tracking-wider text-amber-300 mb-1">
+                <div className="text-[11px] text-amber-300 mb-1">
                   Items to add to manifest
                 </div>
                 <ul className="text-sm text-zinc-100 space-y-1.5">
                   {gap.suggested_compliance_categories.map((c, i) => (
                     <li key={`c-${i}`}>
-                      <span className="text-[10px] uppercase tracking-wider text-zinc-500 mr-2">
+                      <span className="text-[11px] text-zinc-500 mr-2">
                         Category
                       </span>
                       {c.category_slug.replace(/_/g, ' ')}
@@ -332,7 +332,7 @@ export function Step5GapAnalysis({ session, onUpdated, onNext }: StepProps) {
                   ))}
                   {gap.suggested_certifications.map((c, i) => (
                     <li key={`cert-${i}`}>
-                      <span className="text-[10px] uppercase tracking-wider text-zinc-500 mr-2">
+                      <span className="text-[11px] text-zinc-500 mr-2">
                         Cert
                       </span>
                       {c.name}
@@ -343,7 +343,7 @@ export function Step5GapAnalysis({ session, onUpdated, onNext }: StepProps) {
                   ))}
                   {gap.suggested_licenses.map((l, i) => (
                     <li key={`lic-${i}`}>
-                      <span className="text-[10px] uppercase tracking-wider text-zinc-500 mr-2">
+                      <span className="text-[11px] text-zinc-500 mr-2">
                         License
                       </span>
                       {l.name}

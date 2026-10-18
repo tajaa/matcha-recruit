@@ -83,7 +83,7 @@ export default function ComplianceStudio() {
       actions={
         <div className="flex items-center gap-4">
           {/* The two meters — everything in this studio serves one of these. */}
-          <div className="hidden items-center gap-4 font-mono text-[11px] uppercase tracking-wide text-zinc-500 sm:flex">
+          <div className="hidden items-center gap-4 font-mono text-[11px] text-zinc-500 sm:flex">
             <span className="text-emerald-400"
                   title={`Live requirements carrying a verified statute citation — what makes the data AUTHORITATIVE.${
                     meters && meters.keyless > 0

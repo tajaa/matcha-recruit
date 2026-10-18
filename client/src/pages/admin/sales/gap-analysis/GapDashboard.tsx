@@ -204,7 +204,7 @@ export default function GapDashboard() {
           {/* Stat row */}
           <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
             <div className="rounded-lg border border-vsc-border bg-vsc-panel p-3 col-span-2 md:col-span-1">
-              <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Coverage</div>
+              <div className="text-[11px] text-zinc-500">Coverage</div>
               <div className="text-2xl font-semibold text-zinc-100 mt-1">{displayCoveragePct}%</div>
               <div className="mt-1.5 h-1.5 rounded-full bg-vsc-bg overflow-hidden">
                 <div className="h-full rounded-full bg-emerald-500" style={{ width: `${displayCoveragePct}%` }} />
@@ -231,10 +231,10 @@ export default function GapDashboard() {
                 className="text-left"
                 title="Compliance complexity — click for breakdown" variant="ghost"
               >
-                <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Complexity</div>
+                <div className="text-[11px] text-zinc-500">Complexity</div>
                 <div className="flex items-center gap-2 mt-1">
                   <span className="text-2xl font-semibold text-zinc-100">{cx.score}</span>
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded border uppercase tracking-wide ${complexityBandClass(cx.band)}`}>{cx.band}</span>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded border capitalize ${complexityBandClass(cx.band)}`}>{cx.band}</span>
                 </div>
               </AdminButton>
             )}
@@ -346,7 +346,7 @@ export default function GapDashboard() {
               <div className="space-y-4">
                 {[...gapsByJur.entries()].map(([jur, items]) => (
                   <div key={jur}>
-                    <div className="flex items-center gap-1.5 text-[11px] text-zinc-500 uppercase tracking-wide mb-1.5">
+                    <div className="flex items-center gap-1.5 text-[11px] text-zinc-500 mb-1.5">
                       <MapPin className="w-3 h-3" /> {jur} · {items.length}
                     </div>
                     <div className="space-y-2">
@@ -435,7 +435,7 @@ export default function GapDashboard() {
                 ) : (
                   [...coveredByCat.entries()].map(([cat, items]) => (
                     <div key={cat} className="mb-2">
-                      <div className="text-[11px] text-zinc-500 uppercase tracking-wide px-3 pt-2 pb-1">{cat} · {items.length}</div>
+                      <div className="text-[11px] text-zinc-500 px-3 pt-2 pb-1">{cat} · {items.length}</div>
                       <div className="rounded-lg border border-vsc-border overflow-hidden">
                         {items.map((c, i) => <CoveredRow key={c.requirement_id || i} companyId={companyId} item={c} />)}
                       </div>

@@ -1,4 +1,5 @@
 import { AdminButton, AdminTable } from '../../../../components/admin/AdminUI'
+import { AdminTab, AdminTabBar } from '../../../../components/admin/AdminTabs'
 import { type Dispatch, type SetStateAction } from 'react'
 import { Pencil, Trash2, ExternalLink, Loader2 } from 'lucide-react'
 import { STATUS_FILTERS } from './constants'
@@ -28,13 +29,13 @@ export default function PostsList({
       <td className="text-zinc-500 font-mono">{p.slug}</td>
       <td >
         <div className="flex items-center gap-1.5">
-          <span className={`text-[10px] px-2 py-0.5 rounded uppercase tracking-wider font-mono ${
+          <span className={`text-[10px] px-2 py-0.5 rounded capitalize font-mono ${
             p.status === 'published' ? 'bg-emerald-900/40 text-emerald-400'
             : p.status === 'draft' ? 'bg-zinc-800 text-zinc-400'
             : 'bg-zinc-900 text-zinc-600'
           }`}>{p.status}</span>
           {p.submitted_for_review && (
-            <span className="text-[10px] px-2 py-0.5 rounded uppercase tracking-wider font-mono bg-amber-900/40 text-amber-400">review</span>
+            <span className="text-[10px] px-2 py-0.5 rounded capitalize font-mono bg-amber-900/40 text-amber-400">review</span>
           )}
         </div>
       </td>
@@ -44,7 +45,7 @@ export default function PostsList({
           {p.submitted_for_review && (
             <>
               <AdminButton onClick={() => approve(p)}  variant="success">Approve</AdminButton>
-              <AdminButton onClick={() => reject(p)} className="text-amber-400 hover:text-amber-300" variant="ghost">Reject</AdminButton>
+              <AdminButton onClick={() => reject(p)} className="text-amber-400! hover:text-amber-300!" variant="ghost">Reject</AdminButton>
             </>
           )}
           {p.status === 'published' && (
@@ -65,19 +66,16 @@ export default function PostsList({
 
   return (
     <>
-      <div className="flex gap-2 mb-5">
+      <AdminTabBar className="mb-5!" role="group" aria-label="Status">
         {STATUS_FILTERS.map(s => (
-          <button
+          <AdminTab
             key={s}
+            active={filter === s}
             onClick={() => setFilter(s)}
-            className={`px-3 py-1.5 text-xs rounded uppercase tracking-wider font-medium transition ${
-              filter === s ? 'bg-zinc-700 text-zinc-100'
-              : s === 'pending' ? 'bg-amber-950/40 text-amber-400 hover:text-amber-300'
-              : 'bg-zinc-900 text-zinc-500 hover:text-zinc-300'
-            }`}
-          >{s === 'pending' ? 'Pending Review' : s}</button>
+            className={`capitalize ${filter !== s && s === 'pending' ? 'text-amber-400! hover:text-amber-300!' : ''}`}
+          >{s === 'pending' ? 'Pending review' : s}</AdminTab>
         ))}
-      </div>
+      </AdminTabBar>
 
       {loading ? (
         <div className="flex items-center gap-2 text-zinc-500 text-sm"><Loader2 size={14} className="animate-spin" /> Loading…</div>
@@ -85,7 +83,7 @@ export default function PostsList({
         <div className="space-y-6">
           {/* Drafts section */}
           <div>
-            <p className="text-[10px] text-zinc-500 uppercase tracking-wider mb-2">Drafts</p>
+            <p className="text-[11px] text-zinc-500 mb-2">Drafts</p>
             {drafts.length === 0 ? (
               <div className="text-zinc-600 text-xs py-4 text-center border border-dashed border-zinc-800 rounded">
                 No drafts — click <span className="text-zinc-400">+ New post</span> to start one.
@@ -109,7 +107,7 @@ export default function PostsList({
           {/* Published / scheduled / archived */}
           {(filter === 'all' ? nonDrafts.length > 0 : posts.filter(p => p.status !== 'draft').length > 0) && (
             <div>
-              <p className="text-[10px] text-zinc-500 uppercase tracking-wider mb-2">Published &amp; Archived</p>
+              <p className="text-[11px] text-zinc-500 mb-2">Published &amp; Archived</p>
               <AdminTable className="border border-zinc-800 rounded overflow-hidden">
                 <thead >
                   <tr>

@@ -361,7 +361,7 @@ function LinkRow({
 }) {
   return (
     <div className="flex items-center gap-2 bg-zinc-800 rounded px-3 py-2">
-      <span className="text-[10px] uppercase tracking-wider text-zinc-500 w-14 shrink-0">{label}</span>
+      <span className="text-[11px] text-zinc-500 w-14 shrink-0">{label}</span>
       <span className="flex-1 text-xs text-zinc-300 truncate font-mono">{url}</span>
       <button
         onClick={() => onCopy(url)}

@@ -128,7 +128,7 @@ function RollupTable<T extends { calls: number; cost_usd: number | null; input_t
   return (
     <AdminTable>
       <thead>
-        <tr className="text-left text-[10px] uppercase tracking-wider text-zinc-500 border-b border-zinc-800">
+        <tr className="text-left text-[11px] text-zinc-500 border-b border-zinc-800">
           <th >{labelHeader}</th>
           <th className="text-right">Calls</th>
           <th className="text-right">Attributed cost</th>
@@ -180,7 +180,7 @@ function CallLogRow({ call, isOpen, onToggle }: { call: AiUsageCall; isOpen: boo
           </span>
           <span className="shrink-0 w-16 text-[11px] text-zinc-500">{relTime(call.created_at)}</span>
           <span
-            className={`shrink-0 text-[9px] font-medium uppercase px-1.5 py-0.5 rounded border ${STATUS_BADGE[call.status]}`}
+            className={`shrink-0 text-[9px] font-medium capitalize px-1.5 py-0.5 rounded border ${STATUS_BADGE[call.status]}`}
           >
             {call.status}
           </span>
@@ -364,24 +364,20 @@ export default function AiUsage() {
         }
       />
 
-      <div className="flex items-center gap-2 mb-4">
+      <AdminTabBar className="mb-4!" role="group" aria-label="Time range">
         {RANGES.map((r) => (
-          <button
+          <AdminTab
             key={r.hours}
+            active={sinceHours === r.hours}
             onClick={() => {
               setSinceHours(r.hours)
               setPage(0)
             }}
-            className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
-              sinceHours === r.hours
-                ? 'bg-zinc-800 border-zinc-600 text-zinc-100'
-                : 'border-zinc-800 text-zinc-400 hover:border-zinc-700'
-            }`}
           >
             {r.label}
-          </button>
+          </AdminTab>
         ))}
-      </div>
+      </AdminTabBar>
 
       {error && (
         <p className="mb-4 text-sm text-red-400">Couldn't load AI usage: {error}</p>
@@ -440,7 +436,7 @@ export default function AiUsage() {
           full breakdown if that's what's needed instead. */}
       {imageTotals && (
         <div className="mb-4">
-          <p className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+          <p className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold text-zinc-500">
             <Image size={11} /> Image generation
           </p>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -475,7 +471,7 @@ export default function AiUsage() {
           derived-not-fetched pattern as the image block above. */}
       {huumeTotals && (
         <div className="mb-4">
-          <p className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+          <p className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold text-zinc-500">
             <Bot size={11} /> Huume agent
           </p>
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
@@ -502,7 +498,7 @@ export default function AiUsage() {
 
       {timeseries.points.length > 0 && (
         <AdminCard className="mb-6">
-          <p className="text-[10px] uppercase tracking-wider text-zinc-500 mb-2">
+          <p className="text-[11px] text-zinc-500 mb-2">
             Locally attributed cost by {timeseries.bucket}
           </p>
           <Bars points={timeseries.points} />
@@ -511,7 +507,7 @@ export default function AiUsage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
         <div className="rounded-xl border border-zinc-800 overflow-hidden">
-          <p className="px-3 pt-3 pb-1 text-xs font-semibold uppercase tracking-wider text-zinc-500">
+          <p className="px-3 pt-3 pb-1 text-xs font-semibold text-zinc-500">
             By feature — click a row to drill in
           </p>
           <RollupTable<AiUsageFeatureRollup>
@@ -523,7 +519,7 @@ export default function AiUsage() {
           />
         </div>
         <div className="rounded-xl border border-zinc-800 overflow-hidden">
-          <p className="px-3 pt-3 pb-1 text-xs font-semibold uppercase tracking-wider text-zinc-500">
+          <p className="px-3 pt-3 pb-1 text-xs font-semibold text-zinc-500">
             By model — click a row to drill in
           </p>
           <RollupTable<AiUsageModelRollup>
@@ -538,7 +534,7 @@ export default function AiUsage() {
 
       <div>
         <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">Call log</h2>
+          <h2 className="text-xs font-semibold text-zinc-500">Call log</h2>
           <div className="flex items-center gap-2 flex-wrap">
             {selection && (
               <button
@@ -548,19 +544,13 @@ export default function AiUsage() {
                 {selection.kind}: {selection.value} <X size={10} />
               </button>
             )}
-            <div className="flex rounded-lg border border-zinc-800 p-0.5">
+            <AdminTabBar className="mb-0!" role="group" aria-label="Status">
               {STATUS_CHIPS.map((s) => (
-                <button
-                  key={s.label}
-                  onClick={() => toggleStatus(s.value)}
-                  className={`px-2 py-1 rounded-md text-[11px] font-medium transition-colors ${
-                    statusFilter === s.value ? 'bg-zinc-700 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'
-                  }`}
-                >
+                <AdminTab key={s.label} active={statusFilter === s.value} onClick={() => toggleStatus(s.value)}>
                   {s.label}
-                </button>
+                </AdminTab>
               ))}
-            </div>
+            </AdminTabBar>
             <span className="text-[11px] text-zinc-500">
               {callLog.items.length} of {callLog.total}
             </span>

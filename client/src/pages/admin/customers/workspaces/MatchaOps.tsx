@@ -19,7 +19,7 @@ const OPS_FLAGS: { key: string; label: string; description: string }[] = [
 const OPS_FLAG_KEYS = new Set(OPS_FLAGS.map((flag) => flag.key))
 
 function Stat({ label, value, icon: Icon }: { label: string; value: number; icon: typeof Users }) {
-  return <AdminCard ><div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-zinc-500"><Icon className="h-4 w-4 text-emerald-400" />{label}</div><div className="mt-2 text-2xl font-semibold text-zinc-100">{value}</div></AdminCard>
+  return <AdminCard ><div className="flex items-center gap-2 text-[11px] text-zinc-500"><Icon className="h-4 w-4 text-emerald-400" />{label}</div><div className="mt-2 text-2xl font-semibold text-zinc-100">{value}</div></AdminCard>
 }
 
 export default function MatchaOps() {
@@ -108,7 +108,7 @@ export default function MatchaOps() {
         {filtered.map((company) => <button key={company.company_id} type="button" onClick={() => setSelectedId(company.company_id)} className={`w-full border-l-2 px-3 py-3 text-left ${selectedId === company.company_id ? 'border-emerald-400 bg-white/[0.05]' : 'border-transparent hover:bg-white/[0.03]'}`}><div className="flex items-center justify-between gap-2"><span className="truncate text-sm text-zinc-200">{company.company_name}</span>{company.needs_attention && <AlertTriangle size={14} className="shrink-0 text-amber-400" />}</div><div className="mt-1 text-[11px] text-zinc-500">{company.matcha_ops_enabled ? `${company.operations_channel_count} Ops channels` : 'Ops disabled'}</div></button>)}
         {filtered.length === 0 && <p className="p-4 text-xs text-zinc-500">No companies found.</p>}
       </div>
-      <div className="border-t border-white/[0.06] p-3 text-[10px] uppercase tracking-wider text-zinc-600">{companies.length} companies</div>
+      <div className="border-t border-white/[0.06] p-3 text-[11px] text-zinc-600">{companies.length} companies</div>
     </div>
     <div className="min-w-0 flex-1 overflow-y-auto p-5">
       {overview && <div className="grid grid-cols-2 gap-3 md:grid-cols-4"><Stat label="Ops companies" value={overview.companies_enabled} icon={Users} /><Stat label="Channels" value={overview.operations_channels} icon={MessageSquare} /><Stat label="Open events" value={overview.open_events} icon={ClipboardList} /><Stat label="Upcoming shifts" value={overview.upcoming_shifts} icon={CalendarDays} /></div>}

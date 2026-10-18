@@ -134,7 +134,7 @@ export function ClassificationEditor({
 
       <div className="grid gap-2 md:grid-cols-3">
         <label className="block">
-          <span className="text-[10px] uppercase tracking-wider text-zinc-500">Disposition</span>
+          <span className="text-[11px] text-zinc-500">Disposition</span>
           <AdminSelect
             value={disposition}
             onChange={(e) => setDisposition(e.target.value)}
@@ -146,7 +146,7 @@ export function ClassificationEditor({
         </label>
 
         <label className="block">
-          <span className="text-[10px] uppercase tracking-wider text-zinc-500">
+          <span className="text-[11px] text-zinc-500">
             Key category
           </span>
           <AdminSelect
@@ -164,7 +164,7 @@ export function ClassificationEditor({
         </label>
 
         <label className="block">
-          <span className="text-[10px] uppercase tracking-wider text-zinc-500">
+          <span className="text-[11px] text-zinc-500">
             Regulation key
           </span>
           <AdminSelect
@@ -187,7 +187,7 @@ export function ClassificationEditor({
 
       {disposition === 'excluded' ? (
         <label className="mt-2 block">
-          <span className="text-[10px] uppercase tracking-wider text-zinc-500">
+          <span className="text-[11px] text-zinc-500">
             Excluded reason (required)
           </span>
           <AdminInput
@@ -206,7 +206,7 @@ export function ClassificationEditor({
              'Categories this obligation explicitly does NOT reach, even if otherwise universal.'],
           ] as const).map(([label, list, set, hint]) => (
             <div key={label}>
-              <span className="text-[10px] uppercase tracking-wider text-zinc-500" title={hint}>
+              <span className="text-[11px] text-zinc-500" title={hint}>
                 {label}
               </span>
               <div className="mt-0.5 flex flex-wrap gap-1">
@@ -231,7 +231,7 @@ export function ClassificationEditor({
 
       {item.entity_condition && (
         <AdminCard className="mt-2 px-2 py-1">
-          <span className="text-[10px] uppercase tracking-wider text-zinc-500">
+          <span className="text-[11px] text-zinc-500">
             Trigger (kept as-is)
           </span>
           <div

@@ -42,7 +42,7 @@ function QuotaCard({
       }`}
     >
       <div className="flex items-center justify-between gap-2">
-        <p className="text-[10px] uppercase tracking-wider text-zinc-500">{quota.label}</p>
+        <p className="text-[11px] text-zinc-500">{quota.label}</p>
         {quota.plan && (
           <span className="text-[10px] text-zinc-500 truncate">
             {quota.plan}
@@ -89,7 +89,7 @@ export function SearchApisPanel({
   const byProvider = new Map(providers.map((p) => [p.provider, p]))
   return (
     <div className="mb-4">
-      <p className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+      <p className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold text-zinc-500">
         <Search size={11} /> Search APIs
         {loading && <span className="normal-case tracking-normal font-normal text-zinc-600">checking…</span>}
       </p>

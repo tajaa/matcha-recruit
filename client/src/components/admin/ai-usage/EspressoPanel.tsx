@@ -50,7 +50,7 @@ export function EspressoPanel({
 
   return (
     <div className="mb-4">
-      <p className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+      <p className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold text-zinc-500">
         <Coffee size={11} /> Espresso
       </p>
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
@@ -66,7 +66,7 @@ export function EspressoPanel({
         <div className="mt-2">
           <AdminTable>
             <thead>
-              <tr className="text-left text-[10px] uppercase tracking-wider text-zinc-500 border-b border-zinc-800">
+              <tr className="text-left text-[11px] text-zinc-500 border-b border-zinc-800">
                 <th >Spend by provider</th>
                 <th className="text-right">Calls</th>
                 <th className="text-right">Cost</th>
@@ -111,13 +111,13 @@ export function EspressoPanel({
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-2 mt-2">
         <div className="rounded-lg border border-zinc-800 overflow-x-auto">
-          <p className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Runs by kind</p>
+          <p className="px-3 pt-2 pb-1 text-[11px] font-semibold text-zinc-500">Runs by kind</p>
           {runs.length === 0 ? (
             <p className="p-4 text-center text-xs text-zinc-500">No runs in the selected window.</p>
           ) : (
             <AdminTable>
               <thead>
-                <tr className="text-left text-[10px] uppercase tracking-wider text-zinc-500 border-b border-zinc-800">
+                <tr className="text-left text-[11px] text-zinc-500 border-b border-zinc-800">
                   <th >Kind</th>
                   <th className="text-right">Runs</th>
                   <th className="text-right">Failed</th>
@@ -148,13 +148,13 @@ export function EspressoPanel({
         </div>
 
         <div className="rounded-lg border border-zinc-800 overflow-x-auto max-h-96 overflow-y-auto">
-          <p className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Tools used</p>
+          <p className="px-3 pt-2 pb-1 text-[11px] font-semibold text-zinc-500">Tools used</p>
           {tools.length === 0 ? (
             <p className="p-4 text-center text-xs text-zinc-500">No tool calls in the selected window.</p>
           ) : (
             <AdminTable>
               <thead>
-                <tr className="text-left text-[10px] uppercase tracking-wider text-zinc-500 border-b border-zinc-800">
+                <tr className="text-left text-[11px] text-zinc-500 border-b border-zinc-800">
                   <th >Tool</th>
                   <th className="text-right">Calls</th>
                   <th className="text-right">Failed</th>

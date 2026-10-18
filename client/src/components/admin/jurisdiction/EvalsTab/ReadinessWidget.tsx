@@ -45,7 +45,7 @@ export function ReadinessWidget() {
 
       <div className="flex flex-wrap items-end gap-2 mb-4">
         <label className="flex flex-col gap-1">
-          <span className="text-[10px] uppercase tracking-wider text-zinc-500">Industry</span>
+          <span className="text-[11px] text-zinc-500">Industry</span>
           <AdminSelect
             value={industry}
             onChange={(e) => setIndustry(e.target.value)}
@@ -56,7 +56,7 @@ export function ReadinessWidget() {
           </AdminSelect>
         </label>
         <label className="flex flex-col gap-1">
-          <span className="text-[10px] uppercase tracking-wider text-zinc-500">State</span>
+          <span className="text-[11px] text-zinc-500">State</span>
           <AdminInput
             value={state}
             onChange={(e) => setState(e.target.value.toUpperCase())}
@@ -65,7 +65,7 @@ export function ReadinessWidget() {
           />
         </label>
         <label className="flex flex-col gap-1">
-          <span className="text-[10px] uppercase tracking-wider text-zinc-500">City (blank = state)</span>
+          <span className="text-[11px] text-zinc-500">City (blank = state)</span>
           <AdminInput
             value={city}
             onChange={(e) => setCity(e.target.value)}
@@ -73,7 +73,7 @@ export function ReadinessWidget() {
           />
         </label>
         <label className="flex flex-col gap-1">
-          <span className="text-[10px] uppercase tracking-wider text-zinc-500">Depth</span>
+          <span className="text-[11px] text-zinc-500">Depth</span>
           <AdminSelect
             value={effectiveDepth}
             onChange={(e) => setDepth(e.target.value as 'core' | 'full')}
@@ -114,7 +114,7 @@ export function ReadinessWidget() {
           <div className="grid grid-cols-5 gap-2">
             {(['completeness', 'accuracy', 'authority', 'freshness', 'tagging'] as const).map((k) => (
               <div key={k} className="border border-zinc-800 rounded px-2 py-2">
-                <p className="text-[10px] uppercase tracking-wider text-zinc-500">{k}</p>
+                <p className="text-[10px] capitalize text-zinc-500">{k}</p>
                 <p className={`text-lg font-bold ${scoreColor(data.subscores[k])}`}>
                   {fmtScore(data.subscores[k])}
                 </p>

@@ -86,7 +86,7 @@ export function Scorecard({ cells }: { cells: ScorecardCell[] }) {
           <div className="grid grid-cols-5 gap-2 mb-3">
             {(['completeness', 'accuracy', 'authority', 'freshness', 'tagging'] as const).map((k) => (
               <div key={k} className="border border-zinc-800 rounded px-2 py-2">
-                <p className="text-[10px] uppercase tracking-wider text-zinc-500">{k}</p>
+                <p className="text-[10px] capitalize text-zinc-500">{k}</p>
                 <p className={`text-lg font-bold ${scoreColor(selected.subscores[k])}`}>
                   {fmtScore(selected.subscores[k])}
                 </p>

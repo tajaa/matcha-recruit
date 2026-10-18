@@ -152,7 +152,7 @@ export default function PolicyBrowserTab() {
           { label: 'Jurisdictions', value: sum.total_jurisdictions.toLocaleString() },
         ].map((s) => (
           <div key={s.label} className="border border-zinc-800 rounded-lg px-3 py-3">
-            <p className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium">{s.label}</p>
+            <p className="text-[11px] text-zinc-500 font-medium">{s.label}</p>
             <p className="text-2xl font-bold tracking-tight mt-0.5 text-zinc-100">{s.value}</p>
           </div>
         ))}
@@ -180,7 +180,7 @@ export default function PolicyBrowserTab() {
             >
               <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
             </svg>
-            <h2 className="text-xs font-medium text-zinc-400 uppercase tracking-wide group-hover:text-zinc-200 transition-colors">
+            <h2 className="text-xs font-medium text-zinc-400 group-hover:text-zinc-200 transition-colors">
               {domain.label}
             </h2>
             <span className="text-[10px] text-zinc-600 font-mono">

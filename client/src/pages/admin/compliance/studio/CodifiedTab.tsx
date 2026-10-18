@@ -247,7 +247,7 @@ export default function CodifiedTab({ initialState, goto, gotoUncodified }: Prop
                             {nodeOpen ? <ChevronDown className="h-3 w-3 shrink-0 text-zinc-600" />
                                       : <ChevronRight className="h-3 w-3 shrink-0 text-zinc-600" />}
                             <span className="flex-1 truncate text-zinc-300">{node.label}</span>
-                            <span className="font-mono text-[10px] uppercase text-zinc-600">{node.level}</span>
+                            <span className="font-mono text-[10px] capitalize text-zinc-600">{node.level}</span>
                             <Meter codified={node.codified} total={node.total} />
                           </div>
 

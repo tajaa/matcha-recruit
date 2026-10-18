@@ -312,7 +312,7 @@ export default function StatutoryFitPanel({ companyId, onCodifyGated, refreshKey
           seed it showed the 9 that happened to have rows. */}
       {fit.locations.length > 1 && (
         <div className="mt-3 rounded-lg border border-white/[0.06] bg-black/20 p-2">
-          <div className="mb-1.5 text-[10px] uppercase tracking-wide text-zinc-600">
+          <div className="mb-1.5 text-[11px] text-zinc-600">
             {fit.locations.length} locations
           </div>
           <div className="space-y-0.5">

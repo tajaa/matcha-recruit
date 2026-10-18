@@ -66,7 +66,7 @@ export function ReviewSection({
                 <div className="flex items-start justify-between gap-3 border-b border-white/[0.06] px-4 py-3">
                   <div className="min-w-0">
                     <h3 className="truncate text-[15px] font-semibold text-zinc-100">{group.label}</h3>
-                    <p className="mt-0.5 flex items-center gap-2 font-mono text-[10px] uppercase tracking-wide text-zinc-500">
+                    <p className="mt-0.5 flex items-center gap-2 font-mono text-[11px] text-zinc-500">
                       <span>{group.state} · {group.rows.length} staged</span>
                       <a href={coverageLink(group.state, group.city)}
                         className="inline-flex items-center gap-0.5 text-cyan-400/70 hover:text-cyan-300 normal-case tracking-normal">

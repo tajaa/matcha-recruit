@@ -108,7 +108,7 @@ export function TemplatesTab({
                 <div className="flex items-center gap-2">
                   <p className="text-sm text-zinc-200 truncate">{t.name}</p>
                   {t.design_json && (
-                    <span className="text-[9px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400">Design</span>
+                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400">Design</span>
                   )}
                 </div>
                 {t.description && <p className="text-[11px] text-zinc-500 truncate">{t.description}</p>}
@@ -119,7 +119,7 @@ export function TemplatesTab({
           ))}
         </div>
         <div className="rounded-xl border border-zinc-800 p-4 space-y-3 self-start">
-          <p className="text-[10px] text-zinc-500 uppercase tracking-wider">Save a raw-HTML template</p>
+          <p className="text-[11px] text-zinc-500">Save a raw-HTML template</p>
           <AdminInput value={name} onChange={(e) => setName(e.target.value)} placeholder="Template name"  />
           <AdminInput value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="Description (optional)"  />
           <AdminInput value={pre} onChange={(e) => setPre(e.target.value)} placeholder="Preheader (optional)"  />

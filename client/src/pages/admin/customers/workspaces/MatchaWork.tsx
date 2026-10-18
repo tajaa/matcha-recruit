@@ -127,7 +127,7 @@ function BusinessWork() {
           <tbody >
             {pagination.rows.map((row) => (
               <tr key={row.company_id} className="text-zinc-300 hover:bg-zinc-900/30">
-                <td ><Link to={`/admin/companies/${row.company_id}`} className="font-medium text-zinc-100 hover:text-emerald-400">{row.company_name}</Link>{row.signup_source && <p className="mt-0.5 text-[10px] uppercase tracking-wider text-zinc-500">{row.signup_source.replaceAll('_', ' ')}</p>}</td>
+                <td ><Link to={`/admin/companies/${row.company_id}`} className="font-medium text-zinc-100 hover:text-emerald-400">{row.company_name}</Link>{row.signup_source && <p className="mt-0.5 text-[10px] capitalize text-zinc-500">{row.signup_source.replaceAll('_', ' ')}</p>}</td>
                 <td ><CompanyStatus status={row.company_status} /></td>
                 <td className="text-right tabular-nums"><span className="inline-flex items-center gap-1"><Users className="h-3 w-3 text-zinc-500" />{row.member_count}</span></td>
                 <td className="text-zinc-300"><span className={row.free_tokens_remaining === 0 ? 'text-amber-400' : ''}>{formatTokens(row.free_tokens_remaining)}</span><span className="text-zinc-600"> / {formatTokens(row.free_token_limit)}</span></td>

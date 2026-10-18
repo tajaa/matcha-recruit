@@ -151,7 +151,7 @@ export function IndustryCoveragePanel({
                     className="cursor-pointer border-t border-white/[0.04] hover:bg-white/[0.03]">
                     <td className="sticky left-0 z-10 text-left whitespace-nowrap">
                       <span className="text-zinc-200">{row.display_name || row.city || row.state}</span>
-                      <span className="ml-1.5 text-[10px] text-zinc-600 uppercase">{row.level}</span>
+                      <span className="ml-1.5 text-[10px] text-zinc-600 capitalize">{row.level}</span>
                     </td>
                     {grid.categories.map((c) => {
                       const cell = row.cells[c.slug]
@@ -282,7 +282,7 @@ export function IndustryCoveragePanel({
               </div>
               {resolveResult.uncodified.length > 0 && (
                 <div className="mt-3">
-                  <div className="text-[11px] uppercase text-zinc-500">To fetch</div>
+                  <div className="text-[11px] text-zinc-500">To fetch</div>
                   <ul className="mt-1 grid gap-1 sm:grid-cols-2">
                     {resolveResult.uncodified.slice(0, 20).map((it) => (
                       <li key={it.citation} className="text-xs text-zinc-400">

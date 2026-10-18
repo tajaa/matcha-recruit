@@ -1,4 +1,5 @@
 /* eslint-disable react-hooks/set-state-in-effect -- Effects intentionally synchronize this tool with loaded data, URL selections, and preview inputs. */
+import { AdminTab, AdminTabBar } from '../../../components/admin/AdminTabs'
 import { AdminButton as Button, AdminCard, AdminInput, AdminTextarea } from '../../../components/admin/AdminUI'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Loader2, Download, FileText, PencilLine } from 'lucide-react'
@@ -88,10 +89,10 @@ export default function LiteEditionPanel({
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="inline-flex rounded-lg border border-zinc-700 p-0.5">
-          <ToggleBtn active={view === 'edit'} onClick={() => setView('edit')} icon={<PencilLine className="h-4 w-4" />}>Edit</ToggleBtn>
-          <ToggleBtn active={view === 'preview'} onClick={() => setView('preview')} icon={<FileText className="h-4 w-4" />}>Preview</ToggleBtn>
-        </div>
+        <AdminTabBar className="mb-0!" role="group" aria-label="View">
+          <AdminTab active={view === 'edit'} onClick={() => setView('edit')}><PencilLine className="h-3.5 w-3.5" />Edit</AdminTab>
+          <AdminTab active={view === 'preview'} onClick={() => setView('preview')}><FileText className="h-3.5 w-3.5" />Preview</AdminTab>
+        </AdminTabBar>
         <div className="flex items-center gap-2">
           <SaveTemplateButton onSave={saveTpl} />
           <Button onClick={download} disabled={!validHeadcount || downloading}>
@@ -173,16 +174,5 @@ function AutoTextarea({
       rows={1}
       className={` resize-none border-transparent bg-transparent leading-relaxed ${className}`}
     />
-  )
-}
-
-function ToggleBtn({ active, onClick, icon, children }: { active: boolean; onClick: () => void; icon: React.ReactNode; children: React.ReactNode }) {
-  return (
-    <button type="button" onClick={onClick}
-      className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-        active ? 'bg-violet-500/15 text-violet-200' : 'text-zinc-400 hover:text-zinc-200'
-      }`}>
-      {icon}{children}
-    </button>
   )
 }

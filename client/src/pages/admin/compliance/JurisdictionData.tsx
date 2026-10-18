@@ -1,4 +1,5 @@
 /* eslint-disable react-hooks/set-state-in-effect -- Effects intentionally synchronize this tool with loaded data, URL selections, and preview inputs. */
+import { AdminTab, AdminTabBar } from '../../../components/admin/AdminTabs'
 import { AdminButton as Button, AdminSelect } from '../../../components/admin/AdminUI'
 import { AdminPageHeader } from '../../../components/admin/AdminPageHeader'
 import { useEffect, useState, useCallback, useMemo } from 'react'
@@ -225,14 +226,14 @@ export default function JurisdictionData() {
           { label: 'Key Definitions', value: '353' },
         ].map((s) => (
           <div key={s.label} className="border border-zinc-800 rounded-lg px-3 py-3">
-            <p className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium">{s.label}</p>
+            <p className="text-[11px] text-zinc-500 font-medium">{s.label}</p>
             <p className={`text-2xl font-bold tracking-tight mt-0.5 ${'color' in s ? s.color : 'text-zinc-100'}`}>{s.value}</p>
           </div>
         ))}
       </div>
 
       {/* Tabs */}
-      <div className="flex items-center gap-1 mt-5 mb-5">
+      <AdminTabBar className="mt-5 mb-5!">
         {([
           { id: 'explorer' as Tab, label: 'Explorer' },
           { id: 'policies' as Tab, label: 'Policies' },
@@ -246,11 +247,11 @@ export default function JurisdictionData() {
           { id: 'bookmarks' as Tab, label: 'Bookmarks' },
           { id: 'schedule-rules' as Tab, label: 'Schedule Rules' },
         ]).map((t) => (
-          <Button key={t.id} variant={tab === t.id ? 'secondary' : 'ghost'} size="sm" onClick={() => setTab(t.id)}>
+          <AdminTab key={t.id} active={tab === t.id} onClick={() => setTab(t.id)}>
             {t.label}
-          </Button>
+          </AdminTab>
         ))}
-      </div>
+      </AdminTabBar>
 
       {/* ── Policies Tab ── */}
       {tab === 'policies' && <PolicyBrowserTab />}

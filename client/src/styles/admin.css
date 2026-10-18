@@ -179,6 +179,21 @@ html[data-app-shell-bg="admin"] .admin-button:hover:not(:disabled) {
   --color-emerald-950: var(--color-zinc-950);
 }
 
+/* Pages that still compose chrome from raw zinc utilities get the same quiet
+   surfaces as the shared components: zinc-900 panels sink to near-canvas
+   (opaque, so modals and drawers stay readable) and zinc-800 edges and fills
+   become faint white. Floating zinc-800 tooltips use .admin-popover instead. */
+html[data-app-shell-bg="admin"] {
+  --color-zinc-900: #0c0d0f;
+  --color-zinc-800: rgba(255, 255, 255, .06);
+}
+
+/* Field borders and outlined/hover button fills drop to the same faint edge;
+   zinc-700 stays a dim text color everywhere else. */
+html[data-app-shell-bg="admin"] :is(button, input, select, textarea) {
+  --color-zinc-700: rgba(255, 255, 255, .09);
+}
+
 html[data-app-shell-bg="admin"] .admin-badge {
   display: inline-block;
   border: 1px solid transparent;

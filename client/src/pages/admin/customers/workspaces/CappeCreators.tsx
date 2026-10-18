@@ -358,7 +358,7 @@ export default function CappeCreators() {
                       <AdminCard className="mb-3 flex flex-wrap items-center justify-between gap-3 px-3 py-2">
                         <div>
                           <p className="text-xs font-medium text-zinc-300">{row.email}</p>
-                          <p className="mt-0.5 text-[10px] uppercase tracking-wider text-zinc-500">Account {row.account_status}</p>
+                          <p className="mt-0.5 text-[11px] text-zinc-500">Account {row.account_status}</p>
                         </div>
                         {row.account_status === 'active' ? (
                           <Button size="sm" variant="ghost" disabled={busyId === row.account_id} onClick={() => suspendAccount(row)}>Disable login</Button>
@@ -455,7 +455,7 @@ export default function CappeCreators() {
                 ))}
               </div>
 
-              <h2 className="mt-6 mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">By brand</h2>
+              <h2 className="mt-6 mb-2 text-sm font-semibold text-zinc-500">By brand</h2>
               <AdminTable>
                 <thead >
                   <tr>
