@@ -234,7 +234,7 @@ export default function CoverageHeatmap({ onCellClick }: CoverageHeatmapProps) {
       {/* Floating tooltip */}
       {tooltip && (
         <div
-          className="fixed z-50 pointer-events-none bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-[11px] text-zinc-200 shadow-xl max-w-[200px]"
+          className="admin-popover fixed z-50 pointer-events-none bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-[11px] text-zinc-200 shadow-xl max-w-[200px]"
           style={{ left: tooltip.x + 8, top: Math.max(8, tooltip.y - 80) }}
         >
           <p className="font-medium text-zinc-100">{tooltip.jName}</p>

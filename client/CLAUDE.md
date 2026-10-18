@@ -133,6 +133,10 @@ the saved preference and has no theme toggle. Use neutral selection and plan lab
 reserve color for meaningful status, warnings, errors, and data visualizations.
 Use regular-weight controls, lightly weighted headings, flat buttons, and faint
 surface edges; avoid inset bevels, outlined pills, and extra button decoration.
+Inside admin, `admin.css` remaps `zinc-900` to a near-canvas panel and `zinc-800`
+(plus `zinc-700` on fields and buttons) to faint white, so pages still built from
+raw zinc utilities match the shared components. A floating `bg-zinc-800` tooltip
+or menu must add `admin-popover` to stay opaque.
 Pages do not add their own outer width/padding or fixed-height console frame.
 
 - `components/admin/adminNavigation.ts` defines seven sidebar categories and

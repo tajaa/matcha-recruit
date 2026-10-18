@@ -62,7 +62,7 @@ export default function PreemptionTab({ requiredCats, preemptionRules }: Preempt
                           {cell.allows ? '✓' : '✗'}
                         </span>
                         {isHovered && cell.notes && (
-                          <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-1.5 px-2.5 py-1.5 rounded-lg text-[10px] max-w-[220px] bg-zinc-800 text-zinc-200 shadow-lg whitespace-normal">
+                          <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-1.5 px-2.5 py-1.5 rounded-lg text-[10px] max-w-[220px] admin-popover bg-zinc-800 text-zinc-200 shadow-lg whitespace-normal">
                             {cell.notes}
                           </div>
                         )}
