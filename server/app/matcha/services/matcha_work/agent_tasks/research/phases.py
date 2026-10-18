@@ -42,7 +42,7 @@ from app.matcha.services.matcha_work.agent_runtime.chain import Budget, PhaseOut
 from .. import items as items_mod
 from ..playbook import Budgets
 from . import fields as F
-from . import geo, kinds, providers, ranking
+from . import batches, geo, kinds, providers, ranking
 from . import units as leasing
 
 logger = logging.getLogger(__name__)
@@ -94,8 +94,8 @@ _GONE = re.compile(
     re.I,
 )
 # Phase names, as the chain stores them (`<playbook>.<phase>`).
-PROVIDERS, DISCOVER, ENRICH, SCREEN, RANK, SUMMARIZE = (
-    f"research.{name}" for name in ("providers", "discover", "enrich", "screen", "rank", "summarize")
+PROVIDERS, DISCOVER, ENRICH, SCREEN, RANK, FILL, SUMMARIZE = (
+    f"research.{name}" for name in ("providers", "discover", "enrich", "screen", "rank", "fill", "summarize")
 )
 
 
@@ -129,6 +129,15 @@ async def _default_rehost(images: list[dict], **kwargs) -> tuple[list[dict], lis
     return await rehost_urls(images, **kwargs)
 
 
+async def _default_search(query: str) -> list[dict]:
+    """A look-up for one finding (`fill.py`): a few Brave results with their pictures."""
+    from app.matcha.services.matcha_work import brave_search
+
+    if not brave_search.configured() or not brave_search.available():
+        return []
+    return await brave_search.search(query, count=5, images=True)
+
+
 @dataclass
 class Deps:
     # The listings API for a source (`places`, `shopping`), or None.
@@ -140,6 +149,8 @@ class Deps:
     view: Callable[[str, str], Awaitable[dict]] = _default_view
     browser_ready: Callable[[], bool] = _default_browser_ready
     rehost: Callable[..., Awaitable[tuple[list[dict], list[str]]]] = _default_rehost
+    # A web search for one finding by name (Brave), for what it still lacks.
+    search: Callable[[str], Awaitable[list[dict]]] = _default_search
     geocode: geo.Geocode = geo.census_point
     today: Callable[[], date] = field(default=date.today)
 
@@ -737,8 +748,10 @@ async def enrich(task: dict, deps: Deps, guard: chain.Guard) -> PhaseOutcome:
         for (_, update), units in zip(found, copied):
             update["units"] = units
 
-    # Both at once, so a batch's media take about a minute, not one after the other.
-    await asyncio.gather(photos(), plans())
+    # Both at once, so a batch's media take about a minute, not one after the
+    # other. A task shown in batches gets its photos when a batch is released
+    # (`fill.py`), so they go to what is shown, not to whatever was read first.
+    await asyncio.gather(*([] if batches.uses_batches(plan_of(task)) else [photos()]), plans())
 
     async with connection_or_direct() as conn:
         for item_id, update in updates.items():
@@ -878,4 +891,4 @@ async def rank_phase(task: dict, deps: Deps, guard: chain.Guard) -> PhaseOutcome
     async with connection_or_direct() as conn:
         fresh = await conn.fetchrow("SELECT * FROM mw_agent_tasks WHERE id = $1", task["id"])
         await rerank(conn, dict(fresh))
-    return PhaseOutcome(status="running", phase=SUMMARIZE, progress={"note": "Writing up what it found…"})
+    return PhaseOutcome(status="running", phase=FILL, progress={"note": "Getting the best ready to show…"})

@@ -16,6 +16,7 @@ from app.database import decode_jsonb
 from app.matcha.services.matcha_work.agent_card.schema import normalize_url
 
 from . import items as items_mod, playbooks
+from .research import batches
 from .research.units import unit_line
 
 MAX_ITEMS = 10
@@ -140,11 +141,13 @@ async def pick_rows(conn, task_id: UUID, item_ids: list[UUID]) -> list[dict]:
             task_id, item_ids,
         )
     else:
+        # What the person has been shown (`research/batches.py`), never the waiting list.
         rows = await conn.fetch(
-            f"""SELECT * FROM mw_agent_task_items
-                WHERE task_id = $1 AND (rank_band < 9 OR user_state IN ('saved', 'chosen'))
-                ORDER BY CASE user_state WHEN 'chosen' THEN 0 WHEN 'saved' THEN 1 ELSE 2 END,
-                         rank NULLS LAST, created_at
+            f"""SELECT i.* FROM mw_agent_task_items i JOIN mw_agent_tasks t ON t.id = i.task_id
+                WHERE i.task_id = $1 AND (i.rank_band < 9 OR i.user_state IN ('saved', 'chosen'))
+                  AND {batches.SHOWN_SQL}
+                ORDER BY CASE i.user_state WHEN 'chosen' THEN 0 WHEN 'saved' THEN 1 ELSE 2 END,
+                         i.rank NULLS LAST, i.created_at
                 LIMIT {MAX_ITEMS}""",
             task_id,
         )

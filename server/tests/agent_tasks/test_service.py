@@ -118,7 +118,8 @@ async def test_close_round_rules():
     c = FakeConn()
     await service.close_round(c, TASK)
     settle, wait = c.calls
-    assert "t.phase_cursor ? 'round_failed'" in settle[1] and "r.kind = 'more' AND r.items_added = 0" in settle[1]
+    assert "t.phase_cursor ? 'round_failed'" in settle[1] and "r.kind = 'more' AND NOT" in settle[1]
+    assert "r.items_added = 0 OR" in settle[1]
     assert "t.status <> 'waiting'" in settle[1] and "waiting_since = COALESCE" in wait[1]
 
 

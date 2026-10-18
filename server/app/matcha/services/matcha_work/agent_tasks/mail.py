@@ -25,7 +25,7 @@ from uuid import UUID
 from app.database import decode_jsonb
 
 from . import items as items_mod
-from .chat import PICKED_FROM, TOP_ITEMS, picks
+from .chat import TOP_ITEMS, picked_from, picks
 
 logger = logging.getLogger(__name__)
 
@@ -201,11 +201,8 @@ async def round_finished(conn, task_id: UUID) -> bool:
         if to is None:
             return False
         summary = decode_jsonb(task["summary"], {}) or {}
-        top = picks([items_mod.item_summary(r) for r in await conn.fetch(
-            f"""SELECT * FROM mw_agent_task_items WHERE task_id = $1 AND rank_band < 9
-                ORDER BY rank LIMIT {PICKED_FROM}""",
-            task_id,
-        )], summary) if task["status"] == "done" else []
+        top = picks([items_mod.item_summary(r) for r in await picked_from(conn, task_id, summary)],
+                    summary) if task["status"] == "done" else []
         message = compose(dict(task), summary=summary, top=top, columns=plan_view(dict(task))["columns"])
         from ..recaps.delivery import own_mail
         if await own_mail(conn, kind="research", source_id=task_id, message=message):

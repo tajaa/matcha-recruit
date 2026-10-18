@@ -77,6 +77,23 @@ async def post_card(conn, task: dict, *, company_id: UUID, channel_id: UUID, eve
     )
 
 
+async def picked_from(conn, task_id: UUID, summary: dict) -> list:
+    """The findings a round's picks come from: the batch it released, when it
+    released one (`research/batches.py`), else the best ranked."""
+    batch = summary.get("batch")
+    if isinstance(batch, list):
+        return list(await conn.fetch(
+            """SELECT * FROM mw_agent_task_items WHERE task_id = $1 AND id::text = ANY($2::text[])
+               ORDER BY rank NULLS LAST""",
+            task_id, [str(i) for i in batch],
+        ))
+    return list(await conn.fetch(
+        f"""SELECT * FROM mw_agent_task_items WHERE task_id = $1 AND rank_band < 9
+            ORDER BY rank LIMIT {PICKED_FROM}""",
+        task_id,
+    ))
+
+
 def picks(ranked: list[dict], summary: dict) -> list[dict]:
     """The summary's top picks first, in its order, then the ranking's best."""
     order = {str(p.get("item_id")): n for n, p in enumerate(summary.get("top") or []) if isinstance(p, dict)}
@@ -97,10 +114,7 @@ async def post_stopped(conn, task_id: UUID) -> dict | None:
     summary = decode_jsonb(await conn.fetchval(
         "SELECT summary FROM mw_agent_task_rounds WHERE task_id = $1 AND n = $2", task_id, row["current_round"],
     ), {}) or {}
-    top = picks([items_mod.item_summary(r) for r in await conn.fetch(
-        f"""SELECT * FROM mw_agent_task_items WHERE task_id = $1 AND rank_band < 9
-            ORDER BY rank LIMIT {PICKED_FROM}""",
-        task_id,
-    )], summary) if row["status"] == "done" else []
+    top = picks([items_mod.item_summary(r) for r in await picked_from(conn, task_id, summary)],
+                summary) if row["status"] == "done" else []
     return await post_card(conn, dict(row), company_id=row["company_id"], channel_id=row["origin_channel_id"],
                            summary=summary, top=top)
