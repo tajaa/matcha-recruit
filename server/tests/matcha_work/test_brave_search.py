@@ -215,3 +215,42 @@ async def test_searches_at_once_are_spaced_to_the_rate():
     clock.now += 10
     await B._pace(sleep=sleep, clock=clock)
     assert waits == [1.05, 2.1], "a search after a quiet spell goes at once"
+
+
+@pytest.mark.asyncio
+async def test_a_search_called_off_while_waiting_gives_its_slot_back():
+    import asyncio
+
+    clock = Clock()
+
+    async def no_wait(_s):
+        return None
+
+    async def cancelled(_s):
+        raise asyncio.CancelledError
+
+    await B._pace(sleep=no_wait, clock=clock)  # takes now; the next slot is 1.05 s on
+    with pytest.raises(asyncio.CancelledError):
+        await B._pace(sleep=cancelled, clock=clock)
+    waits = []
+
+    async def sleep(seconds):
+        waits.append(round(seconds, 2))
+
+    await B._pace(sleep=sleep, clock=clock)
+    assert waits == [1.05], "the next search waits for the first one only, not the one called off"
+
+
+@pytest.mark.asyncio
+async def test_brave_out_while_a_search_waited_its_turn_sends_nothing():
+    clock = Clock()
+
+    async def sleep(seconds):
+        B.mark_out("Brave has no searches left this period", 3600, clock=clock)
+
+    await B._pace(sleep=_no_sleep, clock=clock)  # someone else's search: this one has to wait
+    seen = []
+    with pytest.raises(B.Unavailable) as out:
+        await B.search("lip balm", transport=httpx.MockTransport(lambda r: seen.append(r) or _ok([])),
+                       sleep=sleep, clock=clock)
+    assert out.value.out and seen == []

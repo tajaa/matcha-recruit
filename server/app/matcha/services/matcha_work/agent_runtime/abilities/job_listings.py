@@ -16,10 +16,14 @@ inside one tool call:
    take it), deduped within the run.
 3. The top postings read from the employer's own posting, a few at a time
    (`phases.enrich_one`: the ATS's public API or the page's JobPosting data,
-   title and employer matched). A posting read is `verified`: still up at
-   that link, its pay in the posting's own words. It is `at_employer` only
-   on an ATS or a host carrying the employer's name; builtin.com and the
-   like carry the same JobPosting data but are boards, and are said to be.
+   title and employer matched), within the time the run has left. A posting
+   read is `verified`: still up at that link, its pay in the posting's own
+   words. It is `at_employer` only on an ATS or the employer's own host
+   (`employer_host`); builtin.com and the like carry the same JobPosting
+   data but are boards, and are said to be.
+
+Every posting kept is in the run (and its id taken) before anything is read,
+so a read that runs out of time costs that posting's check, not the list.
 
 Pay is `ranking.comp_line` over evidence (`comp.py`), never the model's. The
 block is rebuilt from what the run found, by id. Only the title and place
@@ -31,6 +35,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -56,6 +61,8 @@ VERIFY_FETCHES = 4
 BOARD_FETCHES = 6
 VERIFY_SECONDS = 40.0
 TOOL_SECONDS = 80.0
+# Kept back from the tool's own deadline so the answer is written before it.
+VERIFY_MARGIN = 5.0
 MAX_BLOCK = 30
 AUTO_BLOCK_AT = 3
 SOURCE_LABELS = {"greenhouse": "Greenhouse", "lever": "Lever", "ashby": "Ashby"}
@@ -112,15 +119,44 @@ async def _verify(lead: dict) -> dict | None:
     return at_employer
 
 
+# What a careers site puts around the employer's name: jobs.netflix.com,
+# disneycareers.com, lifeattiktok.com.
+_CAREER_PREFIXES = ("careers", "career", "jobs", "lifeat", "workat", "joinus", "join")
+_CAREER_SUFFIXES = ("careers", "career", "jobs", "hiring")
+# The label before a country's TLD that isn't the site's name (example.co.uk).
+_SECOND_LEVEL = {"co", "com", "org", "net", "gov", "ac", "edu"}
+
+
+def _without_career_words(label: str) -> str:
+    for prefix in _CAREER_PREFIXES:
+        if label.startswith(prefix) and len(label) > len(prefix):
+            label = label[len(prefix):]
+            break
+    for suffix in _CAREER_SUFFIXES:
+        if label.endswith(suffix) and len(label) > len(suffix):
+            return label[:-len(suffix)]
+    return label
+
+
 def employer_host(url: str | None, company: str) -> bool:
-    """Whether a link is on the employer's own site: a distinctive word of its
-    name in the host ("jobs.disneycareers.com" for The Walt Disney Company).
-    builtin.com or jobilize.com carry the same JobPosting data, but they are
-    boards, not the employer."""
+    """Whether a link is on the employer's own site: a label of the host is
+    its name run together ("careers.bostonscientific.com", "bostonscientific.
+    wd5.myworkdayjobs.com"), or the site's own domain is one of its distinctive
+    words once a careers word is taken off ("jobs.disneycareers.com" for The
+    Walt Disney Company, "jobs.netflix.com"). A word merely inside a label,
+    or a subdomain of someone else's site, is not enough: builtinboston.com
+    and boston.craigslist.org are not Boston Scientific. Boards (builtin.com,
+    jobilize.com) carry the same JobPosting data, but they are not the employer."""
     from app.matcha.services.matcha_work.job_search import normalize
 
-    host = normalize.host_of(url or "")
-    return bool(host) and any(word in host for word in normalize.name_words(company))
+    labels = [label.replace("-", "") for label in normalize.host_of(url or "").split(".") if label]
+    name = normalize.named_employer(company)
+    if len(labels) < 2 or not name:
+        return False
+    if any(name in (label, _without_career_words(label)) for label in labels[:-1]):
+        return True
+    site = labels[-3] if len(labels) >= 3 and labels[-2] in _SECOND_LEVEL else labels[-2]
+    return _without_career_words(site) in normalize.name_words(company)
 
 
 def _apply_url(lead: dict, update: dict | None) -> str | None:
@@ -201,9 +237,10 @@ def model_line(short_id: str, row: dict) -> str:
     return " | ".join(parts)
 
 
-async def _read_some(leads: list[dict]) -> list[dict | None]:
-    """Each lead's employer posting, a few at a time, inside VERIFY_SECONDS;
-    a read still going then counts as not read."""
+async def _read_some(leads: list[dict], seconds: float = VERIFY_SECONDS) -> list[dict | None]:
+    """Each lead's employer posting, a few at a time, inside `seconds`; a read
+    still going then counts as not read, and is stopped (so is every read,
+    when the tool itself is called off)."""
     gate = asyncio.Semaphore(VERIFY_AT_ONCE)
 
     async def one(lead: dict) -> dict | None:
@@ -214,18 +251,22 @@ async def _read_some(leads: list[dict]) -> list[dict | None]:
                 logger.info("find_jobs could not read a posting", exc_info=True)
                 return None
 
+    if not leads or seconds <= 0:
+        return [None] * len(leads)
     tasks = [asyncio.ensure_future(one(lead)) for lead in leads]
-    if not tasks:
-        return []
-    done, pending = await asyncio.wait(tasks, timeout=VERIFY_SECONDS)
-    for task in pending:
-        task.cancel()
+    try:
+        done, _pending = await asyncio.wait(tasks, timeout=seconds)
+    finally:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
     return [task.result() if task in done and not task.cancelled() else None for task in tasks]
 
 
-async def _find(ctx: RunContext, state: RunState, args: dict, _left: float) -> ToolOutput:
+async def _find(ctx: RunContext, state: RunState, args: dict, left: float) -> ToolOutput:
     from app.matcha.services.matcha_work.job_search import normalize, phases
 
+    started = time.monotonic()
     session = session_of(state)
     title = " ".join(str(args.get("title") or "").split())[:120]
     if not title:
@@ -252,7 +293,9 @@ async def _find(ctx: RunContext, state: RunState, args: dict, _left: float) -> T
     try:
         for query in queries:
             token = None
-            for _page in range(max(1, min(MAX_PAGES, pages, MAX_PAID - session.paid))):
+            for _page in range(max(1, min(MAX_PAGES, pages))):
+                if session.paid >= MAX_PAID:
+                    break
                 session.paid += 1  # counted before the call: a page that left may be billed
                 found, token = await provider.search(query["q"], query["location"], page_token=token)
                 postings.extend(found)
@@ -274,18 +317,26 @@ async def _find(ctx: RunContext, state: RunState, args: dict, _left: float) -> T
             repeats += 1
             continue
         kept.append(posting)
-    leads = [(posting, phases.lead_record(posting)) for posting in kept]
+    # In the run, unread, before anything is read: a read cut short loses its
+    # check, not the job, and nothing else can count the same job as new.
+    new: list[tuple[str, dict]] = []
+    leads: list[tuple[str, Any, dict]] = []
+    for posting in kept:
+        lead = phases.lead_record(posting)
+        short_id = f"J{len(session.jobs) + 1}"
+        session.keys[lead["dedupe_key"]] = short_id
+        session.jobs[short_id] = job_row(lead, None, posting.via)
+        leads.append((short_id, posting, lead))
     if leads:
         await ctx.progress.note(f"Checking {min(len(leads), VERIFY)} postings at the employer…")
-    updates = await _read_some([lead for _, lead in leads[:VERIFY]])
-    new: list[tuple[str, dict]] = []
+    # Inside the tool's own deadline (the runner's, or the run's time left).
+    seconds = min(VERIFY_SECONDS, min(TOOL_SECONDS, left) - (time.monotonic() - started) - VERIFY_MARGIN)
+    updates = await _read_some([lead for _, _, lead in leads[:VERIFY]], seconds)
     provenance: set[str] = set()
-    for n, (posting, lead) in enumerate(leads):
+    for n, (short_id, posting, lead) in enumerate(leads):
         row = job_row(lead, updates[n] if n < len(updates) else None, posting.via)
         provenance.update(u for u in (row["apply_url"], lead.get("source_url"),
                                       *((l or {}).get("url") for l in lead.get("apply_links") or [])) if u)
-        short_id = f"J{len(session.jobs) + 1}"
-        session.keys[lead["dedupe_key"]] = short_id
         session.jobs[short_id] = row
         new.append((short_id, row))
     payload: dict[str, Any] = {

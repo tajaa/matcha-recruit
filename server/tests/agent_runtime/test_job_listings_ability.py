@@ -180,3 +180,93 @@ async def test_a_posting_read_on_a_board_is_looked_up_on_the_employers_own_board
     found["Otter"] = ats.AtsPosting(ref=ats.AtsRef("greenhouse", "otter", "9"), url="https://job-boards.greenhouse.io/otter/jobs/9",
                                     title="Staff Accountant", company="Otter")
     assert (await J._verify(lead))["source"] == "web"
+
+
+@pytest.mark.parametrize("url, company, theirs", [
+    ("https://careers.bostonscientific.com/job/1", "Boston Scientific", True),
+    ("https://bostonscientific.wd5.myworkdayjobs.com/x", "Boston Scientific Corporation", True),
+    ("https://jobs.disneycareers.com/job/glendale/1", "The Walt Disney Company", True),
+    ("https://www.metacareers.com/jobs/1", "Meta", True),
+    ("https://jobs.netflix.com/jobs/1", "Netflix", True),
+    ("https://otter.ai/careers", "Otter.ai", True),
+    ("https://www.bmw.com/careers", "BMW", True),
+    ("https://amazon.jobs/en/jobs/1", "Amazon", True),
+    ("https://careers.tesco.co.uk/1", "Tesco PLC", True),
+    # A word of the name inside a board's host is not the employer's site.
+    ("https://www.builtinboston.com/job/1", "Boston Scientific", False),
+    ("https://builtin.com/job/1", "Plug Technologies", False),
+    ("https://www.jobilize.com/job/1", "Disney", False),
+    ("https://boston.craigslist.org/jobs/1", "Boston Scientific", False),
+    ("", "Boston Scientific", False),
+    ("https://careers.example.com/1", "Confidential", False),
+])
+def test_a_host_is_the_employers_when_a_label_is_its_name(url, company, theirs):
+    assert J.employer_host(url, company) is theirs
+
+
+@pytest.mark.asyncio
+async def test_a_slow_read_costs_its_check_not_the_list(monkeypatch):
+    import asyncio
+
+    stopped = []
+
+    async def verify(lead):
+        try:
+            await asyncio.sleep(30)
+        except asyncio.CancelledError:
+            stopped.append(lead["company"])
+            raise
+
+    monkeypatch.setattr(J, "_verify", verify)
+    monkeypatch.setattr(J, "VERIFY_MARGIN", 0.0)
+    monkeypatch.setattr(J, "_provider", lambda: Provider(([
+        posting("Product Designer", "Acme", "Los Angeles, CA"),
+        posting("Product Designer", "Brightline", "Los Angeles, CA"),
+    ], None)))
+    st = state()
+    # 0.2 s left in the run: the reads get that, then are stopped.
+    out = await J.FIND_JOBS.handler(context(), st, {"title": "product designer", "location": "Los Angeles, CA"}, 0.2)
+    assert out.payload["new_jobs"] == 2 and out.payload["live_at_employer"] == 0
+    assert all("listed on Google Jobs only" in line for line in out.payload["jobs"])
+    await asyncio.sleep(0)  # the reads called off get their cancellation
+    assert sorted(stopped) == ["Acme", "Brightline"]
+
+
+@pytest.mark.asyncio
+async def test_a_job_is_in_the_run_before_it_is_read(monkeypatch):
+    # Called off mid-read (the runner's timeout), the jobs listed are kept, and
+    # a second search can't count them as new.
+    import asyncio
+
+    reading = asyncio.Event()
+
+    async def verify(lead):
+        reading.set()
+        await asyncio.sleep(30)
+
+    monkeypatch.setattr(J, "_verify", verify)
+    monkeypatch.setattr(J, "_provider", lambda: Provider(
+        ([posting("Product Designer", "Acme", "Los Angeles, CA")], None),
+        ([posting("Product Designer", "Acme", "Los Angeles, CA")], None),
+    ))
+    st = state()
+    first = asyncio.ensure_future(J.FIND_JOBS.handler(context(), st, {"title": "product designer",
+                                                                      "location": "Los Angeles, CA"}, 120))
+    await reading.wait()
+    first.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await first
+    assert list(st.sessions[J.KEY].jobs) == ["J1"] and not st.sessions[J.KEY].jobs["J1"]["verified"]
+    again = await J.FIND_JOBS.handler(context(), st, {"title": "product designer", "location": "Los Angeles, CA",
+                                                      "pages": 1}, 0.0)
+    assert again.payload["new_jobs"] == 0 and again.payload["already_found"] == 1
+
+
+@pytest.mark.asyncio
+async def test_listing_pages_stop_at_the_runs_budget(monkeypatch, wired):
+    provider = Provider(([posting("Product Designer", "Acme", "Los Angeles, CA")], "next"),
+                        ([posting("Product Designer", "Brightline", "Los Angeles, CA")], "next"))
+    st = state()
+    st.sessions[J.KEY].paid = J.MAX_PAID - 1
+    await find(st, provider, monkeypatch, title="product designer", location="Los Angeles, CA", pages=2)
+    assert len(provider.asked) == 1 and st.sessions[J.KEY].paid == J.MAX_PAID

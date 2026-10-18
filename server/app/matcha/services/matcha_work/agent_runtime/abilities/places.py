@@ -18,8 +18,10 @@ address), under a short id (P1, P2…). The model sees compact rows to choose
 from; the `places` block is rebuilt from what the run found, by id, so a
 name, phone or address in the list is always Google's, never the model's
 restatement. A run that found a list and left the block out gets it anyway
-(`auto_blocks`). Each place's website and Maps link are run provenance, so a
-place can be saved as a sales prospect with its source.
+(`auto_blocks`), when the run built a list: more than one page across its
+searches. A one-page lookup ("the phone number for Woodcat Coffee") answered
+without the block is left that way. Each place's website and Maps link are
+run provenance, so a place can be saved as a sales prospect with its source.
 """
 from __future__ import annotations
 
@@ -48,7 +50,8 @@ MAX_BLOCK = MAX_PAID * 20
 # Rows from one call that always reach the model, whatever the output budget.
 MIN_ROWS = 10
 TOOL_SECONDS = 60.0
-# A run that found this many and left the list out still shows it.
+# A run that built a list (more than one page) of at least this many and
+# left it out still shows it.
 AUTO_BLOCK_AT = 3
 
 
@@ -255,6 +258,8 @@ FIND_PLACES = AgentTool(
     handler=_find,
     max_calls=MAX_CALLS,
     timeout_seconds=TOOL_SECONDS,
+    # Pages are paid for and places deduped before or without an await.
+    concurrent=True,
     describe=lambda args: f"Searched Google Maps: {' '.join(str(args.get('query') or '').split())[:100]}",
     exhausted_label="Place search budget exhausted",
     exhausted_message="Place search budget used up; finish with what you have.",
@@ -341,9 +346,10 @@ def gate_block(block_type: str, raw: Any, state: RunState) -> tuple[dict | None,
 
 
 def auto_blocks(state: RunState) -> list[dict]:
-    """The list a run found, when its answer left it out."""
+    """The list a run built, when its answer left it out. A run that looked a
+    place or two up (one page) meant to leave it out."""
     session = state.sessions.get(KEY)
-    if session is None or len(session.places) < AUTO_BLOCK_AT:
+    if session is None or session.paid < 2 or len(session.places) < AUTO_BLOCK_AT:
         return []
     block, _ = _block(session, None, "")
     return [block] if block else []

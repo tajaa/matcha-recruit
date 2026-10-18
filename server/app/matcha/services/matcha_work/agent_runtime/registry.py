@@ -85,6 +85,10 @@ class AgentTool:
     # max_hosted_per_response` and `max_hosted_per_run`, and the run's
     # `hosted_calls`. The runner enforces both before the handler runs.
     counts_as_search: bool = False
+    # Calls to this tool may run at the same time as each other in a turn that
+    # only reads: its handler takes its budget and dedupes before its first
+    # await. Otherwise a turn's calls to one ability run one after another.
+    concurrent: bool = False
     timeout_seconds: float | None = None
     min_seconds_left: float = 0.0
     describe: Callable[[dict], str] | None = None  # step label from the arguments

@@ -68,9 +68,9 @@ async def test_find_places_keeps_each_place_once_with_its_links_as_provenance(mo
     first = await find(st, provider, monkeypatch, query="coffee shops in Silver Lake, Los Angeles", pages=3)
     assert provider.asked == [("places", "coffee shops in Silver Lake, Los Angeles", 3)]
     assert first.payload["new_places"] == 2 and first.payload["places"][0].startswith("P1 | Cafe 1 | Coffee shop | 4.5★")
-    assert "(213) 555-0001" in first.payload["places"][0] and first.payload["places"][0].endswith("https://cafe1.test/")
-    assert first.payload["places"][1].endswith("no website")
-    assert "https://cafe1.test/" in first.provenance and any("query_place_id=p2" in u for u in first.provenance)
+    assert first.payload["places"][0].split(" | ")[-2:] == ["(213) 555-0001", "https://cafe1.test/"]
+    assert first.payload["places"][1].split(" | ")[-1] == "no website"
+    assert first.provenance >= {"https://cafe1.test/"} and any("query_place_id=p2" in u for u in first.provenance)
     second = await find(st, provider, monkeypatch, query="coffee shops in Echo Park, Los Angeles")
     assert second.payload["new_places"] == 1 and second.payload["already_found"] == 1
     assert second.payload["places"][0].startswith("P3 | Cafe 3")
@@ -130,14 +130,27 @@ async def test_a_list_can_leave_a_few_out_instead_of_naming_every_place_kept(mon
 @pytest.mark.asyncio
 async def test_a_list_left_out_of_the_answer_is_added(monkeypatch):
     st = state()
-    await find(st, Provider([item(1), item(2), item(3)]), monkeypatch, query="cafes in LA")
+    await find(st, Provider([item(1), item(2), item(3)]), monkeypatch, query="cafes in LA", pages=3)
     ability = places.build()
     out, _ = result.normalize({"headline": "Found 3 cafes", "summary": "Three cafes."}, st, [ability])
     assert [b["type"] for b in out["blocks"]] == ["places"] and len(out["blocks"][0]["places"]) == 3
+    two = state()
+    await find(two, Provider([item(1), item(2)], [item(3)]), monkeypatch, query="cafes in Silver Lake")
+    await find(two, Provider([item(3)]), monkeypatch, query="cafes in Echo Park")
+    out, _ = result.normalize({"headline": "Cafes", "summary": "Three cafes."}, two, [ability])
+    assert len(out["blocks"][0]["places"]) == 3, "two searches build a list too"
+
+
+@pytest.mark.asyncio
+async def test_a_place_looked_up_is_not_turned_into_a_list(monkeypatch):
+    # "What's Cafe 1's number?" finds the cafe and its neighbours on one page;
+    # an answer that leaves them out meant to.
     lookup = state()
-    await find(lookup, Provider([item(1)]), monkeypatch, query="Cafe 1 Los Angeles")
-    out, _ = result.normalize({"headline": "Cafe 1", "summary": "It's on Sunset."}, lookup, [ability])
-    assert out["blocks"] == [], "one place looked up is not a list"
+    await find(lookup, Provider([item(n) for n in range(1, 6)]), monkeypatch, query="Cafe 1 Los Angeles")
+    out, _ = result.normalize({"headline": "Cafe 1", "summary": "(213) 555-0001."}, lookup, [places.build()])
+    assert out["blocks"] == []
+    picked, _ = places.gate_block("places", {"place_ids": ["P1"]}, lookup)
+    assert [p["id"] for p in picked["places"]] == ["P1"], "it can still show the one it means"
 
 
 @pytest.mark.asyncio
@@ -170,3 +183,20 @@ async def test_sales_refuses_places_this_run_did_not_find(monkeypatch):
     out = await tool.handler(context(), st, {"campaign_id": "00000000-0000-0000-0000-000000000001",
                                              "place_ids": ["P1"]}, 60)
     assert "find_places" in out.payload["error"]
+
+
+@pytest.mark.asyncio
+async def test_sales_saves_at_most_fifty_places_a_call(monkeypatch):
+    st = state()
+    campaign = "00000000-0000-0000-0000-000000000001"
+    st.sessions[sales.KEY] = sales.SalesSession(campaigns={campaign})
+    await find(st, Provider([item(n) for n in range(1, 61)]), monkeypatch, query="cafes in LA", pages=3)
+    imported = AsyncMock(return_value={"added": 50, "duplicates": 0, "suppressed": 0})
+    monkeypatch.setattr(sales.store, "import_prospects", imported)
+    tool = next(t for t in sales.build().tools if t.name == "add_places_to_campaign")
+    out = await tool.handler(context(), st, {"campaign_id": campaign, "place_ids": []}, 60)
+    assert "60 places" in out.payload["error"] and "50" in out.payload["error"] and not imported.await_count
+    out = await tool.handler(context(), st, {"campaign_id": campaign, "place_ids": [],
+                                             "leave_out_ids": [f"P{n}" for n in range(51, 61)]}, 60)
+    assert out.payload["added"] == 50 and len(imported.await_args.args[2].prospects) == 50
+    assert tool.parameters["properties"]["place_ids"]["maxItems"] == sales.MAX_PROSPECTS_PER_CALL == 50

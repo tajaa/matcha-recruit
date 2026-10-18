@@ -102,9 +102,18 @@ async def _pace(*, sleep: SleepFn, clock: Clock) -> None:
     global _next_at
     now = clock()
     at = max(now, _next_at)
-    _next_at = at + _pace_seconds()
+    gap = _pace_seconds()
+    _next_at = at + gap
     if at > now:
-        await sleep(at - now)
+        try:
+            await sleep(at - now)
+        except asyncio.CancelledError:
+            # Called off while waiting (the tool's timeout): give the slot back
+            # when nobody has queued behind it, so the next search isn't held
+            # for a request that never went out.
+            if _next_at == at + gap:
+                _next_at = at
+            raise
 
 
 def _key() -> str | None:
@@ -270,6 +279,8 @@ async def search(query: str, *, freshness: Any = None, count: int = COUNT,
     headers = {"X-Subscription-Token": key, "Accept": "application/json"}
     answered: list[httpx.Response] = []
     await _pace(sleep=sleep, clock=clock)
+    if clock() < _out_until:  # went out while this one waited its turn
+        raise Unavailable(f"Brave search is out ({_out_reason})", out=True)
 
     async def send(client: httpx.AsyncClient) -> httpx.Response:
         response = await client.get(URL, params=params, headers=headers)

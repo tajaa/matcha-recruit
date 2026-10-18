@@ -22,7 +22,9 @@ from . import places as places_ability
 
 KEY = "sales"
 # Places saved from find_places in one call: the places block's own cap.
-MAX_PLACE_IMPORT = places_ability.MAX_BLOCK
+# Prospects one call may save, however they were found.
+MAX_PROSPECTS_PER_CALL = 50
+MAX_PLACE_IMPORT = MAX_PROSPECTS_PER_CALL
 
 
 @dataclass
@@ -175,8 +177,8 @@ def build():
                 campaign_id = UUID(args["campaign_id"])
                 if operation == "add":
                     data = ProspectImport(prospects=args["prospects"])
-                    if len(data.prospects) > 50:
-                        raise ValueError("Save at most 50 prospects per call.")
+                    if len(data.prospects) > MAX_PROSPECTS_PER_CALL:
+                        raise ValueError(f"Save at most {MAX_PROSPECTS_PER_CALL} prospects per call.")
                     for p in data.prospects:
                         if p.sources and not set(p.sources) <= state.provenance:
                             raise ValueError(
@@ -219,7 +221,10 @@ def build():
                     if not rows:
                         raise ValueError("Use ids find_places returned in this run.")
                     if len(rows) > MAX_PLACE_IMPORT:
-                        raise ValueError(f"Save at most {MAX_PLACE_IMPORT} places per call.")
+                        raise ValueError(
+                            f"That is {len(rows)} places; save at most {MAX_PLACE_IMPORT} per call. "
+                            f"List place_ids {MAX_PLACE_IMPORT} at a time."
+                        )
                     payload = await store.import_prospects(
                         campaign_id, ctx.user_id, ProspectImport(prospects=[place_prospect(r) for r in rows])
                     )
@@ -261,7 +266,7 @@ def build():
         )
 
     prospect_schema = ProspectImport.model_json_schema()
-    prospect_schema["properties"]["prospects"]["maxItems"] = 50
+    prospect_schema["properties"]["prospects"]["maxItems"] = MAX_PROSPECTS_PER_CALL
     patch_schema = ProspectPatch.model_json_schema()
     return Ability(
         key=KEY,
@@ -325,9 +330,9 @@ def build():
             tool(
                 "add_places_to_campaign",
                 "draft",
-                "Save places find_places found in this run as prospects, by id (empty: every place found; "
-                "leave_out_ids drops some): name, website, phone, address and the Google Maps source, "
-                "without retyping them.",
+                f"Save places find_places found in this run as prospects, by id (empty: every place found; "
+                f"leave_out_ids drops some), at most {MAX_PLACE_IMPORT} a call: name, website, phone, address "
+                f"and the Google Maps source, without retyping them.",
                 schema(
                     cid | {"place_ids": {"type": "array", "items": string,
                                          "maxItems": MAX_PLACE_IMPORT},

@@ -131,17 +131,24 @@ column as `<playbook>.<phase>`).
   `FINISH_AFTER_ACTION`): it was written before the write's outcome existed,
   and a failed draft ("that date does not exist") would otherwise be reported
   as done. The model reads the outcome and finishes on the next turn.
-- **A turn that only reads runs its tools at once.** When a response has no
-  `commit`/`draft` call and no ask, its read calls run concurrently
-  (`asyncio.gather`): four page loads cost the slowest, not the sum. Each
-  call's budget, the per-response and per-run search caps and the output
-  order are still settled in call order (`run_tool` counts a call before its
-  first await), so the outcome is what one-at-a-time gave. Audit steps are
-  written as each call ends. A turn that writes or asks stays sequential: a
-  commit's `resolve` may read what an earlier read in that turn added. Brave
-  spaces one process's requests to its per-second rate (`brave_search._pace`,
-  `BRAVE_SEARCH_QPS`, default 1 for the free plan), so a turn of searches
-  doesn't 429.
+- **A turn that only reads runs different abilities at once.** When a
+  response has no `commit`/`draft` call and no ask, its reads run in lanes:
+  one lane per ability, whose calls run one after another, and one lane per
+  call for a tool marked `concurrent` (`fetch_page`, `web_search`,
+  `find_places`: each takes its budget and dedupes before its first await).
+  Four page loads cost the slowest, not the sum, and a tool that isn't
+  `concurrent` (`find_jobs`, mail, calendar) never has its budget or dedupe
+  raced by a second call to it. Outputs go back in call order. A turn that
+  writes or asks stays sequential: a commit's `resolve` may read what an
+  earlier read in that turn added. Step numbers are taken before the step's
+  first await, so tools that end together never share one. Brave spaces one
+  process's requests to its per-second rate (`brave_search._pace`,
+  `BRAVE_SEARCH_QPS`, default 1 for the free plan), rechecks that it isn't
+  out once a search's turn comes, and gives back the slot of a search called
+  off while it waited.
+- **A finish is judged after every other call in its turn.** A result written
+  beside a search (`finish` and `find_places` in one response) is normalized
+  once the search has run, so its blocks see what the search found.
 - **The claim is written before the call.** `store.claim_step` (status
   `claimed`), then the handler, then `store.resolve_step`. A request that left
   and got no answer resolves to `unknown`, never `failed`, and the model is
@@ -665,7 +672,9 @@ each is offered only when the server has a provider key (`env_ready`).
   tasks' provider (`agent_tasks/research/providers.choose_provider("places")`:
   Google Places Text Search with `GOOGLE_MAPS_API_KEY`, else SearchAPI, else
   SerpApi). Up to 3 pages of 20 a query in one walk of the page tokens
-  (`search_pages`: n pages = n paid calls), 8 calls and 18 paid pages a run.
+  (`search_pages`: n pages = n paid calls), 8 calls and 18 paid pages a run;
+  the prompt states that budget, so the model picks areas instead of starting
+  searches that are refused.
   Places are kept once per run (Google's place id, else name + address)
   under short ids (P1…); the model gets one compact line each, fitted to the
   output budget, and every one stays in the session.
@@ -673,9 +682,15 @@ each is offered only when the server has a provider key (`env_ready`).
   for one title and place (queries built by `phases.plan_from_criteria`),
   kept only where wanted (`phases.keep_posting` → `places.fits`), deduped,
   then the top 10 read (`phases.enrich_one` with 4 fetches each, 4 at once,
-  40 s in all). Read = `verified` (still up at that link, pay from the
-  posting); otherwise "listed on Google Jobs only". `at_employer` only for an
-  ATS or a host with the employer's name: a posting first read on a board
+  at most 40 s and never past the tool's own deadline less 5 s; reads still
+  going then are stopped). Every posting kept is in the session, unread,
+  before any read starts, so a read cut short costs its check, not the list.
+  Read = `verified` (still up at that link, pay from the posting); otherwise
+  "listed on Google Jobs only". `at_employer` only for an ATS or the
+  employer's own host (`employer_host`: a host label is the name run
+  together, or the site's own domain is a distinctive word of it once
+  "careers"/"jobs" is taken off; builtinboston.com is not Boston Scientific):
+  a posting first read on a board
   (builtin.com, jobilize.com) is looked up on the employer's own board
   (`ats.find_on_board`, 6 fetches) and read there when it is the same job;
   otherwise it is said to be live on that board (live check, 2026-10-17: 9
@@ -685,14 +700,19 @@ each is offered only when the server has a provider key (`env_ready`).
 - **Blocks are rebuilt by id.** `places` (all a run can find, 360) and
   `job_postings` (≤30, read-at-employer first) come from the session, never
   the model's text; empty ids mean everything found, and `leave_out_ids` drops
-  a few places (a model that listed 190 kept ids took 38 s to finish). A run that found 3 or more and left the block out
-  gets it (`auto_blocks`). The web renders both (`AgentListBlocks.tsx`, with
-  CSV download) and the saved-search `jobs` block; the Mac skips them as
-  unknown blocks until it has renderers.
+  a few places (a model that listed 190 kept ids took 38 s to finish). A run
+  that left the block out gets it (`auto_blocks`) when it found 3 or more:
+  any `find_jobs` run, and a `find_places` run that built a list (more than
+  one page across its searches). A one-page lookup ("Woodcat's number")
+  answered without the list stays that way. Both apps render both, folded
+  after 8 rows, with a CSV of the same columns: the web in
+  `AgentListBlocks.tsx` (download), the Mac in `AgentAssistantCards.swift`
+  (`PlacesListView`, `JobPostingsListView`; Save CSV, `AgentListCSV`).
 - **Sales takes places by id.** `add_places_to_campaign` saves found places
   as prospects (name, website, phone/address/rating in notes, website + Maps
-  link as sources) in one call, so the model never retypes a list. No email:
-  Maps lists none, and the address grounding rule below is unchanged.
+  link as sources) by id, so the model never retypes a list: at most 50 a
+  call, the same limit as `add_prospects`. No email: Maps lists none, and the
+  address grounding rule below is unchanged.
 
 ## Sales campaigns
 

@@ -370,25 +370,30 @@ async def test_an_ask_tool_can_parse_its_own_question(monkeypatch):
         validate_tool(replace(read_tool(), parse_ask=parse))
 
 
-@pytest.mark.asyncio
-async def test_a_turn_that_only_reads_runs_its_tools_at_once(monkeypatch):
-    wire_store(monkeypatch)
-    running, most = 0, 0
+def overlap_meter():
+    """A handler that sleeps, and the most calls that were inside it at once."""
+    seen = {"running": 0, "most": 0}
 
     async def slow(ctx, state, args, left):
-        nonlocal running, most
-        running += 1
-        most = max(most, running)
+        seen["running"] += 1
+        seen["most"] = max(seen["most"], seen["running"])
         await asyncio.sleep(0.05)
-        running -= 1
+        seen["running"] -= 1
         return ToolOutput(payload={"value": args["q"]})
 
+    return slow, seen
+
+
+@pytest.mark.asyncio
+async def test_a_turn_that_only_reads_runs_a_concurrent_tool_at_once(monkeypatch):
+    wire_store(monkeypatch)
+    slow, seen = overlap_meter()
     client = FakeClient([
         response(*(call("lookup", {"q": q}) for q in ("a", "b", "c"))),
         response(call("finish", {"answer": "ok"})),
     ])
-    out = await run(client, [ability(read_tool("lookup", handler=slow))])
-    assert out.kind == "result" and most == 3
+    out = await run(client, [ability(read_tool("lookup", handler=slow, concurrent=True))])
+    assert out.kind == "result" and seen["most"] == 3
     # The outputs go back in the order the model asked for them.
     assert [o["output"] for o in client.calls[1]["input"]] == [
         '{"value":"a"}', '{"value":"b"}', '{"value":"c"}',
@@ -396,9 +401,83 @@ async def test_a_turn_that_only_reads_runs_its_tools_at_once(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_one_abilitys_calls_run_in_turn_while_different_abilities_run_at_once(monkeypatch):
+    # A tool that isn't `concurrent` can't have its budget or dedupe raced by
+    # a second call to it; another ability's reads still go alongside.
+    wire_store(monkeypatch)
+    jobs, jobs_seen = overlap_meter()
+    maps, maps_seen = overlap_meter()
+    both = {"running": 0, "most": 0}
+
+    def counted(handler):
+        async def wrapped(ctx, state, args, left):
+            both["running"] += 1
+            both["most"] = max(both["most"], both["running"])
+            try:
+                return await handler(ctx, state, args, left)
+            finally:
+                both["running"] -= 1
+        return wrapped
+
+    client = FakeClient([
+        response(call("jobs", {"q": "a"}), call("maps", {"q": "b"}), call("jobs", {"q": "c"})),
+        response(call("finish", {"answer": "ok"})),
+    ])
+    await run(client, [ability(read_tool("jobs", handler=counted(jobs)), key="job_listings"),
+                       ability(read_tool("maps", handler=counted(maps)), key="places")])
+    assert jobs_seen["most"] == 1 and both["most"] == 2
+    assert [o["output"] for o in client.calls[1]["input"]] == [
+        '{"value":"a"}', '{"value":"b"}', '{"value":"c"}',
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_finish_beside_a_read_is_judged_after_the_read(monkeypatch):
+    # Asked first in the turn, the answer must still see what the search found.
+    wire_store(monkeypatch)
+    seen = {}
+
+    async def find(ctx, state, args, left):
+        await asyncio.sleep(0.01)
+        state.provenance.add("https://found.example")
+        return ToolOutput(payload={"found": 1})
+
+    def normalize(args, state):
+        seen["provenance"] = set(state.provenance)
+        return {"answer": args.get("answer")}, []
+
+    client = FakeClient([response(call("finish", {"answer": "ok"}), call("lookup", {"q": "a"}))])
+    out = await runner.run_agent(
+        context(), client=client, abilities=[ability(read_tool("lookup", handler=find))],
+        contract=runner.ResultContract(finish=contract().finish, normalize=normalize),
+        instructions="sys", first_input=[],
+    )
+    assert out.kind == "result" and seen["provenance"] == {"https://found.example"}
+    assert len(client.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_tools_that_finish_together_get_their_own_step_numbers(monkeypatch):
+    record, _, _ = wire_store(monkeypatch)
+
+    async def slow_record(*args):
+        await asyncio.sleep(0)  # a real insert yields, and the other tool's step gets in
+
+    record.side_effect = slow_record
+    ctx = context()
+    client = FakeClient([
+        response(*(call("lookup", {"q": q}) for q in ("a", "b", "c"))),
+        response(call("finish", {"answer": "ok"})),
+    ])
+    await run(client, [ability(read_tool("lookup", concurrent=True))], ctx=ctx)
+    shown = sorted(seq for seq, *_ in ctx.progress.steps)
+    assert shown == sorted(c.args[1] for c in record.await_args_list) == [1, 2, 3, 4]
+
+
+@pytest.mark.asyncio
 async def test_concurrent_reads_still_keep_a_tools_budget_in_call_order(monkeypatch):
     wire_store(monkeypatch)
-    tool = read_tool("lookup", max_calls=2, exhausted_message="No more lookups.")
+    tool = read_tool("lookup", max_calls=2, exhausted_message="No more lookups.", concurrent=True)
     client = FakeClient([
         response(*(call("lookup", {"q": q}) for q in ("a", "b", "c"))),
         response(call("finish", {"answer": "ok"})),
