@@ -88,40 +88,45 @@ def _off_site(url: str) -> ViewRefused:
     return ViewRefused(f"it redirected to {away[:80]}, off its own site, which is not allowed")
 
 
-async def _view_in_browser(url: str) -> tuple[dict, bytes | None]:
+async def _view_in_browser(url: str, recap=None) -> tuple[dict, bytes | None]:
+    """`recap`: the `recaps.capture.Window` this view fills, stored later by
+    `view_and_store` outside VIEW_SECONDS."""
     from app.matcha.services.matcha_work.browser.session import BrowsePolicy, host_allowed, open_page
 
     _, host = _checked(url)
     allowed = frozenset({_site(host)})
     async with open_page(BrowsePolicy(allowed_hosts=allowed)) as session:
         page = session.page
-        try:
-            response = await page.goto(url, wait_until="domcontentloaded", timeout=_GOTO_MS)
-        except Exception:
+        from ...recaps.capture import window
+        async with window(page, recap) as capture:
+            try:
+                response = await page.goto(url, wait_until="domcontentloaded", timeout=_GOTO_MS)
+            except Exception:
+                if session.blocked_navigations:
+                    # The guard aborted the navigation, so goto only says "blocked by client".
+                    raise _off_site(session.blocked_navigations[0])
+                raise
+            # The navigation guard never sees an HTTP redirect (Playwright routes
+            # only a redirect's first request), so where the page ended up is
+            # checked here: after the load, and again once it has settled.
+            if not host_allowed(page.url, allowed):
+                raise _off_site(page.url)
+            if response is not None and response.status >= 400:
+                raise ViewRefused(f"HTTP {response.status}")
+            try:
+                await page.wait_for_load_state("networkidle", timeout=_SETTLE_MS)
+            except Exception:  # noqa: BLE001
+                pass  # a page that never goes quiet (polling, ads) still shows something
+            if not host_allowed(page.url, allowed):
+                raise _off_site(page.url)
+            title = await page.title()
+            text = await page.inner_text("body")
+            shot = await page.screenshot(type="png", full_page=False)
+            out = {"url": page.url, "title": (title or "")[:200], "text": _page_text(text)}
             if session.blocked_navigations:
-                # The guard aborted the navigation, so goto only says "blocked by client".
-                raise _off_site(session.blocked_navigations[0])
-            raise
-        # The navigation guard never sees an HTTP redirect (Playwright routes
-        # only a redirect's first request), so where the page ended up is
-        # checked here: after the load, and again once it has settled.
-        if not host_allowed(page.url, allowed):
-            raise _off_site(page.url)
-        if response is not None and response.status >= 400:
-            raise ViewRefused(f"HTTP {response.status}")
-        try:
-            await page.wait_for_load_state("networkidle", timeout=_SETTLE_MS)
-        except Exception:  # noqa: BLE001
-            pass  # a page that never goes quiet (polling, ads) still shows something
-        if not host_allowed(page.url, allowed):
-            raise _off_site(page.url)
-        title = await page.title()
-        text = await page.inner_text("body")
-        shot = await page.screenshot(type="png", full_page=False)
-        out = {"url": page.url, "title": (title or "")[:200], "text": _page_text(text)}
-        if session.blocked_navigations:
-            out["note"] = "The page tried to leave its own site; that was blocked."
-        return out, shot
+                out["note"] = "The page tried to leave its own site; that was blocked."
+            capture.accept(shot)
+            return out, shot
 
 
 async def _store_screenshot(png: bytes, prefix: str) -> str | None:
@@ -139,8 +144,11 @@ async def view_and_store(url: str, prefix: str) -> dict:
     where Chromium does. Always a JSON-safe dict, since it is also the
     browser task's result: the page with `screenshot_url` (or None), or
     `{"url", "error"}`."""
+    from ...recaps.capture import Window
+
+    recap = Window()
     try:
-        out, png = await asyncio.wait_for(_view_in_browser(url), timeout=VIEW_SECONDS)
+        out, png = await asyncio.wait_for(_view_in_browser(url, recap), timeout=VIEW_SECONDS)
     except ViewRefused as exc:
         return {"url": url, "error": str(exc)}
     except TimeoutError:
@@ -149,8 +157,15 @@ async def view_and_store(url: str, prefix: str) -> dict:
         # The site refused, timed out or is not public: a definite no, said plainly.
         logger.info("view_page could not open url=%s", url[:200], exc_info=True)
         return {"url": url, "error": type(exc).__name__}
-    out["screenshot_url"] = (await _store_screenshot(png, prefix)) if png else None
+    # The recap keeps its window beside the screenshot, after the view's
+    # budget: storing it never makes a page that loaded fine time out.
+    shot, _ = await asyncio.gather(_store_screenshot(png, prefix) if png else _nothing(), recap.store())
+    out["screenshot_url"] = shot
     return out
+
+
+async def _nothing() -> None:
+    return None
 
 
 def browser_here() -> bool:
@@ -160,11 +175,18 @@ def browser_here() -> bool:
     return consumes_queue(os.getenv(BROWSER_QUEUE_ENV))
 
 
+def _recap_worker_scope() -> dict:
+    from ...recaps import scope, settings
+    run_id = scope.current_run.get()
+    return {"recap_run_id": str(run_id)} if settings.enabled() and run_id else {}
+
+
 async def _view_on_browser_worker(url: str, prefix: str) -> dict:
     from app.workers.tasks.assistant import view_page as view_task
 
     pending = view_task.apply_async(
         args=[url, prefix], queue=os.getenv(BROWSER_QUEUE_ENV),
+        **({"kwargs": _recap_worker_scope()} if _recap_worker_scope() else {}),
         # Still queued by then, it is dropped rather than run for nobody.
         expires=QUEUE_SECONDS,
     )

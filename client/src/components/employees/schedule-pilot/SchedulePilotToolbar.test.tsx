@@ -47,4 +47,11 @@ describe('SchedulePilotToolbar', () => {
     expect(props.onHelp).toHaveBeenCalled()
     expect(screen.queryByText(/selected for Huume/)).not.toBeInTheDocument()
   })
+
+  it('opens the notifications pane from its tab', () => {
+    const props = renderToolbar({ centerView: 'notifications' })
+    fireEvent.click(screen.getByRole('tab', { name: 'Notifications' }))
+    expect(props.onSetCenterView).toHaveBeenCalledWith('notifications')
+    expect(screen.getByRole('tab', { name: 'Notifications' })).toHaveAttribute('aria-selected', 'true')
+  })
 })

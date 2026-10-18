@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { PanelLeftClose, Home, Search, ClipboardList, BookOpenCheck, Package, Archive, NotebookPen, CheckSquare, Star, MessagesSquare, Sparkles, HardDrive, Briefcase, FileSignature } from 'lucide-react'
+import { PanelLeftClose, Home, Search, ClipboardList, BookOpenCheck, Package, Archive, NotebookPen, CheckSquare, Star, MessagesSquare, Sparkles, HardDrive, Briefcase, FileSignature, Film } from 'lucide-react'
 import { logoutSession } from '../../../api/client'
 import type { ChannelSummary } from '../../api/channels'
 import { createProjectNew, createThread, archiveThread, notifyThreadsChanged } from '../../api/matchaWork'
@@ -18,6 +18,7 @@ import { useSidebarData } from './WorkSidebar/useSidebarData'
 import { useSectionState } from './WorkSidebar/useSectionState'
 import { useSidebarRename } from './WorkSidebar/useSidebarRename'
 import { useEntitlements } from '../../hooks/useEntitlements'
+import { useRecapPreferences } from '../../hooks/useRecapPreferences'
 import { useTasksSummary } from '../../hooks/useTasksSummary'
 import { showPaywall } from '../../utils/paywall'
 import { getStarredFileMeta, useStars } from '../../hooks/useStars'
@@ -48,6 +49,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
   const showProjects = can('projects_solo')
   // Espresso Tasks, as on the Mac: personal accounts with Tasks or Job search
   // (job searches are tasks too), with how many run and a dot when one needs them.
+  const showRecaps = !!useRecapPreferences()?.available
   const showTasks = isPersonal && (tasksEnabled || jobSearchEnabled)
   const tasksBadge = useTasksSummary(showTasks)
   const canCreate = surface !== 'matcha-work' && canCreateChannel(me?.user?.role)
@@ -222,6 +224,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
         isActive={isActive}
         showProjects={showProjects}
         showTasks={showTasks}
+        showRecaps={showRecaps}
         tasksBadge={tasksBadge}
         totalChannelUnread={totalChannelUnread}
         pendingConnections={pendingConnections}
@@ -279,6 +282,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
 
           {showAssistant && <SidebarNavButton icon={Sparkles} label="Ask Espresso" active={location.pathname.startsWith(`${base}/assistant`)} onClick={() => navigate(`${base}/assistant`)} />}
 
+          {showRecaps && <SidebarNavButton icon={Film} label="Recaps" active={location.pathname.startsWith(`${base}/recaps`)} onClick={() => navigate(`${base}/recaps`)} />}
           {showTasks && (
             <SidebarNavButton
               icon={ClipboardList}

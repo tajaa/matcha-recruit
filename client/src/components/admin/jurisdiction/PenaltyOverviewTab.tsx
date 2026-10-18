@@ -1,3 +1,6 @@
+/* eslint-disable react-hooks/set-state-in-effect -- Effects intentionally synchronize this tool with loaded data, URL selections, and preview inputs. */
+import { AdminCard, AdminTable } from '../AdminUI'
+import { AdminTab, AdminTabBar } from '../AdminTabs'
 import { useEffect, useState, useCallback } from 'react'
 import { api } from '../../../api/client'
 import { Badge } from '../../ui'
@@ -56,39 +59,37 @@ export default function PenaltyOverviewTab() {
     <div className="space-y-4">
       {/* Summary stats */}
       <div className="grid grid-cols-3 gap-3">
-        <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-3">
+        <AdminCard >
           <p className="text-[10px] text-zinc-500 uppercase tracking-wide">Coverage</p>
           <p className="text-xl font-semibold text-zinc-100">{overallPct}%</p>
           <p className="text-xs text-zinc-500">{totalWithPenalty.toLocaleString()} / {totalReqs.toLocaleString()} requirements</p>
-        </div>
-        <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-3">
+        </AdminCard>
+        <AdminCard >
           <p className="text-[10px] text-zinc-500 uppercase tracking-wide">Categories</p>
           <p className="text-xl font-semibold text-zinc-100">{data.details.length}</p>
           <p className="text-xs text-zinc-500">with penalty data</p>
-        </div>
-        <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-3">
+        </AdminCard>
+        <AdminCard >
           <p className="text-[10px] text-zinc-500 uppercase tracking-wide">Highest Penalty</p>
           <p className="text-xl font-semibold text-red-400">
             {data.top_penalties[0] ? fmtUsd(data.top_penalties[0].max_penalty) : '—'}
           </p>
           <p className="text-xs text-zinc-500">{data.top_penalties[0]?.category.replace(/_/g, ' ') ?? ''}</p>
-        </div>
+        </AdminCard>
       </div>
 
       {/* View toggle */}
-      <div className="flex gap-1.5">
+      <AdminTabBar>
         {(['details', 'coverage', 'top'] as const).map((v) => (
-          <button
+          <AdminTab
             key={v}
             onClick={() => setView(v)}
-            className={`px-3 py-1.5 text-xs rounded transition-colors ${
-              view === v ? 'bg-zinc-700 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'
-            }`}
+           active={view === v}
           >
             {v === 'details' ? 'By Category' : v === 'coverage' ? 'Coverage' : 'Highest Penalties'}
-          </button>
+          </AdminTab>
         ))}
-      </div>
+      </AdminTabBar>
 
       {/* Details view — penalty info per category */}
       {view === 'details' && (
@@ -165,32 +166,30 @@ export default function PenaltyOverviewTab() {
 
       {/* Coverage view */}
       {view === 'coverage' && (
-        <div className="overflow-hidden rounded-lg border border-zinc-800">
-          <table className="w-full text-xs">
-            <thead className="bg-zinc-900/50 text-zinc-400">
-              <tr>
-                <th className="px-3 py-2 text-left font-medium">Category</th>
-                <th className="px-3 py-2 text-right font-medium">Total</th>
-                <th className="px-3 py-2 text-right font-medium">With Penalty</th>
-                <th className="px-3 py-2 text-right font-medium">Coverage</th>
+        <AdminTable>
+          <thead >
+            <tr>
+              <th className="text-left">Category</th>
+              <th className="text-right">Total</th>
+              <th className="text-right">With Penalty</th>
+              <th className="text-right">Coverage</th>
+            </tr>
+          </thead>
+          <tbody >
+            {data.coverage.map((c) => (
+              <tr key={c.category} className="text-zinc-300">
+                <td >{catLabel(c.category)}</td>
+                <td className="text-right text-zinc-500">{c.total}</td>
+                <td className="text-right">{c.has_penalty}</td>
+                <td className="text-right">
+                  <Badge variant={c.pct === 100 ? 'success' : c.pct > 0 ? 'warning' : 'danger'}>
+                    {c.pct}%
+                  </Badge>
+                </td>
               </tr>
-            </thead>
-            <tbody className="divide-y divide-zinc-800/60">
-              {data.coverage.map((c) => (
-                <tr key={c.category} className="text-zinc-300">
-                  <td className="px-3 py-1.5">{catLabel(c.category)}</td>
-                  <td className="px-3 py-1.5 text-right text-zinc-500">{c.total}</td>
-                  <td className="px-3 py-1.5 text-right">{c.has_penalty}</td>
-                  <td className="px-3 py-1.5 text-right">
-                    <Badge variant={c.pct === 100 ? 'success' : c.pct > 0 ? 'warning' : 'danger'}>
-                      {c.pct}%
-                    </Badge>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+            ))}
+          </tbody>
+        </AdminTable>
       )}
 
       {/* Top penalties view */}

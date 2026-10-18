@@ -62,6 +62,8 @@ async def run_owner(task: dict) -> phase_run.RunOwner:
         storage_prefix=f"matcha-work/{task['company_id']}/agent-tasks/{task['id']}",
         surface="agent_task",
         account=partial(_count_run, task["id"]),
+        dispatch_token=task.get("dispatch_token"),
+        recap_round=task.get("current_round"),
     )
 
 

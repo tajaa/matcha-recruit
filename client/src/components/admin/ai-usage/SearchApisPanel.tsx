@@ -100,7 +100,7 @@ export function SearchApisPanel({
             key={q.provider}
             quota={q}
             usage={byProvider.get(q.provider)}
-            active={selectedProvider === q.provider}
+          active={selectedProvider === q.provider}
             onSelect={() => onSelectProvider(q.provider)}
           />
         ))}

@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/set-state-in-effect -- Effects intentionally synchronize this tool with loaded data, URL selections, and preview inputs. */
 import { useState, useCallback, useEffect } from 'react'
 import { api } from '../../../api/client'
 import type { IndustryProfile } from './types'

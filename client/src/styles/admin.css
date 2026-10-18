@@ -1,0 +1,219 @@
+/* Admin-only materials. Shared utilities still carry layout and semantic data
+   colors; these tokens own chrome, including menus portaled to document.body. */
+html[data-app-shell-bg="admin"] {
+  --admin-canvas: #030304;
+  --admin-surface: rgba(10, 11, 13, .3);
+  --admin-floating: rgba(9, 10, 12, .65);
+  --admin-rail: rgba(8, 9, 11, .6);
+  --admin-field: rgba(0, 0, 0, .25);
+  --admin-edge: rgba(255, 255, 255, .1);
+  --admin-highlight: rgba(255, 255, 255, .1);
+  --admin-hover: rgba(255, 255, 255, .035);
+  --admin-selected: rgba(255, 255, 255, .075);
+  --admin-shadow: 0 8px 24px rgba(0, 0, 0, .16);
+  --admin-inset: inset 0 1px 0 var(--admin-highlight), inset 0 -1px 0 rgba(255, 255, 255, .025);
+  --admin-reflection: linear-gradient(125deg, rgba(255, 255, 255, .055), transparent 35%, transparent 70%, rgba(255, 255, 255, .015));
+  --color-zinc-500: #a1a1a8;
+  color-scheme: dark;
+}
+
+html:root[data-app-shell-bg="admin"] {
+  background-color: var(--admin-canvas);
+}
+
+html[data-app-shell-bg="admin"] .admin-shell {
+  /* Neutral light behind the panes gives their transparency something to reveal. */
+  background:
+    radial-gradient(ellipse at 0% 0%, rgba(210, 216, 226, .075), transparent 42%),
+    radial-gradient(ellipse at 85% 55%, rgba(190, 196, 208, .035), transparent 42%),
+    radial-gradient(ellipse at 25% 100%, rgba(210, 216, 226, .025), transparent 40%),
+    var(--admin-canvas);
+  background-attachment: fixed;
+  color: var(--color-zinc-200);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-feature-settings: 'cv11', 'ss01';
+}
+
+/* The admin rail uses 208px expanded and 56px collapsed. */
+.admin-shell .admin-rail {
+  padding: 6px 0 6px 6px;
+}
+
+.admin-shell .admin-rail aside {
+  border: 1px solid var(--admin-edge);
+  border-radius: 14px;
+  background: var(--admin-reflection), var(--admin-rail);
+  box-shadow: var(--admin-inset), var(--admin-shadow);
+  -webkit-backdrop-filter: blur(32px);
+  backdrop-filter: blur(32px);
+}
+
+.admin-shell .admin-rail aside > div:first-child {
+  height: 48px;
+}
+
+.admin-shell .admin-rail nav a {
+  height: 30px;
+  margin: 1px 0;
+  border-radius: 8px;
+  font-weight: 400;
+}
+
+.admin-shell .admin-rail nav a:hover {
+  background: var(--admin-hover);
+}
+
+.admin-shell .admin-rail nav a[aria-current="page"] {
+  background: var(--admin-reflection), var(--admin-selected);
+  box-shadow: var(--admin-inset), 0 2px 6px rgba(0, 0, 0, .06);
+  font-weight: 500;
+}
+
+.admin-shell .admin-rail a[title="Matcha Admin"] span {
+  font-family: inherit !important;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+html[data-app-shell-bg="admin"] :is(.admin-toolbar, .admin-popover) {
+  border-color: var(--admin-edge);
+  background: var(--admin-reflection), var(--admin-floating);
+  box-shadow: var(--admin-inset), var(--admin-shadow);
+  -webkit-backdrop-filter: blur(32px);
+  backdrop-filter: blur(32px);
+}
+
+html[data-app-shell-bg="admin"] .admin-surface {
+  border-radius: 10px;
+  background: var(--admin-reflection), var(--admin-surface);
+  box-shadow: var(--admin-inset), 0 2px 12px rgba(0, 0, 0, .06);
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
+}
+
+/* One glass layer per pane; nested sections do not stack expensive filters. */
+html[data-app-shell-bg="admin"] .admin-surface .admin-surface {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+html[data-app-shell-bg="admin"] .admin-border {
+  border-color: var(--admin-edge);
+}
+
+html[data-app-shell-bg="admin"] .admin-directory .admin-surface {
+  border-radius: 10px;
+}
+
+html[data-app-shell-bg="admin"] .admin-directory a:hover .admin-surface {
+  background-color: var(--admin-hover);
+  border-color: rgba(255, 255, 255, .28);
+}
+
+html[data-app-shell-bg="admin"] :is(.admin-field, .admin-tabbar) {
+  border-color: var(--admin-edge);
+  background: var(--admin-field);
+  box-shadow: var(--admin-inset);
+}
+
+html[data-app-shell-bg="admin"] .admin-field {
+  border-radius: 7px;
+}
+
+html[data-app-shell-bg="admin"] select option {
+  color: var(--color-zinc-100);
+  background: var(--color-zinc-900);
+}
+
+html[data-app-shell-bg="admin"] .admin-field:focus {
+  border-color: var(--color-zinc-400);
+  --tw-ring-color: var(--admin-edge);
+}
+
+html[data-app-shell-bg="admin"] .admin-tab[aria-pressed="true"] {
+  background: var(--admin-reflection), var(--admin-selected);
+  box-shadow: var(--admin-inset), 0 1px 4px rgba(0, 0, 0, .1);
+}
+
+html[data-app-shell-bg="admin"] .admin-button {
+  border-radius: 7px;
+  padding-block: 4px;
+}
+
+html[data-app-shell-bg="admin"] .admin-button:is([data-admin-variant="primary"], [data-admin-variant="success"], [data-admin-variant="secondary"]) {
+  color: var(--color-zinc-100);
+  background: var(--admin-reflection), var(--admin-selected);
+  box-shadow: var(--admin-inset), 0 0 0 1px var(--admin-edge);
+}
+
+html[data-app-shell-bg="admin"] .admin-button:hover:not(:disabled) {
+  background: var(--admin-hover);
+}
+
+/* Keep color for warnings, errors, and charts. Interactive chrome uses silver
+   instead of the old green accent; descendants inherit the neutral ramp. */
+.admin-shell :is(button, a, input, select, textarea) {
+  --color-emerald-100: var(--color-zinc-100);
+  --color-emerald-200: var(--color-zinc-200);
+  --color-emerald-300: var(--color-zinc-200);
+  --color-emerald-400: var(--color-zinc-300);
+  --color-emerald-500: var(--color-zinc-400);
+  --color-emerald-600: var(--color-zinc-600);
+  --color-emerald-700: var(--color-zinc-700);
+  --color-emerald-800: var(--color-zinc-800);
+  --color-emerald-900: var(--color-zinc-900);
+  --color-emerald-950: var(--color-zinc-950);
+}
+
+html[data-app-shell-bg="admin"] .admin-badge {
+  display: inline-block;
+  border: 1px solid var(--admin-edge);
+  border-radius: 4px;
+  padding: 1px 5px;
+  background: var(--admin-surface);
+  color: var(--color-zinc-300);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+html[data-app-shell-bg="admin"] :is(.admin-table, .admin-list .overflow-hidden:has(> .overflow-x-auto > table)) {
+  border-color: var(--admin-edge);
+  border-radius: 10px;
+  background: var(--admin-reflection), var(--admin-surface);
+  box-shadow: var(--admin-inset);
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
+}
+
+html[data-app-shell-bg="admin"] :is(.admin-table, .admin-list) thead {
+  background: var(--admin-hover);
+}
+
+html[data-app-shell-bg="admin"] :is(.admin-table, .admin-list) tbody tr:hover {
+  background: var(--admin-hover);
+}
+
+/* Filters contain fixed descendants and create a stacking context. Open inline
+   dialogs and popovers must keep their existing viewport and stacking behavior. */
+html[data-app-shell-bg="admin"] :is(.admin-surface, .admin-table, .admin-list .overflow-hidden:has(> .overflow-x-auto > table)):has(.fixed, .absolute) {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  html[data-app-shell-bg="admin"] {
+    --admin-surface: #111214;
+    --admin-floating: #151618;
+    --admin-rail: #0c0d0f;
+  }
+  html[data-app-shell-bg="admin"] :is(.admin-rail aside, .admin-toolbar, .admin-popover, .admin-surface, .admin-table, .admin-list .overflow-hidden:has(> .overflow-x-auto > table)) {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-shell *, html[data-app-shell-bg="admin"] .admin-popover {
+    transition: none !important;
+  }
+}

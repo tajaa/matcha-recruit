@@ -249,7 +249,7 @@ async def test_view_and_store_always_answers_in_json(monkeypatch):
         monkeypatch.setattr(screenshots, "_view_in_browser", AsyncMock(side_effect=raised))
         assert await screenshots.view_and_store("https://a.example/", "p") == {"url": "https://a.example/", "error": said}
 
-    async def slow(_url):
+    async def slow(_url, _recap=None):
         await asyncio.sleep(5)
 
     # The whole view, launch included, is held to VIEW_SECONDS.
@@ -257,6 +257,25 @@ async def test_view_and_store_always_answers_in_json(monkeypatch):
     monkeypatch.setattr(screenshots, "_view_in_browser", slow)
     assert await screenshots.view_and_store("https://a.example/", "p") == {
         "url": "https://a.example/", "error": "it took too long to load"}
+
+
+@pytest.mark.asyncio
+async def test_recap_capture_is_stored_after_the_views_own_budget(monkeypatch):
+    # A page that loaded within VIEW_SECONDS never times out over recap storage.
+    monkeypatch.setattr(screenshots, "_store_screenshot", AsyncMock(return_value="https://cdn.example/s.webp"))
+    stored = []
+
+    async def view(_url, recap):
+        async def store():
+            await asyncio.sleep(0.05)
+            stored.append(True)
+        recap.store = store
+        return {"url": "https://a.example/", "title": "A", "text": "x"}, b"png"
+
+    monkeypatch.setattr(screenshots, "VIEW_SECONDS", 0.02)
+    monkeypatch.setattr(screenshots, "_view_in_browser", view)
+    out = await screenshots.view_and_store("https://a.example/", "p")
+    assert out["screenshot_url"] == "https://cdn.example/s.webp" and stored == [True]
 
 
 @pytest.mark.asyncio

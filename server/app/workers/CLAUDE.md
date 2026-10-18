@@ -44,3 +44,16 @@ to `failed`.
   next restart resumes it. Correctness never rests on the cadence — each break is deduped
   in `services/scheduling/break_reminders.py`. Copy this shape for any future sub-hourly
   task rather than adding celery-beat.
+
+## Espresso recaps
+
+`tasks/recaps.py` dispatches a DB-claimed 60-second recovery sweep and structured
+completion delivery on the default queue. Its `scheduler_settings` row is inserted
+enabled (handed-over completion email depends on it, as with
+`schedule_auto_generation`), and with `ESPRESSO_RECAPS_ENABLED` off the sweep runs only
+while handed-over email or due cleanup is outstanding. Render/cleanup consume only
+`espresso_recaps_render` on separate compute. The Linux media worker sets
+`ESPRESSO_RECAPS_WORKER=1`, loads restricted settings without AI/auth/provider
+secrets, and supervises a separate child with an OS deadline (solo Celery limits
+alone cannot stop threaded storage calls). Do not run it on the sized app host.
+Rollout, retention and recovery: `docs/ops/ESPRESSO_RECAPS.md`.

@@ -411,6 +411,14 @@ submitting it starts the task with no run (`POST /agent-tasks/prompts/{id}/answe
 and a typed reply answers it like `ask_user`. An ask tool may parse its own
 question (`AgentTool.parse_ask`); without one it is `ask_user`'s.
 
+**The latest message sets the work and answer scope.** Replayed requests, answers
+and action receipts are context, not unfinished tasks. The base prompt applies
+this to tool calls and all result fields: an email question after a calendar
+add must not re-check or mention the event, including unsolicited corrections.
+Explicit follow-ups and requested recaps still use the full relevant history;
+do not discard it or filter abilities by topic. The same server rule serves
+web and macOS Espresso, within the existing runner.
+
 What carries over from earlier runs, besides their words (`history.py`):
 
 - **A run record.** Each replayed `agent_result` (the 5 newest) ends with a
@@ -656,3 +664,16 @@ output budget and return `next_offset`; large text is explicitly marked partial.
   in batches of at most 50, before a durable worker sends each message
   separately. Opt-outs (`mw_sales_suppressions`) are honoured at import,
   approval and claim. Details and recovery: `docs/ESPRESSO_SALES.md`.
+
+## Optional task recap observation
+
+`../recaps/scope.py` binds owner-scoped roots before enqueue, carries trusted
+confirmation/question lineage and decorates this same runner with a ContextVar.
+Phase RunOwner carries the dispatch token and generation/round for late-worker
+fencing. Accepted chain snapshots share the source mutation transaction; terminal
+callbacks/network stay outside it. Public screenshot windows may collect bounded
+CDP frames, stored by `view_and_store` after VIEW_SECONDS, never inside it;
+authenticated API work uses allowlisted cards (any commit/draft/policy step is kept,
+titled or not; a failed read is not a warning). A tool adds recap display data to its
+step audit only while `recaps.scope.enrolled(run_id)`; the recap scrubs it once frozen.
+Never replay an action to obtain footage or repair a recap. Flags default off; see `docs/ops/ESPRESSO_RECAPS.md`.

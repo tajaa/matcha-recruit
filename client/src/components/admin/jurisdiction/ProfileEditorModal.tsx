@@ -1,5 +1,7 @@
+/* eslint-disable react-hooks/set-state-in-effect -- Effects intentionally synchronize this tool with loaded data, URL selections, and preview inputs. */
+import { AdminButton as Button, AdminInput as Input, AdminTextarea as Textarea } from '../AdminUI'
 import { useState, useEffect } from 'react'
-import { Button, Input, Modal, Textarea } from '../../ui'
+import { Modal } from '../../ui'
 import {
   CATEGORY_LABELS,
   CATEGORY_SHORT_LABELS,

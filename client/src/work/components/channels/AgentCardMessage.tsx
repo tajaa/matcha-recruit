@@ -1,3 +1,4 @@
+import RecapLink from '../recaps/RecapLink'
 import { useEffect, useState } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -763,7 +764,7 @@ export default function AgentCardMessage({
   if (metadata.kind === 'agent_card_result' && metadata.result) return <ResultCard result={metadata.result} />
   if (metadata.kind === 'agent_card_receipt' && metadata.receipt) return <ReceiptCard receipt={metadata.receipt} />
   if (metadata.kind === 'agent_progress') return <ProgressCard progress={metadata.progress} />
-  if (metadata.kind === 'agent_result' && metadata.result_v2) return <ResultV2Card result={metadata.result_v2} />
+  if (metadata.kind === 'agent_result' && metadata.result_v2) return <><ResultV2Card result={metadata.result_v2} />{metadata.recap_id && <RecapLink recapId={metadata.recap_id} />}</>
   if (metadata.kind === 'agent_receipt' && metadata.action_receipt) {
     return <ActionReceiptCard receipt={metadata.action_receipt} />
   }

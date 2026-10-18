@@ -119,6 +119,7 @@ async def enqueue_assistant_run(
     resume_prompt_id: UUID | None = None,
     skip_preflight: bool = False,
     model: str | None = None,
+    recap_parent_run_id: UUID | None = None,
 ) -> dict:
     """Insert a queued `assistant` run and dispatch it. Returns `{run_id, status}`.
 
@@ -169,6 +170,14 @@ async def enqueue_assistant_run(
                 )
             except asyncpg.UniqueViolationError:
                 raise HTTPException(status_code=409, detail=STILL_WORKING)
+            if run_id is not None and surface == "assistant":
+                from ..recaps.scope import register_run
+                if resume_prompt_id is not None:
+                    recap_parent_run_id = await conn.fetchval(
+                        "SELECT run_id FROM mw_agent_card_prompts WHERE id=$1 AND owner_user_id=$2",
+                        resume_prompt_id, user.id,
+                    )
+                await register_run(conn, run_id, user.id, company_id, parent_run_id=recap_parent_run_id)
     if swept:
         # Swept here, the reconciler never sees these rows move, so it is here
         # that the dead run's progress card is closed and the person told.

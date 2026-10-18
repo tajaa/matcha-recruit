@@ -1,3 +1,4 @@
+import RecapLink from '../../components/recaps/RecapLink'
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
@@ -53,6 +54,7 @@ export default function TaskDetail({
     // findings out; wider, the header stays put and only the findings scroll.
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto md:overflow-y-hidden">
       <header className="space-y-2 border-b border-w-line px-5 py-4">
+        <RecapLink sourceId={detail.id} />
         <div className="flex items-start gap-2">
           <button type="button" onClick={onBack} aria-label="All tasks" className="-ml-1 rounded-md p-1 text-w-dim hover:bg-w-surface2 hover:text-w-text md:hidden">
             <ArrowLeft size={16} />

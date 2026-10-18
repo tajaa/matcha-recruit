@@ -1,4 +1,4 @@
-import { CalendarDays, ChevronLeft, ChevronRight, Edit3, HelpCircle, LayoutGrid, ListChecks, Loader2, MessageSquareText, PanelLeft, Save, Send, Sparkles, X } from 'lucide-react'
+import { Bell, CalendarDays, ChevronLeft, ChevronRight, Edit3, HelpCircle, LayoutGrid, ListChecks, Loader2, MessageSquareText, PanelLeft, Save, Send, Sparkles, X } from 'lucide-react'
 import type { ScheduleSaveState } from '../../../hooks/employees/useScheduleEditor'
 import type { CompanyLocation } from '../../../hooks/useLocationScope'
 import LocationPicker from '../../shared/LocationPicker'
@@ -6,7 +6,7 @@ import type { ScheduleSummary } from '../../../types/employeeSchedule'
 import { weekRangeLabel } from './weekLabel'
 import { useMediaQuery } from '../../../hooks/useMediaQuery'
 
-export type CenterView = 'board' | 'review'
+export type CenterView = 'board' | 'review' | 'notifications'
 
 interface SchedulePilotToolbarProps {
   weekStart: string
@@ -116,6 +116,7 @@ export default function SchedulePilotToolbar({
             <ListChecks className="h-3.5 w-3.5" /> Review
             {reviewReady && <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" aria-label="Review has content" />}
           </button>
+          <button role="tab" aria-selected={centerView === 'notifications'} onClick={() => onSetCenterView('notifications')} className={`inline-flex items-center gap-1.5 border-l border-white/[0.04] px-3 py-1.5 text-xs ${centerView === 'notifications' ? 'bg-white/[0.08] text-zinc-100' : 'text-zinc-500 hover:text-zinc-200'}`}><Bell className="h-3.5 w-3.5" /> Notifications</button>
         </div>
         <div className="flex items-center gap-1.5 text-[11px] text-zinc-500" aria-label="This week">
           {!phone && <span className="rounded-md bg-white/[0.04] px-2 py-1">{total} {total === 1 ? 'shift' : 'shifts'}</span>}

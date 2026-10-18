@@ -1,6 +1,7 @@
+import { AdminButton as Button, AdminSelect, AdminInput } from '../../AdminUI'
 import { useCallback, useState } from 'react'
 import { api } from '../../../../api/client'
-import { Button } from '../../../ui'
+
 import { CoreChecklistPanel } from './ChecklistByCategory'
 import { CORE_INDUSTRIES, INDUSTRIES } from './constants'
 import { fmtScore, scoreColor, statusBadge } from './helpers'
@@ -45,45 +46,44 @@ export function ReadinessWidget() {
       <div className="flex flex-wrap items-end gap-2 mb-4">
         <label className="flex flex-col gap-1">
           <span className="text-[10px] uppercase tracking-wider text-zinc-500">Industry</span>
-          <select
+          <AdminSelect
             value={industry}
             onChange={(e) => setIndustry(e.target.value)}
-            className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-sm text-zinc-200"
           >
             {INDUSTRIES.map((i) => (
               <option key={i} value={i}>{i}</option>
             ))}
-          </select>
+          </AdminSelect>
         </label>
         <label className="flex flex-col gap-1">
           <span className="text-[10px] uppercase tracking-wider text-zinc-500">State</span>
-          <input
+          <AdminInput
             value={state}
             onChange={(e) => setState(e.target.value.toUpperCase())}
             maxLength={2}
-            className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-sm text-zinc-200 w-16"
+            className="w-16"
           />
         </label>
         <label className="flex flex-col gap-1">
           <span className="text-[10px] uppercase tracking-wider text-zinc-500">City (blank = state)</span>
-          <input
+          <AdminInput
             value={city}
             onChange={(e) => setCity(e.target.value)}
-            className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-sm text-zinc-200 w-44"
+            className="w-44"
           />
         </label>
         <label className="flex flex-col gap-1">
           <span className="text-[10px] uppercase tracking-wider text-zinc-500">Depth</span>
-          <select
+          <AdminSelect
             value={effectiveDepth}
             onChange={(e) => setDepth(e.target.value as 'core' | 'full')}
             disabled={!hasCore}
             title={hasCore ? undefined : `No core checklist curated for ${industry}`}
-            className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-sm text-zinc-200 disabled:opacity-50"
+            className="disabled:opacity-50"
           >
             <option value="core">Core (≤30 keys)</option>
             <option value="full">Full sweep</option>
-          </select>
+          </AdminSelect>
         </label>
         <Button size="sm" onClick={check} disabled={loading || !state.trim()}>
           {loading ? 'Checking…' : 'Check'}

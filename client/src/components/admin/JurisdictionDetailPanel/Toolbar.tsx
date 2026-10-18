@@ -1,4 +1,4 @@
-import { Button } from '../../ui'
+import { AdminButton as Button, AdminButton } from '../AdminUI'
 import type { JurisdictionDetail } from './types'
 
 type Props = {
@@ -48,30 +48,26 @@ export default function Toolbar({
         <Button variant="secondary" size="sm" disabled={anyRunning} onClick={startCheck}>
           {scanning ? 'Scanning...' : 'Run Check'}
         </Button>
-        <button onClick={startSpecialtyCheck} disabled={anyRunning}
-          className="px-2.5 py-1.5 text-[11px] font-medium border rounded transition-colors
-            text-purple-400 border-purple-500/40 hover:bg-purple-500/10 disabled:opacity-30"
-          title="Research healthcare + oncology specialty policies">
+        <AdminButton onClick={startSpecialtyCheck} disabled={anyRunning}
+          className="text-purple-400 disabled:opacity-30"
+          title="Research healthcare + oncology specialty policies" variant="ghost">
           {specialtyRunning ? 'Running...' : 'Specialty'}
-        </button>
-        <button onClick={startMedicalCheck} disabled={anyRunning}
-          className="px-2.5 py-1.5 text-[11px] font-medium border rounded transition-colors
-            text-teal-400 border-teal-500/40 hover:bg-teal-500/10 disabled:opacity-30"
-          title="Research health specs (17 categories)">
+        </AdminButton>
+        <AdminButton onClick={startMedicalCheck} disabled={anyRunning}
+          className="text-teal-400 disabled:opacity-30"
+          title="Research health specs (17 categories)" variant="ghost">
           {medicalRunning ? 'Running...' : 'Health Specs'}
-        </button>
-        <button onClick={startLifeSciCheck} disabled={anyRunning}
-          className="px-2.5 py-1.5 text-[11px] font-medium border rounded transition-colors
-            text-blue-400 border-blue-500/40 hover:bg-blue-500/10 disabled:opacity-30"
-          title="Research life sciences / biotech (6 categories)">
+        </AdminButton>
+        <AdminButton onClick={startLifeSciCheck} disabled={anyRunning}
+          className="text-blue-400 disabled:opacity-30"
+          title="Research life sciences / biotech (6 categories)" variant="ghost">
           {lifeSciRunning ? 'Running...' : 'Life Sci'}
-        </button>
-        <button onClick={startFedSourcesCheck} disabled={anyRunning}
-          className="px-2.5 py-1.5 text-[11px] font-medium border rounded transition-colors
-            text-amber-400 border-amber-500/40 hover:bg-amber-500/10 disabled:opacity-30"
-          title="Fetch from Federal Register, CMS, Congress.gov">
+        </AdminButton>
+        <AdminButton onClick={startFedSourcesCheck} disabled={anyRunning}
+          className="text-amber-400 disabled:opacity-30"
+          title="Fetch from Federal Register, CMS, Congress.gov" variant="ghost">
           {fedSourcesRunning ? 'Fetching...' : 'Fed Sources'}
-        </button>
+        </AdminButton>
       </div>
     </div>
   )

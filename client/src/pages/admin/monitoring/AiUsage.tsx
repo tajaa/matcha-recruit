@@ -1,0 +1,610 @@
+import { AdminButton, AdminCard, AdminTable } from '../../../components/admin/AdminUI'
+import { AdminTab, AdminTabBar } from '../../../components/admin/AdminTabs'
+import { AdminPageHeader } from '../../../components/admin/AdminPageHeader'
+import { useState } from 'react'
+import { AlertCircle, Bot, ChevronDown, ChevronRight, Image, RefreshCw, X } from 'lucide-react'
+import { useAsync } from '../../../hooks/useAsync'
+import {
+  getAiUsageCalls,
+  getAiUsageSummary,
+  getAiUsageTimeseries,
+  getApiQuotas,
+  getEspressoUsage,
+} from '../../../api/admin/aiUsage'
+import { ESPRESSO_FEATURE_PREFIX, SEARCH_PROVIDERS } from '../../../components/admin/ai-usage/constants'
+import { EspressoPanel } from '../../../components/admin/ai-usage/EspressoPanel'
+import { SearchApisPanel } from '../../../components/admin/ai-usage/SearchApisPanel'
+import { StatCard } from '../../../components/admin/ai-usage/StatCard'
+import { fmtCost, fmtMs, fmtPct, fmtTokens, relTime } from '../../../components/admin/ai-usage/format'
+import type {
+  AiUsageCall,
+  AiUsageFeatureRollup,
+  AiUsageMetrics,
+  AiUsageModelRollup,
+  AiUsagePoint,
+  AiUsageStatus,
+  AiUsageSummary,
+  ApiQuota,
+} from '../../../types/aiUsage'
+
+const RANGES: { label: string; hours: number }[] = [
+  { label: '24h', hours: 24 },
+  { label: '7d', hours: 168 },
+  { label: '30d', hours: 720 },
+]
+
+const PAGE_SIZE = 50
+const STATUS_CHIPS: { label: string; value: AiUsageStatus | '' }[] = [
+  { label: 'All', value: '' },
+  { label: 'ok', value: 'ok' },
+  { label: 'error', value: 'error' },
+  { label: 'timeout', value: 'timeout' },
+]
+
+type Selection = { kind: 'feature' | 'model' | 'provider'; value: string } | null
+
+// Every image-generation model this codebase has ever called — the current
+// GA name (core.services.image_gen.IMAGE_MODEL) plus the "-preview" name it
+// shipped under before Google shut that one down 2026-06-25. Matched by
+// prefix so a future "gemini-3.2-flash-image" etc. doesn't need a code
+// change here to keep showing up, and so historical "-preview" rows already
+// in ai_usage_log stay included in the rollup below.
+const IMAGE_MODEL_PREFIX = 'gemini-3.1-flash-image'
+// The one callers actually send today — what clicking the summary card below
+// filters the call log to (a specific "-preview" row is a rounding error of
+// historical traffic by now, not worth a multi-value filter on the backend).
+const CURRENT_IMAGE_MODEL = 'gemini-3.1-flash-image'
+
+// Every Huume-attributed feature label — the agent loop plus its embedded
+// pilot tools, each scoped separately (services/huume/agent.py,
+// legal_skill.py, handbook_skill.py) so this rollup can tell them apart via
+// the button row below, not just sum them into one number.
+const HUUME_FEATURE_PREFIX = 'matcha.huume.'
+
+function sumRollupMetrics(rows: AiUsageMetrics[]) {
+  const calls = rows.reduce((s, r) => s + r.calls, 0)
+  const cost_usd = rows.some((r) => r.cost_usd != null)
+    ? rows.reduce((s, r) => s + (r.cost_usd ?? 0), 0)
+    : null
+  const unknown_cost_calls = rows.reduce((s, r) => s + r.unknown_cost_calls, 0)
+  return {
+    calls,
+    cost_usd,
+    // Only the PRICED calls contributed to cost_usd, so the average divides by
+    // those — dividing the partial cost by the full call count (which includes
+    // unpriced/errored rows) would bias "avg cost / call" below the true value.
+    priced_calls: calls - unknown_cost_calls,
+    input_tokens: rows.reduce((s, r) => s + r.input_tokens, 0),
+    output_tokens: rows.reduce((s, r) => s + r.output_tokens, 0),
+    thinking_tokens: rows.reduce((s, r) => s + r.thinking_tokens, 0),
+    cached_tokens: rows.reduce((s, r) => s + r.cached_tokens, 0),
+    errors: rows.reduce((s, r) => s + r.errors, 0),
+    unknown_cost_calls,
+  }
+}
+
+const STATUS_BADGE: Record<AiUsageStatus, string> = {
+  ok: 'bg-zinc-700/40 text-zinc-300 border-zinc-600/40',
+  timeout: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
+  error: 'bg-red-500/15 text-red-300 border-red-500/30',
+}
+
+function Bars({ points }: { points: AiUsagePoint[] }) {
+  const max = Math.max(0.0001, ...points.map((p) => p.cost_usd ?? 0))
+  return (
+    <div className="flex items-end gap-0.5 h-24">
+      {points.map((p, i) => {
+        const h = Math.max(2, Math.round(((p.cost_usd ?? 0) / max) * 96))
+        const hasErrors = p.errors > 0
+        return (
+          <div
+            key={i}
+            title={`${new Date(p.at).toLocaleString()} — ${p.calls} calls, ${fmtCost(p.cost_usd)}${hasErrors ? `, ${p.errors} errors` : ''}`}
+            className={`flex-1 rounded-sm ${hasErrors ? 'bg-amber-500/60' : 'bg-emerald-500/50'} hover:opacity-80 transition-opacity`}
+            style={{ height: `${h}px` }}
+          />
+        )
+      })}
+    </div>
+  )
+}
+
+function RollupTable<T extends { calls: number; cost_usd: number | null; input_tokens: number; output_tokens: number; thinking_tokens: number; error_rate: number; p95_latency_ms: number | null; provider?: string }>({
+  rows,
+  labelKey,
+  labelHeader,
+  selectedLabel,
+  onSelect,
+}: {
+  rows: T[]
+  labelKey: (r: T) => string
+  labelHeader: string
+  selectedLabel: string | null
+  onSelect: (label: string) => void
+}) {
+  if (rows.length === 0) {
+    return <p className="p-6 text-center text-sm text-zinc-500">No calls in the selected window.</p>
+  }
+  return (
+    <AdminTable>
+      <thead>
+        <tr className="text-left text-[10px] uppercase tracking-wider text-zinc-500 border-b border-zinc-800">
+          <th >{labelHeader}</th>
+          <th className="text-right">Calls</th>
+          <th className="text-right">Attributed cost</th>
+          <th className="text-right">In</th>
+          <th className="text-right">Out</th>
+          <th className="text-right">Thinking</th>
+          <th className="text-right">Err %</th>
+          <th className="text-right">p95</th>
+        </tr>
+      </thead>
+      <tbody >
+        {rows.map((r, i) => {
+          const label = labelKey(r)
+          const selected = selectedLabel === label
+          return (
+            <tr
+              key={i}
+              onClick={() => onSelect(label)}
+              className={`cursor-pointer transition-colors ${selected ? 'bg-zinc-800 ring-1 ring-inset ring-emerald-700/40' : 'hover:bg-zinc-800/20'}`}
+            >
+              <td className="font-mono text-zinc-200">
+                {r.provider && <span className="text-zinc-500">{r.provider} / </span>}
+                {label}
+              </td>
+              <td className="text-right text-zinc-300">{r.calls}</td>
+              <td className="text-right text-zinc-100">{fmtCost(r.cost_usd)}</td>
+              <td className="text-right text-zinc-400">{fmtTokens(r.input_tokens)}</td>
+              <td className="text-right text-zinc-400">{fmtTokens(r.output_tokens)}</td>
+              <td className="text-right text-zinc-400">{fmtTokens(r.thinking_tokens)}</td>
+              <td className={` text-right ${r.error_rate > 0 ? 'text-amber-400' : 'text-zinc-500'}`}>
+                {fmtPct(r.error_rate)}
+              </td>
+              <td className="text-right text-zinc-500">{fmtMs(r.p95_latency_ms)}</td>
+            </tr>
+          )
+        })}
+      </tbody>
+    </AdminTable>
+  )
+}
+
+function CallLogRow({ call, isOpen, onToggle }: { call: AiUsageCall; isOpen: boolean; onToggle: () => void }) {
+  return (
+    <div>
+      <button onClick={onToggle} className="w-full text-left px-3 py-2 hover:bg-zinc-800/20 transition-colors">
+        <div className="flex items-center gap-3 text-sm">
+          <span className="shrink-0 text-zinc-500">
+            {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+          </span>
+          <span className="shrink-0 w-16 text-[11px] text-zinc-500">{relTime(call.created_at)}</span>
+          <span
+            className={`shrink-0 text-[9px] font-medium uppercase px-1.5 py-0.5 rounded border ${STATUS_BADGE[call.status]}`}
+          >
+            {call.status}
+          </span>
+          <span className="min-w-0 flex-1 font-mono text-zinc-200 truncate">
+            {call.feature} <span className="text-zinc-600">·</span> {call.provider} / {call.model}
+          </span>
+          <span className="shrink-0 text-[11px] text-zinc-500 w-20 text-right">{call.method}</span>
+          <span className="shrink-0 text-[11px] text-zinc-400 w-14 text-right">{fmtTokens(call.input_tokens)}</span>
+          <span className="shrink-0 text-[11px] text-zinc-400 w-14 text-right">{fmtTokens(call.output_tokens)}</span>
+          <span className="shrink-0 text-[11px] text-zinc-400 w-14 text-right">{fmtTokens(call.cached_tokens)}</span>
+          <span className="shrink-0 text-[11px] text-zinc-100 w-16 text-right">{fmtCost(call.cost_usd)}</span>
+          <span className="shrink-0 text-[11px] text-zinc-500 w-16 text-right">{fmtMs(call.latency_ms)}</span>
+        </div>
+      </button>
+      {isOpen && (
+        <div className="px-3 pb-3 pl-11 space-y-2 bg-zinc-900/30">
+          <div className="flex items-center gap-3 text-[10px] text-zinc-500 font-mono flex-wrap">
+            <span>id: {call.id}</span>
+            {call.provider_response_id && <span>provider id: {call.provider_response_id}</span>}
+            {call.provider_status && <span>provider status: {call.provider_status}</span>}
+            {call.service_tier && <span>service tier: {call.service_tier}</span>}
+            <span>at: {new Date(call.created_at).toLocaleString()}</span>
+            <span>thinking: {fmtTokens(call.thinking_tokens)}</span>
+            <span>cache writes: {fmtTokens(call.cache_write_tokens)}</span>
+          </div>
+          {call.error && (
+            <pre className="text-[11px] font-mono text-red-300/90 bg-zinc-950/80 p-3 rounded border border-zinc-800 overflow-x-auto whitespace-pre-wrap">
+              {call.error}
+            </pre>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+type PageData = {
+  summary: AiUsageSummary | null
+  timeseries: { bucket: 'hour' | 'day'; points: AiUsagePoint[] }
+}
+
+const EMPTY_DATA: PageData = {
+  summary: null,
+  timeseries: { bucket: 'hour', points: [] },
+}
+
+export default function AiUsage() {
+  const [sinceHours, setSinceHours] = useState(24)
+  const [selection, setSelection] = useState<Selection>(null)
+  const [statusFilter, setStatusFilter] = useState<AiUsageStatus | ''>('')
+  const [page, setPage] = useState(0)
+  const [expanded, setExpanded] = useState<Set<number>>(new Set())
+
+  // Combined fetch for the page-level rollups (mirrors ServerErrors.tsx's
+  // Promise.all pattern): a single reload keeps the stat cards, chart, and
+  // both tables in sync instead of drifting independently.
+  const { data, loading, error, reload } = useAsync(
+    async () => {
+      const [summary, timeseries] = await Promise.all([
+        getAiUsageSummary(sinceHours),
+        getAiUsageTimeseries(sinceHours),
+      ])
+      return { summary, timeseries }
+    },
+    [sinceHours],
+    EMPTY_DATA,
+  )
+  const { summary, timeseries } = data
+  const totals = summary?.totals
+  // Derived, not fetched — `by_model` already carries every model's rollup
+  // for the window, so image-generation spend is just the rows that match.
+  // No new endpoint/query: same data the "By model" table below renders,
+  // pre-summed into its own card row per the ask "make sure /ai-usage has
+  // info about image calls like we do for other aspects".
+  const imageModelRows = summary?.by_model.filter((r) => r.model.startsWith(IMAGE_MODEL_PREFIX)) ?? []
+  const imageTotals = imageModelRows.length ? sumRollupMetrics(imageModelRows) : null
+  // Derived, not fetched — same pattern as the image block above: by_feature
+  // already carries every huume label's rollup (matcha.huume.loop plus the
+  // embedded matcha.huume.legal_pilot / .handbook_pilot sub-features).
+  const huumeRows = summary?.by_feature.filter((r) => r.feature.startsWith(HUUME_FEATURE_PREFIX)) ?? []
+  const huumeTotals = huumeRows.length ? sumRollupMetrics(huumeRows) : null
+  // Espresso's own feature labels (assistant, tasks.<playbook>, job_search, …)
+  // for the chips that filter the call log.
+  const espressoFeatures = summary?.by_feature.filter((r) => r.feature.startsWith(ESPRESSO_FEATURE_PREFIX)) ?? []
+  // The paid search APIs log under their own provider; their calls are
+  // per-request rows, not tokens, so they get their own panel.
+  const searchProviders = summary?.by_provider.filter((r) => SEARCH_PROVIDERS.includes(r.provider)) ?? []
+  // SearchAPI/SerpApi requests are covered by a monthly plan and carry no
+  // per-request cost on purpose, so they don't belong in the unpriced warning.
+  const unpricedCalls = totals
+    ? totals.unknown_cost_calls - searchProviders.reduce((n, r) => n + r.unknown_cost_calls, 0)
+    : 0
+
+  // Espresso's runs and tools come from its own tables, joined to the ledger
+  // by feature label; the quota check asks two providers' account APIs live,
+  // so it is fetched once and on Refresh, not on every range change.
+  const {
+    data: espresso,
+    loading: espressoLoading,
+    error: espressoError,
+    reload: reloadEspresso,
+  } = useAsync(() => getEspressoUsage(sinceHours), [sinceHours], null)
+  const {
+    data: quotas,
+    loading: quotasLoading,
+    error: quotasError,
+    reload: reloadQuotas,
+  } = useAsync(() => getApiQuotas().then((r) => r.providers), [], [] as ApiQuota[])
+
+  // Separate fetch for the call log: it's interaction-driven (selection,
+  // status, page) rather than page-level, so it doesn't belong in the
+  // combined fetch above — selecting a row shouldn't re-fetch the chart.
+  const {
+    data: callLog,
+    loading: callLogLoading,
+    error: callLogError,
+    reload: reloadCallLog,
+  } = useAsync(
+    () =>
+      getAiUsageCalls({
+        sinceHours,
+        feature: selection?.kind === 'feature' ? selection.value : undefined,
+        model: selection?.kind === 'model' ? selection.value : undefined,
+        provider: selection?.kind === 'provider' ? selection.value : undefined,
+        status: statusFilter || undefined,
+        limit: PAGE_SIZE,
+        offset: page * PAGE_SIZE,
+      }),
+    [sinceHours, selection, statusFilter, page],
+    { total: 0, items: [] as AiUsageCall[] },
+  )
+
+  function selectFeature(feature: string) {
+    setPage(0)
+    setSelection((s) => (s?.kind === 'feature' && s.value === feature ? null : { kind: 'feature', value: feature }))
+  }
+  function selectModel(model: string) {
+    setPage(0)
+    setSelection((s) => (s?.kind === 'model' && s.value === model ? null : { kind: 'model', value: model }))
+  }
+  function selectProvider(provider: string) {
+    setPage(0)
+    setSelection((s) => (s?.kind === 'provider' && s.value === provider ? null : { kind: 'provider', value: provider }))
+  }
+  function toggleStatus(status: AiUsageStatus | '') {
+    setPage(0)
+    setStatusFilter((s) => (s === status ? '' : status))
+  }
+  function toggleExpand(id: number) {
+    setExpanded((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+  function refreshAll() {
+    reload()
+    reloadCallLog()
+    reloadEspresso()
+    reloadQuotas()
+  }
+  const refreshing = loading || callLogLoading || espressoLoading || quotasLoading
+
+  const totalPages = Math.max(1, Math.ceil(callLog.total / PAGE_SIZE))
+
+  return (
+    <div>
+      <AdminPageHeader
+        title="AI Usage"
+        description="Exact provider-reported usage and paid search API requests, attributed to the Matcha feature that made each call."
+        actions={
+          <AdminButton
+            onClick={refreshAll}
+            disabled={refreshing}
+            className="gap-1.5 disabled:opacity-50" variant="secondary"
+          >
+            <RefreshCw size={12} className={refreshing ? 'animate-spin' : ''} />
+            Refresh
+          </AdminButton>
+        }
+      />
+
+      <div className="flex items-center gap-2 mb-4">
+        {RANGES.map((r) => (
+          <button
+            key={r.hours}
+            onClick={() => {
+              setSinceHours(r.hours)
+              setPage(0)
+            }}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+              sinceHours === r.hours
+                ? 'bg-zinc-800 border-zinc-600 text-zinc-100'
+                : 'border-zinc-800 text-zinc-400 hover:border-zinc-700'
+            }`}
+          >
+            {r.label}
+          </button>
+        ))}
+      </div>
+
+      {error && (
+        <p className="mb-4 text-sm text-red-400">Couldn't load AI usage: {error}</p>
+      )}
+
+      {totals && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mb-4">
+          <StatCard label="Attributed cost" value={fmtCost(totals.cost_usd)} sub="provider billing is authoritative" />
+          <StatCard label="Calls" value={String(totals.calls)} />
+          <StatCard label="Tokens in" value={fmtTokens(totals.input_tokens)} />
+          <StatCard label="Tokens out" value={fmtTokens(totals.output_tokens)} />
+          <StatCard
+            label="Error rate"
+            value={fmtPct(totals.error_rate)}
+            sub={`${totals.errors} errors — click to filter`}
+          active={statusFilter === 'error'}
+            onClick={() => toggleStatus('error')}
+          />
+          <StatCard label="p95 latency" value={fmtMs(totals.p95_latency_ms)} />
+        </div>
+      )}
+
+      {unpricedCalls > 0 && (
+        <p className="mb-4 text-xs text-amber-300/90 flex items-center gap-1.5">
+          <AlertCircle size={12} />
+          {unpricedCalls} call(s) have no locally attributed cost. Any recorded tokens are
+          provider-reported; provider billing remains the dollar source of truth.
+        </p>
+      )}
+
+      <SearchApisPanel
+        quotas={quotas}
+        providers={searchProviders}
+        loading={quotasLoading}
+        error={quotasError}
+        selectedProvider={selection?.kind === 'provider' ? selection.value : null}
+        onSelectProvider={selectProvider}
+      />
+
+      <EspressoPanel
+        usage={espresso}
+        features={espressoFeatures}
+        loading={espressoLoading}
+        error={espressoError}
+        selectedFeature={selection?.kind === 'feature' ? selection.value : null}
+        onSelectFeature={selectFeature}
+      />
+
+      {/* Image generation — the editor's Generate button + Merlin's agent-loop
+          generate_image tool, both routed through core.services.image_gen and
+          logged under whichever image model they called. Pulled out of the
+          generic by-model table into its own row: token counts read as noise
+          for an image call (~1290 tokens IS one image, not a lot of text), so
+          "cost per image" is the number that actually answers "what's this
+          costing me" — the by-model/by-feature tables below still have the
+          full breakdown if that's what's needed instead. */}
+      {imageTotals && (
+        <div className="mb-4">
+          <p className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+            <Image size={11} /> Image generation
+          </p>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <StatCard
+              label="Images generated"
+              value={String(imageTotals.calls)}
+              sub="click to filter the call log"
+            active={selection?.kind === 'model' && selection.value === CURRENT_IMAGE_MODEL}
+              onClick={() => selectModel(CURRENT_IMAGE_MODEL)}
+            />
+            <StatCard label="Image spend" value={fmtCost(imageTotals.cost_usd)} />
+            <StatCard
+              label="Avg cost / image"
+              value={imageTotals.priced_calls > 0 && imageTotals.cost_usd != null
+                ? fmtCost(imageTotals.cost_usd / imageTotals.priced_calls)
+                : '—'}
+            />
+            <StatCard label="Image output tokens" value={fmtTokens(imageTotals.output_tokens)} />
+          </div>
+          {imageTotals.unknown_cost_calls > 0 && (
+            <p className="mt-1.5 text-[11px] text-amber-300/90">
+              {imageTotals.unknown_cost_calls} image call(s) have unknown cost — spend above is undercounted.
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Huume's agent loop (services/huume/agent.py) plus its embedded Legal
+          Pilot / Handbook Pilot tool calls, each scoped under matcha.huume.* via
+          feature_scope so this usage doesn't get lost in matcha.legal_defense /
+          matcha.handbook_pilot alongside the standalone pilot UIs. Same
+          derived-not-fetched pattern as the image block above. */}
+      {huumeTotals && (
+        <div className="mb-4">
+          <p className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+            <Bot size={11} /> Huume agent
+          </p>
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+            <StatCard label="Huume calls" value={String(huumeTotals.calls)} />
+            <StatCard label="Tokens in" value={fmtTokens(huumeTotals.input_tokens)} sub="context" />
+            <StatCard label="Tokens out" value={fmtTokens(huumeTotals.output_tokens)} />
+            <StatCard label="Thinking" value={fmtTokens(huumeTotals.thinking_tokens)} />
+            <StatCard label="Cached" value={fmtTokens(huumeTotals.cached_tokens)} />
+          </div>
+          <AdminTabBar className="mt-1.5">
+            {huumeRows.map((r) => (
+              <AdminTab
+                key={r.feature}
+                type="button"
+                onClick={() => selectFeature(r.feature)}
+               active={selection?.kind === 'feature' && selection.value === r.feature}
+              >
+                {r.feature.slice(HUUME_FEATURE_PREFIX.length)} · {r.calls} calls · {fmtTokens(r.output_tokens)} out
+              </AdminTab>
+            ))}
+          </AdminTabBar>
+        </div>
+      )}
+
+      {timeseries.points.length > 0 && (
+        <AdminCard className="mb-6">
+          <p className="text-[10px] uppercase tracking-wider text-zinc-500 mb-2">
+            Locally attributed cost by {timeseries.bucket}
+          </p>
+          <Bars points={timeseries.points} />
+        </AdminCard>
+      )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+        <div className="rounded-xl border border-zinc-800 overflow-hidden">
+          <p className="px-3 pt-3 pb-1 text-xs font-semibold uppercase tracking-wider text-zinc-500">
+            By feature — click a row to drill in
+          </p>
+          <RollupTable<AiUsageFeatureRollup>
+            rows={summary?.by_feature ?? []}
+            labelKey={(r) => r.feature}
+            labelHeader="Feature"
+            selectedLabel={selection?.kind === 'feature' ? selection.value : null}
+            onSelect={selectFeature}
+          />
+        </div>
+        <div className="rounded-xl border border-zinc-800 overflow-hidden">
+          <p className="px-3 pt-3 pb-1 text-xs font-semibold uppercase tracking-wider text-zinc-500">
+            By model — click a row to drill in
+          </p>
+          <RollupTable<AiUsageModelRollup>
+            rows={summary?.by_model ?? []}
+            labelKey={(r) => r.model}
+            labelHeader="Model"
+            selectedLabel={selection?.kind === 'model' ? selection.value : null}
+            onSelect={selectModel}
+          />
+        </div>
+      </div>
+
+      <div>
+        <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+          <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">Call log</h2>
+          <div className="flex items-center gap-2 flex-wrap">
+            {selection && (
+              <button
+                onClick={() => setSelection(null)}
+                className="flex items-center gap-1 px-2 py-1 rounded-full text-[11px] bg-emerald-500/10 text-emerald-300 border border-emerald-700/40"
+              >
+                {selection.kind}: {selection.value} <X size={10} />
+              </button>
+            )}
+            <div className="flex rounded-lg border border-zinc-800 p-0.5">
+              {STATUS_CHIPS.map((s) => (
+                <button
+                  key={s.label}
+                  onClick={() => toggleStatus(s.value)}
+                  className={`px-2 py-1 rounded-md text-[11px] font-medium transition-colors ${
+                    statusFilter === s.value ? 'bg-zinc-700 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'
+                  }`}
+                >
+                  {s.label}
+                </button>
+              ))}
+            </div>
+            <span className="text-[11px] text-zinc-500">
+              {callLog.items.length} of {callLog.total}
+            </span>
+          </div>
+        </div>
+
+        {callLogError && (
+          <p className="mb-2 text-sm text-red-400">Couldn't load call log: {callLogError}</p>
+        )}
+
+        <div className="rounded-xl border border-zinc-800 overflow-hidden">
+          {callLog.items.length === 0 ? (
+            <p className="p-6 text-center text-sm text-zinc-500">No calls match the current filters.</p>
+          ) : (
+            <div className="divide-y divide-zinc-800">
+              {callLog.items.map((c) => (
+                <CallLogRow key={c.id} call={c} isOpen={expanded.has(c.id)} onToggle={() => toggleExpand(c.id)} />
+              ))}
+            </div>
+          )}
+        </div>
+
+        {callLog.total > PAGE_SIZE && (
+          <div className="flex items-center justify-center gap-3 mt-3">
+            <AdminButton
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+              disabled={page === 0}
+              className="disabled:opacity-40" variant="secondary"
+            >
+              Prev
+            </AdminButton>
+            <span className="text-[11px] text-zinc-500">
+              page {page + 1} of {totalPages}
+            </span>
+            <AdminButton
+              onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+              disabled={page >= totalPages - 1}
+              className="disabled:opacity-40" variant="secondary"
+            >
+              Next
+            </AdminButton>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}

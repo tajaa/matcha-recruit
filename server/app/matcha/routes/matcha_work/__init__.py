@@ -55,6 +55,10 @@ from .agent_tasks import router as _agent_tasks_router
 
 router.include_router(_agent_tasks_router)
 
+from .recaps import router as _recaps_router
+
+router.include_router(_recaps_router)
+
 from .tasks import router as _tasks_router
 
 router.include_router(_tasks_router)

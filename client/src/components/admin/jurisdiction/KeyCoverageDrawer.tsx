@@ -1,3 +1,4 @@
+import { AdminButton } from '../AdminUI'
 import { useState } from 'react'
 import { useAsync } from '../../../hooks/useAsync'
 import { fetchKeyCoverage, runStalenessCheck } from '../../../api/compliance'
@@ -171,13 +172,13 @@ export default function KeyCoverageDrawer({ jurisdictionId, category, state, onC
             )}
           </div>
           <div className="flex items-center gap-2">
-            <button
+            <AdminButton
               onClick={handleRunCheck}
               disabled={runningCheck}
-              className="px-3 py-1.5 text-xs font-medium rounded bg-amber-600/20 text-amber-400 border border-amber-600/30 hover:bg-amber-600/30 disabled:opacity-50"
+              className="text-amber-400 disabled:opacity-50" variant="ghost"
             >
               {runningCheck ? 'Running...' : 'Run Staleness Check'}
-            </button>
+            </AdminButton>
             <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300 text-xl px-2">&times;</button>
           </div>
         </div>

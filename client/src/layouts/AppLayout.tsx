@@ -1,4 +1,4 @@
-import { useState, useEffect, type ReactNode } from 'react'
+import { useState, useEffect, useLayoutEffect, type ReactNode } from 'react'
 import { Navigate, Outlet, useLocation } from 'react-router-dom'
 import { Menu, X } from 'lucide-react'
 import { useMe } from '../hooks/useMe'
@@ -18,9 +18,18 @@ export default function AppLayout({ sidebar, variant }: { sidebar: ReactNode; lo
   )
   const isAdmin = variant === 'admin'
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    const previousTheme = document.documentElement.getAttribute('data-theme')
+    // Admin is dark only. Keep the saved preference for the other app surfaces.
+    if (isAdmin) document.documentElement.removeAttribute('data-theme')
     document.documentElement.setAttribute('data-app-shell-bg', isAdmin ? 'admin' : 'true')
-    return () => document.documentElement.removeAttribute('data-app-shell-bg')
+    return () => {
+      document.documentElement.removeAttribute('data-app-shell-bg')
+      if (isAdmin) {
+        if (previousTheme === null) document.documentElement.removeAttribute('data-theme')
+        else document.documentElement.setAttribute('data-theme', previousTheme)
+      }
+    }
   }, [isAdmin])
 
   if (pathname !== menuPath) {
@@ -53,7 +62,7 @@ export default function AppLayout({ sidebar, variant }: { sidebar: ReactNode; lo
 
   return (
     <LayoutContext.Provider value={{ sidebarCollapsed, setSidebarCollapsed }}>
-      <div className={isAdmin ? 'min-h-screen bg-gradient-to-b from-zinc-700 to-zinc-900' : 'min-h-screen bg-vsc-bg'}>
+      <div className={isAdmin ? 'admin-shell min-h-screen' : 'min-h-screen bg-vsc-bg'}>
 
         {/* No top bar: it spent 56px on a logo, a page title every page already
             prints as its own <h1>, and an avatar — all of which the sidebar can
@@ -79,9 +88,9 @@ export default function AppLayout({ sidebar, variant }: { sidebar: ReactNode; lo
         {/* Sidebar — full height now that nothing sits above it.
             Mobile: full-width overlay (translate).
             Desktop: icon-only when collapsed (width transition). */}
-        <div className={`fixed bottom-0 left-0 top-0 z-50 w-60 overflow-hidden transition-all duration-200 ease-in-out
+        <div className={`${isAdmin ? 'admin-rail w-52' : 'w-60'} fixed bottom-0 left-0 top-0 z-50 overflow-hidden transition-all duration-200 ease-in-out
           ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}
-          md:translate-x-0 ${sidebarCollapsed ? 'md:w-14' : 'md:w-60'}
+          md:translate-x-0 ${sidebarCollapsed ? 'md:w-14' : isAdmin ? 'md:w-52' : 'md:w-60'}
         `}>
           {sidebar}
           <button
@@ -94,8 +103,8 @@ export default function AppLayout({ sidebar, variant }: { sidebar: ReactNode; lo
         </div>
 
         {/* Main content — pt-16 on mobile clears the floating menu trigger. */}
-        <main className={`p-4 pt-16 transition-[margin] duration-200 ease-in-out md:p-8 md:pt-8 ${
-          sidebarCollapsed ? 'md:ml-14' : 'md:ml-60'
+        <main className={`p-4 pt-16 transition-[margin] duration-200 ease-in-out ${isAdmin ? 'md:p-6' : 'md:p-8 md:pt-8'} ${
+          sidebarCollapsed ? 'md:ml-14' : isAdmin ? 'md:ml-52' : 'md:ml-60'
         }`}>
           <Outlet />
         </main>

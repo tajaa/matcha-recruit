@@ -6,7 +6,6 @@ import { scOnboardingApi } from '../../../api/sc/scOnboarding'
 import { useMe } from '../../../hooks/useMe'
 import type {
   CompanySize,
-  ScCertificateSetup,
   ScEmployeeImport,
   ScJobSetup,
   ScLocationImport,
@@ -16,7 +15,7 @@ import type {
 import { inferLocationTimezone, TIMEZONE_OPTIONS } from '../../../utils/locationTimezone'
 import { StoreFields } from '../../employees/StoreFields'
 import { EMPTY_STORE, storeFormError, type StoreForm } from '../../employees/storeForm'
-import { Button, FileUpload, Input, Select, Toggle } from '../../ui'
+import { Button, FileUpload, Input, Select } from '../../ui'
 
 const COMPANY_SIZES: { value: CompanySize; label: string }[] = [
   { value: '1-10', label: '1–10 employees' },
@@ -27,7 +26,7 @@ const COMPANY_SIZES: { value: CompanySize; label: string }[] = [
   { value: '501+', label: '501+ employees' },
 ]
 
-const STEPS = ['Company', 'Locations', 'Employees', 'Jobs & certificates', 'Review']
+const STEPS = ['Company', 'Locations', 'Employees', 'Review']
 
 // ~12s of cover for the Stripe webhook that activates a paid S&C product.
 const ACTIVATION_POLL_ATTEMPTS = 8
@@ -53,25 +52,11 @@ function downloadCsv(filename: string, text: string) {
   URL.revokeObjectURL(url)
 }
 
-function emptyCertificate(): ScCertificateSetup {
-  return { name: '', is_required: true, schedule_blocking: true }
-}
-
-// Certificates are optional, so a new job starts with none: naming the job is
-// enough to move on.
-function emptyJob(): ScJobSetup {
-  return { name: '', credential_grace_days: 7, certificates: [] }
-}
-
 /** A store's time zone is what lets its schedule publish. Pre-fill it where
  *  the state leaves no doubt; a split-zone state stays blank for the manager. */
 function withTimezone(location: ScLocationImport): ScLocationImport {
   return { ...location, timezone: location.timezone || inferLocationTimezone(location.state) || '' }
 }
-
-// Shared verbatim with services/sc_onboarding.UNMATCHED_JOB_TITLES_MESSAGE.
-const UNMATCHED_JOB_TITLES_MESSAGE =
-  'Every employee job title needs a job. Add a job with the same name, or correct the title in the employee CSV and upload it again. Missing: '
 
 /** The comparison form for names, matching the server's `_key` (Python
  *  `casefold`). Plain `toLowerCase` is not enough: it leaves "Straße" and
@@ -82,33 +67,19 @@ function normalized(value: string) {
   return value.trim().toUpperCase().toLowerCase().replace(/\s+/g, ' ')
 }
 
-/** Distinct employee job titles with no job yet, in roster order. */
-function unmatchedTitles(jobs: ScJobSetup[], employees: ScEmployeeImport[]): string[] {
-  const seen = new Set(jobs.map((job) => normalized(job.name)))
-  const titles: string[] = []
+/** Keep imported employees schedulable without asking for job rules at signup.
+ *  Derive this from the current roster so replacing or clearing a file also
+ *  replaces or clears its jobs. Certificates can be configured later. */
+function rosterJobs(employees: ScEmployeeImport[]): ScJobSetup[] {
+  const seen = new Set<string>()
+  const jobs: ScJobSetup[] = []
   for (const employee of employees) {
     const key = normalized(employee.job_title)
     if (seen.has(key)) continue
     seen.add(key)
-    titles.push(employee.job_title.trim())
+    jobs.push({ name: employee.job_title.trim(), credential_grace_days: 7, certificates: [] })
   }
-  return titles
-}
-
-/** Adds a certificate-less job for every roster title that has none yet.
- *  The title is what assigns an imported employee to a job, so the manager
- *  should see every one of them instead of discovering them one error at a
- *  time. Blank rows go — they could only fail "Every job needs a name". */
-function withRosterJobs(jobs: ScJobSetup[], employees: ScEmployeeImport[]): ScJobSetup[] {
-  const titles = unmatchedTitles(jobs, employees)
-  if (!titles.length) return jobs
-  const kept = jobs.filter((job) => job.name.trim() || job.certificates.some((certificate) => certificate.name.trim()))
-  return [...kept, ...titles.map((name) => ({ name, credential_grace_days: 7, certificates: [] }))]
-}
-
-function hasDuplicates(values: string[]) {
-  const normalizedValues = values.map(normalized)
-  return new Set(normalizedValues).size !== normalizedValues.length
+  return jobs
 }
 
 function csvSummary(
@@ -163,14 +134,15 @@ function unassignedCount(locations: ScLocationImport[], employees: ScEmployeeImp
 
 export default function ScOnboardingWizard() {
   const navigate = useNavigate()
-  const { refresh } = useMe()
+  const { refresh, hasFeature } = useMe()
+  const salesSetupEnabled = hasFeature('matcha_ops') && hasFeature('inventory') && hasFeature('sales_intake')
   const [step, setStep] = useState(0)
   const [companyName, setCompanyName] = useState('')
   const [companySize, setCompanySize] = useState<CompanySize | ''>('')
   const [naicsCode, setNaicsCode] = useState('')
   const [locations, setLocations] = useState<ScLocationImport[]>([])
   const [employees, setEmployees] = useState<ScEmployeeImport[]>([])
-  const [jobs, setJobs] = useState<ScJobSetup[]>([emptyJob()])
+  const jobs = rosterJobs(employees)
   const [csvColumns, setCsvColumns] = useState<NonNullable<ScOnboardingStatus['csv_columns']>>(EMPTY_CSV_COLUMNS)
   const [optionalColumns, setOptionalColumns] = useState<NonNullable<ScOnboardingStatus['csv_optional_columns']>>(EMPTY_CSV_COLUMNS)
   const [storeForm, setStoreForm] = useState<StoreForm | null>(null)
@@ -179,7 +151,14 @@ export default function ScOnboardingWizard() {
   const [activating, setActivating] = useState(false)
   const [parsing, setParsing] = useState<'locations' | 'employees' | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [completed, setCompleted] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // refresh() updates useMe's state. Choose the destination on that render,
+  // rather than from the feature flags captured before Stripe activated it.
+  useEffect(() => {
+    if (completed) navigate(salesSetupEnabled ? '/ops/schedule/editor?setup=sales' : '/ops/schedule', { replace: true })
+  }, [completed, navigate, salesSetupEnabled])
 
   useEffect(() => {
     let cancelled = false
@@ -252,38 +231,13 @@ export default function ScOnboardingWizard() {
     return `Every employee location must match a location name from the locations step. Not found: ${unknown.join(', ')}`
   }
 
-  // Mirrors the server contract (models/sc_onboarding.py +
-  // services/sc_onboarding.validate_sc_submission): unique names, and every
-  // employee job title matching a job on this step. Certificates are optional
-  // — a job, or the whole setup, may have none. Change both together.
-  function jobsError(): string | null {
-    if (!jobs.length) return 'Add at least one job.'
-    if (jobs.some((job) => !job.name.trim())) return 'Every job needs a name.'
-    if (hasDuplicates(jobs.map((job) => job.name))) return 'Every job needs a unique name.'
-    if (jobs.some((job) => !Number.isInteger(job.credential_grace_days) || job.credential_grace_days < 0 || job.credential_grace_days > 365)) {
-      return 'Credential grace days must be a whole number from 0 to 365.'
-    }
-    if (jobs.some((job) => job.certificates.some((certificate) => !certificate.name.trim()))) {
-      return 'Every certificate needs a name.'
-    }
-    if (jobs.some((job) => hasDuplicates(job.certificates.map((certificate) => certificate.name)))) {
-      return 'Certificate names must be unique within each job.'
-    }
-    const missing = unmatchedTitles(jobs, employees)
-    if (missing.length) {
-      return UNMATCHED_JOB_TITLES_MESSAGE + [...missing].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })).join(', ')
-    }
-    return null
-  }
-
   function advance() {
-    const validation = [companyError, locationsError, employeesError, jobsError][step]?.() ?? null
+    const validation = [companyError, locationsError, employeesError][step]?.() ?? null
     if (validation) {
       setError(validation)
       return
     }
     setError(null)
-    if (step === 2) setJobs((current) => withRosterJobs(current, employees))
     setStep((current) => Math.min(current + 1, STEPS.length - 1))
   }
 
@@ -327,24 +281,8 @@ export default function ScOnboardingWizard() {
     setStoreForm(null)
   }
 
-  function updateJob(index: number, update: Partial<ScJobSetup>) {
-    setJobs((current) => current.map((job, i) => i === index ? { ...job, ...update } : job))
-  }
-
-  function updateCertificate(jobIndex: number, certificateIndex: number, update: Partial<ScCertificateSetup>) {
-    setJobs((current) => current.map((job, i) => i !== jobIndex ? job : {
-      ...job,
-      certificates: job.certificates.map((certificate, j) => {
-        if (j !== certificateIndex) return certificate
-        const next = { ...certificate, ...update }
-        if (!next.is_required) next.schedule_blocking = false
-        return next
-      }),
-    }))
-  }
-
   async function complete() {
-    const validation = companyError() ?? locationsError() ?? employeesError() ?? jobsError()
+    const validation = companyError() ?? locationsError() ?? employeesError()
     if (validation || !companySize) {
       setError(validation ?? 'Review the required fields.')
       return
@@ -362,7 +300,7 @@ export default function ScOnboardingWizard() {
       await refresh()
       // Straight to the schedule: it is what they signed up for, and every
       // store and employee they just entered is already on it.
-      navigate('/ops/schedule', { replace: true })
+      setCompleted(true)
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : 'Setup could not be completed. Nothing was imported; review the details and try again.')
     } finally {
@@ -405,7 +343,7 @@ export default function ScOnboardingWizard() {
           <p className="mt-1 text-sm text-zinc-400">Nothing is created until you approve the final review.</p>
         </div>
 
-        <ol className="grid grid-cols-5 gap-2" aria-label="Setup progress">
+        <ol className="grid grid-cols-4 gap-2" aria-label="Setup progress">
           {STEPS.map((label, index) => (
             <li key={label} className={`border-t-2 pt-2 text-[11px] ${index <= step ? 'border-emerald-500 text-zinc-200' : 'border-zinc-800 text-zinc-600'}`}>
               {index < step && <Check className="mr-1 inline h-3 w-3" />}{label}
@@ -476,7 +414,7 @@ export default function ScOnboardingWizard() {
 
           {step === 2 && (
             <div className="space-y-4">
-              <div><h2 className="text-lg font-medium">Employees</h2><p className="text-sm text-zinc-400">Optional. Each job title in the file becomes a job in the next step. No invitations are sent.</p></div>
+              <div><h2 className="text-lg font-medium">Employees</h2><p className="text-sm text-zinc-400">Optional. Jobs are created automatically from the titles in your file. You can set up certificates later. No invitations are sent.</p></div>
               <FileUpload accept=".csv,text/csv" maxSizeMB={5} onFiles={(files) => { if (files[0]) void loadCsv('employees', files[0], scOnboardingApi.parseEmployeesCsv, setEmployees) }}>
                 <Upload className="mx-auto mb-2 h-5 w-5" /><p>Drop an employees CSV or browse</p>
               </FileUpload>
@@ -501,35 +439,10 @@ export default function ScOnboardingWizard() {
             </div>
           )}
 
-          {step === 3 && (
-            <div className="space-y-5">
-              <div><h2 className="text-lg font-medium">Jobs and certificates</h2><p className="text-sm text-zinc-400">Name the roles you schedule. Certificates are optional: add one only where a role needs it. A schedule-blocking certificate prevents assignment after the job grace period until valid evidence is on file.{employees.length > 0 && ' Every job title from your employee file is listed here; a job can have no certificate.'}</p></div>
-              {jobs.map((job, jobIndex) => (
-                <div key={jobIndex} className="space-y-3 rounded-lg border border-white/[0.08] bg-zinc-950/50 p-4">
-                  <div className="grid gap-3 sm:grid-cols-[1fr_180px_auto]">
-                    <Input label="Job name" value={job.name} maxLength={150} onChange={(event) => updateJob(jobIndex, { name: event.target.value })} placeholder="e.g. Line cook" />
-                    <Input label="Credential grace days" type="number" min={0} max={365} value={job.credential_grace_days} onChange={(event) => updateJob(jobIndex, { credential_grace_days: Number(event.target.value) })} />
-                    <Button aria-label="Remove job" variant="ghost" size="sm" disabled={jobs.length === 1} onClick={() => setJobs((current) => current.filter((_, i) => i !== jobIndex))}><Trash2 className="h-4 w-4" /></Button>
-                  </div>
-                  {job.certificates.map((certificate, certificateIndex) => (
-                    <div key={certificateIndex} className="grid items-end gap-3 sm:grid-cols-[1fr_auto_auto_auto]">
-                      <Input label="Certificate" value={certificate.name} maxLength={200} onChange={(event) => updateCertificate(jobIndex, certificateIndex, { name: event.target.value })} placeholder="e.g. Food Handler Card" />
-                      <label className="flex h-10 items-center gap-2 text-xs text-zinc-300"><Toggle size="sm" checked={certificate.is_required} onChange={(checked) => updateCertificate(jobIndex, certificateIndex, { is_required: checked })} />Mandatory</label>
-                      <label className="flex h-10 items-center gap-2 text-xs text-zinc-300"><Toggle size="sm" checked={certificate.schedule_blocking} disabled={!certificate.is_required} onChange={(checked) => updateCertificate(jobIndex, certificateIndex, { schedule_blocking: checked })} />Blocks schedule</label>
-                      <Button aria-label="Remove certificate" variant="ghost" size="sm" onClick={() => updateJob(jobIndex, { certificates: job.certificates.filter((_, i) => i !== certificateIndex) })}><Trash2 className="h-4 w-4" /></Button>
-                    </div>
-                  ))}
-                  {job.certificates.length === 0 && <p className="text-xs text-zinc-500">No certificate required for this job.</p>}
-                  <Button variant="ghost" size="sm" onClick={() => updateJob(jobIndex, { certificates: [...job.certificates, emptyCertificate()] })}><Plus className="h-3.5 w-3.5" />Add certificate</Button>
-                </div>
-              ))}
-              <Button variant="secondary" size="sm" onClick={() => setJobs((current) => [...current, emptyJob()])}><Plus className="h-3.5 w-3.5" />Add job</Button>
-            </div>
-          )}
-
-          {step === 4 && companySize && (
+          {step === 3 && companySize && (
             <div className="space-y-5">
               <div><h2 className="text-lg font-medium">Review setup</h2><p className="text-sm text-zinc-400">Submission is atomic: if any item fails validation, no company setup records are created.</p></div>
+              {salesSetupEnabled && <p className="rounded-lg border border-emerald-500/25 bg-emerald-500/[0.05] p-3 text-sm text-emerald-100">Next, Notifications will help you connect Square or register a nightly sales email for each store. Sales-based forecasts need received sales data; company setup alone does not connect your POS.</p>}
               <dl className="grid gap-3 text-sm sm:grid-cols-2"><div><dt className="text-zinc-500">Company size</dt><dd>{companySize}</dd></div><div><dt className="text-zinc-500">NAICS</dt><dd>{naicsCode}</dd></div></dl>
               <div className="grid gap-3 sm:grid-cols-2">
                 <ReviewList title={`Locations (${locations.length})`} items={locations.map((location) => `${location.name} — ${location.address}, ${location.city}, ${location.state} ${location.zipcode}; ${location.timezone}`)} empty="Skipped" />
@@ -543,10 +456,8 @@ export default function ScOnboardingWizard() {
                   {unassigned} {unassigned === 1 ? 'employee has' : 'employees have'} no store yet. You can finish setup and assign them from the schedule.
                 </p>
               )}
-              <ReviewList title={`Jobs (${jobs.length})`} items={jobs.map((job) => {
-                const certificates = job.certificates.map((certificate) => `${certificate.name} (${certificate.is_required ? 'mandatory' : 'optional'}, ${certificate.schedule_blocking ? 'blocks scheduling' : 'does not block scheduling'})`).join('; ')
-                return `${job.name} — ${job.credential_grace_days} grace day${job.credential_grace_days === 1 ? '' : 's'}; ${certificates || 'no certificates'}`
-              })} empty="None" />
+              {jobs.length > 0 && <ReviewList title={`Jobs from employee titles (${jobs.length})`} items={jobs.map((job) => job.name)} empty="None" />}
+              <p className="text-sm text-zinc-400">You can add jobs and certificate requirements from the schedule after setup.</p>
             </div>
           )}
 

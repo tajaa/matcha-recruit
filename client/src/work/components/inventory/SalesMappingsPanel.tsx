@@ -6,7 +6,7 @@ import {
   type InventoryItem, type SalesMapping,
 } from '../../api/inventory'
 
-export default function SalesMappingsPanel({ items, locationId, onHelp }: { items: InventoryItem[]; locationId?: string; onHelp?: () => void }) {
+export default function SalesMappingsPanel({ items, locationId, onHelp, onSaved }: { items: InventoryItem[]; locationId?: string; onHelp?: () => void; onSaved?: () => void }) {
   const { toast } = useToast()
   const [mappings, setMappings] = useState<SalesMapping[]>([])
   const [soldName, setSoldName] = useState('')
@@ -40,6 +40,7 @@ export default function SalesMappingsPanel({ items, locationId, onHelp }: { item
       setKind('direct')
       setComponents([{ item_id: '', quantity_per_sale: '1', unit: '' }])
       load()
+      onSaved?.()
       toast('Sales mapping saved', 'success')
     } catch {
       toast('Failed to save sales mapping', 'error')

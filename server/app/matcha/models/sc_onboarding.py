@@ -80,7 +80,9 @@ class ScOnboardingComplete(ScOnboardingModel):
     company: ScCompanySetup
     locations: list[ScLocationImport] = Field(default_factory=list, max_length=500)
     employees: list[ScEmployeeImport] = Field(default_factory=list, max_length=500)
-    jobs: list[ScJobSetup] = Field(min_length=1, max_length=100)
+    # The wizard derives one job per distinct roster title, or none when the
+    # optional employee import is skipped. Match the 500-row roster limit.
+    jobs: list[ScJobSetup] = Field(max_length=500)
 
 
 class ScOnboardingStatus(ScOnboardingModel):

@@ -196,3 +196,6 @@ docs/references/handbooks/sparksuite-handbook/
 secrets/*
 !secrets/.gitignore
 !secrets/.gitkeep
+
+# Dedicated Espresso recap scene bundle (built into the media image).
+client/dist-recap/

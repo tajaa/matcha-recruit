@@ -1,4 +1,5 @@
-import { Button } from '../ui'
+import { AdminButton as Button, AdminButton } from './AdminUI'
+import { AdminTab, AdminTabBar } from './AdminTabs'
 import SpecialtyFilterSelect from './jurisdiction/SpecialtyFilterSelect'
 import type { Props, RowContext, ViewMode } from './JurisdictionDetailPanel/types'
 import { getCategoryLabel } from './JurisdictionDetailPanel/helpers'
@@ -52,16 +53,16 @@ export default function JurisdictionDetailPanel({ id, city, state, categoriesMis
           <p className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium mb-1.5">Metro Group</p>
           <div className="flex flex-wrap gap-1.5">
             {detail.parent_id && onNavigate && (
-              <button type="button" onClick={() => onNavigate(detail.parent_id!)}
-                className="text-[11px] text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded hover:bg-amber-500/20 transition-colors">
+              <AdminButton type="button" onClick={() => onNavigate(detail.parent_id!)}
+                className="text-amber-400" variant="ghost">
                 Parent ↑
-              </button>
+              </AdminButton>
             )}
             {detail.children.map((c) => (
-              <button key={c.id} type="button" onClick={() => onNavigate?.(c.id)}
-                className="text-[11px] text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded hover:bg-blue-500/20 transition-colors">
+              <AdminButton key={c.id} type="button" onClick={() => onNavigate?.(c.id)}
+                className="text-blue-400" variant="ghost">
                 {c.city}, {c.state}
-              </button>
+              </AdminButton>
             ))}
           </div>
         </div>
@@ -118,7 +119,7 @@ export default function JurisdictionDetailPanel({ id, city, state, categoriesMis
         <>
           {/* ── Category filter strip ── */}
           {filteredReqs.length > 0 && (viewMode === 'requirements' || viewMode === 'hierarchy') && (
-            <div className="flex flex-wrap gap-1 mb-3">
+            <AdminTabBar className="mb-3">
               <button
                 onClick={() => setCategoryFilter(null)}
                 className={`text-[10px] px-2 py-1 rounded transition-colors ${
@@ -128,17 +129,15 @@ export default function JurisdictionDetailPanel({ id, city, state, categoriesMis
                 All ({filteredReqs.length})
               </button>
               {availableCategories.map(({ cat, count, label }) => (
-                <button
+                <AdminTab
                   key={cat}
                   onClick={() => setCategoryFilter(categoryFilter === cat ? null : cat)}
-                  className={`text-[10px] px-2 py-1 rounded transition-colors ${
-                    categoryFilter === cat ? 'bg-zinc-700 text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'
-                  }`}
+                 active={categoryFilter === cat}
                 >
                   {label} ({count})
-                </button>
+                </AdminTab>
               ))}
-            </div>
+            </AdminTabBar>
           )}
 
           {/* ── Requirements view ── */}

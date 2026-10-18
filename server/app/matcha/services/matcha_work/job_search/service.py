@@ -417,6 +417,8 @@ async def delete_search(search_id: UUID, user_id: UUID) -> dict:
     Tasks goes too."""
     async with connection_or_direct() as conn, conn.transaction():
         await owned_search(conn, search_id, user_id, lock=True)
+        from ..recaps.scope import revoke_source
+        await revoke_source(conn, "jobs", search_id)
         await conn.execute("DELETE FROM mw_job_leads WHERE search_id = $1", search_id)
         await conn.execute(
             "DELETE FROM mw_project_agent_runs WHERE job_search_id = $1 AND kind = 'job_search'",
@@ -580,6 +582,8 @@ async def widen(search_id: UUID, user_id: UUID):
             raise JobSearchError("Only a finished or cancelled search can show more matches.", 409)
         if fit_floor(search) != ranking.FIT_FLOOR:
             raise JobSearchError("This search already shows its 3/5 matches.", 409)
+        from ..recaps.scope import before_job_restart
+        await before_job_restart(conn, search_id)
         try:
             search = await conn.fetchrow(
                 """UPDATE mw_job_searches
@@ -594,6 +598,8 @@ async def widen(search_id: UUID, user_id: UUID):
             )
         except asyncpg.UniqueViolationError as exc:
             raise JobSearchError("Another job search is running. Try again when it finishes.", 409) from exc
+        from ..recaps.scope import register_job
+        await register_job(conn, search)
     return search, token
 
 
@@ -622,6 +628,8 @@ async def requeue_approach(search_id: UUID, lead_id: UUID, user_id: UUID):
             "UPDATE mw_job_leads SET approach_status = 'queued', updated_at = NOW() WHERE id = $1",
             lead_id,
         )
+        from ..recaps.scope import before_job_restart
+        await before_job_restart(conn, search_id)
         try:
             search = await conn.fetchrow(
                 """UPDATE mw_job_searches
@@ -637,4 +645,6 @@ async def requeue_approach(search_id: UUID, lead_id: UUID, user_id: UUID):
             )
         except asyncpg.UniqueViolationError as exc:
             raise JobSearchError("Another job search is running. Try again when it finishes.", 409) from exc
+        from ..recaps.scope import register_job
+        await register_job(conn, search)
     return search, token

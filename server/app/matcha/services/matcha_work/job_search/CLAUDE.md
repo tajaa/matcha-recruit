@@ -314,3 +314,12 @@ call is a 409 `email_draft_missing` carrying the job as it is now. The pane
 says so, and Draft email is the person's own click to make a new one. Draft
 email sends no body, and with no body the endpoint behaves as before (an older
 Mac build's Edit draft still recreates a missing draft).
+
+## Optional web recaps
+
+`recap_generation` identifies a new enabled search execution. Accepted widen or
+approach restart freezes the old resting recap source before mutable results
+change, then enrolls a new generation under the existing source lock. Ordinary
+worker retries/batches keep the generation. Phase evidence includes dispatch
+epoch fencing. Completion mail ownership is durable; deletion revokes recaps.
+Flags default off; see `docs/ops/ESPRESSO_RECAPS.md`.

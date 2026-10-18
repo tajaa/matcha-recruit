@@ -1,6 +1,11 @@
-import { describe, expect, it } from 'vitest'
-import type { SalesLine } from '../../api/inventory'
-import { buildCommitLine, isLineValid, toDraftLine } from './SalesImportModal'
+import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { InventoryItem, SalesLine } from '../../api/inventory'
+import SalesImportModal, { buildCommitLine, isLineValid, toDraftLine } from './SalesImportModal'
+
+const mock = vi.hoisted(() => ({ getSalesImport: vi.fn(), commitSales: vi.fn() }))
+vi.mock('../../api/inventory', () => ({ getSalesImport: mock.getSalesImport, commitSales: mock.commitSales }))
 
 const recipe: SalesLine = {
   sold_name: 'Vanilla latte',
@@ -93,5 +98,33 @@ describe('SalesImportModal mapping payloads', () => {
     draft.components = [draft.components[0]]
     const payload = buildCommitLine(draft, 'loc-1')
     expect(payload.new_mapping?.kind).toBe('direct')
+  })
+})
+
+describe('saved import store scope', () => {
+  beforeEach(() => {
+    mock.commitSales.mockResolvedValue({ unmapped: 0, items_affected: 1 })
+  })
+
+  it.each(['B', null])('uses the saved import store (%s) for stock choices and committed mappings', async (location) => {
+    const user = userEvent.setup()
+    mock.getSalesImport.mockResolvedValue({
+      id: 'draft', location_id: location, business_date: '2026-10-16', source: 'email', filename: 'sales.csv',
+      lines: [{ sold_name: 'Coffee', quantity: 1, status: 'unmapped', components: [] }],
+    })
+    const items = ['A', 'B', null].map((store) => ({
+      id: store ?? 'shared', name: `${store ?? 'shared'} beans`, location_id: store, unit: 'kg',
+    })) as InventoryItem[]
+    render(<SalesImportModal open onClose={vi.fn()} items={items} locationId="A" draftImportId="draft" onCommitted={vi.fn()} />)
+    await user.click(await screen.findByRole('button', { name: 'Stock item' }))
+    expect(screen.queryByRole('button', { name: 'A beans' })).not.toBeInTheDocument()
+    if (!location) expect(screen.queryByRole('button', { name: 'B beans' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'shared beans' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: `${location ?? 'shared'} beans` }))
+    await user.click(screen.getByRole('button', { name: 'Commit sales' }))
+    await waitFor(() => expect(mock.commitSales).toHaveBeenCalledWith(expect.objectContaining({
+      import_id: 'draft', location_id: location ?? undefined,
+      lines: [expect.objectContaining({ new_mapping: expect.objectContaining({ location_id: location }) })],
+    })))
   })
 })

@@ -302,6 +302,10 @@ class Settings:
     # Espresso Tasks (`services/matcha_work/agent_tasks/`). Off until the Mac
     # Tasks tab ships; admins can use it either way.
     espresso_tasks_enabled: bool = False
+    espresso_recaps_enabled: bool = False
+    espresso_recaps_capture_enabled: bool = False
+    espresso_recaps_allowed_users: str = ""
+    espresso_recaps_render_bundle: str = "/app/recap-render"
     # Tenant-only distribution that carries the shared origin/WAF/secret config.
     cappe_cf_tenant_distribution_id: Optional[str] = None
     # Connection group the tenants route through.
@@ -345,6 +349,8 @@ _settings: Optional[Settings] = None
 
 def load_settings() -> Settings:
     global _settings
+    if os.getenv("ESPRESSO_RECAPS_WORKER") == "1":
+        return load_recap_worker_settings()
     load_dotenv()
 
     # AWS Secrets Manager override: when AWS_SECRETS_MANAGER_SECRET_ID is set,
@@ -504,6 +510,10 @@ def load_settings() -> Settings:
         in ("1", "true", "yes"),
         espresso_tasks_enabled=os.getenv("ESPRESSO_TASKS_ENABLED", "").strip().lower()
         in ("1", "true", "yes"),
+        espresso_recaps_enabled=os.getenv("ESPRESSO_RECAPS_ENABLED", "").strip().lower() in ("1", "true", "yes"),
+        espresso_recaps_capture_enabled=os.getenv("ESPRESSO_RECAPS_CAPTURE_ENABLED", "").strip().lower() in ("1", "true", "yes"),
+        espresso_recaps_allowed_users=os.getenv("ESPRESSO_RECAPS_ALLOWED_USERS", ""),
+        espresso_recaps_render_bundle=os.getenv("ESPRESSO_RECAPS_RENDER_BUNDLE", "/app/recap-render"),
         cappe_cf_tenant_distribution_id=os.getenv("CAPPE_CF_TENANT_DISTRIBUTION_ID"),
         cappe_cf_connection_group_id=os.getenv("CAPPE_CF_CONNECTION_GROUP_ID"),
         cappe_cf_routing_endpoint=os.getenv("CAPPE_CF_ROUTING_ENDPOINT"),
@@ -527,4 +537,31 @@ def get_settings() -> Settings:
     global _settings
     if _settings is None:
         raise RuntimeError("Settings not initialized. Call load_settings() first.")
+    return _settings
+
+
+def load_recap_worker_settings() -> Settings:
+    """Restricted media bootstrap: no AI, JWT, mail or calendar credentials.
+
+    Only the dedicated recap worker uses this mode; its Celery registry is
+    restricted to media tasks. It cannot authenticate API requests.
+    """
+    import secrets
+    global _settings
+    database_url = os.getenv("DATABASE_URL", "").strip().strip('"')
+    private_bucket = os.getenv("S3_PRIVATE_BUCKET", "").strip()
+    if not database_url or not private_bucket:
+        raise ValueError("Media worker requires DATABASE_URL and S3_PRIVATE_BUCKET")
+    _settings = Settings(
+        database_url=database_url, database_ssl=os.getenv("DATABASE_SSL", "require"),
+        gemini_api_key=None, openai_api_key=None, openai_luna_model=None,
+        serp_api_key=None, use_vertex_ai=False, vertex_ai_project=None, vertex_ai_location="",
+        live_model="", analysis_model="", voice="", port=0, search_api_key=None,
+        jwt_secret_key=secrets.token_urlsafe(32), chat_jwt_secret_key=secrets.token_urlsafe(32),
+        aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"), aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
+        s3_private_bucket=private_bucket, s3_region=os.getenv("S3_REGION", "us-west-1"),
+        espresso_recaps_enabled=os.getenv("ESPRESSO_RECAPS_ENABLED", "").lower() in ("1", "true", "yes"),
+        espresso_recaps_allowed_users=os.getenv("ESPRESSO_RECAPS_ALLOWED_USERS", ""),
+        espresso_recaps_render_bundle=os.getenv("ESPRESSO_RECAPS_RENDER_BUNDLE", "/app/recap-render"),
+    )
     return _settings

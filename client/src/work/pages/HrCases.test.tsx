@@ -117,6 +117,26 @@ beforeEach(() => {
 })
 
 describe('HrCases', () => {
+  it('opens the draft action form directly from a flagged card without taking action', async () => {
+    api.listHrCases.mockResolvedValue({ columns: COLUMNS, cases: [hrCase()] })
+    api.getHrCase.mockResolvedValue(hrCase())
+    renderAt('/work/hr-cases')
+    fireEvent.click(await screen.findByRole('button', { name: 'Draft action for HRC-2026-0001' }))
+    const confirm = await screen.findByRole('button', { name: 'Confirm violation and draft' })
+    expect(confirm).toBeDisabled()
+    expect(screen.getByText(/Nothing is approved or sent to the employee here/)).toBeInTheDocument()
+    expect(api.suggestHrCaseDraft).not.toHaveBeenCalled()
+    expect(api.startHrCaseDraft).not.toHaveBeenCalled()
+    expect(api.decideHrCase).not.toHaveBeenCalled()
+  })
+
+  it('does not offer a new draft action for a case already in HR review', async () => {
+    api.listHrCases.mockResolvedValue({ columns: COLUMNS, cases: [hrCase({ stage: 'hr_review', column: 'review', draft_file_id: 'f1' })] })
+    renderAt('/work/hr-cases')
+    await screen.findByRole('region', { name: 'HR review' })
+    expect(screen.queryByRole('button', { name: 'Draft action for HRC-2026-0001' })).not.toBeInTheDocument()
+  })
+
   it('advances a flagged incident by requesting a manager write-up', async () => {
     api.listHrCases.mockResolvedValue({ columns: COLUMNS, cases: [hrCase()] })
     api.getHrCase.mockResolvedValue(hrCase())
@@ -131,7 +151,6 @@ describe('HrCases', () => {
     api.getHrCase.mockResolvedValue(hrCase())
     api.suggestHrCaseDraft.mockResolvedValue(hrCase())
     renderAt('/work/hr-cases/c1')
-    fireEvent.click(await screen.findByRole('button', { name: 'Review policy violation' }))
     await screen.findByRole('option', { name: 'Test Employee' })
     const confirm = screen.getByRole('button', { name: 'Confirm violation and draft' }) as HTMLButtonElement
     expect(confirm.disabled).toBe(true)
@@ -184,7 +203,6 @@ describe('HrCases', () => {
     api.getHrCase.mockResolvedValue(hrCase())
     api.suggestHrCaseDraft.mockRejectedValue(new Error('Protected sick leave (CA 246.5).'))
     renderAt('/work/hr-cases/c1')
-    fireEvent.click(await screen.findByRole('button', { name: 'Review policy violation' }))
     await screen.findByRole('option', { name: 'Test Employee' })
     fireEvent.change(screen.getByLabelText('Employee for this action'), { target: { value: 'e1' } })
     fireEvent.change(screen.getByLabelText(/Occurrence dates/), { target: { value: '2026-09-03' } })

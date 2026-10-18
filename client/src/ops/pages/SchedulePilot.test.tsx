@@ -206,6 +206,12 @@ beforeEach(() => {
 })
 
 describe('SchedulePilot — the workspace', () => {
+  it('keeps the onboarding handoff on Notifications, including on mobile with Huume enabled', () => {
+    renderPilot({ url: '/ops/schedule/editor?setup=sales&location=loc1' })
+    expect(screen.getByRole('region', { name: 'Schedule notifications' })).toBeInTheDocument()
+    expect(within(screen.getByRole('tablist', { name: 'Workspace panes' })).getByRole('tab', { name: 'Notifications' })).toHaveAttribute('aria-selected', 'true')
+  })
+
   it('mounts the inputs rail, the board and the Huume thread at once', async () => {
     renderPilot()
 

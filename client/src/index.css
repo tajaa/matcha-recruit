@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./styles/admin.css";
 @plugin "@tailwindcss/typography";
 
 /* The marketing kit's three families (components/marketing/kit/theme.ts),
@@ -114,10 +115,6 @@ html, body {
    shorter-than-viewport page shows app chrome instead of a flash of white. */
 html[data-app-shell-bg] {
   background-color: var(--color-vsc-bg);
-}
-
-html[data-app-shell-bg="admin"] {
-  background-color: #3f3f46;
 }
 
 html[data-app-shell-bg="werk"] {

@@ -21,7 +21,7 @@ from app.matcha.models.inventory import (
     AuditCommit, AuditCommitResult, InventoryItemCreate, InventoryItemOut, InventoryItemPatch,
     ItemListResponse, MovementListResponse, MovementOut, OrderAction, OrderCreate,
     OrderListResponse, OrderOut, ReceiptCommit, ReceiptCommitResult, VoiceCountDraft,
-    SalesCommit, SalesCommitResult, SalesMappingUpsert, SalesSourceUpsert,
+    SalesCommit, SalesCommitResult, SalesMappingUpsert, SalesSourceUpsert, SalesSetupStatus,
 )
 from app.matcha.services._shared.uploads import read_wav_or_400
 from app.matcha.services.inventory import audits as audits_service
@@ -33,6 +33,7 @@ from app.matcha.services.inventory import sales_mappings as sales_mappings_servi
 from app.matcha.services.inventory import sales_parse as sales_parse_service
 from app.matcha.services.inventory import expected as expected_service
 from app.matcha.services.inventory import voice_audit
+from app.matcha.services.inventory.sales_setup import sales_setup_status
 from app.matcha.services.inventory.matching import normalize_name
 from app.matcha.services.inventory.reorder import suggest_order
 from app.matcha.services.inventory._codec import decode_jsonb
@@ -580,6 +581,18 @@ async def delete_sales_mapping(
     if row is None:
         raise HTTPException(404, "Sales mapping not found.")
     return {"id": row["id"], "deleted": True}
+
+
+@router.get("/sales/setup", response_model=SalesSetupStatus)
+async def get_sales_setup(
+    location_id: UUID, company_id: UUID = Depends(get_client_company_id),
+    _=Depends(require_admin_or_client), _gate=Depends(require_feature("sales_intake")),
+):
+    async with get_connection() as conn:
+        status = await sales_setup_status(conn, company_id=company_id, location_id=location_id)
+    if status is None:
+        raise HTTPException(404, "Location not found.")
+    return status
 
 
 @router.get("/sales/sources")

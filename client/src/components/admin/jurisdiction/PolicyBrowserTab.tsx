@@ -1,3 +1,5 @@
+/* eslint-disable react-hooks/set-state-in-effect -- Effects intentionally synchronize this tool with loaded data, URL selections, and preview inputs. */
+import { AdminInput, AdminTable } from '../AdminUI'
 import { useEffect, useState, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../../../api/client'
@@ -157,12 +159,11 @@ export default function PolicyBrowserTab() {
       </div>
 
       {/* Search */}
-      <input
+      <AdminInput
         type="text"
         placeholder="Search categories..."
         value={search}
         onChange={(e) => setSearch(e.target.value)}
-        className="w-full bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-200 text-sm px-3 py-2 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500"
       />
 
       {/* Domain sections */}
@@ -258,18 +259,17 @@ export default function PolicyBrowserTab() {
             <>
               {detail.requirements.length > 10 && (
                 <div className="px-4 pt-3">
-                  <input
+                  <AdminInput
                     type="text"
                     placeholder="Search requirements..."
                     value={detailSearch}
                     onChange={(e) => setDetailSearch(e.target.value)}
-                    className="w-full bg-zinc-900 border border-zinc-700 rounded text-zinc-300 text-xs px-2.5 py-1.5 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500"
                   />
                 </div>
               )}
               <div className="max-h-[60vh] overflow-y-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-zinc-900/50 text-zinc-400 sticky top-0">
+                <AdminTable>
+                  <thead className="sticky top-0">
                     <tr>
                       {([
                         { key: 'state' as const, label: 'State' },
@@ -282,7 +282,7 @@ export default function PolicyBrowserTab() {
                       ]).map((col, i) => (
                         <th
                           key={i}
-                          className={`text-left py-2 px-3 font-medium text-[10px] uppercase tracking-wide ${col.key ? 'cursor-pointer hover:text-zinc-200 select-none' : ''}`}
+                          className={` text-left ${col.key ? 'cursor-pointer hover:text-zinc-200 select-none' : ''}`}
                           onClick={col.key ? () => handleSort(col.key!) : undefined}
                         >
                           {col.label}
@@ -293,20 +293,20 @@ export default function PolicyBrowserTab() {
                       ))}
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-zinc-800">
+                  <tbody >
                     {filteredReqs.map((r) => (
                       <tr key={r.id} className="hover:bg-zinc-800/30">
-                        <td className="py-2 px-3 font-mono font-bold text-zinc-200 whitespace-nowrap">{r.state}</td>
-                        <td className="py-2 px-3 text-zinc-400 text-xs">{r.city ?? '—'}</td>
-                        <td className="py-2 px-3 text-zinc-500 text-xs">{r.jurisdiction_level}</td>
-                        <td className="py-2 px-3 text-zinc-200 max-w-xs truncate" title={r.title}>{r.title}</td>
-                        <td className="py-2 px-3 text-zinc-400 text-xs whitespace-nowrap">{r.current_value ?? '—'}</td>
-                        <td className="py-2 px-3"><TierBadge tier={r.source_tier} /></td>
-                        <td className="py-2 px-3 text-zinc-500 text-[11px] whitespace-nowrap">{fmtDate(r.last_verified_at)}</td>
+                        <td className="font-mono text-zinc-200 whitespace-nowrap">{r.state}</td>
+                        <td className="text-zinc-400">{r.city ?? '—'}</td>
+                        <td className="text-zinc-500">{r.jurisdiction_level}</td>
+                        <td className="text-zinc-200 max-w-xs truncate" title={r.title}>{r.title}</td>
+                        <td className="text-zinc-400 whitespace-nowrap">{r.current_value ?? '—'}</td>
+                        <td ><TierBadge tier={r.source_tier} /></td>
+                        <td className="text-zinc-500 whitespace-nowrap">{fmtDate(r.last_verified_at)}</td>
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                </AdminTable>
               </div>
               {detailSearch && filteredReqs.length === 0 && (
                 <p className="text-xs text-zinc-600 text-center py-4">No requirements match "{detailSearch}"</p>

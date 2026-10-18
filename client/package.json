@@ -11,7 +11,8 @@
     "test": "vitest",
     "test:ui": "vitest --ui",
     "test:run": "vitest run",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "build:recaps": "vite build --config vite.recap.config.ts"
   },
   "dependencies": {
     "@dagrejs/dagre": "^2.0.4",

@@ -187,8 +187,9 @@ async def advance(spec: ChainSpec, row_id: UUID, token: UUID, outcome: PhaseOutc
         phase_sql = f"\n                   {column} = COALESCE($10::text, {column}),"
         args.append(outcome.phase)
     async with connection_or_direct() as conn:
-        row = await conn.fetchrow(
-            f"""UPDATE {spec.table}
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                f"""UPDATE {spec.table}
                SET status = $3, dispatch_token = $4, lease_until = NULL,
                    attempts = CASE WHEN $5 THEN attempts ELSE 0 END,
                    progress = progress || $6::jsonb,
@@ -198,8 +199,12 @@ async def advance(spec: ChainSpec, row_id: UUID, token: UUID, outcome: PhaseOutc
                    updated_at = NOW()
                WHERE id = $1 AND dispatch_token = $2
                RETURNING id""",
-            *args,
-        )
+                *args,
+            )
+            if row is not None:
+                from ..recaps.observe import accepted
+                await accepted(conn, spec.table, row_id, token, phase=outcome.phase or outcome.status,
+                               terminal=terminal and outcome.status != "waiting", retry=retry)
         if row is not None and terminal and spec.on_terminal is not None:
             await spec.on_terminal(conn, row_id)
     if row is None:
