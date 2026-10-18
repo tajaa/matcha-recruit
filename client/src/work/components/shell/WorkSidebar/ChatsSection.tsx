@@ -1,12 +1,13 @@
-import { useState } from 'react'
 import { Link, type NavigateFunction } from 'react-router-dom'
-import { MessageSquare, ChevronDown, Pencil, Plus, Users, Archive } from 'lucide-react'
+import { MessageSquare, Pencil, Plus, Users, Archive } from 'lucide-react'
 import type { MWThread } from '../../../types'
 import { formatDateTimePacific } from '../../../../utils/dateFormat'
 import { relativeTime, shortDate } from '../../../../utils/format'
 import { chatLabel } from '../../../utils/chatLabel'
 import type { SidebarRename } from './useSidebarRename'
 import RenameInput from './RenameInput'
+import { EmptyRow, SectionAction, SidebarSection } from './SidebarSection'
+import { useCappedList } from './useCappedList'
 
 // Default collapsed to the 5 most recent — a "Show more" chevron expands in
 // place. A hard cap (not "show ALL ever") still applies once expanded so a
@@ -44,121 +45,81 @@ export default function ChatsSection({
   onArchive,
 }: Props) {
   const { renaming, startRename } = rename
-  const [expanded, setExpanded] = useState(false)
+  const matching = threads.filter((t) => t.title.toLowerCase().includes(filter.toLowerCase()))
+  const { visible, toggle } = useCappedList(matching.slice(0, MAX_VISIBLE), COLLAPSED_VISIBLE, {
+    filtering: !!filter,
+    keep: (t) => isActive(`${base}/${t.id}`),
+  })
+
   return (
-    <div className="mt-1">
-      <button
-        onClick={onToggle}
-        className="flex items-center justify-between w-full px-2.5 py-1.5 text-[11px] font-medium uppercase tracking-wider text-w-dim transition-colors"
-      >
-        <span className="flex items-center gap-1.5">
-          <MessageSquare size={12} />
-          Chats
-        </span>
-        <div className="flex items-center gap-1">
-          <span
-            onClick={(e) => { e.stopPropagation(); onNewChat() }}
-            className="hover:text-w-accent cursor-pointer"
-            title="New chat"
-            aria-label="New chat"
-          >
-            <Plus size={12} />
-          </span>
-          <ChevronDown size={12} className={`transition-transform ${chatsOpen || filter ? '' : '-rotate-90'}`} />
+    <SidebarSection
+      label="Chats"
+      open={chatsOpen || !!filter}
+      onToggle={onToggle}
+      actions={<SectionAction icon={Plus} label="New chat" onClick={onNewChat} />}
+    >
+      {matching.length === 0 && <EmptyRow>{filter ? 'No chats match' : 'No chats yet'}</EmptyRow>}
+      {visible.map((t) => (
+        <div
+          key={t.id}
+          className={`group flex w-full items-center gap-2 rounded-md px-2.5 py-1 text-[13px] transition-colors ${
+            isActive(`${base}/${t.id}`)
+              ? 'bg-w-surface2 font-medium text-white'
+              : 'text-w-dim hover:bg-w-surface2/50 hover:text-w-text'
+          }`}
+        >
+          <MessageSquare size={13} className="shrink-0 text-w-faint" strokeWidth={1.8} />
+          {renaming?.type === 'thread' && renaming.id === t.id ? (
+            <RenameInput rename={rename} />
+          ) : (
+            <>
+              <Link to={`${base}/${t.id}`} className="min-w-0 flex-1 truncate text-left" title={t.title}>
+                {chatLabel(t.title)}
+              </Link>
+              {t.collaborator_count > 0 && (
+                <span title="Shared" className="shrink-0 text-w-faint">
+                  <Users size={11} />
+                </span>
+              )}
+              {/* When, until hover swaps it for the row's actions. */}
+              <span
+                className="shrink-0 text-[10px] font-normal text-w-faint group-focus-within:hidden group-hover:hidden"
+                title={`Created ${formatDateTimePacific(t.created_at)}`}
+              >
+                {relativeTime(t.updated_at ?? t.created_at, { empty: '', justNowLabel: 'now', maxRelativeDays: 7, absolute: shortDate }).replace(' ago', '')}
+              </span>
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); startRename('thread', t.id, t.title) }}
+                className="hidden shrink-0 p-0.5 text-w-faint hover:text-w-text group-focus-within:block group-hover:block"
+                title="Rename"
+                aria-label={`Rename ${chatLabel(t.title)}`}
+              >
+                <Pencil size={11} />
+              </button>
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); onArchive(t) }}
+                className="hidden shrink-0 p-0.5 text-w-faint hover:text-w-text group-focus-within:block group-hover:block"
+                title="Archive"
+                aria-label={`Archive ${chatLabel(t.title)}`}
+              >
+                <Archive size={11} />
+              </button>
+            </>
+          )}
         </div>
-      </button>
-      {(chatsOpen || !!filter) && (() => {
-        const filtered = threads.filter((t) => t.title.toLowerCase().includes(filter.toLowerCase()))
-
-        if (filtered.length === 0) {
-          return <p className="px-2.5 py-1 text-[11px] text-w-faint">{filter ? 'No chats match' : 'No chats yet'}</p>
-        }
-
-        // Filtering implies the admin is searching for something specific —
-        // the 5-row collapse only applies to the unfiltered recent list.
-        const limit = filter ? MAX_VISIBLE : (expanded ? MAX_VISIBLE : COLLAPSED_VISIBLE)
-        const visible = filtered.slice(0, limit)
-
-        return (
-          <div className="space-y-0.5 mt-0.5">
-            {visible.map((t) => (
-              <div
-                key={t.id}
-                className={`group w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition-colors ${
-                  isActive(`${base}/${t.id}`)
-                    ? 'bg-w-surface2 text-white font-medium'
-                    : 'text-w-dim hover:text-w-text hover:bg-w-surface2/50'
-                }`}
-              >
-                <MessageSquare size={14} className="text-w-dim shrink-0" strokeWidth={1.6} />
-                {renaming?.type === 'thread' && renaming.id === t.id ? (
-                  <RenameInput rename={rename} />
-                ) : (
-                  <>
-                    <Link to={`${base}/${t.id}`} className="flex-1 min-w-0 truncate text-left" title={t.title}>
-                      {chatLabel(t.title)}
-                    </Link>
-                    {t.collaborator_count > 0 && (
-                      <span title="Shared" className="shrink-0 text-w-faint">
-                        <Users size={11} />
-                      </span>
-                    )}
-                    {/* When, until hover swaps it for the row's actions. */}
-                    <span
-                      className="shrink-0 text-[10px] font-normal text-w-faint group-hover:hidden"
-                      title={`Created ${formatDateTimePacific(t.created_at)}`}
-                    >
-                      {relativeTime(t.updated_at ?? t.created_at, { empty: '', justNowLabel: 'now', maxRelativeDays: 7, absolute: shortDate }).replace(' ago', '')}
-                    </span>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); startRename('thread', t.id, t.title) }}
-                      className="hidden group-hover:block shrink-0 p-0.5 text-w-dim hover:text-w-text"
-                      title="Rename"
-                      aria-label={`Rename ${chatLabel(t.title)}`}
-                    >
-                      <Pencil size={11} />
-                    </button>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); onArchive(t) }}
-                      className="hidden group-hover:block shrink-0 p-0.5 text-w-dim hover:text-w-text"
-                      title="Archive"
-                      aria-label={`Archive ${chatLabel(t.title)}`}
-                    >
-                      <Archive size={11} />
-                    </button>
-                  </>
-                )}
-              </div>
-            ))}
-            {!filter && !expanded && filtered.length > COLLAPSED_VISIBLE && (
-              <button
-                onClick={() => setExpanded(true)}
-                className="w-full flex items-center gap-1 px-2.5 py-1 text-left text-[11px] text-w-faint hover:text-w-text transition-colors"
-              >
-                <ChevronDown size={11} />
-                Show {Math.min(filtered.length, MAX_VISIBLE) - COLLAPSED_VISIBLE} more
-              </button>
-            )}
-            {!filter && expanded && filtered.length > COLLAPSED_VISIBLE && (
-              <button
-                onClick={() => setExpanded(false)}
-                className="w-full flex items-center gap-1 px-2.5 py-1 text-left text-[11px] text-w-faint hover:text-w-text transition-colors"
-              >
-                <ChevronDown size={11} className="rotate-180" />
-                Show less
-              </button>
-            )}
-            {filtered.length > MAX_VISIBLE && (
-              <button
-                onClick={() => navigate(base)}
-                className="w-full px-2.5 py-1 text-left text-[11px] text-w-faint hover:text-w-text transition-colors"
-              >
-                Show all ({filtered.length})
-              </button>
-            )}
-          </div>
-        )
-      })()}
-    </div>
+      ))}
+      {toggle}
+      {matching.length > MAX_VISIBLE && (
+        <button
+          type="button"
+          onClick={() => navigate(base)}
+          className="w-full rounded px-2.5 py-1 text-left text-[11px] text-w-faint transition-colors hover:text-w-text"
+        >
+          All chats ({matching.length})
+        </button>
+      )}
+    </SidebarSection>
   )
 }
