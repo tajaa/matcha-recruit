@@ -1433,6 +1433,7 @@ export type AgentActionReceipt = {
 }
 
 export type AgentChatMetadata = {
+  recap_id?: string
   kind?:
     | 'agent_card_result' | 'agent_card_prompt' | 'agent_card_receipt'
     | 'agent_progress' | 'agent_result' | 'agent_receipt'
@@ -1964,3 +1965,22 @@ export type HrCaseVerification = {
   flag_hr_comments: boolean
   reading?: { employee_comments_text?: string | null; employee_signature_date?: string | null; available?: boolean }
 }
+
+// Private server-generated task recaps. Storage keys never reach the web API.
+export type RecapState = 'collecting' | 'waiting' | 'queued' | 'rendering' | 'ready' | 'failed' | 'skipped' | 'expired' | 'deleted'
+export type RecapEvent = {
+  schema_version: 1; kind: string; title: string; outcome: string; occurred_at: string
+  facts: { label: string; value: string }[]
+}
+export type RecapSummary = {
+  schema_version: 1; id: string; title: string; state: RecapState; outcome: string
+  created_at: string; ready_at: string | null; expires_at: string | null
+  duration_ms: number | null; can_retry: boolean; last_error_code: string | null
+}
+export type RecapDetail = RecapSummary & {
+  chapters: { label: string; start_ms: number }[]; transcript: RecapEvent[]
+  source_completed_at: string | null; sources: { kind: 'run' | 'research' | 'jobs'; id: string }[]
+}
+export type RecapPreferences = { enabled: boolean; email_enabled: boolean; available: boolean }
+export type RecapList = { recaps: RecapSummary[]; next_cursor: string | null }
+export type RecapPlayback = { video_url: string; poster_url: string; expires_in: number }

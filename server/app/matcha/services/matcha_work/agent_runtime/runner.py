@@ -34,6 +34,8 @@ from . import policy
 from .context import FrozenAction, RunContext, RunState
 from .registry import Ability, AgentTool, ToolOutput, declarations, offered_tools
 
+from ..recaps.scope import observe_run
+
 logger = logging.getLogger(__name__)
 
 # Effects whose outcome a result must not be written ahead of.
@@ -118,6 +120,7 @@ def _owner_of(abilities: Sequence[Ability]) -> dict[str, tuple[Ability, AgentToo
     return {tool.name: (ability, tool) for ability in abilities for tool in ability.tools}
 
 
+@observe_run
 async def run_agent(
     ctx: RunContext,
     *,

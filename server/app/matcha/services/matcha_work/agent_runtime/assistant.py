@@ -81,6 +81,14 @@ async def _own_addresses(conn, user_id: UUID, gmail) -> frozenset[str]:
 
 async def _post(run: dict, content: str, metadata: dict | None = None) -> None:
     async with connection_or_direct() as conn:
+        from ..recaps import scope, settings as recap_settings
+        if metadata and recap_settings.enabled():
+            try:
+                source = await scope.source_for_run(conn, run["id"])
+                if source:
+                    metadata = {**metadata, "recap_id": str(source["recap_id"])}
+            except Exception:
+                logger.info("recap link unavailable run=%s", run["id"])
         message = await persist_espresso_message(
             conn, run["company_id"], run["channel_id"], content, metadata=metadata,
         )

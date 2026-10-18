@@ -201,3 +201,12 @@ same cache layout. Once any reply text has been emitted, an interrupted Claude
 call ends with an SSE error, with available partial usage billed; it must never
 replay on Gemini. A disconnected client still uses the existing cancellation
 finalizer to account for the provider call.
+
+## Personal task recaps
+
+`recaps.py` exposes owner-only preferences, cursor library/status reads, detail,
+private playback, one manual render retry and deletion. `require_personal` gates
+every endpoint; service SQL also validates company/owner/account/source retention.
+Playback signs generated private assets for five minutes. Retry never runs an
+agent action. Feature-off reads handle a pre-migration schema. Deployment requires
+explicit schema approval and pilot configuration: `docs/ops/ESPRESSO_RECAPS.md`.

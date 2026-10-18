@@ -55,6 +55,9 @@ class RunOwner:
     # The workspace's token budget is charged here, not by the owner.
     account: Callable[[dict], Awaitable[None]]
     role: str = "client"
+    dispatch_token: UUID | None = None
+    recap_generation: int | None = None
+    recap_round: int | None = None
 
     def __post_init__(self) -> None:
         if self.kind not in get_args(RunKind):
@@ -100,7 +103,7 @@ class NoteProgress:
 
 async def _insert_run(owner: RunOwner, phase: str, abilities: list[str]) -> UUID:
     async with connection_or_direct() as conn:
-        return await conn.fetchval(
+        run_id = await conn.fetchval(
             f"""INSERT INTO mw_project_agent_runs
                    (company_id, requested_by, agent_key, kind, prompt, status, started_at,
                     model, surface, abilities, {owner.fk_column})
@@ -109,6 +112,16 @@ async def _insert_run(owner: RunOwner, phase: str, abilities: list[str]) -> UUID
             owner.company_id, owner.user_id, f"{phase}:{owner.owner_id}", owner.model, abilities,
             owner.owner_id,
         )
+
+        from ..recaps.scope import phase_run
+        from ..recaps import settings as recap_settings
+        if recap_settings.enabled():
+            try:
+                async with conn.transaction():
+                    await phase_run(conn, run_id, owner)
+            except Exception:
+                logger.warning("recap phase binding missing run=%s", run_id, exc_info=True)
+        return run_id
 
 
 async def _account(owner: RunOwner, stats: dict) -> None:

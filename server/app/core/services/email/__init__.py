@@ -16,5 +16,5 @@ The package is split into:
 inheritance. All 35 external importers see the same surface as the
 original flat `email.py`.
 """
-from .client import EmailService, get_email_service  # noqa: F401
+from .client import EmailService, SendResult, get_email_service  # noqa: F401
 from ._shared import _is_reserved_test_domain  # noqa: F401

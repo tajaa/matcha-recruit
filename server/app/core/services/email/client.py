@@ -4,6 +4,7 @@ import html
 import httpx
 import json
 import logging
+from dataclasses import dataclass
 from datetime import date, datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -26,6 +27,32 @@ from ._shared import (  # noqa: F401
     _RESERVED_EXAMPLE_DOMAINS,
     _RESERVED_TLDS,
 )
+
+
+@dataclass(frozen=True)
+class SendResult:
+    """What became of one send (`EmailService.send_with_result`): `sent`
+    (accepted), `unknown` (the provider may have it, so it is never resent),
+    `retry_wait` (certainly not sent; try later), `failed` or `suppressed`."""
+    state: str
+    provider: Optional[str] = None
+    message_id: Optional[str] = None
+
+
+def send_result(response: httpx.Response, provider: str) -> SendResult:
+    """A provider's answer as a `SendResult`. Anything that may have been
+    accepted (a 5xx, a timeout or conflict) is `unknown`, not a failure."""
+    if 200 <= response.status_code < 300:
+        message_id = response.headers.get("x-message-id")
+        if provider == "gmail":
+            try:
+                message_id = response.json().get("id")
+            except ValueError:
+                pass  # Acceptance is authoritative even if the body is lost.
+        return SendResult("sent", provider, message_id)
+    if response.status_code >= 500 or response.status_code in (408, 409):
+        return SendResult("unknown", provider)
+    return SendResult("retry_wait" if response.status_code == 429 else "failed", provider)
 
 
 from .auth import AuthEmailMixin
@@ -107,6 +134,147 @@ class EmailService(
             resp.raise_for_status()
             return resp.json()["access_token"]
 
+    def _mime_raw(
+        self,
+        to_email: str,
+        to_name: Optional[str],
+        subject: str,
+        html_content: str,
+        text_content: Optional[str] = None,
+        attachments: Optional[list[dict]] = None,
+        extra_headers: Optional[dict[str, str]] = None,
+        from_name: Optional[str] = None,
+    ) -> str:
+        """The base64url RFC 822 message the Gmail API sends."""
+        msg = MIMEMultipart("alternative") if not attachments else MIMEMultipart("mixed")
+        msg["Subject"] = subject
+        msg["From"] = f"{from_name or self.from_name} <{self.from_email}>"
+        msg["To"] = f"{to_name} <{to_email}>" if to_name else to_email
+        if extra_headers:
+            for name, value in extra_headers.items():
+                msg[name] = value
+
+        if attachments:
+            alt = MIMEMultipart("alternative")
+            if text_content:
+                alt.attach(MIMEText(text_content, "plain"))
+            alt.attach(MIMEText(html_content, "html"))
+            msg.attach(alt)
+            for att in attachments:
+                part = MIMEBase("application", "octet-stream")
+                part.set_payload(base64.b64decode(att["content"]))
+                encoders.encode_base64(part)
+                part.add_header("Content-Disposition", att.get("disposition", "attachment"), filename=att["filename"])
+                msg.attach(part)
+        else:
+            if text_content:
+                msg.attach(MIMEText(text_content, "plain"))
+            msg.attach(MIMEText(html_content, "html"))
+
+        return base64.urlsafe_b64encode(msg.as_bytes()).decode()
+
+    def _mailersend_payload(
+        self,
+        to_email: str,
+        to_name: Optional[str],
+        subject: str,
+        html_content: str,
+        text_content: Optional[str] = None,
+        attachments: Optional[list[dict]] = None,
+        from_name: Optional[str] = None,
+    ) -> dict:
+        """The MailerSend `/email` request body."""
+        payload = {
+            "from": {"email": self.mailersend_from_email, "name": from_name or self.from_name},
+            "to": [{"email": to_email, "name": to_name or to_email}],
+            "subject": subject,
+            "html": html_content,
+            "text": text_content or "",
+        }
+        if attachments:
+            # MailerSend expects {content: <base64>, filename, disposition} —
+            # same shape callers already build for the Gmail MIME path.
+            payload["attachments"] = [
+                {
+                    "content": att["content"],
+                    "filename": att["filename"],
+                    "disposition": att.get("disposition", "attachment"),
+                }
+                for att in attachments
+            ]
+        return payload
+
+    async def send_with_result(
+        self,
+        to_email: str,
+        to_name: Optional[str],
+        subject: str,
+        html_content: str,
+        text_content: Optional[str] = None,
+        from_name: Optional[str] = None,
+    ) -> "SendResult":
+        """Gmail first, MailerSend only when Gmail certainly did not take it.
+
+        `send_email_with_fallback` falls back on any Gmail failure, so a lost
+        response can deliver twice. A caller with a durable outbox, which
+        must never resend an email that may have gone, uses this instead and
+        acts on the outcome (`SendResult`).
+        """
+        if _is_reserved_test_domain(to_email):
+            logger.info("Skipping send to reserved test domain: %s", to_email)
+            return SendResult("suppressed")
+        gmail: Optional[SendResult] = None
+        if self.is_gmail_configured():
+            try:
+                token = await self._get_access_token()
+            except Exception:
+                # No send request was made, so MailerSend cannot double it.
+                logger.warning("Gmail token refresh failed for %s, trying MailerSend", to_email, exc_info=True)
+                token = None
+            if token:
+                try:
+                    raw = self._mime_raw(to_email, to_name, subject, html_content, text_content, from_name=from_name)
+                except (ValueError, TypeError):
+                    logger.warning("Email to %s could not be encoded", to_email, exc_info=True)
+                    return SendResult("failed")
+                try:
+                    async with httpx.AsyncClient(timeout=20) as client:
+                        gmail = send_result(await client.post(
+                            GMAIL_SEND_URI, json={"raw": raw}, headers={"Authorization": f"Bearer {token}"},
+                        ), "gmail")
+                except (httpx.ConnectError, httpx.ConnectTimeout):
+                    gmail = SendResult("retry_wait", "gmail")
+                except Exception:
+                    logger.warning("Gmail send to %s has an unknown outcome", to_email, exc_info=True)
+                    return SendResult("unknown", "gmail")
+                if gmail.state in ("sent", "unknown"):
+                    if gmail.state == "sent":
+                        logger.info("Sent email to %s", to_email)
+                    return gmail
+                logger.warning("Gmail did not send to %s (%s), trying MailerSend", to_email, gmail.state)
+        if not self.api_key:
+            logger.warning("MailerSend not configured, cannot send to %s", to_email)
+            return gmail or SendResult("retry_wait")
+        try:
+            async with httpx.AsyncClient(timeout=20) as client:
+                response = await client.post(
+                    f"{self.base_url}/email",
+                    json=self._mailersend_payload(to_email, to_name, subject, html_content, text_content,
+                                                  from_name=from_name),
+                    headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
+                )
+        except (httpx.ConnectError, httpx.ConnectTimeout):
+            return SendResult("retry_wait", "mailersend")
+        except Exception:
+            logger.warning("MailerSend send to %s has an unknown outcome", to_email, exc_info=True)
+            return SendResult("unknown", "mailersend")
+        result = send_result(response, "mailersend")
+        if result.state == "sent":
+            logger.info("Sent email to %s via MailerSend fallback", to_email)
+        else:
+            logger.warning("MailerSend did not send to %s: status=%s", to_email, response.status_code)
+        return result
+
     async def send_email(
         self,
         to_email: str,
@@ -139,32 +307,10 @@ class EmailService(
             return False
 
         try:
-            msg = MIMEMultipart("alternative") if not attachments else MIMEMultipart("mixed")
-            msg["Subject"] = subject
-            msg["From"] = f"{from_name or self.from_name} <{self.from_email}>"
-            msg["To"] = f"{to_name} <{to_email}>" if to_name else to_email
-            if extra_headers:
-                for name, value in extra_headers.items():
-                    msg[name] = value
-
-            if attachments:
-                alt = MIMEMultipart("alternative")
-                if text_content:
-                    alt.attach(MIMEText(text_content, "plain"))
-                alt.attach(MIMEText(html_content, "html"))
-                msg.attach(alt)
-                for att in attachments:
-                    part = MIMEBase("application", "octet-stream")
-                    part.set_payload(base64.b64decode(att["content"]))
-                    encoders.encode_base64(part)
-                    part.add_header("Content-Disposition", att.get("disposition", "attachment"), filename=att["filename"])
-                    msg.attach(part)
-            else:
-                if text_content:
-                    msg.attach(MIMEText(text_content, "plain"))
-                msg.attach(MIMEText(html_content, "html"))
-
-            raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+            raw = self._mime_raw(
+                to_email, to_name, subject, html_content, text_content,
+                attachments=attachments, extra_headers=extra_headers, from_name=from_name,
+            )
             token = await self._get_access_token()
 
             async with httpx.AsyncClient() as client:
@@ -254,24 +400,10 @@ class EmailService(
             logger.warning("MailerSend not configured, cannot send to %s", to_email)
             return False
 
-        payload = {
-            "from": {"email": self.mailersend_from_email, "name": from_name or self.from_name},
-            "to": [{"email": to_email, "name": to_name or to_email}],
-            "subject": subject,
-            "html": html_content,
-            "text": text_content or "",
-        }
-        if attachments:
-            # MailerSend expects {content: <base64>, filename, disposition} —
-            # same shape callers already build for the Gmail MIME path.
-            payload["attachments"] = [
-                {
-                    "content": att["content"],
-                    "filename": att["filename"],
-                    "disposition": att.get("disposition", "attachment"),
-                }
-                for att in attachments
-            ]
+        payload = self._mailersend_payload(
+            to_email, to_name, subject, html_content, text_content,
+            attachments=attachments, from_name=from_name,
+        )
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.post(

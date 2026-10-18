@@ -447,6 +447,59 @@ async def test_adding_to_the_espresso_calendar_is_never_held_and_shows_as_an_eve
 
 
 @pytest.mark.asyncio
+async def test_local_calendar_recap_uses_persisted_safe_audit(monkeypatch):
+    from datetime import datetime, timezone
+    from unittest.mock import AsyncMock
+    from app.matcha.services.matcha_work.recaps.adapters import step_event
+    from app.matcha.services.matcha_work.recaps import scope as recap_scope
+    record, _, _ = wire_store(monkeypatch)
+    monkeypatch.setattr(calendar, "_insert_reminder", AsyncMock(return_value="card-1"))
+    monkeypatch.setattr(recap_scope, "enrolled", AsyncMock(return_value=True))
+    new_id = "7a2b3c4d-0000-4000-8000-000000000001"
+    client = FakeClient([
+        response(call("add_espresso_event", {"title":"Dentist", "start":START, "notes":"Private notes"})),
+        response(call("update_espresso_event", {"event_id":new_id, "title":"Checkup"})),
+        response(call("delete_espresso_event", {"event_id":new_id})),
+        response(call("add_reminder", {"title":"Renew lease", "date":"2026-10-02"})),
+        response(call("finish", FINISH)),
+    ])
+    await run_espresso(client, FakeStore(), _ctx("add change and remove my dentist; remind me to renew lease",
+                                              scopes=frozenset(), timezone="America/Los_Angeles"))
+    snapshots = []
+    for entry in record.await_args_list:
+        args = entry.args
+        event = step_event({"tool":args[2], "kind":args[3], "result":args[6], "status":args[7],
+                            "created_at":datetime.now(timezone.utc)})
+        if event: snapshots.append(event)
+    assert len(snapshots) == 4
+    text = " ".join(event.model_dump_json() for event in snapshots)
+    assert "Dentist" in text and "Checkup" in text and START in text and "America/Los_Angeles" in text
+    assert "Previous title" in text and "Renew lease" in text and "2026-10-02" in text
+    assert "Private notes" not in text
+    assert all(event.outcome == "confirmed" for event in snapshots)
+
+
+@pytest.mark.asyncio
+async def test_a_run_without_a_recap_keeps_no_event_details_in_its_audit(monkeypatch):
+    from unittest.mock import AsyncMock
+    from app.matcha.services.matcha_work.recaps import scope as recap_scope
+    record, _, _ = wire_store(monkeypatch)
+    monkeypatch.setattr(calendar, "_insert_reminder", AsyncMock(return_value="card-1"))
+    enrolled = AsyncMock(return_value=False)
+    monkeypatch.setattr(recap_scope, "enrolled", enrolled)
+    client = FakeClient([
+        response(call("add_espresso_event", {"title":"Dentist", "start":START})),
+        response(call("add_reminder", {"title":"Renew lease", "date":"2026-10-02"})),
+        response(call("finish", FINISH)),
+    ])
+    await run_espresso(client, FakeStore(), _ctx("add my dentist; remind me to renew lease", scopes=frozenset()))
+    audits = [entry.args[6] for entry in record.await_args_list if entry.args[2] in ("add_espresso_event", "add_reminder")]
+    assert len(audits) == 2 and enrolled.await_count == 2
+    assert all("recap" not in audit for audit in audits)
+    assert "Dentist" not in str(audits) and "Renew lease" not in str(audits)
+
+
+@pytest.mark.asyncio
 async def test_a_result_written_beside_an_add_waits_for_the_adds_outcome(monkeypatch):
     wire_store(monkeypatch)
     store = FakeStore()

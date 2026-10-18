@@ -335,6 +335,7 @@ async def answer_form(user, prompt_id: UUID, body) -> dict:
                         title=payload.get("title") or "", brief=values, input_ids=list(body.input_ids or []),
                         consent_version=body.consent_version),
         origin=(prompt["channel_id"], prompt["message_id"]),
+        **({"recap_parent_run_id": prompt["run_id"]} if prompt.get("run_id") else {}),
     )
     task_id = UUID(task["id"])
     async with connection_or_direct() as conn, conn.transaction():

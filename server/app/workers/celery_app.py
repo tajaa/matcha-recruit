@@ -81,6 +81,7 @@ celery_app = Celery(
         "app.workers.tasks.sales_campaign",
         "app.workers.tasks.job_search",
         "app.workers.tasks.agent_tasks",
+        "app.workers.tasks.recaps",
         "app.workers.tasks.sales_intake_poll",
         "app.workers.tasks.pos_sales_sync",
         "app.workers.tasks.schedule_eligibility",
@@ -97,6 +98,9 @@ celery_app = Celery(
     ],
 )
 
+if os.getenv("ESPRESSO_RECAPS_WORKER") == "1":
+    celery_app.conf.include = ["app.workers.tasks.recaps"]
+
 celery_app.conf.update(
     # Serialization
     task_serializer="json",
@@ -109,6 +113,8 @@ celery_app.conf.update(
 
     # Task execution
     task_track_started=True,
+    task_routes={"recaps.render": {"queue": "espresso_recaps_render"},
+                 "recaps.cleanup": {"queue": "espresso_recaps_render"}},
     task_time_limit=600,  # 10 minutes max per task
     task_soft_time_limit=540,  # Soft limit 9 minutes
 
@@ -345,6 +351,12 @@ def on_worker_ready(sender=None, **kwargs):
         dispatch_schedule_automation.delay(resume=True)
     except Exception:
         logger.exception("[Worker] Failed to enqueue auto schedule recovery")
+
+    try:
+        from app.workers.tasks.recaps import reconcile_recaps
+        reconcile_recaps.delay()
+    except Exception:
+        logger.exception("[Worker] Failed to enqueue recap recovery")
 
     task_keys = [key for key, _, _ in _SCHEDULED_TASKS]
     flags = _scheduler_flags(task_keys)
