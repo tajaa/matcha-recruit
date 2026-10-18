@@ -155,11 +155,12 @@ def model_line(short_id: str, row: dict) -> str:
     return " | ".join(parts)
 
 
-def _fit(lines: list[str], budget: int) -> tuple[list[str], int]:
-    """As many lines as fit `budget` characters (never fewer than MIN_ROWS)."""
+def fit_lines(lines: list[str], budget: int, min_rows: int = MIN_ROWS) -> tuple[list[str], int]:
+    """As many lines as fit `budget` characters (never fewer than `min_rows`),
+    and how many were left out. `find_jobs` fits its list the same way."""
     kept, used = [], 0
     for line in lines:
-        if len(kept) >= MIN_ROWS and used + len(line) + 4 > budget:
+        if len(kept) >= min_rows and used + len(line) + 4 > budget:
             break
         kept.append(line)
         used += len(line) + 4
@@ -209,7 +210,7 @@ async def _find(ctx: RunContext, state: RunState, args: dict, _left: float) -> T
         session.keys[key] = short_id
         session.places[short_id] = row
         new.append((short_id, row))
-    lines, hidden = _fit([model_line(i, r) for i, r in new], max(2000, ctx.limits.max_tool_output_chars - 1200))
+    lines, hidden = fit_lines([model_line(i, r) for i, r in new], max(2000, ctx.limits.max_tool_output_chars - 1200))
     payload: dict[str, Any] = {
         "query": query,
         "new_places": len(new),

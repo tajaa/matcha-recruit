@@ -43,18 +43,21 @@ from app.matcha.services.matcha_work.search_apis import ProviderError
 
 from ..context import RunContext, RunState
 from ..registry import Ability, AgentTool, ToolOutput
+from .places import fit_lines
 
 logger = logging.getLogger(__name__)
 
 KEY = "job_listings"
-MAX_PAGES = 2
+# Google Jobs pages of about 10 a call walks, and the most it may: one page
+# kept about 5 once the place filter and board copies were taken out.
+MAX_PAGES = 3
 # find_jobs calls a run, and paid listing pages across them.
 MAX_CALLS = 4
-MAX_PAID = 6
+MAX_PAID = 12
 # Postings read from the employer's own posting per call, how many at once,
 # the fetches one may use and how long the reading may take in all.
-VERIFY = 10
-VERIFY_AT_ONCE = 4
+VERIFY = 20
+VERIFY_AT_ONCE = 6
 VERIFY_FETCHES = 4
 # The employer's own board, for a posting first read on a job board: two
 # guessed names on each of three ATSs.
@@ -63,7 +66,8 @@ VERIFY_SECONDS = 40.0
 TOOL_SECONDS = 80.0
 # Kept back from the tool's own deadline so the answer is written before it.
 VERIFY_MARGIN = 5.0
-MAX_BLOCK = 30
+# Rows in the `job_postings` block (and its CSV): all a run can find.
+MAX_BLOCK = MAX_PAID * 10
 AUTO_BLOCK_AT = 3
 SOURCE_LABELS = {"greenhouse": "Greenhouse", "lever": "Lever", "ashby": "Ashby"}
 
@@ -284,9 +288,9 @@ async def _find(ctx: RunContext, state: RunState, args: dict, left: float) -> To
         return ToolOutput(payload={"error": "Job listings aren't set up on this server. Use web_search instead."},
                           status="error")
     try:
-        pages = int(args.get("pages") or 1)
+        pages = int(args.get("pages") or MAX_PAGES)
     except (TypeError, ValueError):
-        pages = 1
+        pages = MAX_PAGES
     queries = phases.plan_from_criteria(title, criteria)["queries"][:1]
     await ctx.progress.note(f"Looking for {title[:50]} jobs{' in ' + location[:40] if location else ''}…")
     postings = []
@@ -339,6 +343,9 @@ async def _find(ctx: RunContext, state: RunState, args: dict, left: float) -> To
                                       *((l or {}).get("url") for l in lead.get("apply_links") or [])) if u)
         session.jobs[short_id] = row
         new.append((short_id, row))
+    # Three pages can outgrow the output budget: the model gets what fits, the
+    # block has every one.
+    lines, hidden = fit_lines([model_line(i, r) for i, r in new], max(2000, ctx.limits.max_tool_output_chars - 1200))
     payload: dict[str, Any] = {
         "title": title,
         "location": location or "anywhere",
@@ -347,11 +354,20 @@ async def _find(ctx: RunContext, state: RunState, args: dict, left: float) -> To
         "live_on_a_board": sum(1 for _, r in new if r["verified"] and not r["at_employer"]),
         "left_out_elsewhere": outside,
         "already_found": repeats,
-        "jobs": [model_line(i, r) for i, r in new],
+        "jobs": lines,
     }
+    if hidden:
+        payload["not_shown_here"] = (f"{hidden} more were found and kept; the job_postings block shows them "
+                                     "(leave job_ids empty to show everything).")
     if not new:
-        payload["note"] = ("No open postings matched there. Try a broader title, a nearby city, or remote."
-                           if not postings else "Every posting found was outside the place asked for.")
+        if not postings:
+            payload["note"] = "No open postings matched there. Try a broader title, a nearby city, or remote."
+        elif not outside:
+            payload["note"] = "Every posting found was already found in this run."
+        elif not repeats:
+            payload["note"] = "Every posting found was outside the place asked for."
+        else:
+            payload["note"] = "Every posting found was outside the place asked for or already found in this run."
     return ToolOutput(
         payload=payload,
         provenance=frozenset(provenance),
@@ -378,7 +394,7 @@ FIND_JOBS = AgentTool(
                          "description": "A city and state, a state, 'Remote' or 'United States'. Leave out for anywhere"},
             "remote_only": {"type": "boolean", "description": "Only remote jobs"},
             "pages": {"type": "integer", "minimum": 1, "maximum": MAX_PAGES,
-                      "description": "Pages of Google Jobs results (about 10 each)"},
+                      "description": f"Pages of Google Jobs results, about 10 each ({MAX_PAGES} when left out)"},
         },
         "required": ["title"],
         "additionalProperties": False,
@@ -395,11 +411,14 @@ FIND_JOBS = AgentTool(
     untrusted_output=True,
 )
 
-_PROMPT = """Finding jobs (find_jobs):
+_PROMPT = f"""Finding jobs (find_jobs):
 - When they ask for open roles ("find me product designer jobs in LA"), use find_jobs, not web_search: \
 LinkedIn, Indeed and Glassdoor pages can't be read, and job boards stay indexed long after a job closes.
 - One call per title and place; search two or three related titles or places in the same turn when the ask \
-is broad (they run at the same time). A job found twice is kept once.
+is broad. A job found twice is kept once.
+- A call reads {MAX_PAGES} pages of Google Jobs (about {MAX_PAGES * 10} listings) unless you ask for fewer, and \
+a run reads at most {MAX_PAID} pages: {MAX_PAID // MAX_PAGES} full searches. Pass pages=1 only to look up one \
+employer's opening.
 - Lead with the jobs live at the employer (read on its ATS or its own site). Say which were only found on a \
 job board or only listed on Google Jobs. Pay is only what the posting states, with its quote: say "pay not \
 posted" when it isn't, never estimate one, and when the quote gives several cities' ranges, say whose is whose.
