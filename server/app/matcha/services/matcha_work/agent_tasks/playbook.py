@@ -58,6 +58,10 @@ class IntakeField:
     max_bytes: int = 0
     # What the field starts as in a form ("yes" for a switch that starts on).
     default: str = ""
+    # A richer control an app may draw for it (`resume`: the saved résumé,
+    # with a drop zone when there is none). An app that doesn't know the name
+    # draws the plain `type`.
+    widget: str = ""
 
     def view(self) -> dict:
         out: dict[str, Any] = {
@@ -70,6 +74,8 @@ class IntakeField:
             out["options"] = list(self.options)
         if self.type == "file":
             out.update(accept=list(self.accept), max_count=self.max_count, max_bytes=self.max_bytes)
+        if self.widget:
+            out["widget"] = self.widget
         return out
 
 

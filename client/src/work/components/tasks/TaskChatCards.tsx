@@ -9,6 +9,8 @@ import { uploadChannelFiles } from '../../api/channels'
 import { useWorkBase } from '../../routes/WorkSurfaceContext'
 import type { AgentTaskCard, IntakeForm, IntakeFormField } from '../../types'
 import IntakeFieldInput from './IntakeFieldInput'
+import ResumeFormField from '../resume/ResumeFormField'
+import { useMyResume } from '../../hooks/useMyResume'
 import { buildFormValues, cardFacts, formErrorText, initialText, taskCardBody, taskCardLead, webUrl } from './tasksLogic'
 
 // Espresso Tasks in the conversation, as on the Mac (`TaskChatCards.swift`):
@@ -99,10 +101,15 @@ export function IntakeFormCard({ question, form, promptId, status, closedText, m
   const [problems, setProblems] = useState<string[]>([])
   const [startedTaskId, setStartedTaskId] = useState<string | null>(null)
   const units = form.units ?? 0
+  const resumeField = fields.find((f) => f.widget === 'resume')
+  const { resume } = useMyResume(!!resumeField)
 
   async function submit() {
     if (!promptId || sending) return
     const built = buildFormValues(fields, text, files)
+    if (resumeField && text[resumeField.key] === 'yes' && !resume) {
+      built.problems.push('Drop in your résumé, or switch “Use my résumé” off for a general search.')
+    }
     setProblems(built.problems)
     if (built.problems.length) return
     setSending(true)
@@ -161,6 +168,7 @@ export function IntakeFormCard({ question, form, promptId, status, closedText, m
                   onChange={(value) => setText((prev) => ({ ...prev, [field.key]: value }))}
                 />
               )}
+              {field.widget === 'resume' && <ResumeFormField on={text[field.key] === 'yes'} />}
               {field.help && <p className="text-[10px] text-w-dim">{field.help}</p>}
             </div>
           ))}

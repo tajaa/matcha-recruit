@@ -54,8 +54,8 @@ def wired(monkeypatch):
     return SimpleNamespace(storage=storage, conn=conn)
 
 
-def _row(url):
-    return {"filename": "cv.pdf", "resume_url": url, "parsed_data": {"current_title": "COO"},
+def _row(url, text="text"):
+    return {"filename": "cv.pdf", "resume_url": url, "raw_text": text, "parsed_data": {"current_title": "COO"},
             "updated_at": datetime(2026, 10, 14, tzinfo=timezone.utc)}
 
 
@@ -96,3 +96,71 @@ async def test_a_failed_cleanup_never_fails_the_request(wired, monkeypatch):
 
     monkeypatch.setattr(wired.storage, "delete_private_file", broken)
     await routes._delete_stored("s3://private/x")
+
+
+TEXT = "Haley Rivera. Senior software engineer, platform and AI. Seven years at startups. " * 2
+
+
+@pytest.mark.asyncio
+async def test_the_owner_reads_the_text_espresso_uses(wired):
+    user = SimpleNamespace(id=uuid4())
+    wired.conn.on("FROM user_resumes WHERE user_id", _row("s3://private/profile_resumes/u/cv.pdf", TEXT))
+    out = await routes.get_my_resume(user)
+    assert out.text == TEXT and out.filename == "cv.pdf"
+    assert "raw_text" in wired.conn.ran("FROM user_resumes")[0][1]
+    wired.conn.on("FROM user_resumes WHERE user_id", None)
+    assert await routes.get_my_resume(user) is None
+
+
+@pytest.mark.asyncio
+async def test_a_recruiter_never_gets_the_text(wired):
+    recruiter = SimpleNamespace(id=uuid4())
+    wired.conn.on("FROM channel_job_applications", 1)
+    wired.conn.on("recruiter_until > NOW()", True)
+    wired.conn.on("FROM user_resumes WHERE user_id", _row("s3://private/x.pdf", TEXT))
+    out = await routes.get_user_resume_as_recruiter(str(uuid4()), recruiter)
+    assert not hasattr(out, "text") and "text" not in out.model_dump()
+    assert "raw_text" not in wired.conn.ran("FROM user_resumes")[0][1]
+
+
+@pytest.mark.asyncio
+async def test_editing_the_text_rereads_the_fields_and_keeps_the_file(wired, monkeypatch):
+    user = SimpleNamespace(id=uuid4())
+    parse = AsyncMock(return_value={"current_title": "Staff Engineer"})
+    monkeypatch.setattr(routes, "parse_resume_text", parse)
+    wired.conn.on("SELECT 1 FROM user_resumes", 1)
+    wired.conn.on("UPDATE user_resumes", lambda uid, text, parsed: {
+        **_row("s3://private/x.pdf", text), "parsed_data": parsed or {"current_title": "COO"}})
+    out = await routes.update_my_resume_text(routes.ResumeTextUpdate(text=f"  {TEXT}  "), user)
+    assert out.text == TEXT.strip() and out.parsed_data == {"current_title": "Staff Engineer"}
+    parse.assert_awaited_once_with(TEXT.strip())
+    update = wired.conn.ran("UPDATE user_resumes")[0]
+    assert "resume_url" not in update[1].split("RETURNING")[0]  # the original file stays
+    assert update[2][0] == user.id
+
+
+@pytest.mark.asyncio
+async def test_a_failed_reread_keeps_the_typed_text_and_the_old_fields(wired, monkeypatch):
+    user = SimpleNamespace(id=uuid4())
+    monkeypatch.setattr(routes, "parse_resume_text", AsyncMock(side_effect=routes.ResumeParseError("down")))
+    wired.conn.on("SELECT 1 FROM user_resumes", 1)
+    wired.conn.on("UPDATE user_resumes", lambda uid, text, parsed: {**_row("s3://private/x.pdf", text)})
+    out = await routes.update_my_resume_text(routes.ResumeTextUpdate(text=TEXT), user)
+    assert out.text == TEXT.strip() and out.parsed_data == {"current_title": "COO"}
+    assert wired.conn.ran("UPDATE user_resumes")[0][2][2] is None  # COALESCE keeps parsed_data
+
+
+@pytest.mark.asyncio
+async def test_editing_needs_a_resume_and_real_text(wired):
+    from fastapi import HTTPException
+    from pydantic import ValidationError
+
+    user = SimpleNamespace(id=uuid4())
+    with pytest.raises(HTTPException) as exc:
+        await routes.update_my_resume_text(routes.ResumeTextUpdate(text=TEXT), user)
+    assert exc.value.status_code == 404
+    with pytest.raises(ValidationError):
+        routes.ResumeTextUpdate(text="too short")
+    with pytest.raises(HTTPException) as exc:
+        await routes.update_my_resume_text(routes.ResumeTextUpdate(text=" " * 40 + "x" * 20), user)
+    assert exc.value.status_code == 422

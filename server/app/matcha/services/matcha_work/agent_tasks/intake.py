@@ -140,7 +140,7 @@ def clean_fields(specs: tuple[IntakeField, ...], raw: dict) -> tuple[dict, dict[
 # ── the form ─────────────────────────────────────────────────────────────────
 
 def build_form(playbook: Playbook, *, directive: str, title: str, known: dict, missing: list,
-               note: str, consent_needed: bool) -> dict:
+               note: str, consent_needed: bool, prefill: dict | None = None) -> dict:
     """The question payload: what to ask, from the playbook's fields only.
 
     Asked: required fields not yet known, fields the model named as missing,
@@ -175,6 +175,8 @@ def build_form(playbook: Playbook, *, directive: str, title: str, known: dict, m
         "fields": asked,
         "optional": optional,
         "consent": playbook.consent if consent_needed else None,
+        # What an asked field starts as (not yet known: the person still decides).
+        **({"prefill": prefill} if prefill else {}),
     }
 
 
@@ -205,7 +207,8 @@ def form_view(payload: dict) -> dict:
             "label": playbook.label if playbook else "",
             "title": payload.get("title") or "",
             "directive": payload.get("directive") or "",
-            "fields": [{**fields[k].view(), "optional": k in optional, "value": known.get(k)}
+            "fields": [{**fields[k].view(), "optional": k in optional,
+                        "value": known.get(k, (payload.get("prefill") or {}).get(k))}
                        for k in [*(payload.get("fields") or []), *(payload.get("optional") or [])] if k in fields],
             "known": [{"key": k, "label": fields[k].label, "value": v, "shown": _shown(fields[k], v)}
                       for k, v in known.items() if k in fields],
@@ -238,9 +241,23 @@ def _parse(ctx, state, args: dict) -> dict:
         raise ValueError("Give the directive: what the person asked for, in their words.")
     known = args.get("known") if isinstance(args.get("known"), dict) else {}
     missing = args.get("missing") if isinstance(args.get("missing"), list) else []
+    prefill = None
+    if playbook.key == "job_search" and getattr(ctx, "saved_resume", None) is not None:
+        # A saved résumé is used unless they said otherwise: shown as known.
+        from app.matcha.services.matcha_work.agent_runtime.abilities.tasks import with_resume_default
+
+        if "use_resume" not in missing:
+            known = with_resume_default(ctx, known)
+    elif playbook.key == "job_search" and (known.get("use_resume") is True or "use_resume" in missing):
+        # They want their résumé used and none is saved: the field is asked,
+        # switched on, so the form shows where to drop it in.
+        known = {k: v for k, v in known.items() if k != "use_resume"}
+        missing = [*(k for k in missing if k != "use_resume"), "use_resume"]
+        prefill = {"use_resume": "yes"}
     needs_consent = bool(playbook.consent) and playbook.consent not in (getattr(ctx, "grants", None) or {})
     return build_form(playbook, directive=directive, title=str(args.get("title") or ""), known=known,
-                      missing=missing, note=str(args.get("note") or ""), consent_needed=needs_consent)
+                      missing=missing, note=str(args.get("note") or ""), consent_needed=needs_consent,
+                      prefill=prefill)
 
 
 def ask_form_tool():

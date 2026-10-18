@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { AlertTriangle, BookOpen, Briefcase, ClipboardList, Film, Loader2, Settings } from 'lucide-react'
+import { AlertTriangle, BookOpen, Briefcase, ChevronRight, ClipboardList, FileText, Film, Loader2, Settings } from 'lucide-react'
 import { useMe } from '../../hooks/useMe'
 import { useWorkBase } from '../routes/WorkSurfaceContext'
 import { useEntitlements } from '../hooks/useEntitlements'
@@ -23,6 +23,9 @@ import RecapList from '../components/recaps/RecapList'
 import RecapView from '../components/recaps/RecapView'
 import { recapsPath } from '../components/recaps/paths'
 import { useRecapPreferences } from '../hooks/useRecapPreferences'
+import ResumePane from '../components/resume/ResumePane'
+import { resumePath } from '../components/resume/paths'
+import { useMyResume } from '../hooks/useMyResume'
 import type { AssistantDraftState } from './Assistant'
 
 function guideSeen(): boolean {
@@ -60,6 +63,9 @@ function TasksPage() {
   const recapId = recapsView ? params.get('recap') : null
   const recapSource = recapsView ? params.get('source_id') : null
   const recapsOffered = !!useRecapPreferences()?.available || recapsView
+  // The résumé job searches read, in its own view (`?view=resume`), the
+  // task list beside it.
+  const resumeView = !taskId && !recapsView && params.get('view') === 'resume'
   const { me } = useMe()
   const t = useTasks(taskId, itemId)
   const { tasksEnabled, jobSearchEnabled } = useEntitlements()
@@ -78,10 +84,10 @@ function TasksPage() {
 
   // Nothing open on a wide screen: open the first task, as the Mac does.
   useEffect(() => {
-    if (taskId || recapsView || !list || !wide()) return
+    if (taskId || recapsView || resumeView || !list || !wide()) return
     const first = groupTasks(list.tasks)[0]?.[1][0]
     if (first) navigate(`${base}/tasks/${encodeURIComponent(first.id)}`, { replace: true })
-  }, [taskId, recapsView, list, base, navigate])
+  }, [taskId, recapsView, resumeView, list, base, navigate])
 
   const setItemParam = useCallback((id: string | null) => {
     setParams((prev) => {
@@ -199,7 +205,8 @@ function TasksPage() {
         olderError={t.olderError}
         onOlder={() => void t.loadOlder()}
         selectedId={taskId ?? null}
-        hiddenOnSmall={!!taskId}
+        hiddenOnSmall={!!taskId || resumeView}
+        resumeRow={jobSearchEnabled && <ResumeRow active={resumeView} onOpen={() => navigate(resumePath(base))} />}
         tasksEnabled={tasksEnabled}
         canSearchJobs={jobSearchEnabled}
         onOpen={openTask}
@@ -209,8 +216,10 @@ function TasksPage() {
         onRetry={() => void t.loadList()}
       />
 
-      <main className={`min-h-0 min-w-0 flex-1 flex-col ${taskId ? 'flex' : 'hidden md:flex'}`}>
-        {!taskId ? (
+      <main className={`min-h-0 min-w-0 flex-1 flex-col ${taskId || resumeView ? 'flex' : 'hidden md:flex'} ${resumeView ? 'overflow-y-auto' : ''}`}>
+        {resumeView ? (
+          <ResumePane onBack={() => navigate(`${base}/tasks`)} />
+        ) : !taskId ? (
           <EmptyState list={list} error={t.listError} tasksEnabled={tasksEnabled} onNewJobSearch={jobSearchEnabled ? () => setCreating(true) : undefined} />
         ) : jobSearchId ? (
           <JobSearchPane
@@ -312,11 +321,30 @@ function ViewTabs({ view, onTasks, onRecaps }: { view: 'tasks' | 'recaps'; onTas
   )
 }
 
+/** The saved résumé under the list's header: what job searches read, one
+ *  click from where it can be read and edited. */
+function ResumeRow({ active, onOpen }: { active: boolean; onOpen: () => void }) {
+  const { resume, loaded } = useMyResume()
+  return (
+    <button type="button" onClick={onOpen} aria-current={active ? 'page' : undefined}
+      className={`flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-[11px] ${
+        active ? 'bg-w-accent/10 text-w-text' : 'text-w-dim hover:bg-w-surface2/60 hover:text-w-text'}`}>
+      <FileText size={12} className={resume ? 'text-w-accent' : ''} />
+      <span className="min-w-0 flex-1 truncate">
+        {!loaded ? 'Résumé' : resume ? <>Résumé · <span className="text-w-text">{resume.filename}</span></> : 'Add your résumé'}
+      </span>
+      <ChevronRight size={11} className="shrink-0 text-w-faint" />
+    </button>
+  )
+}
+
 function TaskList({
-  tabs, list, error, loadingOlder, olderError, onOlder, selectedId, hiddenOnSmall, tasksEnabled, canSearchJobs, onOpen, onAsk, onNewJobSearch, onHelp, onRetry,
+  tabs, resumeRow, list, error, loadingOlder, olderError, onOlder, selectedId, hiddenOnSmall, tasksEnabled, canSearchJobs, onOpen, onAsk, onNewJobSearch, onHelp, onRetry,
 }: {
   /** The Tasks | Recaps switch, in place of the heading, when recaps are offered. */
   tabs: React.ReactNode
+  /** The saved résumé, for accounts that can search jobs. */
+  resumeRow?: React.ReactNode
   list: AgentTaskList | null
   loadingOlder: boolean
   olderError: string | null
@@ -390,6 +418,7 @@ function TaskList({
             </button>
           )
         )}
+        {resumeRow}
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
         {error && !list ? (

@@ -39,6 +39,8 @@ _PHOTO_SECONDS = 45.0
 # Room for a booking: the browser alone may take close to three minutes.
 LIMITS = RunLimits(max_model_calls=10, wall_seconds=330.0)
 FAILED = "I couldn't finish that. {reason}"
+# Abilities that can look for jobs: the run is told whether a résumé is saved.
+JOB_ABILITIES = frozenset({"tasks", "job_listings", "jobs"})
 
 
 def commit_mode(ability_key: str | None = None) -> str:
@@ -220,6 +222,11 @@ async def run_assistant(run: dict, *, stats: dict | None = None) -> runner.RunOu
         model = await models.default_model()
         await store.set_run_model(run_id, model)
     claude_model = model if models.is_claude(model) else None
+    saved_resume = None
+    if any(a.key in JOB_ABILITIES for a in abilities):
+        from app.matcha.services.matcha_work.job_search.service import resume_on_file
+
+        saved_resume = await resume_on_file(user_id)
     ctx = RunContext(
         run_id=run_id, user_id=user_id, company_id=run["company_id"],
         role=run.get("requester_role") or "client", surface=surface, ask=run["prompt"],
@@ -240,6 +247,7 @@ async def run_assistant(run: dict, *, stats: dict | None = None) -> runner.RunOu
         # a run without mail or calendar replays earlier answers built from them.
         store_responses=not private and not any(a.private_only for a in abilities),
         timezone=timezone_name,
+        saved_resume=saved_resume,
     )
     contract = runner.ResultContract(
         finish=result.finish_tool(abilities),

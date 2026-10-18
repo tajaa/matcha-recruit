@@ -1,7 +1,7 @@
 import RecapLink from '../../components/recaps/RecapLink'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { AlertTriangle, ArrowLeft, BookOpen, FileCheck2, ListFilter, Loader2, SlidersHorizontal, Trash2, X } from 'lucide-react'
-import type { JobLeadSummary, JobSearchDetail, JobWeights } from '../../api/matchaWork/jobSearch'
+import { AlertTriangle, ArrowLeft, BookOpen, Compass, FileCheck2, ListFilter, Loader2, SlidersHorizontal, Trash2, X } from 'lucide-react'
+import type { JobDirection, JobLeadSummary, JobSearchDetail, JobWeights } from '../../api/matchaWork/jobSearch'
 import {
   DEFAULT_WEIGHTS, FILTERS, GMAIL_DRAFTS_URL, PHASES, anyWeightAboveZero, compBadge, displayTitle, filterLeads, fitText,
   isDrafting, isLive, leadStatusText, phaseIndex, progressLine, searchProgress, showsRemoteBadge, statusLabel,
@@ -40,8 +40,11 @@ export default function SearchDetail({
   const [showWeaker, setShowWeaker] = useState(false)
   const [stepsCollapsed, setStepsCollapsed] = useState(readCollapsed)
   const [weightsOpen, setWeightsOpen] = useState(false)
+  const [direction, setDirection] = useState<string | null>(null)
   const live = isLive(detail.status)
-  const visible = filterLeads(detail.leads, filter, showWeaker)
+  const directions = detail.plan?.directions ?? []
+  const filtered = filterLeads(detail.leads, filter, showWeaker)
+  const visible = direction ? filtered.filter((lead) => lead.direction === direction) : filtered
   const wider = widerCount(detail)
   const note = detail.progress?.note
 
@@ -111,6 +114,15 @@ export default function SearchDetail({
         </div>
       )}
 
+      {directions.length > 0 && (
+        <Directions
+          directions={directions}
+          leads={detail.leads}
+          active={direction}
+          onToggle={(title) => setDirection((now) => (now === title ? null : title))}
+        />
+      )}
+
       {!live && detail.leads.length > 0 && (
         <NextSteps
           detail={detail}
@@ -151,11 +163,57 @@ export default function SearchDetail({
           <input type="checkbox" checked={showWeaker} onChange={(e) => setShowWeaker(e.target.checked)} />
           Show weaker matches
         </label>
+        {direction && (
+          <button type="button" onClick={() => setDirection(null)}
+            className="inline-flex items-center gap-1 rounded-full bg-w-accent/10 px-2 py-0.5 text-[10px] font-medium text-w-text">
+            {direction} <X size={10} aria-label="Show every job" />
+          </button>
+        )}
         <span className="ml-auto text-[10px] text-w-dim">{visible.length} of {detail.leads.length}</span>
       </div>
 
       <LeadsTable leads={visible} selectedLeadId={selectedLeadId} onSelect={onSelectLead} compact={!!selectedLeadId} live={live} />
     </div>
+  )
+}
+
+/** Roles beyond the titles they asked for that their résumé supports: what
+ *  the search suggested and why, each with the résumé's own words, and how
+ *  many jobs it found for each (a click shows just those). */
+function Directions({ directions, leads, active, onToggle }: {
+  directions: JobDirection[]
+  leads: JobLeadSummary[]
+  active: string | null
+  onToggle: (title: string) => void
+}) {
+  return (
+    <section aria-label="Beyond your title" className="space-y-2 border-b border-w-line px-5 py-3">
+      <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-w-dim">
+        <Compass size={12} className="text-w-accent" /> Beyond your title
+      </p>
+      <ul className="grid gap-2 md:grid-cols-2">
+        {directions.map((d) => {
+          const found = leads.filter((lead) => lead.direction === d.title).length
+          return (
+            <li key={d.title} className={`space-y-1 rounded-lg border p-2.5 ${active === d.title ? 'border-w-accent' : 'border-w-line'}`}>
+              <div className="flex items-baseline gap-2">
+                <p className="min-w-0 flex-1 text-xs font-semibold text-w-text">{d.title}</p>
+                {found > 0 ? (
+                  <button type="button" onClick={() => onToggle(d.title)} aria-pressed={active === d.title}
+                    className="shrink-0 text-[10px] font-medium text-w-accent hover:underline">
+                    {active === d.title ? 'Show all jobs' : `${found} ${found === 1 ? 'job' : 'jobs'}`}
+                  </button>
+                ) : (
+                  <span className="shrink-0 text-[10px] text-w-faint">No jobs yet</span>
+                )}
+              </div>
+              <p className="text-[11px] leading-4 text-w-dim">{d.why}</p>
+              <p className="text-[10px] italic leading-4 text-w-faint">From your résumé: “{d.evidence}”</p>
+            </li>
+          )
+        })}
+      </ul>
+    </section>
   )
 }
 
@@ -339,6 +397,11 @@ function LeadRow({ lead, selected, onSelect, compact }: {
         <div className="flex items-start gap-1.5">
           <div className="min-w-0 flex-1">
             <p className="truncate text-xs font-semibold text-w-text">{lead.title}</p>
+            {lead.direction && (
+              <p className="flex items-center gap-1 text-[10px] font-medium text-w-accent" title={`Suggested from your résumé: ${lead.direction}`}>
+                <Compass size={10} /> Beyond your title
+              </p>
+            )}
             <p className="truncate text-[11px] text-w-dim">
               {compact ? [lead.company, where].filter(Boolean).join(' · ') : lead.company}
               {!compact && where && <span className="lg:hidden"> · {where}</span>}
