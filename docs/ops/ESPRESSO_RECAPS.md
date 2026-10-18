@@ -18,8 +18,10 @@ timezone; other runs keep none, and the recap removes that key from the step row
 once its manifest is frozen (or it is skipped or deleted). Calendar previews retain
 ISO offsets; v1 does not infer an IANA timezone when the source preview has none.
 
-The library/player live at `/espresso/recaps` and `/espresso/recaps/:id`, with links
-from task/search details and assistant results. Settings separates video creation
+The library/player live in Tasks' Recaps view (`/espresso/tasks?view=recaps`,
+`&recap=<id>` opens one, `&source_id=<id>` narrows to one task), with links from
+task/search details and assistant results. `/espresso/recaps` and
+`/espresso/recaps/:id` (the recap email's link) redirect there. Settings separates video creation
 from recap email. The backend requires personal-company membership, owner identity,
 an active account and retained sources on reads and asynchronous publication.
 Playback uses five-minute signed private object URLs. Logout/account changes clear
