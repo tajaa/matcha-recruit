@@ -172,7 +172,7 @@ function TasksPage() {
               onOpen={(recap) => navigate(recapsPath(base, { recap: recap.id, source: recapSource }))} />
           </div>
         </aside>
-        <main className={`min-h-0 min-w-0 flex-1 overflow-y-auto ${recapId ? 'block' : 'hidden md:block'}`}>
+        <main className={`min-h-0 min-w-0 flex-1 flex-col overflow-y-auto ${recapId ? 'flex' : 'hidden md:flex'}`}>
           {recapId ? (
             <RecapView
               key={recapId}
