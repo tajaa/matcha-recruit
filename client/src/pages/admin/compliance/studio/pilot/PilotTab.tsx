@@ -80,7 +80,7 @@ export default function PilotTab() {
           })}
         </div>
         <div className="flex items-center justify-between mb-1">
-          <p className="text-[10px] uppercase tracking-wide text-zinc-500">Sessions</p>
+          <p className="text-[11px] text-zinc-500">Sessions</p>
           <button onClick={refetchSessions} className="text-[10px] text-zinc-500 hover:text-zinc-300">refresh</button>
         </div>
         <div className="flex-1 min-h-0 overflow-y-auto space-y-1">
@@ -93,7 +93,7 @@ export default function PilotTab() {
               }`}>
               <div className="flex items-center justify-between gap-2">
                 <p className="text-xs text-zinc-200 truncate">{s.title}</p>
-                <span className="text-[9px] uppercase tracking-wide text-emerald-400/70 shrink-0">{s.mode}</span>
+                <span className="text-[9px] capitalize text-emerald-400/70 shrink-0">{s.mode}</span>
               </div>
               <p className="text-[10px] text-zinc-600 mt-0.5">
                 {s.message_count ?? 0} msgs · {fmtRelative(s.updated_at)}

@@ -64,7 +64,7 @@ export function EmployeeSyncPanel({ companyId }: { companyId: string }) {
               ['Gaps to research', result.missing_count, result.missing_count > 0 ? 'text-amber-400' : 'text-zinc-100'],
             ].map(([label, value, color]) => (
               <AdminCard key={label as string} >
-                <div className="text-[10px] text-zinc-500 uppercase tracking-wider">{label}</div>
+                <div className="text-[11px] text-zinc-500">{label}</div>
                 <div className={`text-xl font-semibold mt-1 ${color}`}>{value}</div>
               </AdminCard>
             ))}

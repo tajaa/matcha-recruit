@@ -138,11 +138,11 @@ export default function Automation() {
               <div className="grid grid-cols-2 gap-3 mb-4">
                 <div className="border border-zinc-800 rounded-lg px-4 py-3 text-center">
                   <p className="text-xl font-semibold text-zinc-100">{activityStats.checks_24h}</p>
-                  <p className="text-[11px] text-zinc-500 uppercase tracking-wide mt-0.5">Checks (24h)</p>
+                  <p className="text-[11px] text-zinc-500 mt-0.5">Checks (24h)</p>
                 </div>
                 <div className="border border-zinc-800 rounded-lg px-4 py-3 text-center">
                   <p className={`text-xl font-semibold ${activityStats.failed_24h > 0 ? 'text-red-400' : 'text-zinc-100'}`}>{activityStats.failed_24h}</p>
-                  <p className="text-[11px] text-zinc-500 uppercase tracking-wide mt-0.5">Failed (24h)</p>
+                  <p className="text-[11px] text-zinc-500 mt-0.5">Failed (24h)</p>
                 </div>
               </div>
             )}

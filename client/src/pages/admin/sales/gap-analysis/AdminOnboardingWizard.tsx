@@ -160,7 +160,7 @@ export default function AdminOnboardingWizard() {
             })}
           </ol>
           {session.status === 'finalized' && (
-            <div className="mt-4 text-[11px] uppercase tracking-wider text-emerald-300">
+            <div className="mt-4 text-[11px] text-emerald-300">
               Finalized
             </div>
           )}

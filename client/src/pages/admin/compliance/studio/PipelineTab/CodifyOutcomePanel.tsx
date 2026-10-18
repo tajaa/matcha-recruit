@@ -17,7 +17,7 @@ export function CodifyOutcomePanel({
   return (
     <AdminCard className="mb-4 overflow-hidden">
       <div className="flex items-center justify-between gap-2 border-b border-white/[0.06] px-3 py-2">
-        <p className="font-mono text-[10px] uppercase tracking-wide text-zinc-500">
+        <p className="font-mono text-[11px] text-zinc-500">
           {remaining.length === 0
             ? `All ${approveResults.length} codified`
             : `Codification outcome — ${approveResults.length - remaining.length}/${approveResults.length} codified`}

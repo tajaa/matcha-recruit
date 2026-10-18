@@ -60,7 +60,7 @@ function QuoteCard({ q, recommended }: { q: DealQuote; recommended: boolean }) {
       <div className="flex items-baseline justify-between">
         <h3 className="text-lg font-semibold text-zinc-100">{q.tier_label}</h3>
         {recommended && (
-          <span className="rounded-full border border-violet-500/40 bg-violet-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-violet-300">
+          <span className="rounded-full border border-violet-500/40 bg-violet-500/10 px-2 py-0.5 text-[10px] font-semibold text-violet-300">
             Recommended
           </span>
         )}
@@ -378,7 +378,7 @@ export default function DealFlow() {
 
           {/* Per-tier price overrides */}
           <div className="space-y-3 rounded-lg border border-zinc-800 p-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Pricing per tier</p>
+            <p className="text-xs font-semibold text-zinc-500">Pricing per tier</p>
             <div className="grid grid-cols-[auto_1fr_1fr] items-center gap-x-3 gap-y-2 text-xs">
               <span />
               <span className="font-medium text-zinc-500">PEPM ($)</span>

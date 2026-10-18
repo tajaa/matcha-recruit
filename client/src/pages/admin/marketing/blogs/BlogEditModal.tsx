@@ -76,28 +76,28 @@ export default function BlogEditModal({
 
         <div className="flex-1 overflow-y-auto p-5 space-y-4">
           <div>
-            <label className="text-[10px] uppercase tracking-wider text-zinc-500">Title</label>
+            <label className="text-[11px] text-zinc-500">Title</label>
             <AdminInput type="text" value={title} onChange={e => setTitle(e.target.value)}
               className="mt-1"
               placeholder="My great post" />
           </div>
 
           <div>
-            <label className="text-[10px] uppercase tracking-wider text-zinc-500">Slug (/blog/&lt;slug&gt;)</label>
+            <label className="text-[11px] text-zinc-500">Slug (/blog/&lt;slug&gt;)</label>
             <AdminInput type="text" value={slug} onChange={e => setSlug(slugify(e.target.value))}
               className="font-mono mt-1"
               placeholder="my-great-post" />
           </div>
 
           <div>
-            <label className="text-[10px] uppercase tracking-wider text-zinc-500">Excerpt (optional, ~160 chars)</label>
+            <label className="text-[11px] text-zinc-500">Excerpt (optional, ~160 chars)</label>
             <AdminTextarea value={excerpt} onChange={e => setExcerpt(e.target.value)} rows={2}
               className="mt-1 resize-none"
               placeholder="One-line summary shown on blog index" />
           </div>
 
           <div>
-            <label className="text-[10px] uppercase tracking-wider text-zinc-500">Cover image</label>
+            <label className="text-[11px] text-zinc-500">Cover image</label>
             <div className="flex items-center gap-2 mt-1">
               <AdminInput type="text" value={coverImage} onChange={e => setCoverImage(e.target.value)}
                 className="flex-1 font-mono"
@@ -112,7 +112,7 @@ export default function BlogEditModal({
 
           <div>
             <div className="flex items-center justify-between">
-              <label className="text-[10px] uppercase tracking-wider text-zinc-500">Content (markdown)</label>
+              <label className="text-[11px] text-zinc-500">Content (markdown)</label>
               <label className="text-[10px] text-zinc-400 hover:text-zinc-200 cursor-pointer">
                 Insert image
                 <input type="file" accept="image/*" className="hidden"
@@ -129,13 +129,13 @@ export default function BlogEditModal({
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-[10px] uppercase tracking-wider text-zinc-500">Tags (comma-separated)</label>
+              <label className="text-[11px] text-zinc-500">Tags (comma-separated)</label>
               <AdminInput type="text" value={tagsInput} onChange={e => setTagsInput(e.target.value)}
                 className="mt-1"
                 placeholder="hr, compliance" />
             </div>
             <div>
-              <label className="text-[10px] uppercase tracking-wider text-zinc-500">Status</label>
+              <label className="text-[11px] text-zinc-500">Status</label>
               <AdminSelect value={status} onChange={e => setStatus(e.target.value as BlogStatus)}
                 className="w-full mt-1">
                 <option value="draft">Draft</option>
@@ -147,12 +147,12 @@ export default function BlogEditModal({
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-[10px] uppercase tracking-wider text-zinc-500">Meta title (SEO)</label>
+              <label className="text-[11px] text-zinc-500">Meta title (SEO)</label>
               <AdminInput type="text" value={metaTitle} onChange={e => setMetaTitle(e.target.value)}
                 className="mt-1" />
             </div>
             <div>
-              <label className="text-[10px] uppercase tracking-wider text-zinc-500">Meta description (SEO)</label>
+              <label className="text-[11px] text-zinc-500">Meta description (SEO)</label>
               <AdminInput type="text" value={metaDesc} onChange={e => setMetaDesc(e.target.value)}
                 className="mt-1" />
             </div>

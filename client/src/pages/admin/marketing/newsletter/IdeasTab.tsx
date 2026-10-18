@@ -100,7 +100,7 @@ export function IdeasTab({
       <div className="rounded-xl border border-zinc-800 p-4 space-y-3 self-start">
         <div className="flex items-center gap-2">
           <Lightbulb size={14} className="text-amber-400" />
-          <p className="text-[10px] text-zinc-500 uppercase tracking-wider">Capture an idea</p>
+          <p className="text-[11px] text-zinc-500">Capture an idea</p>
         </div>
         <AdminInput
           value={title}

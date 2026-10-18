@@ -320,7 +320,7 @@ export default function Companies() {
         <form onSubmit={handleAddCompany} className="space-y-4">
           {/* Company info */}
           <div>
-            <p className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium mb-2">Company Info</p>
+            <p className="text-[11px] text-zinc-500 font-medium mb-2">Company Info</p>
             <div className="grid grid-cols-2 gap-3">
               <Input
                 label="Company Name"
@@ -365,7 +365,7 @@ export default function Companies() {
           {/* Healthcare specialties */}
           {showSpecialties && (
             <div>
-              <p className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium mb-2">
+              <p className="text-[11px] text-zinc-500 font-medium mb-2">
                 Healthcare Specialties
               </p>
               <div className="border border-zinc-800 rounded-lg p-3 grid grid-cols-3 gap-1.5">
@@ -392,7 +392,7 @@ export default function Companies() {
 
           {/* Account info */}
           <div>
-            <p className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium mb-2">First Admin User</p>
+            <p className="text-[11px] text-zinc-500 font-medium mb-2">First Admin User</p>
             <div className="grid grid-cols-2 gap-3">
               <Input
                 label="Full Name"

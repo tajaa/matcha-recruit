@@ -57,7 +57,7 @@ export function Step6Review({ session, onUpdated }: StepProps) {
             <div>Certifications: {finalized.certifications_written} · Licenses: {finalized.licenses_written}</div>
             {finalized.invite_token && (
               <div className="pt-2 border-t border-emerald-500/20">
-                <div className="text-[11px] uppercase tracking-wider text-emerald-300 mb-0.5">
+                <div className="text-[11px] text-emerald-300 mb-0.5">
                   Owner invite token
                 </div>
                 <code className="text-xs text-zinc-100 break-all">{finalized.invite_token}</code>
@@ -85,7 +85,7 @@ export function Step6Review({ session, onUpdated }: StepProps) {
 function SummaryRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center gap-4 py-1.5 border-b border-vsc-border last:border-b-0">
-      <div className="w-44 text-[11px] uppercase tracking-wider text-zinc-500">{label}</div>
+      <div className="w-44 text-[11px] text-zinc-500">{label}</div>
       <div className="text-sm text-zinc-200">{value}</div>
     </div>
   )

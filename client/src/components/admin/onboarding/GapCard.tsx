@@ -55,7 +55,7 @@ export default function GapCard({ gap, selected, onToggle, onResearch, researchi
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-sm font-medium text-zinc-100">{humanizeCategory(gap.category_slug)}</span>
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-vsc-border uppercase tracking-wide">
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-vsc-border capitalize">
               {gap.scope_level}
             </span>
             <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20">

@@ -53,7 +53,7 @@ export default function BlogComposer({
       <AdminPageHeader title="New post" description="Write and publish a post for the public blog." />
       <div className="space-y-4">
         <div>
-          <label className="text-[10px] uppercase tracking-wider text-zinc-500">Title</label>
+          <label className="text-[11px] text-zinc-500">Title</label>
           <AdminInput
             type="text"
             value={composeTitle}
@@ -65,7 +65,7 @@ export default function BlogComposer({
         </div>
 
         <div>
-          <label className="text-[10px] uppercase tracking-wider text-zinc-500 flex items-center justify-between">
+          <label className="text-[11px] text-zinc-500 flex items-center justify-between">
             <span>Slug (/blog/&lt;slug&gt;)</span>
             <label className="flex items-center gap-1 normal-case text-zinc-400 font-normal cursor-pointer">
               <input type="checkbox" checked={autoSlug} onChange={e => setAutoSlug(e.target.checked)} />
@@ -82,7 +82,7 @@ export default function BlogComposer({
         </div>
 
         <div>
-          <label className="text-[10px] uppercase tracking-wider text-zinc-500">Excerpt (optional, ~160 chars)</label>
+          <label className="text-[11px] text-zinc-500">Excerpt (optional, ~160 chars)</label>
           <AdminTextarea
             value={composeExcerpt}
             onChange={e => { setComposeExcerpt(e.target.value); mark() }}
@@ -93,7 +93,7 @@ export default function BlogComposer({
         </div>
 
         <div>
-          <label className="text-[10px] uppercase tracking-wider text-zinc-500">Cover image</label>
+          <label className="text-[11px] text-zinc-500">Cover image</label>
           <div className="flex items-center gap-2 mt-1">
             <AdminInput
               type="text"
@@ -112,7 +112,7 @@ export default function BlogComposer({
 
         <div>
           <div className="flex items-center justify-between mb-1">
-            <label className="text-[10px] uppercase tracking-wider text-zinc-500">Content (markdown)</label>
+            <label className="text-[11px] text-zinc-500">Content (markdown)</label>
             <label className="text-[10px] text-zinc-400 hover:text-zinc-200 cursor-pointer">
               Insert image
               <input type="file" accept="image/*" className="hidden" onChange={async e => {
@@ -137,7 +137,7 @@ export default function BlogComposer({
 
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="text-[10px] uppercase tracking-wider text-zinc-500">Tags (comma-separated)</label>
+            <label className="text-[11px] text-zinc-500">Tags (comma-separated)</label>
             <AdminInput
               type="text"
               value={composeTags}
@@ -147,7 +147,7 @@ export default function BlogComposer({
             />
           </div>
           <div>
-            <label className="text-[10px] uppercase tracking-wider text-zinc-500">Meta title (SEO)</label>
+            <label className="text-[11px] text-zinc-500">Meta title (SEO)</label>
             <AdminInput
               type="text"
               value={composeMetaTitle}
@@ -158,7 +158,7 @@ export default function BlogComposer({
         </div>
 
         <div>
-          <label className="text-[10px] uppercase tracking-wider text-zinc-500">Meta description (SEO)</label>
+          <label className="text-[11px] text-zinc-500">Meta description (SEO)</label>
           <AdminInput
             type="text"
             value={composeMetaDesc}

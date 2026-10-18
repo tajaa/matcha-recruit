@@ -1,4 +1,5 @@
 import { AdminButton as Button, AdminTable } from '../AdminUI'
+import { AdminTab, AdminTabBar } from '../AdminTabs'
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../../../api/client'
 
@@ -96,13 +97,13 @@ export default function EvalsTab() {
         {error && <p className="text-xs text-red-400 mt-2">{error}</p>}
       </div>
 
-      <div className="flex gap-1">
+      <AdminTabBar>
         {(['scorecard', 'runs', 'golden', 'baseline'] as View[]).map((v) => (
-          <Button key={v} variant={view === v ? 'secondary' : 'ghost'} size="sm" onClick={() => setView(v)}>
+          <AdminTab key={v} active={view === v} onClick={() => setView(v)}>
             {v[0].toUpperCase() + v.slice(1)}
-          </Button>
+          </AdminTab>
         ))}
-      </div>
+      </AdminTabBar>
 
       {view === 'scorecard' && <Scorecard cells={cells} />}
 

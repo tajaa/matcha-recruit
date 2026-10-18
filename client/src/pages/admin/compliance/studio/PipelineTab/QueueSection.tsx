@@ -60,7 +60,7 @@ export function QueueSection({
                   className="flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-white/[0.02]">
                   <ChevronDown className={`mt-1 h-4 w-4 shrink-0 text-zinc-600 transition-transform ${open ? 'rotate-0' : '-rotate-90'}`} />
                   <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-3 font-mono text-[10px] uppercase tracking-wide text-zinc-500">
+                    <div className="flex flex-wrap items-center gap-3 font-mono text-[11px] text-zinc-500">
                       {item.created_at && <span className="tabular-nums">{new Date(item.created_at).toLocaleDateString()}</span>}
                       <span>{item.type === 'category' ? 'Category gap' : `Specialty · ${item.label}`}</span>
                     </div>

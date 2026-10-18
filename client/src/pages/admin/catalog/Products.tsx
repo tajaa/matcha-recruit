@@ -301,7 +301,7 @@ export default function Products() {
         <div className="min-w-0 flex-1 overflow-y-auto">
           {builtinProducts.length > 0 && (
             <AdminTabBar>
-              <p className="px-3 pt-2 text-[10px] font-medium uppercase tracking-wide text-zinc-600">
+              <p className="px-3 pt-2 text-[11px] font-medium text-zinc-600">
                 Built-in tiers
               </p>
               {builtinProducts.map((t) => (
@@ -322,7 +322,7 @@ export default function Products() {
               ))}
             </AdminTabBar>
           )}
-          <p className="px-3 pt-2 text-[10px] font-medium uppercase tracking-wide text-zinc-600">
+          <p className="px-3 pt-2 text-[11px] font-medium text-zinc-600">
             Custom products
           </p>
           {loading ? (
@@ -416,7 +416,7 @@ export default function Products() {
             />
 
             <section className="space-y-2">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Account setup</h3>
+              <h3 className="text-xs font-semibold text-zinc-400">Account setup</h3>
               <Select
                 label="New-account onboarding"
                 options={[
@@ -435,7 +435,7 @@ export default function Products() {
 
             {/* Pricing */}
             <section className="space-y-3">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Pricing</h3>
+              <h3 className="text-xs font-semibold text-zinc-400">Pricing</h3>
               <div className="grid grid-cols-2 gap-3">
                 <Select
                   label="Model"
@@ -495,7 +495,7 @@ export default function Products() {
 
             {/* Features */}
             <section className="space-y-3">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
+              <h3 className="text-xs font-semibold text-zinc-400">
                 Included features ({enabledFeatures.length})
               </h3>
               {featureGroups.map((group) => {
@@ -503,7 +503,7 @@ export default function Products() {
                 if (keys.length === 0) return null
                 return (
                   <div key={group.label} className="space-y-1.5">
-                    <p className="text-[11px] uppercase tracking-wide text-zinc-600">{group.label}</p>
+                    <p className="text-[11px] text-zinc-600">{group.label}</p>
                     <div className="grid grid-cols-2 gap-x-4 gap-y-1">
                       {keys.map((key) => (
                         <label key={key} className="flex items-center gap-2 py-0.5 text-[13px] text-zinc-300">
@@ -523,7 +523,7 @@ export default function Products() {
 
             {/* Nav preview */}
             <section className="space-y-2">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Sidebar</h3>
+              <h3 className="text-xs font-semibold text-zinc-400">Sidebar</h3>
               <p className="text-[11px] text-zinc-500">
                 Derived from the features above. Reorder to change what the customer sees;
                 features with no page of their own don't appear.
@@ -653,14 +653,14 @@ function BuiltinSummary({ tier }: { tier: BuiltinTier }) {
 
       <div className="space-y-3">
         <div>
-          <p className="mb-1 text-[11px] uppercase tracking-wide text-emerald-500">
+          <p className="mb-1 text-[11px] text-emerald-500">
             Always on — can't be removed
           </p>
           <FeatureChipRow keys={tier.forced_on} emptyLabel="Nothing forced on for this tier." />
         </div>
         {tier.forced_off.length > 0 && (
           <div>
-            <p className="mb-1 text-[11px] uppercase tracking-wide text-red-400">
+            <p className="mb-1 text-[11px] text-red-400">
               Blocked — overrides a stored "true"
             </p>
             <FeatureChipRow keys={tier.forced_off} emptyLabel="" />
@@ -668,14 +668,14 @@ function BuiltinSummary({ tier }: { tier: BuiltinTier }) {
         )}
         {tier.paid_gate.length > 0 && (
           <div>
-            <p className="mb-1 text-[11px] uppercase tracking-wide text-amber-400">
+            <p className="mb-1 text-[11px] text-amber-400">
               Unlocked by Stripe checkout
             </p>
             <FeatureChipRow keys={tier.paid_gate} emptyLabel="" />
           </div>
         )}
         <div>
-          <p className="mb-1 text-[11px] uppercase tracking-wide text-zinc-500">
+          <p className="mb-1 text-[11px] text-zinc-500">
             Granted at signup — admin-toggleable afterward
           </p>
           <FeatureChipRow keys={tier.granted_at_signup} emptyLabel="Nothing else granted at signup." />

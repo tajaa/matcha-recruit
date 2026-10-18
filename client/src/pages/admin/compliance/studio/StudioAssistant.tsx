@@ -104,7 +104,7 @@ export default function StudioAssistant({
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-between border-b border-white/[0.06] px-3 py-2.5">
-        <p className="font-mono text-[10px] uppercase tracking-wide text-zinc-400">Guide</p>
+        <p className="font-mono text-[11px] text-zinc-400">Guide</p>
         <button type="button" onClick={onClose} className="text-zinc-600 hover:text-zinc-300">
           <X className="h-3.5 w-3.5" />
         </button>

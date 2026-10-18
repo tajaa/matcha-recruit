@@ -28,7 +28,7 @@ export function LaborScopePanel({
             {laborScope?.coordinate.state
               ? `${laborScope.coordinate.state}${laborScope.coordinate.city ? `, ${laborScope.coordinate.city}` : ''}`
               : 'Federal'}
-            <span className="ml-2 font-mono text-[10px] font-normal uppercase tracking-[0.15em] text-zinc-600">
+            <span className="ml-2 font-mono text-[11px] font-normal text-zinc-600">
               generic employer · federal + state + city
             </span>
           </h2>
@@ -191,7 +191,7 @@ export function LaborScopePanel({
                   </div>
                   {data.codified.length > 0 && (
                     <details className="mt-2">
-                      <summary className="cursor-pointer text-[10px] uppercase text-zinc-500">
+                      <summary className="cursor-pointer text-[11px] text-zinc-500">
                         Codified ({data.codified.length})
                       </summary>
                       <ul className="mt-1 space-y-1.5">
@@ -249,7 +249,7 @@ export function LaborScopePanel({
                   )}
                   {data.uncodified.length > 0 && (
                     <div className="mt-2">
-                      <div className="text-[10px] uppercase text-zinc-500">Fetch queue</div>
+                      <div className="text-[11px] text-zinc-500">Fetch queue</div>
                       <ul className="mt-1 space-y-0.5">
                         {data.uncodified.slice(0, 10).map((it) => (
                           <li key={it.citation} className="text-[11px] text-amber-300/80">

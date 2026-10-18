@@ -277,7 +277,7 @@ export default function Features() {
             })
           )}
         </div>
-        <div className="border-t border-white/[0.06] px-3 py-2 font-mono text-[10px] uppercase tracking-wide text-zinc-600">
+        <div className="border-t border-white/[0.06] px-3 py-2 font-mono text-[11px] text-zinc-600">
           {companies.length} tenants
         </div>
       </div>

@@ -7,7 +7,7 @@ export function SeverityBadge({ severity }: { severity?: string | null }) {
   const cls = SEVERITY_BADGE[key]
   if (!cls) return null
   return (
-    <span className={`ml-1.5 rounded border px-1 text-[9px] uppercase tracking-wide ${cls}`}
+    <span className={`ml-1.5 rounded border px-1 text-[9px] capitalize ${cls}`}
           title={`Severity: ${key}`}>
       {key}
     </span>

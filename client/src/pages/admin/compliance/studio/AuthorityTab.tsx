@@ -165,7 +165,7 @@ export default function AuthorityTab({ onMutate }: { onMutate?: () => void }) {
                         <Check className="inline h-3 w-3" /> Ack
                       </AdminButton>
                     ) : (
-                      <span className="text-[10px] uppercase text-zinc-600">acknowledged</span>
+                      <span className="text-[10px] capitalize text-zinc-600">acknowledged</span>
                     )}
                   </td>
                 </tr>

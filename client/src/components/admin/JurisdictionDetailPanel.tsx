@@ -1,4 +1,4 @@
-import { AdminButton as Button, AdminButton } from './AdminUI'
+import { AdminButton } from './AdminUI'
 import { AdminTab, AdminTabBar } from './AdminTabs'
 import SpecialtyFilterSelect from './jurisdiction/SpecialtyFilterSelect'
 import type { Props, RowContext, ViewMode } from './JurisdictionDetailPanel/types'
@@ -50,7 +50,7 @@ export default function JurisdictionDetailPanel({ id, city, state, categoriesMis
       {/* Metro group (parent/children) */}
       {detail && (detail.parent_id || detail.children.length > 0) && (
         <div className="mb-3 border border-zinc-800 rounded-lg px-3 py-2.5">
-          <p className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium mb-1.5">Metro Group</p>
+          <p className="text-[11px] text-zinc-500 font-medium mb-1.5">Metro Group</p>
           <div className="flex flex-wrap gap-1.5">
             {detail.parent_id && onNavigate && (
               <AdminButton type="button" onClick={() => onNavigate(detail.parent_id!)}
@@ -71,7 +71,7 @@ export default function JurisdictionDetailPanel({ id, city, state, categoriesMis
       {/* Missing categories */}
       {categoriesMissing && categoriesMissing.length > 0 && (
         <div className="mb-3 border border-zinc-800 rounded-lg px-3 py-2.5">
-          <p className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium mb-1.5">Missing categories</p>
+          <p className="text-[11px] text-zinc-500 font-medium mb-1.5">Missing categories</p>
           <div className="flex flex-wrap gap-1.5">
             {categoriesMissing.map((cat) => (
               <span key={cat} className="text-[10px] text-red-400/70 bg-red-500/10 px-2 py-0.5 rounded">{getCategoryLabel(cat)}</span>
@@ -82,17 +82,17 @@ export default function JurisdictionDetailPanel({ id, city, state, categoriesMis
 
       {/* View controls: mode tabs + specialty filter */}
       <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-1">
+        <AdminTabBar className="mb-0!">
           {([
             { id: 'requirements' as ViewMode, label: 'Requirements' },
             { id: 'hierarchy' as ViewMode, label: 'Hierarchy' },
             { id: 'legislation' as ViewMode, label: 'Legislation' },
           ]).map((v) => (
-            <Button key={v.id} variant={viewMode === v.id ? 'secondary' : 'ghost'} size="sm" onClick={() => setViewMode(v.id)}>
+            <AdminTab key={v.id} active={viewMode === v.id} onClick={() => setViewMode(v.id)}>
               {v.label}
-            </Button>
+            </AdminTab>
           ))}
-        </div>
+        </AdminTabBar>
         <SpecialtyFilterSelect value={specialtyFilter} onChange={setSpecialtyFilter} />
       </div>
 
@@ -119,15 +119,10 @@ export default function JurisdictionDetailPanel({ id, city, state, categoriesMis
         <>
           {/* ── Category filter strip ── */}
           {filteredReqs.length > 0 && (viewMode === 'requirements' || viewMode === 'hierarchy') && (
-            <AdminTabBar className="mb-3">
-              <button
-                onClick={() => setCategoryFilter(null)}
-                className={`text-[10px] px-2 py-1 rounded transition-colors ${
-                  !categoryFilter ? 'bg-zinc-700 text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'
-                }`}
-              >
+            <AdminTabBar className="mb-3!">
+              <AdminTab onClick={() => setCategoryFilter(null)} active={!categoryFilter}>
                 All ({filteredReqs.length})
-              </button>
+              </AdminTab>
               {availableCategories.map(({ cat, count, label }) => (
                 <AdminTab
                   key={cat}
@@ -165,7 +160,7 @@ export default function JurisdictionDetailPanel({ id, city, state, categoriesMis
           {/* Linked locations */}
           {detail.locations.length > 0 && (
             <div className="mt-3">
-              <p className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium mb-1.5">Linked Business Locations</p>
+              <p className="text-[11px] text-zinc-500 font-medium mb-1.5">Linked Business Locations</p>
               <div className="border border-zinc-800 rounded-lg divide-y divide-zinc-800/60">
                 {detail.locations.map((loc) => (
                   <div key={loc.id} className="flex items-center justify-between px-3 py-2">

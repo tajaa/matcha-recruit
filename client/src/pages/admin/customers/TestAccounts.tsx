@@ -197,7 +197,7 @@ export default function TestAccounts() {
 function Credential({ label, value, onCopy }: { label: string; value: string; onCopy: (value: string) => Promise<void> }) {
   return (
     <div>
-      <p className="mb-1 text-xs font-medium uppercase tracking-wide text-zinc-500">{label}</p>
+      <p className="mb-1 text-xs font-medium text-zinc-500">{label}</p>
       <AdminCard className="flex items-center gap-2 px-3 py-2 font-mono text-sm text-zinc-100">
         <span className="min-w-0 flex-1 break-all">{value}</span>
         <button type="button" onClick={() => onCopy(value)} className="text-zinc-400 hover:text-zinc-100" title={`Copy ${label}`}>

@@ -98,7 +98,7 @@ export function Step4Scope({ session, onUpdated, onNext }: StepProps) {
 function ScopeList({ title, items }: { title: string; items: string[] }) {
   return (
     <div className="mb-4">
-      <div className="text-[11px] uppercase tracking-wider text-zinc-500 mb-1">{title}</div>
+      <div className="text-[11px] text-zinc-500 mb-1">{title}</div>
       {items.length === 0 ? (
         <div className="text-sm text-zinc-600">— none —</div>
       ) : (

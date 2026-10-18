@@ -479,12 +479,12 @@ function JurisdictionRow({ j, expanded, editing, editForm, setEditForm, saving, 
             {j.change_status === 'changed' && (
               <div className="grid grid-cols-2 gap-4 mt-2 pt-2 border-t border-zinc-700/50">
                 <div>
-                  <div className="text-zinc-500 text-[10px] uppercase mb-1">Previous</div>
+                  <div className="text-zinc-500 text-[11px] mb-1">Previous</div>
                   <div className="text-zinc-500">{j.previous_value || '\u2014'}</div>
                   {j.previous_description && <div className="text-zinc-600 mt-1">{j.previous_description}</div>}
                 </div>
                 <div>
-                  <div className="text-zinc-400 text-[10px] uppercase mb-1">Current</div>
+                  <div className="text-zinc-400 text-[11px] mb-1">Current</div>
                   <div className="text-zinc-200">{j.current_value || '\u2014'}</div>
                   {j.description && <div className="text-zinc-400 mt-1">{j.description}</div>}
                 </div>

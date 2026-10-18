@@ -18,7 +18,7 @@ export function Sparkline({ points }: { points: number[] }) {
 export function Stat({ label, value, sub }: { label: string; value: number | string; sub?: string }) {
   return (
     <AdminCard >
-      <p className="text-[10px] text-zinc-500 uppercase tracking-wider mb-1">{label}</p>
+      <p className="text-[11px] text-zinc-500 mb-1">{label}</p>
       <p className="text-xl font-semibold text-zinc-100">{value}</p>
       {sub && <p className="text-[10px] text-zinc-500 mt-0.5">{sub}</p>}
     </AdminCard>

@@ -60,17 +60,17 @@ export default function PenaltyOverviewTab() {
       {/* Summary stats */}
       <div className="grid grid-cols-3 gap-3">
         <AdminCard >
-          <p className="text-[10px] text-zinc-500 uppercase tracking-wide">Coverage</p>
+          <p className="text-[11px] text-zinc-500">Coverage</p>
           <p className="text-xl font-semibold text-zinc-100">{overallPct}%</p>
           <p className="text-xs text-zinc-500">{totalWithPenalty.toLocaleString()} / {totalReqs.toLocaleString()} requirements</p>
         </AdminCard>
         <AdminCard >
-          <p className="text-[10px] text-zinc-500 uppercase tracking-wide">Categories</p>
+          <p className="text-[11px] text-zinc-500">Categories</p>
           <p className="text-xl font-semibold text-zinc-100">{data.details.length}</p>
           <p className="text-xs text-zinc-500">with penalty data</p>
         </AdminCard>
         <AdminCard >
-          <p className="text-[10px] text-zinc-500 uppercase tracking-wide">Highest Penalty</p>
+          <p className="text-[11px] text-zinc-500">Highest Penalty</p>
           <p className="text-xl font-semibold text-red-400">
             {data.top_penalties[0] ? fmtUsd(data.top_penalties[0].max_penalty) : '—'}
           </p>

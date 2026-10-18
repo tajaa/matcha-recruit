@@ -1,4 +1,5 @@
 /* eslint-disable react-hooks/set-state-in-effect -- Effects intentionally synchronize this tool with loaded data, URL selections, and preview inputs. */
+import { AdminTab, AdminTabBar } from '../../../../components/admin/AdminTabs'
 import { AdminButton, AdminInput, AdminTable } from '../../../../components/admin/AdminUI'
 /**
  * Master-admin gap-analysis index page.
@@ -108,21 +109,13 @@ export default function AdminOnboarding({ embedded = false }: { embedded?: boole
         </p>
       )}
 
-      <div className="flex items-center gap-2 mb-4 text-xs">
+      <AdminTabBar className="mb-4!" role="group" aria-label="Status">
         {STATUS_FILTERS.map((f) => (
-          <button
-            key={f.value}
-            onClick={() => setStatus(f.value)}
-            className={`px-3 h-7 rounded-full border transition-colors ${
-              status === f.value
-                ? 'bg-zinc-100 text-zinc-900 border-zinc-100'
-                : 'bg-transparent text-zinc-400 border-vsc-border hover:border-zinc-500'
-            }`}
-          >
+          <AdminTab key={f.value} active={status === f.value} onClick={() => setStatus(f.value)}>
             {f.label}
-          </button>
+          </AdminTab>
         ))}
-      </div>
+      </AdminTabBar>
 
       {error && (
         <div className="mb-4 rounded-md border border-red-500/30 bg-red-500/5 p-3 text-sm text-red-300">
@@ -260,7 +253,7 @@ export function CompanyPicker({ onClose, onPick }: { onClose: () => void; onPick
               >
                 <span className="text-sm text-zinc-200">{c.company_name}</span>
                 {c.signup_source && (
-                  <span className="text-[10px] text-zinc-500 uppercase tracking-wider">{c.signup_source}</span>
+                  <span className="text-[10px] text-zinc-500 capitalize">{c.signup_source}</span>
                 )}
               </button>
             ))
@@ -279,7 +272,7 @@ function StatusPill({ status }: { status: OnboardingStatus }) {
   }
   return (
     <span
-      className={`inline-flex items-center px-2 h-5 rounded-full text-[10.5px] uppercase tracking-wider border ${styles[status]}`}
+      className={`inline-flex items-center px-2 h-5 rounded-full text-[10.5px] capitalize border ${styles[status]}`}
     >
       {status.replace('_', ' ')}
     </span>

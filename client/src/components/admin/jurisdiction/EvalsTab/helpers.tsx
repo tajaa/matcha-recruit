@@ -37,7 +37,7 @@ export function severityBadge(severity: string) {
     info: 'bg-zinc-700 text-zinc-400',
   }
   return (
-    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${map[severity] || ''}`}>
+    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold capitalize ${map[severity] || ''}`}>
       {severity}
     </span>
   )

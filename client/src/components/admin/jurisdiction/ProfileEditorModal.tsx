@@ -231,7 +231,7 @@ export default function ProfileEditorModal({
 
           {/* Rate types */}
           <div>
-            <p className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium mb-1.5">
+            <p className="text-[11px] text-zinc-500 font-medium mb-1.5">
               Rate Types
             </p>
             <div className="flex flex-wrap gap-1.5">
@@ -254,7 +254,7 @@ export default function ProfileEditorModal({
 
           {/* Focused categories by group */}
           <div>
-            <p className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium mb-1.5">
+            <p className="text-[11px] text-zinc-500 font-medium mb-1.5">
               Focused Categories
             </p>
             {GROUP_ORDER.filter((g) => catsByGroup[g]?.length).map((group) => (
@@ -283,7 +283,7 @@ export default function ProfileEditorModal({
           {/* Category order with up/down arrows */}
           {form.category_order.length > 0 && (
             <div>
-              <p className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium mb-1.5">
+              <p className="text-[11px] text-zinc-500 font-medium mb-1.5">
                 Category Order & Evidence
               </p>
               <div className="border border-zinc-800 rounded-lg divide-y divide-zinc-800/60">

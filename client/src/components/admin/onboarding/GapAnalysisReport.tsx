@@ -20,7 +20,7 @@ function Count({ label, value, alert }: { label: string; value: number; alert?: 
       <span className={`text-2xl font-semibold ${alert && value > 0 ? 'text-amber-300' : 'text-zinc-100'}`}>
         {value}
       </span>
-      <span className="text-[11px] uppercase tracking-wider text-zinc-500">{label}</span>
+      <span className="text-[11px] text-zinc-500">{label}</span>
     </div>
   )
 }

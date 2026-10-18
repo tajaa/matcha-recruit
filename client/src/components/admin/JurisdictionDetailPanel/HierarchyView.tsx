@@ -29,7 +29,7 @@ export default function HierarchyView({ filteredReqs, hierarchyGrouped, preempti
         <div key={cat}>
           {catIdx > 0 && <div className="border-t border-zinc-800/60" />}
           <div className="px-4 pt-3 pb-1 flex items-center gap-2">
-            <p className="text-xs uppercase tracking-wide text-zinc-400 font-medium">{getCategoryLabel(cat)}</p>
+            <p className="text-xs text-zinc-400 font-medium">{getCategoryLabel(cat)}</p>
             {/* Preemption badge */}
             {preemptionLookup?.[cat] && (
               <span
@@ -51,7 +51,7 @@ export default function HierarchyView({ filteredReqs, hierarchyGrouped, preempti
             if (!levels[level]?.length) {
               return (
                 <div key={level} className="px-4 pt-2 pb-1.5">
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded uppercase tracking-wider font-medium ${LEVEL_COLORS[level] || 'text-zinc-400 bg-zinc-500/10'}`}>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded capitalize font-medium ${LEVEL_COLORS[level] || 'text-zinc-400 bg-zinc-500/10'}`}>
                     {levelLabel}
                   </span>
                   <p className="text-[11px] text-zinc-600 mt-1 pl-1">No {level}-level rules</p>
@@ -61,7 +61,7 @@ export default function HierarchyView({ filteredReqs, hierarchyGrouped, preempti
             return (
               <div key={level}>
                 <div className="px-4 pt-2 pb-0.5">
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded uppercase tracking-wider font-medium ${LEVEL_COLORS[level] || 'text-zinc-400 bg-zinc-500/10'}`}>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded capitalize font-medium ${LEVEL_COLORS[level] || 'text-zinc-400 bg-zinc-500/10'}`}>
                     {levelLabel}
                   </span>
                 </div>

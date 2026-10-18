@@ -39,7 +39,7 @@ function HoursPanel({ d }: { d: ClientDetail }) {
   const over = pct != null && pct > 100
   return (
     <Card className="p-4">
-      <div className="text-xs uppercase tracking-wide text-zinc-500 mb-2">
+      <div className="text-xs text-zinc-500 mb-2">
         {BILLING_LABELS[s.billing_model as BillingModel]}
         {s.basis === 'period' && s.retainer_period ? ` · ${s.retainer_period}` : ''}
       </div>

@@ -1,4 +1,5 @@
 /* eslint-disable react-hooks/set-state-in-effect -- Effects intentionally synchronize this tool with loaded data, URL selections, and preview inputs. */
+import { AdminTab, AdminTabBar } from '../../../components/admin/AdminTabs'
 import { AdminButton as Button, AdminInput, AdminSelect, AdminTable } from '../../../components/admin/AdminUI'
 import { AdminPageHeader } from '../../../components/admin/AdminPageHeader'
 import { useState, useEffect, useCallback } from 'react'
@@ -118,7 +119,7 @@ export default function PayerData() {
             { label: 'Last Ingest', value: o.last_ingest ? new Date(o.last_ingest).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' }) : '—' },
           ].map(s => (
             <div key={s.label} className="border border-zinc-800 rounded-lg px-3 py-3">
-              <p className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium">{s.label}</p>
+              <p className="text-[11px] text-zinc-500 font-medium">{s.label}</p>
               <p className={`text-2xl font-bold tracking-tight mt-0.5 ${'color' in s && s.color ? s.color : 'text-zinc-100'}`}>{s.value}</p>
             </div>
           ))}
@@ -126,15 +127,17 @@ export default function PayerData() {
       )}
 
       {/* Tabs */}
-      <div className="flex items-center gap-1">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <AdminTabBar className="mb-0!">
         {([
           { id: 'overview' as Tab, label: 'Overview' },
           { id: 'policies' as Tab, label: 'Policies' },
           { id: 'integrity' as Tab, label: 'Integrity' },
           { id: 'changelog' as Tab, label: 'Change Log' },
         ]).map(t => (
-          <Button key={t.id} variant={tab === t.id ? 'secondary' : 'ghost'} size="sm" onClick={() => setTab(t.id)}>{t.label}</Button>
+          <AdminTab key={t.id} active={tab === t.id} onClick={() => setTab(t.id)}>{t.label}</AdminTab>
         ))}
+        </AdminTabBar>
         <div className="ml-auto flex gap-2">
           <Button variant="ghost" size="sm" disabled={running === 'ingest'} onClick={handleCmsIngest}>
             {running === 'ingest' ? 'Ingesting...' : 'Run CMS Ingest'}
@@ -152,7 +155,7 @@ export default function PayerData() {
             <div className="space-y-4">
               {/* Field completeness */}
               <div className="border border-zinc-800 rounded-lg p-4">
-                <h3 className="text-xs text-zinc-400 uppercase tracking-wide mb-3">Field Completeness</h3>
+                <h3 className="text-xs text-zinc-400 mb-3">Field Completeness</h3>
                 <div className="grid grid-cols-3 gap-4">
                   {[
                     { label: 'Clinical Criteria', pct: o.field_completeness.clinical_criteria_pct },
@@ -174,7 +177,7 @@ export default function PayerData() {
 
               {/* Coverage breakdown */}
               <div className="border border-zinc-800 rounded-lg p-4">
-                <h3 className="text-xs text-zinc-400 uppercase tracking-wide mb-3">Coverage Status</h3>
+                <h3 className="text-xs text-zinc-400 mb-3">Coverage Status</h3>
                 <div className="flex gap-6 text-sm">
                   <div><span className="text-emerald-400 font-bold">{o.coverage.covered}</span> <span className="text-zinc-500">covered</span></div>
                   <div><span className="text-amber-400 font-bold">{o.coverage.conditional}</span> <span className="text-zinc-500">conditional</span></div>
@@ -184,7 +187,7 @@ export default function PayerData() {
 
               {/* By payer */}
               <div className="border border-zinc-800 rounded-lg p-4">
-                <h3 className="text-xs text-zinc-400 uppercase tracking-wide mb-3">By Payer</h3>
+                <h3 className="text-xs text-zinc-400 mb-3">By Payer</h3>
                 <AdminTable>
                   <thead >
                     <tr>
@@ -301,43 +304,43 @@ export default function PayerData() {
                               <td colSpan={7} className="space-y-2">
                                 {p.clinical_criteria && (
                                   <div>
-                                    <p className="text-[10px] uppercase text-zinc-500 mb-0.5">Clinical Criteria</p>
+                                    <p className="text-[11px] text-zinc-500 mb-0.5">Clinical Criteria</p>
                                     <p className="text-xs text-zinc-300 whitespace-pre-wrap">{p.clinical_criteria}</p>
                                   </div>
                                 )}
                                 {p.medical_necessity_criteria && (
                                   <div>
-                                    <p className="text-[10px] uppercase text-zinc-500 mb-0.5">Medical Necessity</p>
+                                    <p className="text-[11px] text-zinc-500 mb-0.5">Medical Necessity</p>
                                     <p className="text-xs text-zinc-300 whitespace-pre-wrap">{p.medical_necessity_criteria}</p>
                                   </div>
                                 )}
                                 {p.documentation_requirements && (
                                   <div>
-                                    <p className="text-[10px] uppercase text-zinc-500 mb-0.5">Documentation Requirements</p>
+                                    <p className="text-[11px] text-zinc-500 mb-0.5">Documentation Requirements</p>
                                     <p className="text-xs text-zinc-300 whitespace-pre-wrap">{p.documentation_requirements}</p>
                                   </div>
                                 )}
                                 {p.age_restrictions && (
                                   <div>
-                                    <p className="text-[10px] uppercase text-zinc-500 mb-0.5">Age Restrictions</p>
+                                    <p className="text-[11px] text-zinc-500 mb-0.5">Age Restrictions</p>
                                     <p className="text-xs text-zinc-300">{p.age_restrictions}</p>
                                   </div>
                                 )}
                                 {p.frequency_limits && (
                                   <div>
-                                    <p className="text-[10px] uppercase text-zinc-500 mb-0.5">Frequency Limits</p>
+                                    <p className="text-[11px] text-zinc-500 mb-0.5">Frequency Limits</p>
                                     <p className="text-xs text-zinc-300">{p.frequency_limits}</p>
                                   </div>
                                 )}
                                 {p.procedure_codes?.length > 0 && (
                                   <div>
-                                    <p className="text-[10px] uppercase text-zinc-500 mb-0.5">All Procedure Codes</p>
+                                    <p className="text-[11px] text-zinc-500 mb-0.5">All Procedure Codes</p>
                                     <p className="text-xs text-zinc-300 font-mono">{p.procedure_codes.join(', ')}</p>
                                   </div>
                                 )}
                                 {p.source_url && (
                                   <div>
-                                    <p className="text-[10px] uppercase text-zinc-500 mb-0.5">Source</p>
+                                    <p className="text-[11px] text-zinc-500 mb-0.5">Source</p>
                                     <a href={p.source_url} target="_blank" rel="noreferrer" className="text-xs text-blue-400 hover:underline break-all">{p.source_url}</a>
                                   </div>
                                 )}

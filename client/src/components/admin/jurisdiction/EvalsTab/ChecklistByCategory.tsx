@@ -33,7 +33,7 @@ export function ChecklistByCategory<T extends ChecklistRow>({
     <div className="grid gap-x-6 gap-y-2 sm:grid-cols-2">
       {byCategory.map(([category, rows]) => (
         <div key={category}>
-          <p className="text-[10px] uppercase tracking-wider text-zinc-500 mb-0.5">{category}</p>
+          <p className="text-[11px] text-zinc-500 mb-0.5">{category}</p>
           <ul>
             {rows.map((item) => {
               const link = linkFor?.(item)

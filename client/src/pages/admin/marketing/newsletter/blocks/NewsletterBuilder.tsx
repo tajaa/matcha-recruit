@@ -1,4 +1,5 @@
 import { AdminCard, AdminInput, AdminButton } from '../../../../../components/admin/AdminUI'
+import { AdminTab, AdminTabBar } from '../../../../../components/admin/AdminTabs'
 import { useMemo, useRef, useState } from 'react'
 import {
   Plus, ChevronUp, ChevronDown, Copy, Trash2, Pencil, X, Palette, ImageOff, AlertTriangle,
@@ -99,12 +100,11 @@ export function NewsletterBuilder({
           <div className="px-3 pb-3 space-y-2.5 border-t border-white/[0.06] pt-2.5">
             <div className="flex items-center gap-2">
               <span className="text-[11px] text-zinc-400 w-24">Background</span>
-              {(['light', 'dark'] as ThemePreset[]).map((p) => (
-                <button
-                  key={p} type="button" onClick={() => setTheme({ preset: p })}
-                  className={`text-[11px] px-2.5 py-1 rounded-md capitalize ${design.theme.preset === p ? 'bg-zinc-700 text-zinc-100' : 'bg-zinc-900 text-zinc-400 hover:text-zinc-200'}`}
-                >{p}</button>
-              ))}
+              <AdminTabBar className="mb-0!" role="group" aria-label="Background">
+                {(['light', 'dark'] as ThemePreset[]).map((p) => (
+                  <AdminTab key={p} active={design.theme.preset === p} onClick={() => setTheme({ preset: p })} className="capitalize">{p}</AdminTab>
+                ))}
+              </AdminTabBar>
             </div>
             <div className="flex items-center gap-2">
               <span className="text-[11px] text-zinc-400 w-24">Brand color</span>

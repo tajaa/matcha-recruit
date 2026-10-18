@@ -22,7 +22,7 @@ export default function ApiSourcesTab({ data, loading }: ApiSourcesTabProps) {
         <>
           {/* Research source breakdown */}
           <div>
-            <h2 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-2">Requirements by Research Source</h2>
+            <h2 className="text-xs font-medium text-zinc-400 mb-2">Requirements by Research Source</h2>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               {data.source_counts.map((s) => {
                 const colors: Record<string, string> = {
@@ -44,7 +44,7 @@ export default function ApiSourcesTab({ data, loading }: ApiSourcesTabProps) {
                 const color = colors[s.research_source] || colors.unknown
                 return (
                   <div key={s.research_source} className={`border rounded-lg px-3 py-3 ${color}`}>
-                    <p className="text-[10px] uppercase tracking-wider font-medium opacity-70">
+                    <p className="text-[11px] font-medium opacity-70">
                       {labels[s.research_source] || s.research_source}
                     </p>
                     <p className="text-2xl font-bold tracking-tight mt-0.5">{s.total.toLocaleString()}</p>
@@ -63,7 +63,7 @@ export default function ApiSourcesTab({ data, loading }: ApiSourcesTabProps) {
           {/* Official API category breakdown */}
           {data.api_by_category.length > 0 && (
             <div>
-              <h2 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-2">
+              <h2 className="text-xs font-medium text-zinc-400 mb-2">
                 Official API Data by Category
               </h2>
               <div className="border border-zinc-800 rounded-lg p-4">
@@ -82,7 +82,7 @@ export default function ApiSourcesTab({ data, loading }: ApiSourcesTabProps) {
           {/* Recent official API entries */}
           {data.recent_api.length > 0 && (
             <div>
-              <h2 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-2">
+              <h2 className="text-xs font-medium text-zinc-400 mb-2">
                 Recent Official API Entries ({data.recent_api.length})
               </h2>
               <div className="border border-zinc-800 rounded-lg overflow-hidden">
@@ -133,43 +133,43 @@ export default function ApiSourcesTab({ data, loading }: ApiSourcesTabProps) {
                                 <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-[11px]">
                                   {r.description && (
                                     <div className="col-span-2">
-                                      <p className="text-zinc-500 text-[10px] uppercase tracking-wider mb-0.5">Description</p>
+                                      <p className="text-zinc-500 text-[11px] mb-0.5">Description</p>
                                       <p className="text-zinc-300 leading-relaxed">{r.description}</p>
                                     </div>
                                   )}
                                   {r.current_value && (
                                     <div>
-                                      <p className="text-zinc-500 text-[10px] uppercase tracking-wider mb-0.5">Current Value</p>
+                                      <p className="text-zinc-500 text-[11px] mb-0.5">Current Value</p>
                                       <p className="text-zinc-300">{r.current_value}</p>
                                     </div>
                                   )}
                                   <div>
-                                    <p className="text-zinc-500 text-[10px] uppercase tracking-wider mb-0.5">Category</p>
+                                    <p className="text-zinc-500 text-[11px] mb-0.5">Category</p>
                                     <p className="text-zinc-300">{getCategoryLabel(r.category)}</p>
                                   </div>
                                   <div>
-                                    <p className="text-zinc-500 text-[10px] uppercase tracking-wider mb-0.5">Jurisdiction</p>
+                                    <p className="text-zinc-500 text-[11px] mb-0.5">Jurisdiction</p>
                                     <p className="text-zinc-300">{r.jurisdiction_name || r.jurisdiction_level} · {r.city ? `${r.city}, ${r.state}` : r.state}</p>
                                   </div>
                                   {r.effective_date && (
                                     <div>
-                                      <p className="text-zinc-500 text-[10px] uppercase tracking-wider mb-0.5">Effective Date</p>
+                                      <p className="text-zinc-500 text-[11px] mb-0.5">Effective Date</p>
                                       <p className="text-zinc-300">{r.effective_date}</p>
                                     </div>
                                   )}
                                   <div>
-                                    <p className="text-zinc-500 text-[10px] uppercase tracking-wider mb-0.5">Added</p>
+                                    <p className="text-zinc-500 text-[11px] mb-0.5">Added</p>
                                     <p className="text-zinc-300">{r.created_at ? fmtDate(r.created_at) : '—'}</p>
                                   </div>
                                   {r.last_verified_at && (
                                     <div>
-                                      <p className="text-zinc-500 text-[10px] uppercase tracking-wider mb-0.5">Last Verified</p>
+                                      <p className="text-zinc-500 text-[11px] mb-0.5">Last Verified</p>
                                       <p className="text-zinc-300">{fmtDate(r.last_verified_at)}</p>
                                     </div>
                                   )}
                                   {r.source_url && (
                                     <div className="col-span-2">
-                                      <p className="text-zinc-500 text-[10px] uppercase tracking-wider mb-0.5">Source URL</p>
+                                      <p className="text-zinc-500 text-[11px] mb-0.5">Source URL</p>
                                       <a href={r.source_url} target="_blank" rel="noreferrer"
                                         className="text-emerald-500/70 hover:text-emerald-400 underline break-all">{r.source_url}</a>
                                     </div>

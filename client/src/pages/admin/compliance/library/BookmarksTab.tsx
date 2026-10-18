@@ -36,7 +36,7 @@ export default function BookmarksTab({ bookmarks, loading, allCities, onNavigate
             {Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b)).map(([st, cities]) => (
               <div key={st}>
                 <div className="px-4 pt-3 pb-1 bg-zinc-900/50 sticky top-0">
-                  <p className="text-xs uppercase tracking-wide text-zinc-400 font-medium">{st}</p>
+                  <p className="text-xs capitalize text-zinc-400 font-medium">{st}</p>
                 </div>
                 {Object.entries(cities).sort(([a], [b]) => a.localeCompare(b)).map(([cityName, reqs]) => (
                   <div key={cityName}>

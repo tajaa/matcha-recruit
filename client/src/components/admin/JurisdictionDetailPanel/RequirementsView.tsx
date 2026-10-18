@@ -61,7 +61,7 @@ export default function RequirementsView({ detail, specialtyFilter, categoryFilt
       {sectioned.generalCount > 0 && (
         <div id={sectionAnchor('general')}>
           <div className="px-4 py-2 bg-emerald-500/[0.06]">
-            <p className="text-[11px] font-semibold text-emerald-300 uppercase tracking-wide">
+            <p className="text-[11px] font-semibold text-emerald-300">
               General employment law
               <span className="ml-1.5 text-zinc-500 font-normal normal-case">· {sectioned.generalCount} · every business here answers to these</span>
             </p>
@@ -76,7 +76,7 @@ export default function RequirementsView({ detail, specialtyFilter, categoryFilt
         return (
           <div key={tag} id={sectionAnchor(tag)}>
             <div className="px-4 py-2 bg-blue-500/[0.06]">
-              <p className="text-[11px] font-semibold text-blue-300 uppercase tracking-wide">
+              <p className="text-[11px] font-semibold text-blue-300">
                 {industryLabel(tag)}
                 <span className="ml-1.5 text-zinc-500 font-normal normal-case">· {count} · industry-specific</span>
               </p>

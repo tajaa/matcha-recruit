@@ -281,7 +281,7 @@ export default function Cappe() {
           <div className="mt-6 flex flex-wrap items-center gap-3">
             <Input label="" placeholder="Search email, name or site…" value={search} onChange={(event) => setSearch(event.target.value)} className="max-w-xs" />
             <AdminTabBar className="ml-auto">
-              <span className="mr-2 text-[10px] uppercase tracking-wider text-zinc-500">Plan</span>
+              <span className="mr-2 text-[11px] text-zinc-500">Plan</span>
               {(['all', 'free', 'hosting', 'pro', 'business'] as const).map((item) => (
                 <AdminTab key={item} onClick={() => setPlan(item)}  active={plan === item}>
                   {item === 'all' ? 'All' : PLAN_LABEL[item]}

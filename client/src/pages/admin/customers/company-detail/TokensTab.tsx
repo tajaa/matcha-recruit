@@ -49,7 +49,7 @@ export function TokensTab({ companyId }: { companyId: string }) {
         <AdminCard >
           <div className="flex items-center gap-2 mb-2">
             <Zap className="w-4 h-4 text-emerald-400" />
-            <span className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium">Free Tokens</span>
+            <span className="text-[11px] text-zinc-500 font-medium">Free Tokens</span>
           </div>
           <div className="text-xl font-semibold text-zinc-100">{fmtTokens(b.free_tokens_remaining)}</div>
           <div className="text-[11px] text-zinc-500">{fmtTokens(b.free_tokens_used)} / {fmtTokens(b.free_token_limit)} used</div>
@@ -57,7 +57,7 @@ export function TokensTab({ companyId }: { companyId: string }) {
         <AdminCard >
           <div className="flex items-center gap-2 mb-2">
             <Zap className="w-4 h-4 text-blue-400" />
-            <span className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium">Subscription</span>
+            <span className="text-[11px] text-zinc-500 font-medium">Subscription</span>
           </div>
           <div className="text-xl font-semibold text-zinc-100">
             {b.has_active_subscription ? fmtTokens(b.subscription_tokens_remaining) : 'None'}
@@ -69,7 +69,7 @@ export function TokensTab({ companyId }: { companyId: string }) {
         <AdminCard >
           <div className="flex items-center gap-2 mb-2">
             <Zap className="w-4 h-4 text-zinc-400" />
-            <span className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium">Total Remaining</span>
+            <span className="text-[11px] text-zinc-500 font-medium">Total Remaining</span>
           </div>
           <div className="text-xl font-semibold text-zinc-100">{fmtTokens(b.total_tokens_remaining)}</div>
         </AdminCard>
@@ -114,7 +114,7 @@ export function TokensTab({ companyId }: { companyId: string }) {
         ) : (
           <AdminTable>
             <thead>
-              <tr className="bg-zinc-900 text-zinc-500 uppercase tracking-widest text-[10px]">
+              <tr className="bg-zinc-900 text-zinc-500 text-[11px]">
                 <th className="text-left">Date</th>
                 <th className="text-left">Model</th>
                 <th className="text-right">Tokens</th>
