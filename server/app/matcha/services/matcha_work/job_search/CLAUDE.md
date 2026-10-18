@@ -272,8 +272,10 @@ looks up the pointer task and redirects to its `?item=` link (or Tasks when
 none is found). It resolves through `GET /agent-tasks/for-search/{search_id}`,
 a read-only lookup scoped to the owner and workspace, so the recent task
 list's 50-row page never drops an older link. Only a 404 falls back to Tasks;
-other lookup failures keep the search and job URL with a retry button. New
-searches use this same exact lookup, independently of list refreshes. Tasks
+other lookup failures keep the search and job URL with a retry button. A new
+search opens its task through this same exact lookup, independently of list
+refreshes, and falls back to the search's own link (with its retry) only when
+that lookup fails. Tasks
 offers Load older tasks through a `(created_at, id)` cursor, so earlier searches
 can also be browsed without a saved link. Deleted searches and pointers
 are not recreated. While Tasks deletes a search, both its search controls and
@@ -291,12 +293,15 @@ fingerprint, status or job count changes. Its reads are numbered per kind
 cancel, Draft email) takes a number when it starts and when it lands, so an
 older answer can't undo it; only reads of what is still open are dropped. A
 job's load and save failures show in its pane, which covers the search below
-`xl`. Inside Tasks the hook skips the searches-list load; only the search
-polls its detail. The web workspace endpoint returns lightweight search task
-metadata, or an ordinary task with its selected finding in the same response.
-Search completion refreshes this metadata to persist `seen_at`, retrying a
-failed read while the task remains open; opening a search does not immediately
-reload the Tasks list. Draft
+`xl`. The hook has no searches list (Tasks lists, starts and deletes them);
+only the search polls its detail. The web workspace endpoint returns
+lightweight search task metadata, with the search's own fingerprint (the one
+`/status` reports), or an ordinary task with its selected finding in the same
+response. When the search's status moves, Tasks refreshes this metadata once to
+persist `seen_at`, retrying only a read that missed while the task remains
+open; opening a search does not immediately reload the Tasks list. A search
+opened from a link that is older than the recent page stays listed across list
+refreshes. Draft
 email links to Gmail's own drafts folder, since the web has no Email ▸ Drafts
 view; Ask Espresso opens the one assistant conversation with the Mac's
 hand-off prompt in its composer, unsent.

@@ -258,9 +258,8 @@ async def _job_task(conn, task, user_id: UUID, *, mark_seen: bool) -> dict:
 
     search = await _job_call(job_service.get_search(task["job_search_id"], user_id))
     view = task_view(task)
-    if mark_seen and view["completed_at"] is not None and view["status"] in RESTING:
-        await conn.execute("UPDATE mw_agent_tasks SET seen_at = NOW() WHERE id = $1", task["id"])
-        view["unseen"] = False
+    if mark_seen:
+        await _mark_seen(conn, task, view)
     return {
         **view,
         "fingerprint": search["fingerprint"],
@@ -271,18 +270,33 @@ async def _job_task(conn, task, user_id: UUID, *, mark_seen: bool) -> dict:
     }
 
 
+async def _job_summary(conn, task, *, mark_seen: bool) -> dict:
+    """A job search's task without its jobs, for the web's workspace read. Its
+    fingerprint is the search's own, the one `status_view` reports."""
+    from app.matcha.services.matcha_work.job_search import service as job_service
+
+    if task.get("js_status") is None or task.get("js_deleted_at") is not None:
+        raise AgentTaskError("Job search not found.", 404)
+    view = task_view(task)
+    if mark_seen:
+        await _mark_seen(conn, task, view)
+    search = {"status": task["js_status"], "updated_at": task["js_updated_at"], "progress": task["js_progress"]}
+    return {**view, "fingerprint": job_service.fingerprint(search)}
+
+
+async def _mark_seen(conn, task, view: dict) -> None:
+    """Opening a finished task (its `view`) is what marks it seen."""
+    if view["completed_at"] is not None and view["status"] in RESTING:
+        await conn.execute("UPDATE mw_agent_tasks SET seen_at = NOW() WHERE id = $1", task["id"])
+        view["unseen"] = False
+
+
 async def get_task(task_id: UUID, user_id: UUID, *, mark_seen: bool = True, job_summary: bool = False) -> dict:
     async with connection_or_direct() as conn:
         task = await owned_task(conn, task_id, user_id)
         if _search_id(task) is not None:
             if job_summary:
-                if task.get("js_status") is None or task.get("js_deleted_at") is not None:
-                    raise AgentTaskError("Job search not found.", 404)
-                view = task_view(task)
-                if mark_seen and view["completed_at"] is not None and view["status"] in RESTING:
-                    await conn.execute("UPDATE mw_agent_tasks SET seen_at = NOW() WHERE id = $1", task_id)
-                    view["unseen"] = False
-                return {**view, "fingerprint": fingerprint(task)}
+                return await _job_summary(conn, task, mark_seen=mark_seen)
             return await _job_task(conn, task, user_id, mark_seen=mark_seen)
         rows = await conn.fetch(
             f"SELECT * FROM mw_agent_task_items WHERE task_id = $1 {_ITEM_ORDER} LIMIT {MAX_ITEMS_SHOWN}",
@@ -291,11 +305,9 @@ async def get_task(task_id: UUID, user_id: UUID, *, mark_seen: bool = True, job_
         rounds = await conn.fetch(
             "SELECT * FROM mw_agent_task_rounds WHERE task_id = $1 ORDER BY n", task_id,
         )
-        if mark_seen and task["completed_at"] is not None and task["status"] in RESTING:
-            await conn.execute("UPDATE mw_agent_tasks SET seen_at = NOW() WHERE id = $1", task_id)
-    view = task_view(task)
-    if mark_seen and task["completed_at"] is not None and task["status"] in RESTING:
-        view["unseen"] = False
+        view = task_view(task)
+        if mark_seen:
+            await _mark_seen(conn, task, view)
     return {
         **view,
         "fingerprint": fingerprint(task),

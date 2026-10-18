@@ -23,7 +23,8 @@ export default function JobSearchPane({
   onSelectLead: (id: string | null) => void
   onBack: () => void
   onDelete: () => void
-  onChanged: (status: string) => Promise<unknown>
+  /** Resolves false when the task's row should be synced again. */
+  onChanged: (status: string) => Promise<boolean>
   guideBlocked: boolean
   deleting: boolean
   deleteError: string | null
@@ -31,21 +32,27 @@ export default function JobSearchPane({
 }) {
   const base = useWorkBase()
   const navigate = useNavigate()
-  const js = useJobSearch(searchId, leadId, { list: false, mutationsDisabled: deleting })
+  const js = useJobSearch(searchId, leadId, { mutationsDisabled: deleting })
   const [helpOpen, setHelpOpen] = useState(false)
   const [guideDone, setGuideDone] = useState(guideSeen)
   const [draftedLeadId, setDraftedLeadId] = useState<string | null>(null)
   const { detail } = js
   const guideOpen = !guideBlocked && (helpOpen || (!!detail && !guideDone))
 
-  // The search owns polling. A transition updates task metadata and persists
-  // seen_at; failed metadata reads retry while this search remains open.
+  // The search owns polling. When its status moves, the task's row follows
+  // (and a finished search is marked seen); a sync that misses is retried
+  // while this search remains open.
   const status = detail?.status
   useEffect(() => {
     if (!status) return
-    void onChanged(status)
-    const timer = window.setInterval(() => { if (!document.hidden) void onChanged(status) }, 5_000)
-    return () => window.clearInterval(timer)
+    let stopped = false
+    let timer: number | undefined
+    const sync = async () => {
+      const synced = await onChanged(status).catch(() => false)
+      if (!synced && !stopped) timer = window.setTimeout(() => void sync(), 5_000)
+    }
+    void sync()
+    return () => { stopped = true; window.clearTimeout(timer) }
   }, [status, onChanged])
 
   // A job no longer in this search (a stale link) closes.

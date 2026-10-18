@@ -7,6 +7,7 @@ import { useEntitlements } from '../hooks/useEntitlements'
 import { notifyTasksChanged } from '../hooks/useTasksSummary'
 import type { AgentTask, AgentTaskAction, AgentTaskItemDetail, AgentTaskList } from '../types'
 import type { JobSearchSummary } from '../api/matchaWork/jobSearch'
+import { getAgentTaskForSearch } from '../api/matchaWork/agentTasks'
 import {
   askEspressoPrompt, canFollowUp, displayTitle, groupTasks, isJobSearch, isLive, isWaiting, rowMeta, statusLabel,
   usageLine,
@@ -111,11 +112,17 @@ function TasksPage() {
     if (await t.remove(open.id)) navigate(`${base}/tasks`, { replace: true })
   }
 
-  function searchCreated(search: JobSearchSummary) {
+  /** Open the new search's task, found by the exact lookup (a list refresh
+   *  can't lose it). If that misses, the search's own link looks again and
+   *  offers a retry there. */
+  async function searchCreated(search: JobSearchSummary) {
     setCreating(false)
-    // The exact lookup preserves this search's URL and offers retry if opening
-    // it fails. A list refresh can't lose a successfully created search.
-    navigate(`${base}/jobs/${encodeURIComponent(search.id)}`)
+    try {
+      const task = await getAgentTaskForSearch(search.id)
+      navigate(`${base}/tasks/${encodeURIComponent(task.id)}`)
+    } catch {
+      navigate(`${base}/jobs/${encodeURIComponent(search.id)}`)
+    }
   }
 
   async function makeDocument() {
@@ -222,7 +229,7 @@ function TasksPage() {
           }}
         />
       )}
-      {creating && <NewJobSearch onCreated={searchCreated} onClose={closeNewSearch} />}
+      {creating && <NewJobSearch onCreated={(search) => void searchCreated(search)} onClose={closeNewSearch} />}
       {guideOpen && <TasksGuide onClose={closeGuide} />}
     </div>
   )

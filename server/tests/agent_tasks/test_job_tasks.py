@@ -368,7 +368,11 @@ async def test_web_job_metadata_marks_completion_seen_without_reading_the_full_s
     conn.on("WHERE t.id = $1 AND t.user_id = $2", pointer(js_status="done", js_completed_at=NOW))
     got = await service.get_task(TASK, USER, job_summary=True)
     assert got["status"] == "done" and got["unseen"] is False
-    assert "items" not in got and "job_search" not in got and got["fingerprint"]
+    assert "items" not in got and "job_search" not in got
+    # The search's own fingerprint, which /status reports, so polling it doesn't see a change every tick.
+    searched = search_row(status="done", updated_at=NOW, progress='{"note": "Searching"}')
+    assert got["fingerprint"] == job_service.fingerprint(searched)
+    assert got["fingerprint"] != service.fingerprint(pointer(js_status="done", js_completed_at=NOW))
     assert conn.ran("SET seen_at = NOW()")
     full.assert_not_awaited()
     conn.calls.clear()

@@ -186,7 +186,8 @@ describe('job searches in Tasks', () => {
 
   it('keeps a newly created search recoverable when list and lookup reads fail', async () => {
     mock.create.mockResolvedValue({ ...search, id: 's2' })
-    mock.lookup.mockRejectedValueOnce(new Error('offline'))
+    // Tasks' own lookup misses, then the search's link tries again and offers a retry.
+    mock.lookup.mockRejectedValueOnce(new Error('offline')).mockRejectedValueOnce(new Error('offline'))
     renderAt()
     fireEvent.click(await screen.findByRole('button', { name: 'New job search…' }))
     const form = await screen.findByRole('dialog', { name: 'New job search' })
@@ -347,6 +348,22 @@ describe('job searches in Tasks', () => {
     expect(mock.lookup).toHaveBeenCalledWith('s2')
     expect(mock.create).toHaveBeenCalledTimes(1)
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    // Straight to the task, not through the old search link: Tasks stays mounted.
+    expect(mock.list).toHaveBeenCalledTimes(1)
+    expect(screen.getAllByRole('button', { name: /My job search/ })).toHaveLength(2) // t2 joined t1
+  })
+
+  it('keeps an older search opened from a link listed, without re-reading it, across list refreshes', async () => {
+    vi.useFakeTimers()
+    const recent = { ...pointer, id: 't9', job_search_id: 's9', title: 'Recent search', created_at: '2026-10-17T00:00:00+00:00' }
+    mock.list.mockResolvedValue({ tasks: [recent], next_cursor: 'older' })
+    renderAt()
+    await act(async () => {})
+    expect(screen.getByRole('button', { name: /My job search/ })).toBeInTheDocument()
+    await act(async () => { await vi.advanceTimersByTimeAsync(35_000) })
+    expect(mock.list).toHaveBeenCalledTimes(2)
+    expect(screen.getByRole('button', { name: /My job search/ })).toBeInTheDocument()
+    expect(mock.task).toHaveBeenCalledTimes(1)
   })
 
   it('offers a New job search action in the job-only empty state', async () => {
