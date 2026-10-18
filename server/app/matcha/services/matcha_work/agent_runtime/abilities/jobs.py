@@ -55,7 +55,7 @@ def _compact_search(search: dict) -> dict:
 
 def _compact_lead(lead: dict) -> dict:
     keep = ("id", "rank", "title", "company", "location", "remote", "comp_line", "comp_status",
-            "fit_score", "screen_status", "user_state", "approach_status", "apply_url", "flags")
+            "fit_score", "screen_status", "user_state", "approach_status", "apply_url", "flags", "direction")
     return {k: lead.get(k) for k in keep}
 
 
@@ -87,7 +87,10 @@ async def _read(ctx: RunContext, state: RunState, args: dict) -> dict:
     _remember(session_of(state), view["id"], leads)
     return {
         "search": {**_compact_search(view), "ask": view["ask"], "weights": view["weights"],
-                   "progress": view["progress"], "fit_floor": view.get("fit_floor")},
+                   "progress": view["progress"], "fit_floor": view.get("fit_floor"),
+                   # Roles beyond their title the search suggested from their résumé.
+                   "directions": [{"title": d["title"], "why": d["why"]}
+                                  for d in (view.get("plan") or {}).get("directions") or []]},
         "jobs": [_compact_lead(lead) for lead in leads],
         "weaker_matches": len(view["leads"]) - len(_shown(view["leads"], False)),
         "next_offset": offset + len(leads) if offset + len(leads) < len(shown) else None,
@@ -156,6 +159,10 @@ with start_task (playbook job_search) if you have it; otherwise they start it fr
 Tasks on the Mac. For a quick look at open roles right now, use find_jobs when you have it. \
 list_job_searches, then read_job_search for the ranked jobs and read_job_lead for one job's posting, \
 pay evidence and drafted approach (outreach, answers, cover letter).
+- A search started with their résumé may suggest directions: roles beyond their title the résumé \
+supports, each with why. Pass them on as a coach would ("You could also look at Solutions Architect \
+roles: you've been the technical lead on 20+ enterprise calls"), and say which jobs are one \
+(`direction`). Never add a strength the search didn't give.
 - A search lists its strong matches (fit 4/5 or better) first; weaker_matches counts the jobs below \
 its fit floor, which read_job_search shows with include_weaker. In the app, "Show more at 3/5" reads \
 and ranks them.

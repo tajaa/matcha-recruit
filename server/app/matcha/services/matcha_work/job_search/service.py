@@ -18,7 +18,7 @@ from app.database import connection_or_direct, decode_jsonb
 from app.matcha.models.matcha_work.job_search import JobWeights, LeadPatch
 
 from . import comp as comp_mod
-from . import normalize, ranking
+from . import contracts, normalize, ranking
 
 LIVE = ("queued", "planning", "discovering", "screening", "enriching", "approaching")
 TERMINAL = ("done", "failed", "cancelled")
@@ -204,8 +204,19 @@ async def get_search(search_id: UUID, user_id: UUID) -> dict:
         leads = await conn.fetch(
             f"SELECT * FROM mw_job_leads WHERE search_id = $1 {_LEAD_ORDER}", search_id,
         )
-    return {**search_view(search), "fingerprint": fingerprint(search),
-            "leads": [lead_summary(row) for row in leads]}
+    view = search_view(search)
+    directions = view["plan"].get("directions") or []
+    suggested = {d["title"] for d in directions}
+    own = [*(view["criteria"].get("titles") or []),
+           *(t for t in view["plan"].get("titles") or [] if t not in suggested)]
+    out = []
+    for row in leads:
+        lead = lead_summary(row)
+        # A job that is one of the roles suggested from their résumé, not one
+        # of the titles they asked for: the app marks it "Beyond your title".
+        lead["direction"] = contracts.direction_of(lead["title"], directions, own) if directions else None
+        out.append(lead)
+    return {**view, "fingerprint": fingerprint(search), "leads": out}
 
 
 async def status_view(search_id: UUID, user_id: UUID) -> dict:
@@ -539,6 +550,23 @@ async def rerank(conn, search) -> int:
         PAY_LAW_STATES,
     )
     return len(ranked)
+
+
+async def resume_on_file(user_id: UUID) -> dict | None:
+    """What the assistant and the forms may know about the saved résumé: its
+    name, when it changed and the title read from it. Never its text."""
+    async with connection_or_direct() as conn:
+        row = await conn.fetchrow(
+            "SELECT filename, parsed_data, updated_at FROM user_resumes WHERE user_id = $1", user_id,
+        )
+    if row is None:
+        return None
+    parsed = decode_jsonb(row["parsed_data"], {}) or {}
+    return {
+        "filename": row["filename"],
+        "updated_at": row["updated_at"].date().isoformat() if row["updated_at"] else None,
+        "title": str(parsed.get("current_title") or "")[:120] or None,
+    }
 
 
 async def load_resume_for_model(user_id: UUID) -> str | None:

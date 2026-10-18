@@ -132,3 +132,7 @@ class RunContext:
     # The IANA zone the person's app reported (`calendar_service.get_timezone`),
     # or None. Dates and times are spoken in it.
     timezone: str | None = None
+    # The person's saved résumé as `job_search.service.resume_on_file` gives
+    # it (name, date, title; never its text), when the run can search jobs.
+    # None: none saved, or not looked up.
+    saved_resume: dict | None = None

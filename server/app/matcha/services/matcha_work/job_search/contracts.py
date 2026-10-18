@@ -25,9 +25,13 @@ from typing import Any
 
 from app.matcha.services.matcha_work.agent_runtime import registry
 
-from . import ats
+from . import ats, normalize
+from .comp import verify_quote
 
 MAX_QUERIES = 8
+# Roles beyond the person's own title that their résumé supports, suggested
+# by the plan: at most this many, each searched with one query of its own.
+MAX_DIRECTIONS = 3
 APPROACH_CHANNELS = ("referral", "hiring_manager", "recruiter", "apply_portal", "search_firm")
 _EMAIL = re.compile(r"^[^@\s<>,;]+@[^@\s<>,;]+\.[^@\s<>,;]+$")
 _CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
@@ -82,6 +86,15 @@ PLAN_SCHEMA = {
         "titles": {"type": "array", "items": {"type": "string"}, "maxItems": 10},
         "deal_breakers": {"type": "array", "items": {"type": "string"}, "maxItems": 10},
         "profile_summary": {"type": "string", "description": "Two or three sentences on who is looking, from the ask and résumé"},
+        "directions": {
+            "type": "array", "maxItems": MAX_DIRECTIONS,
+            "description": "Only with a résumé: roles beyond the titles they asked for that their résumé supports",
+            "items": {"type": "object", "properties": {
+                "title": {"type": "string", "description": "A job title to search, e.g. 'Solutions Architect'"},
+                "why": {"type": "string", "description": "One or two sentences to them: what in their résumé fits it"},
+                "evidence": {"type": "string", "description": "Words copied exactly from their résumé that show it"},
+            }, "required": ["title", "why", "evidence"]},
+        },
         "weights": {
             "type": ["object", "null"],
             "description": "How much base, bonus, equity and fit matter to this person (0-1 each), from the ask",
@@ -116,10 +129,59 @@ def normalize_plan(args: dict, _state=None) -> tuple[dict, list[str]]:
         "profile_summary": _text(result.get("profile_summary"), 800),
         "source": "model",
     }
+    directions = _directions(result.get("directions"))
+    if directions:
+        plan["directions"] = directions
     if weights:
         plan["weights"] = {k: weights[k] for k in ("base", "bonus", "equity", "fit")
                            if isinstance(weights.get(k), (int, float))}
     return plan, []
+
+
+def _directions(raw: Any) -> list[dict]:
+    """The plan's suggested directions, shaped; not yet checked (that needs
+    the résumé: `check_directions`)."""
+    out = []
+    for item in raw if isinstance(raw, list) else []:
+        if not isinstance(item, dict):
+            continue
+        direction = {"title": " ".join(_text(item.get("title"), 80).split()),
+                     "why": " ".join(_text(item.get("why"), 300).split()),
+                     "evidence": " ".join(_text(item.get("evidence"), 240).split())}
+        if direction["title"] and direction["why"] and direction["evidence"]:
+            out.append(direction)
+    return out[:MAX_DIRECTIONS]
+
+
+def check_directions(directions: list[dict], resume: str | None, taken: list[str]) -> list[dict]:
+    """Keep a direction only when its evidence is in the résumé word for word
+    (a model can't tell someone they have experience they don't) and it is a
+    role beyond the titles already searched or asked for. Without a résumé,
+    none: the suggestions are its to support."""
+    if not resume:
+        return []
+    kept, seen = [], {t.strip().lower() for t in taken if t}
+    for direction in directions:
+        title = direction["title"]
+        if title.lower() in seen or any(normalize.same_title(title, t) for t in taken if t):
+            continue
+        if not verify_quote(direction["evidence"], resume):
+            continue
+        seen.add(title.lower())
+        kept.append(direction)
+    return kept
+
+
+def direction_of(title: str, directions: list[dict], own_titles: list[str]) -> str | None:
+    """The suggested direction a found job is, if it is one: squarely that
+    title (`normalize.title_covers`) and not the same job as one they asked
+    for (`normalize.same_title`)."""
+    if any(normalize.same_title(title, own) for own in own_titles if own):
+        return None
+    for direction in directions:
+        if normalize.title_covers(title, direction.get("title") or ""):
+            return direction["title"]
+    return None
 
 
 # ── discover ─────────────────────────────────────────────────────────────────

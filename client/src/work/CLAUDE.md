@@ -22,6 +22,16 @@ Backend package is `server/app/matcha/routes/matcha_work/` (own `CLAUDE.md`) + `
 
 Placement rules and the boundary rules between the three client apps live in `client/CLAUDE.md` — read that before adding a file here. DB/deploy/test-data rules are in root `CLAUDE.md`.
 
+## Résumé
+
+The person's résumé (`user_resumes`) is the Résumé view of Tasks
+(`pages/Tasks.tsx`, `?view=resume`; `components/resume/paths.ts:resumePath`):
+`ResumePane` shows where it is kept, the original (a fresh fifteen-minute link
+on each open), what was read from it, and the text Espresso uses, editable in
+place. `hooks/useMyResume.ts` is the one shared, owner-scoped copy, so a résumé
+dropped into a job search form (`ResumeFormField`, drawn for a field with
+`widget: "resume"`) shows in Tasks at once. Rules: `server/.../job_search/CLAUDE.md`.
+
 ## Personal task recaps
 
 Recaps are the Recaps view of Tasks (`pages/Tasks.tsx`, `?view=recaps&recap=<id>`;

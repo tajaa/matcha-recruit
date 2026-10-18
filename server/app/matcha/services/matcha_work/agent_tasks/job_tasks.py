@@ -25,6 +25,8 @@ import logging
 from typing import Any
 from uuid import UUID
 
+from fastapi import HTTPException
+
 from app.database import decode_jsonb
 from app.matcha.services.matcha_work.job_search.ranking import BELOW_FLOOR_BAND
 
@@ -121,14 +123,16 @@ def lead_item(lead: dict) -> dict:
 # ── the playbook ─────────────────────────────────────────────────────────────
 
 REMOTE = {"Any": "any", "Remote only": "remote_only", "On-site only": "onsite_only"}
+RESUME_MISSING = "Add your résumé first (drop it in above), or untick “Use my résumé”."
 
 INTAKE = (
     IntakeField(key="titles", label="Job titles", type="list", help="Like “COO, VP Operations”"),
     IntakeField(key="locations", label="Where", type="list", help="Cities, states or countries"),
     IntakeField(key="remote", label="Remote or on-site", type="select", options=tuple(REMOTE)),
     IntakeField(key="base_floor", label="Lowest base salary you'd take", type="money"),
-    IntakeField(key="use_resume", label="Use my saved résumé", type="boolean",
-                help="To judge fit and write the drafts. Only Espresso's AI models read it."),
+    IntakeField(key="use_resume", label="Use my résumé", type="boolean", widget="resume",
+                help="To judge fit, write the drafts and suggest roles beyond your title. Kept private in "
+                     "Tasks → Résumé, where you can read and edit it. Only Espresso's AI models read it."),
 )
 
 
@@ -205,8 +209,16 @@ async def start(user, company_id: UUID, body, brief: dict, *,
     consent, a search already running)."""
     from app.matcha.models.matcha_work.job_search import JobCriteria, JobSearchCreate
     from app.matcha.services.matcha_work.job_search import enqueue as job_enqueue
+    from app.matcha.services.matcha_work.job_search.service import resume_on_file
 
     from . import service
+
+    # "Use my résumé" with none saved would run a search that silently can't
+    # read one: refused here, for the form and for chat alike.
+    if brief["use_resume"] and await resume_on_file(user.id) is None:
+        raise HTTPException(status_code=422, detail={
+            "code": "form_invalid", "message": RESUME_MISSING, "errors": {"use_resume": RESUME_MISSING},
+        })
 
     create = JobSearchCreate(
         request_id=body.request_id, title=(body.title or "")[:120], ask=body.directive[:4000],

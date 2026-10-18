@@ -1,9 +1,15 @@
-import { Hash, Plus, ChevronDown, Pencil, Compass, Star } from 'lucide-react'
+import { Hash, Plus, Pencil, Compass, Star } from 'lucide-react'
 import type { NavigateFunction } from 'react-router-dom'
 import type { ChannelSummary } from '../../../api/channels'
 import type { SidebarRename } from './useSidebarRename'
 import RenameInput from './RenameInput'
 import { toggleStar, useStars } from '../../../hooks/useStars'
+import { EmptyRow, SectionAction, SidebarSection } from './SidebarSection'
+import { useCappedList } from './useCappedList'
+
+// The first few channels; the rest behind "Show N more". A channel with
+// unread messages, or the one open, always shows.
+const VISIBLE = 8
 
 interface Props {
   channels: ChannelSummary[]
@@ -20,7 +26,6 @@ interface Props {
   userId?: string
 }
 
-// Channels
 export default function ChannelsSection({
   channels,
   channelsOpen,
@@ -37,89 +42,78 @@ export default function ChannelsSection({
 }: Props) {
   const { renaming, startRename } = rename
   const starred = useStars(userId, 'channels')
+  const query = filter.toLowerCase()
+  const matching = channels.filter((ch) => ch.name.toLowerCase().includes(query))
+  const { visible, toggle } = useCappedList(matching, VISIBLE, {
+    filtering: !!filter,
+    keep: (ch) => ch.unread_count > 0 || isActive(`${base}/channels/${ch.id}`),
+  })
+
   return (
-    <div className="mt-2">
-      <button
-        onClick={onToggle}
-        className="flex items-center justify-between w-full px-2.5 py-1.5 text-[11px] font-medium uppercase tracking-wider text-w-dim transition-colors"
-      >
-        <span className="flex items-center gap-1.5">
-          <Hash size={12} />
-          Channels
-          {/* Sections default collapsed, so without this the expanded
-              sidebar shows no unread signal at all until you open it. */}
-          {!channelsOpen && !filter && totalChannelUnread > 0 && (
-            <span className="w-4 h-4 rounded-full bg-w-accent text-[9px] font-bold text-black flex items-center justify-center">
-              {totalChannelUnread > 9 ? '9+' : totalChannelUnread}
-            </span>
-          )}
-        </span>
-        <div className="flex items-center gap-1">
-          <span
-            onClick={(e) => { e.stopPropagation(); navigate(`${base}/channels`) }}
-            className="hover:text-w-accent cursor-pointer"
-            title="Browse channels"
+    <SidebarSection
+      label="Channels"
+      open={channelsOpen || !!filter}
+      onToggle={onToggle}
+      badge={totalChannelUnread > 0 && <UnreadBadge count={totalChannelUnread} />}
+      actions={<>
+        <SectionAction icon={Compass} label="Browse channels" onClick={() => navigate(`${base}/channels`)} />
+        {canCreate && <SectionAction icon={Plus} label="New channel" onClick={() => setShowCreateChannel(true)} />}
+      </>}
+    >
+      {matching.length === 0 && <EmptyRow>{filter ? 'No channels match' : 'No channels yet'}</EmptyRow>}
+      {visible.map((ch) => {
+        const active = isActive(`${base}/channels/${ch.id}`)
+        const isStarred = starred.includes(ch.id)
+        return (
+          <div
+            key={ch.id}
+            className={`group flex w-full cursor-pointer items-center gap-2 rounded-md px-2.5 py-1 text-[13px] transition-colors ${
+              active ? 'bg-w-surface2 font-medium text-white' : 'text-w-dim hover:bg-w-surface2/50 hover:text-w-text'
+            }`}
+            onClick={() => navigate(`${base}/channels/${ch.id}`)}
           >
-            <Compass size={12} />
-          </span>
-          {canCreate && (
-            <span
-              onClick={(e) => { e.stopPropagation(); setShowCreateChannel(true) }}
-              className="hover:text-w-accent cursor-pointer"
-            >
-              <Plus size={12} />
-            </span>
-          )}
-          <ChevronDown size={12} className={`transition-transform ${channelsOpen || filter ? '' : '-rotate-90'}`} />
-        </div>
-      </button>
-      {(channelsOpen || !!filter) && (
-        <div className="space-y-0.5 mt-0.5">
-          {(() => {
-            const filteredChannels = channels.filter((ch) => ch.name.toLowerCase().includes(filter.toLowerCase()))
-            if (filteredChannels.length > 0) return null
-            return <p className="px-2.5 py-1 text-[11px] text-w-faint">No channels</p>
-          })()}
-          {channels.filter((ch) => ch.name.toLowerCase().includes(filter.toLowerCase())).map((ch) => (
-            <div
-              key={ch.id}
-              className={`group w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition-colors cursor-pointer ${
-                isActive(`${base}/channels/${ch.id}`)
-                  ? 'bg-w-surface2 text-white font-medium'
-                  : 'text-w-dim hover:text-w-text hover:bg-w-surface2/50'
-              }`}
-              onClick={() => navigate(`${base}/channels/${ch.id}`)}
-            >
-              <Hash size={14} className="text-w-dim shrink-0" strokeWidth={1.6} />
-              {ch.is_paid && (
-                <span className="text-[9px] font-bold text-w-accent shrink-0">$</span>
-              )}
-              {renaming?.type === 'channel' && renaming.id === ch.id ? (
-                <RenameInput rename={rename} />
-              ) : (
-                <>
-                  <span className={`flex-1 min-w-0 truncate ${ch.unread_count > 0 ? 'font-semibold text-white' : ''}`}>
-                    {ch.name}
-                  </span>
-                  <button onClick={(event) => { event.stopPropagation(); toggleStar(userId, 'channels', ch.id) }} aria-label={`${starred.includes(ch.id) ? 'Unstar' : 'Star'} ${ch.name}`} title={starred.includes(ch.id) ? 'Unstar' : 'Star'} className={starred.includes(ch.id) ? 'text-w-accent' : 'text-w-faint sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100'}><Star size={12} fill={starred.includes(ch.id) ? 'currentColor' : 'none'} /></button>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); startRename('channel', ch.id, ch.name) }}
-                    className="opacity-0 group-hover:opacity-100 shrink-0 p-0.5 text-w-dim hover:text-w-text transition-all"
-                    title="Rename"
-                  >
-                    <Pencil size={11} />
-                  </button>
-                </>
-              )}
-              {ch.unread_count > 0 && !renaming && (
-                <span className="ml-auto w-4 h-4 rounded-full bg-w-accent text-[9px] font-bold text-white flex items-center justify-center shrink-0">
-                  {ch.unread_count > 9 ? '9+' : ch.unread_count}
+            <Hash size={13} className="shrink-0 text-w-faint" strokeWidth={1.8} />
+            {renaming?.type === 'channel' && renaming.id === ch.id ? (
+              <RenameInput rename={rename} />
+            ) : (
+              <>
+                <span className={`min-w-0 flex-1 truncate ${ch.unread_count > 0 ? 'font-semibold text-white' : ''}`}>
+                  {ch.name}
                 </span>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
+                {ch.is_paid && <span className="shrink-0 text-[9px] font-bold text-w-accent" title="Paid channel">$</span>}
+                <button
+                  type="button"
+                  onClick={(event) => { event.stopPropagation(); toggleStar(userId, 'channels', ch.id) }}
+                  aria-label={`${isStarred ? 'Unstar' : 'Star'} ${ch.name}`}
+                  title={isStarred ? 'Unstar' : 'Star'}
+                  className={`shrink-0 ${isStarred ? 'text-w-accent' : 'hidden text-w-faint group-focus-within:block group-hover:block'}`}
+                >
+                  <Star size={11} fill={isStarred ? 'currentColor' : 'none'} />
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); startRename('channel', ch.id, ch.name) }}
+                  aria-label={`Rename ${ch.name}`}
+                  title="Rename"
+                  className="hidden shrink-0 p-0.5 text-w-faint hover:text-w-text group-focus-within:block group-hover:block"
+                >
+                  <Pencil size={11} />
+                </button>
+                {ch.unread_count > 0 && <UnreadBadge count={ch.unread_count} />}
+              </>
+            )}
+          </div>
+        )
+      })}
+      {toggle}
+    </SidebarSection>
+  )
+}
+
+function UnreadBadge({ count }: { count: number }) {
+  return (
+    <span className="ml-auto flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-w-accent px-1 text-[9px] font-bold text-white" aria-label={`${count} unread`}>
+      {count > 9 ? '9+' : count}
+    </span>
   )
 }

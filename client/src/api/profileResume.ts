@@ -17,18 +17,27 @@ export interface ParsedResume {
 
 export interface ProfileResume {
   filename: string
+  /** A fifteen-minute link to the private original file. */
   resume_url: string
   parsed_data: ParsedResume
   updated_at: string
 }
 
-export const getMyResume = () => api.get<ProfileResume | null>('/users/me/resume')
+/** The owner's own résumé: also the text Espresso reads, which they can edit. */
+export interface MyResume extends ProfileResume {
+  text: string
+}
+
+export const getMyResume = () => api.get<MyResume | null>('/users/me/resume')
 
 export const uploadMyResume = (file: File) => {
   const fd = new FormData()
   fd.append('file', file)
-  return api.upload<ProfileResume>('/users/me/resume', fd)
+  return api.upload<MyResume>('/users/me/resume', fd)
 }
+
+/** Edit the text Espresso reads. The original file stays as uploaded. */
+export const updateMyResumeText = (text: string) => api.put<MyResume>('/users/me/resume/text', { text })
 
 export const deleteMyResume = () => api.delete<void>('/users/me/resume')
 

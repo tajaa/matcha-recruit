@@ -117,6 +117,15 @@ def _stems(words: set[str]) -> set[str]:
     return {w[:5] for w in words}
 
 
+def title_covers(title: str, want: str) -> bool:
+    """Whether a posting's title is squarely `want`: every word of it is in
+    the title ("Senior Solutions Architect, AI" for "Solutions Architect").
+    Level words count here ("Engineering Manager" is not any engineer), unlike
+    `related_title`, which one shared word satisfies."""
+    words = _stems(title_words(want))
+    return bool(words) and words <= _stems(title_words(title))
+
+
 def related_title(title: str, wanted: list[str]) -> bool:
     """Whether a posting's title is about the work one of the wanted titles
     is ("Director of Operations" for "Chief Operating Officer", "HR Business

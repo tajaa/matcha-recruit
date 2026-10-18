@@ -209,3 +209,70 @@ async def test_follow_ups_cancel_and_findings(monkeypatch):
     assert out.payload["finding"]["user_state"] == "saved" and patch.await_args.kwargs == {"user_state": "saved", "notes": None}
     assert "Read this finding" in (await _call("update_task_item", state, {"item_id": "x", "status": None,
                                                                             "notes": "n"})).payload["error"]
+
+
+SAVED = {"filename": "Haley-Rivera-Resume.pdf", "updated_at": "2026-10-18", "title": "Senior Software Engineer"}
+
+
+def test_job_routing_follows_whether_a_resume_is_saved():
+    without = ability.job_routing(context())
+    assert "No résumé is saved" in without
+    assert f'"{ability.QUICK}"' in without and f'"{ability.WITH_RESUME}"' in without
+    assert "Never start a job_search task with use_resume true" in without
+    with_saved = ability.job_routing(context(saved_resume=SAVED))
+    assert "Haley-Rivera-Resume.pdf, updated 2026-10-18" in with_saved and "Tasks → Résumé" in with_saved
+    assert "ask_user" not in with_saved
+    assert ability.job_routing(None) == without
+    assert without in ability._prompt(context())
+
+
+@pytest.mark.asyncio
+async def test_a_job_search_from_chat_uses_the_saved_resume_and_never_one_that_isnt_there(monkeypatch):
+    from app.matcha.services.matcha_work.agent_tasks import playbooks
+
+    monkeypatch.setattr(playbooks, "startable", lambda p: p is not None)
+    create = AsyncMock(return_value={**TASK_VIEW, "status": "queued"})
+    monkeypatch.setattr(enqueue, "create_task", create)
+    args = {"playbook": "job_search", "directive": "full stack roles in CA",
+            "brief": {"titles": ["Full stack engineer"], "locations": ["California"]}}
+    # Saved: used without being asked for.
+    out = await _call("start_task", _state(), args, context(user_id=USER, company_id=COMPANY, saved_resume=SAVED))
+    assert out.payload["started"] is True and create.await_args.args[2].brief["use_resume"] is True
+    # Said not to: not used.
+    off = {**args, "brief": {**args["brief"], "use_resume": False}}
+    await _call("start_task", _state(), off, context(user_id=USER, company_id=COMPANY, saved_resume=SAVED))
+    assert create.await_args.args[2].brief["use_resume"] is False
+    # None saved: a general search starts, a résumé search is sent to the form.
+    await _call("start_task", _state(), args)
+    assert not create.await_args.args[2].brief.get("use_resume") and create.await_count == 3
+    wants = {**args, "brief": {**args["brief"], "use_resume": True}}
+    refused = await _call("start_task", _state(), wants)
+    assert refused.status == "error" and refused.payload["missing"] == ["use_resume"]
+    assert "ask_form" in refused.payload["next"] and create.await_count == 3
+
+
+def test_the_form_shows_a_saved_resume_as_known_and_offers_the_drop_in(monkeypatch):
+    from app.matcha.services.matcha_work.agent_tasks import intake, playbooks
+
+    monkeypatch.setattr(playbooks, "startable", lambda p: p is not None)
+    args = {"playbook": "job_search", "directive": "full stack roles", "known": {"titles": ["Engineer"]},
+            "missing": ["locations"]}
+    saved = intake._parse(context(saved_resume=SAVED, grants={"jobs": {}}), None, args)
+    assert saved["known"]["use_resume"] is True and "use_resume" not in saved["fields"]
+    none = intake._parse(context(grants={"jobs": {}}), None, {**args, "missing": ["locations", "use_resume"]})
+    assert "use_resume" in none["fields"] and "use_resume" not in none["known"]
+    field = next(f for f in intake.form_view(none)["form"]["fields"] if f["key"] == "use_resume")
+    assert field["widget"] == "resume" and field["type"] == "boolean" and "Tasks → Résumé" in field["help"]
+    assert field["value"] == "yes"  # asked for it: the switch starts on, showing the drop-in
+    # Said as known with none saved: asked instead, so there is somewhere to drop it.
+    known = intake._parse(context(grants={"jobs": {}}), None,
+                          {**args, "known": {"titles": ["Engineer"], "use_resume": True}})
+    assert "use_resume" in known["fields"] and "use_resume" not in known["known"]
+    assert known["prefill"] == {"use_resume": "yes"}
+    # Not mentioned and none saved: no switch forced on.
+    plain = intake._parse(context(grants={"jobs": {}}), None, args)
+    assert "prefill" not in plain and "use_resume" not in plain["fields"]
+    # Asked about on purpose, a saved résumé is not decided for them.
+    asked = intake._parse(context(saved_resume=SAVED, grants={"jobs": {}}), None,
+                          {**args, "missing": ["locations", "use_resume"]})
+    assert "use_resume" in asked["fields"]

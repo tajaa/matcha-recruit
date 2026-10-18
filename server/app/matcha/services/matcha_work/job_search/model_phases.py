@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 from uuid import UUID
 
@@ -52,7 +53,8 @@ async def _person(search: dict) -> tuple[str, str | None]:
     criteria = decode_jsonb(search.get("criteria"), {}) or {}
     plan = decode_jsonb(search.get("plan"), {}) or {}
     resume = await load_resume_for_model(search["user_id"]) if search.get("use_resume") else None
-    return prompts.person_block(search.get("ask") or "", criteria, resume, plan.get("profile_summary")), resume
+    return prompts.person_block(search.get("ask") or "", criteria, resume, plan.get("profile_summary"),
+                                plan.get("directions")), resume
 
 
 # ── plan ─────────────────────────────────────────────────────────────────────
@@ -60,7 +62,7 @@ async def _person(search: dict) -> tuple[str, str | None]:
 async def plan(search: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
     criteria = decode_jsonb(search.get("criteria"), {}) or {}
     fallback = plan_from_criteria(search.get("ask") or "", criteria)
-    person, _resume = await _person(search)
+    person, resume = await _person(search)
     try:
         outcome = await run_model_phase(
             search, phase="plan", abilities=(),
@@ -79,6 +81,7 @@ async def plan(search: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
             if (query["q"].lower(), query["location"]) not in seen:
                 planned["queries"].append(query)
         planned["queries"] = planned["queries"][:contracts.MAX_QUERIES]
+    _add_directions(planned, search, criteria, resume)
     weights = planned.pop("weights", None)
     async with connection_or_direct() as conn:
         await conn.execute(
@@ -93,6 +96,36 @@ async def plan(search: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
         status="discovering", cursor={},
         progress={"note": f"Searching {len(planned['queries'])} ways…", "queries": len(planned["queries"])},
     )
+
+
+def _query_words(text: str) -> str:
+    """A query as words only, for comparing: "San Francisco, CA" is "san francisco ca"."""
+    return " ".join(re.findall(r"[a-z0-9+#]+", text.lower()))
+
+
+def _add_directions(planned: dict, search: dict, criteria: dict, resume: str | None) -> None:
+    """Keep the directions the résumé supports and make sure each is looked
+    for: one query of its own (in their places) and a place among the first
+    titles, which code's board and web searches take."""
+    own = [*(criteria.get("titles") or []), *(planned.get("titles") or [])]
+    directions = contracts.check_directions(planned.pop("directions", []), resume, own)
+    if not directions:
+        return
+    planned["directions"] = directions
+    # A direction the plan already searches needs no query of its own.
+    planned_text = [_query_words(q["q"]) for q in planned["queries"]]
+    extra = []
+    for direction in directions:
+        if any(_query_words(direction["title"]) in text for text in planned_text):
+            continue
+        queries = plan_from_criteria(search.get("ask") or "", {**criteria, "titles": [direction["title"]]})["queries"]
+        if queries:
+            extra.append(queries[0])
+    keep = planned["queries"][:contracts.MAX_QUERIES - len(extra)]
+    seen = {(_query_words(q["q"]), q["location"]) for q in keep}
+    planned["queries"] = keep + [q for q in extra if (_query_words(q["q"]), q["location"]) not in seen]
+    titles = planned.get("titles") or list(criteria.get("titles") or [])
+    planned["titles"] = (titles[:2] + [d["title"] for d in directions] + titles[2:])[:10]
 
 
 # ── screen ───────────────────────────────────────────────────────────────────

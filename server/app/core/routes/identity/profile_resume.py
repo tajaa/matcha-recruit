@@ -15,7 +15,7 @@ import os
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.database import get_connection
 from app.matcha.services.matcha_work.resume_parser import (
@@ -23,6 +23,7 @@ from app.matcha.services.matcha_work.resume_parser import (
     RESUME_UPLOAD_MAX_BYTES,
     ResumeParseError,
     parse_resume_file,
+    parse_resume_text,
 )
 from app.core.dependencies import get_current_user
 from app.core.models.auth import CurrentUser
@@ -41,6 +42,16 @@ class ProfileResumeResponse(BaseModel):
     updated_at: str
 
 
+class MyResumeResponse(ProfileResumeResponse):
+    """The owner's own view: also the text Espresso reads, which they may
+    edit. Never returned to anyone else (a recruiter gets the parsed fields)."""
+    text: str
+
+
+class ResumeTextUpdate(BaseModel):
+    text: str = Field(min_length=50, max_length=20_000)
+
+
 def _resume_link(stored: str | None) -> str:
     """What the client gets for the stored file: a fifteen-minute link to a
     private copy, or the old public URL until the backfill moves it."""
@@ -51,22 +62,30 @@ def _resume_link(stored: str | None) -> str:
     return stored
 
 
-def _row_to_response(row) -> ProfileResumeResponse:
+def _parsed(row) -> dict:
     parsed = row["parsed_data"]
     if isinstance(parsed, str):
         try:
             parsed = json.loads(parsed)
         except json.JSONDecodeError:
             parsed = {}
+    return parsed or {}
+
+
+def _row_to_response(row) -> ProfileResumeResponse:
     return ProfileResumeResponse(
         filename=row["filename"],
         resume_url=_resume_link(row["resume_url"]),
-        parsed_data=parsed or {},
+        parsed_data=_parsed(row),
         updated_at=row["updated_at"].isoformat() if row["updated_at"] else "",
     )
 
 
-@router.post("/me/resume", response_model=ProfileResumeResponse)
+def _mine(row) -> MyResumeResponse:
+    return MyResumeResponse(**_row_to_response(row).model_dump(), text=row["raw_text"] or "")
+
+
+@router.post("/me/resume", response_model=MyResumeResponse)
 async def upload_my_resume(
     file: UploadFile = File(...),
     current_user: CurrentUser = Depends(get_current_user),
@@ -127,7 +146,7 @@ async def upload_my_resume(
                   raw_text = EXCLUDED.raw_text,
                   parsed_data = EXCLUDED.parsed_data,
                   updated_at = NOW()
-            RETURNING filename, resume_url, parsed_data, updated_at
+            RETURNING filename, resume_url, raw_text, parsed_data, updated_at
             """,
             current_user.id,
             filename,
@@ -138,7 +157,7 @@ async def upload_my_resume(
 
     if previous and previous != resume_url:
         await _delete_stored(previous)
-    return _row_to_response(row)
+    return _mine(row)
 
 
 async def _delete_stored(stored: str) -> None:
@@ -153,17 +172,58 @@ async def _delete_stored(stored: str) -> None:
         logger.warning("could not delete an old resume file", exc_info=True)
 
 
-@router.get("/me/resume", response_model=Optional[ProfileResumeResponse])
+@router.get("/me/resume", response_model=Optional[MyResumeResponse])
 async def get_my_resume(current_user: CurrentUser = Depends(get_current_user)):
-    """Return the caller's parsed resume, or null if none uploaded."""
+    """Return the caller's résumé (parsed, plus the text Espresso reads), or
+    null if none uploaded."""
     async with get_connection() as conn:
         row = await conn.fetchrow(
-            "SELECT filename, resume_url, parsed_data, updated_at FROM user_resumes WHERE user_id = $1",
+            "SELECT filename, resume_url, raw_text, parsed_data, updated_at FROM user_resumes WHERE user_id = $1",
             current_user.id,
         )
     if not row:
         return None
-    return _row_to_response(row)
+    return _mine(row)
+
+
+@router.put("/me/resume/text", response_model=MyResumeResponse)
+async def update_my_resume_text(
+    body: ResumeTextUpdate,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Edit the text Espresso reads from the résumé. The uploaded file stays
+    as it was (it is the original); the parsed fields are read again from the
+    new text, and kept as they were when that fails, so a save never loses the
+    words the person typed."""
+    text = body.text.strip()
+    if len(text) < 50:
+        raise HTTPException(status_code=422, detail="A résumé needs at least a few lines.")
+    async with get_connection() as conn:
+        exists = await conn.fetchval("SELECT 1 FROM user_resumes WHERE user_id = $1", current_user.id)
+    if not exists:
+        raise HTTPException(status_code=404, detail="Upload a résumé first.")
+    try:
+        parsed = await parse_resume_text(text)
+    except ResumeParseError as e:
+        logger.warning("Profile resume re-parse failed for user %s: %s", current_user.id, e)
+        parsed = None
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE user_resumes
+               SET raw_text = $2,
+                   parsed_data = COALESCE($3::jsonb, parsed_data),
+                   updated_at = NOW()
+             WHERE user_id = $1
+            RETURNING filename, resume_url, raw_text, parsed_data, updated_at
+            """,
+            current_user.id,
+            text,
+            json.dumps(parsed) if parsed is not None else None,
+        )
+    if not row:
+        raise HTTPException(status_code=404, detail="Upload a résumé first.")
+    return _mine(row)
 
 
 @router.delete("/me/resume", status_code=status.HTTP_204_NO_CONTENT)
