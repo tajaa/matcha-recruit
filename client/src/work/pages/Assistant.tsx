@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { Loader2, Maximize2, SlidersHorizontal, Sparkles, X } from 'lucide-react'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
+import { Loader2, Maximize2, PanelLeft, SlidersHorizontal, Sparkles, X } from 'lucide-react'
 import { ensureAssistantChannel } from '../api/matchaWork/assistant'
 import AssistantAbilities from '../components/assistant/AssistantAbilities'
+import AssistantSessions from '../components/assistant/AssistantSessions'
+import { useAssistantSessions } from '../hooks/useAssistantSessions'
 import { useEntitlements } from '../hooks/useEntitlements'
 import { useMe } from '../../hooks/useMe'
 import { apiErrorText } from '../utils/apiErrorText'
@@ -26,13 +28,17 @@ export type AssistantDraftState = { draft: AssistantAsk }
  * are none here. Every message is addressed to Espresso: no mention needed.
  */
 
-function Conversation({ channelId, ask, draft, onClose }: {
+function Conversation({ channelId, ask, draft, onClose, title, onShowSessions }: {
   channelId: string
   ask?: AssistantAsk | null
   /** Words to put in the composer, unsent. */
   draft?: AssistantAsk | null
   /** Set when shown as Home's side panel: a close button and a way to the full page. */
   onClose?: () => void
+  /** The session's name, for the header. */
+  title?: string
+  /** Set on a narrow screen, where the session list is behind a button. */
+  onShowSessions?: () => void
 }) {
   const [showAbilities, setShowAbilities] = useState(false)
   const { quotas } = useEntitlements()
@@ -75,9 +81,15 @@ function Conversation({ channelId, ask, draft, onClose }: {
     <div className="flex h-full min-h-0">
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex items-center gap-2 border-b border-w-line px-4 py-3">
-          <Sparkles size={16} className="text-w-accent" />
+          {onShowSessions ? (
+            <button type="button" onClick={onShowSessions} aria-label="Show sessions"
+              className="rounded-md p-1 text-w-dim hover:bg-w-surface2 hover:text-w-text md:hidden">
+              <PanelLeft size={16} />
+            </button>
+          ) : null}
+          <Sparkles size={16} className={`text-w-accent ${onShowSessions ? 'hidden md:block' : ''}`} />
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold text-w-text">Espresso</p>
+            <p className="truncate text-sm font-semibold text-w-text">{title ?? 'Espresso'}</p>
             <p className="truncate text-[11px] text-w-dim">
               {compact ? 'Private to you.' : 'Private to you. Ask it to look something up, or to do something for you.'}
               {runs ? ` ${runs.remaining} of ${runs.limit} requests left today.` : ''}
@@ -86,7 +98,7 @@ function Conversation({ channelId, ask, draft, onClose }: {
           {compact ? (
             <>
               <Link
-                to={`${base}/assistant`}
+                to={`${base}/assistant/${encodeURIComponent(channelId)}`}
                 aria-label="Open the full conversation"
                 title="Open the full conversation"
                 className="rounded-md p-1.5 text-w-dim hover:bg-w-surface2 hover:text-w-text"
@@ -167,11 +179,94 @@ export default function Assistant() {
       </p>
     )
   }
-  return <AssistantConversation draft={draft} />
+  return <SessionsPage draft={draft} />
 }
 
-/** The person's private conversation with Espresso: the full page, or (with
- *  `onClose`) the panel that slides in on Home when they ask from there. */
+const sessionKey = (userId: string) => `espresso.assistant.session:${userId}`
+
+function rememberedSession(userId: string): string | null {
+  try { return localStorage.getItem(sessionKey(userId)) } catch { return null }
+}
+
+/** The full page: the person's sessions on the left, the open one beside
+ *  them. The open session is in the URL (`/assistant/:conversationId`), so a
+ *  link or a reload lands on it; without one, the last session opened here,
+ *  else the most recent, else the main conversation. */
+function SessionsPage({ draft }: { draft: AssistantAsk | null }) {
+  const { conversationId } = useParams<{ conversationId?: string }>()
+  const { me } = useMe()
+  const userId = me?.user.id
+  const base = useWorkBase()
+  const navigate = useNavigate()
+  const sessions = useAssistantSessions()
+  const [railOpen, setRailOpen] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  // A draft belongs to the session the page opened with, not to one switched to after.
+  const [draftFor, setDraftFor] = useState<string | null>(null)
+  if (draft && conversationId && draftFor === null) setDraftFor(conversationId)
+
+  const path = (id: string) => `${base}/assistant/${encodeURIComponent(id)}`
+  const open = (id: string) => {
+    setRailOpen(false)
+    navigate(path(id))
+  }
+
+  // No session in the URL: pick one once the list is in.
+  useEffect(() => {
+    if (conversationId || !sessions.loaded || !userId) return
+    const saved = rememberedSession(userId)
+    const pick = sessions.sessions.find((c) => c.id === saved) ?? sessions.sessions[0]
+    if (pick) { navigate(path(pick.id), { replace: true }); return }
+    let cancelled = false
+    ensureAssistantChannel()
+      .then((out) => { if (!cancelled) navigate(path(out.channel_id), { replace: true }) })
+      .catch((e: unknown) => { if (!cancelled) setError(apiErrorText(e, "Couldn't open your conversation with Espresso.")) })
+    return () => { cancelled = true }
+    // `path` is rebuilt each render; the inputs that matter are listed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversationId, sessions.loaded, sessions.sessions, userId])
+
+  useEffect(() => {
+    if (!conversationId || !userId) return
+    try { localStorage.setItem(sessionKey(userId), conversationId) } catch { /* storage may be off */ }
+  }, [conversationId, userId])
+
+  const current = [...sessions.sessions, ...(sessions.archived ?? [])].find((c) => c.id === conversationId)
+  const rail = (onClose?: () => void) => (
+    <AssistantSessions sessions={sessions} activeId={conversationId ?? null} onSelect={(id) => open(id)} onClose={onClose} />
+  )
+
+  return (
+    <div className="relative flex h-full min-h-0">
+      <div className="hidden md:flex">{rail()}</div>
+      {railOpen && (
+        <div className="absolute inset-0 z-20 flex md:hidden">
+          <div className="w-72 max-w-[85%] border-r border-w-line shadow-xl">{rail(() => setRailOpen(false))}</div>
+          <button type="button" aria-label="Close sessions" className="flex-1 bg-black/40" onClick={() => setRailOpen(false)} />
+        </div>
+      )}
+      <div className="min-w-0 flex-1">
+        {error ? (
+          <p role="alert" className="p-6 text-sm text-red-400">{error}</p>
+        ) : conversationId ? (
+          <Conversation
+            key={conversationId}
+            channelId={conversationId}
+            draft={conversationId === draftFor ? draft : null}
+            title={current ? `${current.title}${current.archived ? ' (archived)' : ''}` : undefined}
+            onShowSessions={() => setRailOpen(true)}
+          />
+        ) : (
+          <div className="flex h-full items-center justify-center"><Loader2 className="animate-spin text-w-dim" /></div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/** The person's main conversation with Espresso, as the panel that slides in
+ *  on Home when they ask from there. Asks always go to the main session; the
+ *  panel's expand button opens it on the full page. */
 export function AssistantConversation({ ask, draft, onClose }: {
   ask?: AssistantAsk | null
   draft?: AssistantAsk | null

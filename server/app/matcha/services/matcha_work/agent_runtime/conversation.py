@@ -15,8 +15,13 @@ ASSISTANT_SCOPE = "assistant"
 CHANNEL_NAME = "Espresso"
 
 
-def _slug(user_id: UUID) -> str:
+def canonical_slug(user_id: UUID) -> str:
+    """The slug of the person's main conversation, the one `/assistant/channel`
+    opens. Other conversations add a request id after it."""
     return f"espresso-{user_id.hex}"
+
+
+_slug = canonical_slug
 
 
 async def ensure_assistant_channel(conn, *, user_id: UUID, company_id: UUID) -> UUID:

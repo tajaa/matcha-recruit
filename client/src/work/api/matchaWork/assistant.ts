@@ -59,6 +59,45 @@ export function ensureAssistantChannel() {
   return api.post<{ channel_id: string }>('/matcha-work/assistant/channel')
 }
 
+/** One of the person's sessions with Espresso: its own channel and history.
+ *  `main` is the one `ensureAssistantChannel` opens; it can't be archived. */
+export type AssistantConversation = {
+  id: string
+  title: string
+  updated_at: string | null
+  archived: boolean
+  main: boolean
+}
+
+export type AssistantConversationList = { conversations: AssistantConversation[]; has_more: boolean }
+
+/** 50 at a time, most recently active first. */
+export function listAssistantConversations(offset = 0, archived = false) {
+  return api.get<AssistantConversationList>(
+    `/matcha-work/assistant/conversations?offset=${offset}&archived=${archived}`,
+  )
+}
+
+/** `requestId` makes a retried create return the same session. */
+export function createAssistantConversation(title: string, requestId: string) {
+  return api.post<{ channel_id: string }>('/matcha-work/assistant/conversations', {
+    title, request_id: requestId,
+  })
+}
+
+export function renameAssistantConversation(id: string, title: string) {
+  return api.patch<AssistantConversation>(`/matcha-work/assistant/conversations/${id}`, { title })
+}
+
+/** Hides a session from the list; every message is kept. */
+export function archiveAssistantConversation(id: string) {
+  return api.post<AssistantConversation>(`/matcha-work/assistant/conversations/${id}/archive`)
+}
+
+export function restoreAssistantConversation(id: string) {
+  return api.post<AssistantConversation>(`/matcha-work/assistant/conversations/${id}/restore`)
+}
+
 /** A file given to Espresso is private; its attachment URL names it. */
 export const PRIVATE_INPUT_SCHEME = 'espresso-input:'
 

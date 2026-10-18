@@ -87,23 +87,31 @@ async def ensure_assistant_channel(
 
 
 def _conversation_view(row) -> dict:
+    # `main`: the canonical conversation `/assistant/channel` opens. It can't
+    # be archived, so Home's panel and older clients always have one to open.
     return {"id": str(row["id"]), "title": row["name"],
-            "updated_at": _iso(row["updated_at"])}
+            "updated_at": _iso(row["updated_at"]),
+            "archived": bool(row["is_archived"]),
+            "main": row["slug"] == conversation.canonical_slug(row["assistant_user_id"])}
+
+
+_CONVERSATION_COLUMNS = "id, name, slug, assistant_user_id, is_archived, updated_at"
 
 
 @router.get("/conversations")
 async def list_conversations(
     offset: int = Query(default=0, ge=0),
+    archived: bool = Query(default=False),
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     company_id = await _company(current_user)
     async with get_connection() as conn:
         rows = await conn.fetch(
-            """SELECT id, name, updated_at FROM channels
+            f"""SELECT {_CONVERSATION_COLUMNS} FROM channels
                WHERE company_id = $1 AND assistant_user_id = $2
-                 AND channel_scope = 'assistant' AND is_archived IS NOT TRUE
+                 AND channel_scope = 'assistant' AND (is_archived IS TRUE) = $4
                ORDER BY updated_at DESC, id DESC LIMIT 51 OFFSET $3""",
-            company_id, current_user.id, offset,
+            company_id, current_user.id, offset, archived,
         )
     return {"conversations": [_conversation_view(r) for r in rows[:50]],
             "has_more": len(rows) > 50}
@@ -138,14 +146,61 @@ async def rename_conversation(
     company_id = await _company(current_user)
     async with get_connection() as conn:
         row = await conn.fetchrow(
-            """UPDATE channels SET name = $1, updated_at = NOW()
+            f"""UPDATE channels SET name = $1, updated_at = NOW()
                WHERE id = $2 AND company_id = $3 AND assistant_user_id = $4
-                 AND channel_scope = 'assistant' RETURNING id, name, updated_at""",
+                 AND channel_scope = 'assistant' RETURNING {_CONVERSATION_COLUMNS}""",
             title, channel_id, company_id, current_user.id,
         )
     if not row:
         raise HTTPException(status_code=404, detail="Conversation not found.")
     return _conversation_view(row)
+
+
+async def _set_archived(channel_id: UUID, current_user: CurrentUser, archived: bool) -> dict:
+    """Archiving hides a conversation from the list and keeps every message;
+    restoring brings it back. `updated_at` is left alone, so a restored
+    conversation goes back to where it was in the list."""
+    company_id = await _company(current_user)
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            f"""UPDATE channels SET is_archived = $1
+               WHERE id = $2 AND company_id = $3 AND assistant_user_id = $4
+                 AND channel_scope = 'assistant' AND slug <> $5
+               RETURNING {_CONVERSATION_COLUMNS}""",
+            archived, channel_id, company_id, current_user.id,
+            conversation.canonical_slug(current_user.id),
+        )
+    if not row:
+        # The main conversation matches everything but the slug: say why.
+        if channel_id == await _main_conversation_id(company_id, current_user.id):
+            raise HTTPException(status_code=409, detail="Your main Espresso conversation can't be archived.")
+        raise HTTPException(status_code=404, detail="Conversation not found.")
+    return _conversation_view(row)
+
+
+async def _main_conversation_id(company_id: UUID, user_id: UUID) -> UUID | None:
+    async with get_connection() as conn:
+        return await conn.fetchval(
+            """SELECT id FROM channels WHERE company_id = $1 AND assistant_user_id = $2
+                 AND channel_scope = 'assistant' AND slug = $3""",
+            company_id, user_id, conversation.canonical_slug(user_id),
+        )
+
+
+@router.post("/conversations/{channel_id}/archive")
+async def archive_conversation(
+    channel_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    return await _set_archived(channel_id, current_user, True)
+
+
+@router.post("/conversations/{channel_id}/restore")
+async def restore_conversation(
+    channel_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    return await _set_archived(channel_id, current_user, False)
 
 
 @router.get("/runs/{run_id}")
