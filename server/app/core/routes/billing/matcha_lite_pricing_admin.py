@@ -22,6 +22,7 @@ from app.core.services.matcha_lite_pricing import (
     row_to_pricing,
 )
 from app.core.services.product_definitions import STRIPE_MIN_CHARGE_CENTS
+from app.core.services.stripe_catalog import INCIDENT_PLANS, sync_after_save
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -161,5 +162,7 @@ async def update_matcha_lite_pricing(
             )
 
     logger.info("Matcha Lite pricing (%s) updated by %s: %s", product_code, updated_by, new_values)
+    if product_code in INCIDENT_PLANS:
+        await sync_after_save("incidents", changed_by=updated_by)
     pricing = row_to_pricing(new_row)
     return MatchaLitePricingConfig(**pricing.__dict__)

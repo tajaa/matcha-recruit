@@ -12,7 +12,7 @@ import {
 import { formatPrice } from '../../../utils/format'
 
 // One form per built-in plan on the Catalog workspace’s Pricing tab.
-export function PricingForm({ productCode }: { productCode: MatchaLiteProductCode }) {
+export function PricingForm({ productCode, onSaved }: { productCode: MatchaLiteProductCode; onSaved?: () => void }) {
   const [config, setConfig] = useState<MatchaLitePricingAdminConfig | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -90,6 +90,7 @@ export function PricingForm({ productCode }: { productCode: MatchaLiteProductCod
         productCode,
       )
       setConfig(updated)
+      onSaved?.()
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)
     } catch (e: unknown) {

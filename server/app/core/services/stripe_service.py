@@ -386,6 +386,7 @@ class StripeService:
         success_url: Optional[str] = None,
         cancel_url: Optional[str] = None,
         is_essentials: bool = False,
+        line_item: Optional[dict[str, Any]] = None,
     ):
         """Subscription checkout for Matcha Lite (IR + Resources) priced by headcount.
 
@@ -428,7 +429,7 @@ class StripeService:
                 cancel_url=resolved_cancel_url,
                 metadata=metadata,
                 subscription_data={"metadata": metadata},
-                line_items=[
+                line_items=[line_item] if line_item is not None else [
                     {
                         "price_data": {
                             "currency": "usd",
@@ -593,6 +594,7 @@ class StripeService:
         amount_cents: int,
         success_url: Optional[str] = None,
         cancel_url: Optional[str] = None,
+        line_item: Optional[dict[str, Any]] = None,
     ):
         """Subscription checkout for an admin-composed product (/admin/products).
 
@@ -625,7 +627,7 @@ class StripeService:
                 cancel_url=resolved_cancel_url,
                 metadata=metadata,
                 subscription_data={"metadata": metadata},
-                line_items=[
+                line_items=[line_item] if line_item is not None else [
                     {
                         "price_data": {
                             "currency": "usd",
@@ -654,6 +656,7 @@ class StripeService:
         old_subscription_id: str,
         success_url: Optional[str] = None,
         cancel_url: Optional[str] = None,
+        line_item: Optional[dict[str, Any]] = None,
     ):
         """Subscription checkout upgrading Essentials → standard Matcha Lite.
 
@@ -685,7 +688,7 @@ class StripeService:
                 cancel_url=resolved_cancel_url,
                 metadata=metadata,
                 subscription_data={"metadata": metadata},
-                line_items=[
+                line_items=[line_item] if line_item is not None else [
                     {
                         "price_data": {
                             "currency": "usd",

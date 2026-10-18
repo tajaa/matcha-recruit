@@ -287,7 +287,7 @@ export default function Products() {
   return (
     <AdminWorkspace
       title="Products"
-      description="Build product bundles and manage their signup experience."
+      description="Matcha Incidents and Matcha Scheduler are commercial. All other product bundles remain in beta; manage Stripe connections and prices in Pricing."
       direction="row"
     >
       {/* Product list */}
@@ -315,7 +315,7 @@ export default function Products() {
                 >
                   <span className="truncate text-[13px] text-zinc-200">{t.label}</span>
                   <span className="flex items-center gap-1.5 text-[11px] text-zinc-500">
-                    <Badge variant="neutral">built-in</Badge>
+                    <Badge variant="neutral">{['matcha_lite', 'matcha_lite_essentials'].includes(t.slug) ? 'Incidents plan' : 'beta'}</Badge>
                     {t.tenants} tenant{t.tenants === 1 ? '' : 's'}
                   </span>
                 </AdminTab>
@@ -342,6 +342,7 @@ export default function Products() {
                 <span className="truncate text-[13px] text-zinc-200">{p.name}</span>
                 <span className="flex items-center gap-1.5 text-[11px] text-zinc-500">
                   <Badge variant={p.status === 'published' ? 'success' : 'neutral'}>{p.status}</Badge>
+                  {p.slug !== 'schedule-comm' && <Badge variant="neutral">beta</Badge>}
                   {p.tenants.active}/{p.tenants.total} active
                 </span>
               </button>

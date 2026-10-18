@@ -10,19 +10,11 @@ import type { MatchaLiteProductCode } from '../../../api/billing/matchaLitePrici
 import { formatPrice } from '../../../utils/format'
 import { productPriceDollars } from '../../../utils/tier'
 import { PricingForm } from './PricingForm'
+import { StripeCatalogPanel } from '../../../components/admin/StripeCatalogPanel'
 
 /**
- * Every price we are still experimenting with, in one place.
- *
- * No company product uses a stored Stripe Price: each checkout builds its
- * price inline from these rows at the moment the session is created, so a save
- * here is what the next Stripe checkout charges — nothing to sync. Current
- * subscribers keep the amount they signed up at.
- *
- * - Incident reporting + Espresso: matcha_lite_pricing rows (the same form as
- *   Signup Links → Pricing).
- * - Scheduling (and any other product-builder product): the price_cents of a
- *   product_definitions row, via the price-only PUT /admin/products/{id}/price.
+ * The two commercial products sync to reusable Stripe products/prices.
+ * Existing beta pricing tools remain available in the closed beta section.
  */
 
 type PaidModel = 'per_seat' | 'per_location' | 'block' | 'flat'
@@ -44,8 +36,8 @@ type AdminProduct = {
 const PAID_MODELS: readonly string[] = ['per_seat', 'per_location', 'block', 'flat']
 
 const LITE_PLANS: { code: MatchaLiteProductCode; name: string; blurb: string }[] = [
-  { code: 'matcha_lite', name: 'Matcha Lite', blurb: 'Incident reporting with the employee roster' },
-  { code: 'matcha_lite_essentials', name: 'Lite Essentials', blurb: 'Incident reporting, no roster' },
+  { code: 'matcha_lite', name: 'Standard', blurb: 'Incident reporting with the employee roster' },
+  { code: 'matcha_lite_essentials', name: 'Essentials', blurb: 'Incident reporting, no roster' },
 ]
 
 const ESPRESSO_PLANS: { code: MatchaLiteProductCode; name: string; blurb: string }[] = [
@@ -80,12 +72,12 @@ function unitLabel(p: AdminProduct): string {
   return 'per month'
 }
 
-function PlanCard({ name, blurb, code }: { name: string; blurb: string; code: MatchaLiteProductCode }) {
+function PlanCard({ name, blurb, code, onSaved }: { name: string; blurb: string; code: MatchaLiteProductCode; onSaved?: () => void }) {
   return (
     <div>
       <p className="text-sm font-medium text-zinc-100">{name}</p>
       <p className="mb-3 text-xs text-zinc-500">{blurb}</p>
-      <PricingForm productCode={code} />
+      <PricingForm productCode={code} onSaved={onSaved} />
     </div>
   )
 }
@@ -172,17 +164,21 @@ function ProductPriceCard({
 }
 
 export default function Pricing() {
+  const [catalogRevision, setCatalogRevision] = useState(0)
+  const refreshCatalog = () => setCatalogRevision((v) => v + 1)
   const products = useAsync(
     () => api.get<{ products: AdminProduct[] }>('/admin/products').then((r) => r.products),
     [],
     [] as AdminProduct[],
   )
   const billed = products.data.filter((p) => p.status === 'published' && PAID_MODELS.includes(p.pricing_model))
-  const scheduling = billed.filter((p) => p.features.employee_schedule)
-  const other = billed.filter((p) => !p.features.employee_schedule)
+  const scheduling = billed.filter((p) => p.slug === 'schedule-comm')
+  const other = billed.filter((p) => p.slug !== 'schedule-comm')
 
-  const replace = (saved: AdminProduct) =>
+  const replace = (saved: AdminProduct) => {
     products.setData((prev) => prev.map((p) => (p.id === saved.id ? { ...p, ...saved } : p)))
+    refreshCatalog()
+  }
 
   const productGrid = (list: AdminProduct[]) => (
     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -195,29 +191,30 @@ export default function Pricing() {
 
   return (
     <div>
-      <AdminPageHeader title="Pricing" description="What each product charges at Stripe checkout." />
+      <AdminPageHeader title="Pricing & Stripe" description="Manage Matcha Incidents and Matcha Scheduler billing." />
 
       <div className="mt-6 flex items-start gap-3 rounded-lg border border-emerald-900/50 bg-emerald-950/20 px-4 py-3 text-sm text-emerald-100">
         <Info className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />
         <p>
-          A save here is what the next Stripe checkout charges. There is nothing to sync in Stripe.
-          Current subscribers keep the price they signed up at.
+          Saving a commercial product price updates Stripe for future checkouts.
+          Current subscribers keep their existing price. Other products remain in beta.
         </p>
       </div>
 
       <div className="mt-10 space-y-12">
+        <StripeCatalogPanel revision={catalogRevision} />
         <Section
-          title="Incident reporting"
-          description="Matcha Lite and Essentials share /lite/signup; checkout prices the company's headcount in blocks."
+          title="Matcha Incidents"
+          description="Standard and Essentials share one Stripe product. Pricing remains based on employee blocks."
         >
           <div className="grid gap-6 lg:grid-cols-2">
-            {LITE_PLANS.map((plan) => <PlanCard key={plan.code} {...plan} />)}
+            {LITE_PLANS.map((plan) => <PlanCard key={plan.code} {...plan} onSaved={refreshCatalog} />)}
           </div>
         </Section>
 
         <Section
-          title="Scheduling"
-          description="Published product-builder products with scheduling. The landing page's Start now price reads this too."
+          title="Matcha Scheduler"
+          description="The schedule-comm product powers signup, the landing price, and the Stripe subscription."
         >
           {products.loading && !products.data.length ? (
             <div className="flex items-center gap-2 text-sm text-zinc-500">
@@ -232,28 +229,29 @@ export default function Pricing() {
           )}
         </Section>
 
-        <Section title="Espresso" description="Personal plans. The web paywall and the Mac app show these prices.">
+        <details className="rounded-lg border border-zinc-800 p-4">
+          <summary className="cursor-pointer text-sm font-medium text-zinc-400">Beta products — excluded from the commercial Stripe catalog</summary>
+          <div className="mt-6 space-y-8">
+        <Section title="Espresso (beta)" description="Personal plans. The web paywall and the Mac app show these prices.">
           <div className="grid gap-6 lg:grid-cols-2">
             {ESPRESSO_PLANS.map((plan) => <PlanCard key={plan.code} {...plan} />)}
           </div>
         </Section>
 
-        <Section title="Compliance, add-ons & Tell-Us" description="All other built-in checkout prices, previously under Signup Links → Pricing.">
+        <Section title="Compliance, add-ons & Tell-Us (beta)" description="Existing beta pricing controls; these do not publish commercial Stripe catalog products.">
           <div className="grid gap-6 lg:grid-cols-2">
             {OTHER_PLANS.map((plan) => <PlanCard key={plan.code} {...plan} />)}
           </div>
         </Section>
 
         {other.length > 0 && (
-          <Section title="Other products" description="Every other published product-builder product billed through Stripe.">
+          <Section title="Other beta products" description="Product-builder pricing outside the two commercial offerings.">
             {productGrid(other)}
           </Section>
         )}
 
-        <p className="text-xs text-zinc-500">
-          Compliance, the Lite add-ons and Tell-Us are priced in{' '}
-          <Link to="/admin/matcha-lite" className="text-zinc-300 hover:text-zinc-100">Signup Links → Pricing</Link>.
-        </p>
+          </div>
+        </details>
       </div>
     </div>
   )

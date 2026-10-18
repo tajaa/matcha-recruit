@@ -40,6 +40,7 @@ from app.core.services.product_definitions import (
 from app.core.feature_flags import BUILTIN_TIER_META, BUILTIN_TIER_SLUGS, builtin_tier_composition
 from app.core.services.feature_beta import load_beta_features
 from app.core.services.feature_provenance import record_feature_changes
+from app.core.services.stripe_catalog import SCHEDULER_SLUG, sync_after_save
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -230,6 +231,8 @@ async def create_product(body: ProductUpsert, current_user=Depends(require_admin
             payload["nav"], payload["onboarding_kind"], current_user.email,
         )
     logger.info("Admin created product %s by %s", payload["slug"], current_user.email)
+    if payload["slug"] == SCHEDULER_SLUG:
+        await sync_after_save("scheduler", changed_by=current_user.email)
     return row_to_product(row).to_dict()
 
 
@@ -292,6 +295,8 @@ async def update_product(
                 payload["nav"], payload["onboarding_kind"], current_user.email, product_id,
             )
     logger.info("Admin updated product %s by %s", payload["slug"], current_user.email)
+    if payload["slug"] == SCHEDULER_SLUG or current["slug"] == SCHEDULER_SLUG:
+        await sync_after_save("scheduler", changed_by=current_user.email)
     return row_to_product(row).to_dict()
 
 
@@ -306,9 +311,9 @@ async def set_product_price(
 ):
     """Change only what a Stripe-billed product charges — /admin/pricing.
 
-    Checkout builds its Stripe price inline from this row, so the next checkout
-    charges the new amount with no Stripe-side sync. Existing subscribers keep
-    the amount they signed up at. Narrower than PUT /products/{id} so the
+    Scheduler pricing is mirrored to the Stripe catalog after this commits.
+    Existing subscribers keep the amount they signed up at.
+    Narrower than PUT /products/{id} so the
     pricing page never re-sends (and can't clobber) features, nav or slug.
     """
     async with get_connection() as conn:
@@ -339,6 +344,8 @@ async def set_product_price(
                 body.price_cents, current_user.email, product_id,
             )
     logger.info("Admin set product %s price to %s by %s", product_id, body.price_cents, current_user.email)
+    if row["slug"] == SCHEDULER_SLUG:
+        await sync_after_save("scheduler", changed_by=current_user.email)
     return row_to_product(row).to_dict()
 
 
@@ -370,6 +377,8 @@ async def set_product_status(
     if not row:
         raise HTTPException(status_code=404, detail="Product not found")
     logger.info("Admin set product %s status=%s", row["slug"], body.status)
+    if row["slug"] == SCHEDULER_SLUG:
+        await sync_after_save("scheduler", changed_by=current_user.email)
     return row_to_product(row).to_dict()
 
 
