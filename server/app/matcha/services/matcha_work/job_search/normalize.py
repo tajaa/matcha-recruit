@@ -174,12 +174,37 @@ def state_of(location: str) -> str | None:
     return None
 
 
-def is_remote(*texts: str | None, flag: bool | None = None) -> bool | None:
-    if flag is True:
+_REMOTE = re.compile(r"\b(remote|work from home|anywhere)\b", re.I)
+_NOT_REMOTE = re.compile(r"\b(?:non|not)[- ]?remote\b", re.I)
+_HYBRID = re.compile(r"\bhybrid\b", re.I)
+# The word set off from the role as a tag: "Designer (Remote)", "Remote -
+# Designer", "Designer | US Remote", "Designer (Remote or Hybrid)". Inside the
+# role it is not one: "Remote Sensing Analyst", "Hybrid Cloud Engineer",
+# "Nurse - Remote Patient Monitoring".
+_EDGE = r"(?:[\(\)\[\]\-–—|,:/]|\bor\b)"
+
+
+def _tag(words: str) -> re.Pattern:
+    return re.compile(rf"(?:^|{_EDGE})\s*(?:(?:us|usa)\s+)?(?:{words})(?:\s+(?:us|usa|only|first|eligible|ok))?"
+                      rf"\s*(?:$|{_EDGE})", re.I)
+
+
+_REMOTE_TAG = _tag("remote|work from home|wfh")
+_HYBRID_TAG = _tag("hybrid")
+
+
+def is_remote(*texts: str | None, flag: bool | None = None, title: str | None = None) -> bool | None:
+    """Whether a posting is remote, from its location `texts`, its `title` and
+    the source's own `flag` (Google's work_from_home), the posting's own words
+    first: True when a text says remote ("Remote - US", "Anywhere") or the
+    title carries it as a tag; False when they say hybrid instead (a hybrid
+    job has an office to go to, whatever a source inferred); else `flag`."""
+    said = [_NOT_REMOTE.sub(" ", text) for text in texts if text]
+    title = _NOT_REMOTE.sub(" ", title or "")
+    if any(_REMOTE.search(text) for text in said) or _REMOTE_TAG.search(title):
         return True
-    for text in texts:
-        if text and re.search(r"\b(remote|work from home|anywhere)\b", text, re.I):
-            return True
+    if any(_HYBRID.search(text) for text in said) or _HYBRID_TAG.search(title):
+        return False
     return flag
 
 

@@ -270,3 +270,77 @@ async def test_listing_pages_stop_at_the_runs_budget(monkeypatch, wired):
     st.sessions[J.KEY].paid = J.MAX_PAID - 1
     await find(st, provider, monkeypatch, title="product designer", location="Los Angeles, CA", pages=2)
     assert len(provider.asked) == 1 and st.sessions[J.KEY].paid == J.MAX_PAID
+
+
+def remote_posting(title, company, location="Anywhere", remote=True):
+    found = posting(title, company, location)
+    found.remote = remote
+    return found
+
+
+@pytest.mark.asyncio
+async def test_remote_only_keeps_remote_jobs_and_says_what_it_left_out(monkeypatch, wired):
+    provider = Provider(([
+        remote_posting("Product Designer", "Remoteco"),
+        remote_posting("Product Designer", "Hybridco", "New York, NY (Hybrid)", remote=False),
+        remote_posting("Product Designer", "Officeco", "Chicago, IL", remote=None),
+        remote_posting("Product Designer", "Northco", "Remote - Canada"),
+    ], None))
+    st = state()
+    out = await find(st, provider, monkeypatch, title="product designer", remote_only=True)
+    # Searched as remote across the US, not as a place called "Remote".
+    assert provider.asked == [("product designer remote", "United States", None)]
+    assert out.payload["location"] == "remote" and out.payload["new_jobs"] == 1
+    assert out.payload["left_out_not_remote"] == 2 and out.payload["left_out_elsewhere"] == 1
+    assert out.payload["jobs"][0].startswith("J1 | Product Designer | Remoteco | Anywhere (remote)")
+    assert out.label == "Found 1 product designer remote jobs"
+    # A location of "Remote" is the same ask.
+    again = Provider(([remote_posting("Product Designer", "Remoteco")], None))
+    out = await find(state(), again, monkeypatch, title="product designer", location="Remote US")
+    assert again.asked == [("product designer remote", "United States", None)] and out.payload["new_jobs"] == 1
+
+
+@pytest.mark.asyncio
+async def test_none_remote_says_so(monkeypatch, wired):
+    provider = Provider(([remote_posting("Product Designer", "Officeco", "Chicago, IL", remote=None)], None))
+    out = await find(state(), provider, monkeypatch, title="product designer", remote_only=True)
+    assert out.payload["new_jobs"] == 0 and "None of the postings found were remote" in out.payload["note"]
+
+
+@pytest.mark.asyncio
+async def test_a_thin_page_takes_the_next_one(monkeypatch, wired):
+    provider = Provider(([remote_posting("Designer", "A"), remote_posting("Designer", "B", "Austin, TX", None)], "p2"),
+                        ([remote_posting("Designer", "C"), remote_posting("Designer", "D")], "p3"))
+    st = state()
+    out = await find(st, provider, monkeypatch, title="designer", remote_only=True)
+    assert [asked[2] for asked in provider.asked] == [None, "p2"]  # never past MAX_PAGES
+    assert out.payload["new_jobs"] == 3 and st.sessions[J.KEY].paid == 2
+    # A full first page is enough.
+    full = Provider(([remote_posting("Designer", c) for c in "EFGHI"], "p2"))
+    await find(state(), full, monkeypatch, title="designer", remote_only=True)
+    assert len(full.asked) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_job_its_own_posting_calls_on_site_is_left_out_once_read(monkeypatch, wired):
+    wired["Hybridco"] = {"source": "lever", "source_url": "https://jobs.lever.co/hybridco/abc", "remote": False,
+                         "comp": {}}
+    wired["Remoteco"] = {"source": "ashby", "source_url": "https://jobs.ashbyhq.com/remoteco/abc", "remote": True,
+                         "comp": {}}
+    st = state()
+    out = await find(st, Provider(([remote_posting("Designer", "Hybridco"), remote_posting("Designer", "Remoteco")],
+                                   None)), monkeypatch, title="designer", remote_only=True)
+    assert out.payload["new_jobs"] == 1 and out.payload["left_out_on_site_at_employer"] == 1
+    assert out.payload["jobs"][0].startswith("J2 | Designer | Remoteco")
+    assert "https://jobs.lever.co/hybridco/abc" not in out.provenance
+    assert list(st.sessions[J.KEY].jobs) == ["J2"]
+    # Its id is never given to another job, and it isn't found again as new.
+    more = await find(st, Provider(([remote_posting("Designer", "Hybridco"), remote_posting("Designer", "Newco")],
+                                    None)), monkeypatch, title="designer", remote_only=True)
+    assert more.payload["new_jobs"] == 1 and more.payload["jobs"][0].startswith("J3 | Designer | Newco")
+    # Near the place they named, a read that says on-site where Google said remote is kept by distance.
+    wired["Austinco"] = {"source": "lever", "source_url": "https://jobs.lever.co/austinco/abc", "remote": False,
+                         "comp": {}}
+    near = await find(state(), Provider(([remote_posting("Designer", "Austinco", "Austin, TX")], None)),
+                      monkeypatch, title="designer", location="Austin, TX")
+    assert near.payload["new_jobs"] == 1 and "left_out_on_site_at_employer" not in near.payload

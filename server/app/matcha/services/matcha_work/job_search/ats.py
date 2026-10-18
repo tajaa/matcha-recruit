@@ -202,11 +202,22 @@ def parse_greenhouse(ref: AtsRef, data: dict) -> AtsPosting:
         title=normalize.clean_text(data.get("title"), 200),
         company=normalize.clean_text(data.get("company_name"), 200),
         location=normalize.clean_text(location.get("name"), 200),
-        remote=normalize.is_remote(location.get("name")),
+        remote=normalize.is_remote(location.get("name"), title=data.get("title")),
         description=description,
         findings=findings,
         questions=greenhouse_questions(data.get("questions")),
     )
+
+
+# The employer's own workplace field: Lever's `workplaceType` ("on-site",
+# "remote", "hybrid", "unspecified"), Ashby's ("OnSite", "Remote", "Hybrid").
+# It says what the job is better than any word in its location.
+_WORKPLACE = {"remote": True, "hybrid": False, "onsite": False}
+
+
+def workplace(value: Any) -> bool | None:
+    """True for a remote job, False for a hybrid or on-site one, None when the field doesn't say."""
+    return _WORKPLACE.get(re.sub(r"[^a-z]", "", str(value or "").lower()))
 
 
 def parse_lever(ref: AtsRef, data: dict) -> AtsPosting:
@@ -222,12 +233,12 @@ def parse_lever(ref: AtsRef, data: dict) -> AtsPosting:
     findings = comp_mod.from_lever(data, url=url)
     findings.extend(f for f in comp_mod.scan_text(description, origin="ats_api", url=url)
                     if f["component"] != "base" or not any(x["component"] == "base" for x in findings))
-    workplace = str(data.get("workplaceType") or "").lower()
+    said = workplace(data.get("workplaceType"))
     return AtsPosting(
         ref=ref, url=url,
         title=normalize.clean_text(data.get("text"), 200),
         location=normalize.clean_text(categories.get("location"), 200),
-        remote=True if workplace == "remote" else normalize.is_remote(categories.get("location")),
+        remote=said if said is not None else normalize.is_remote(categories.get("location"), title=data.get("text")),
         description=description,
         findings=findings,
     )
@@ -244,11 +255,14 @@ def parse_ashby(ref: AtsRef, data: dict) -> AtsPosting | None:
         findings = comp_mod.from_ashby(job.get("compensation"), url=url)
         findings.extend(f for f in comp_mod.scan_text(description, origin="ats_api", url=url)
                         if not any(x["component"] == f["component"] for x in findings))
+        said = workplace(job.get("workplaceType"))
+        if said is None and job.get("isRemote") is True:
+            said = True
         return AtsPosting(
             ref=ref, url=url,
             title=normalize.clean_text(job.get("title"), 200),
             location=normalize.clean_text(job.get("location"), 200),
-            remote=True if job.get("isRemote") else normalize.is_remote(job.get("location")),
+            remote=said if said is not None else normalize.is_remote(job.get("location"), title=job.get("title")),
             description=description,
             findings=findings,
         )

@@ -68,9 +68,17 @@ Worker: `workers/tasks/job_search.py`. Migration: `mwjobs01`
   named, or matched by name abroad, or when it is remote and they'd take
   remote (`phases.keep_job` → `places.fits`). A location code can't place is
   dropped, not guessed at, and so is a remote job open only outside the
-  country of every place they named. Code decides from the posting's text and
-  the Census gazetteer, never a model: a model given Brave results with no
-  location in their snippets kept one of six that fit (prod, 2026-10-17).
+  country of every place they named (or of the US, when they named none).
+  Code decides from the posting's text and the Census gazetteer, never a
+  model: a model given Brave results with no location in their snippets kept
+  one of six that fit (prod, 2026-10-17).
+- **Hybrid is not remote.** `normalize.is_remote` reads the posting's own
+  words first: remote in its location or as a tag in its title ("Designer
+  (Remote)", never "Remote Sensing Analyst") is remote; hybrid there instead
+  is not, whatever Google's work-from-home flag says. Lever's and Ashby's
+  `workplaceType` (`ats.workplace`) is the employer's own field and wins over
+  both; an explicit False is never overruled by words in the location
+  (`places.is_remote`).
 - **A board or web posting is kept only for a related title.** A board search
   for "Chief People Officer" turns up any job that names it somewhere, so a
   posting read from the boards or the web is kept only when its title shares

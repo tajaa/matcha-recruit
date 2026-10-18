@@ -46,6 +46,19 @@ def test_remote_jobs():
     assert keep("Remote - United Kingdom", {"locations": ["London, UK"]}).keep
 
 
+def test_a_remote_job_open_only_abroad_is_not_kept_for_a_us_search():
+    remote_only = {"remote": "remote_only"}
+    # Named no place: the search is across the US.
+    assert not keep("Remote - Canada", remote_only).keep
+    assert not keep("EMEA", remote_only, remote=True).keep
+    assert keep("Remote - US or Canada", remote_only).keep
+    assert keep("Anywhere", remote_only).keep and keep("Remote (USA)", remote_only).keep
+    assert keep("Remote - US or Canada", SOCAL_NY).keep
+    # An explicit not-remote (the employer's own field) isn't overruled by the location's words.
+    assert not places.is_remote("Remote - US", False) and places.is_remote("Remote - US", None)
+    assert not keep("Remote - US", SOCAL_NY, remote=False).keep
+
+
 def test_no_places_or_only_nationwide_keeps_anything():
     for criteria in ({}, {"locations": []}, {"locations": ["United States", "Remote"]}, {"locations": ["nationwide"]}):
         assert keep("Austin, TX", criteria).keep

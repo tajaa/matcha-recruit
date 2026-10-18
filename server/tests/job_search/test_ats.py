@@ -85,6 +85,36 @@ def test_greenhouse_parse():
         assert finding["evidence"]["quote"] in posting.description
 
 
+@pytest.mark.parametrize(("data", "remote"), [
+    # The employer's own field wins over words in the location.
+    ({"workplaceType": "hybrid", "categories": {"location": "Remote - US"}}, False),
+    ({"workplaceType": "on-site", "categories": {"location": "Denver, CO"}}, False),
+    ({"workplaceType": "unspecified", "categories": {"location": "Remote - US"}}, True),
+    ({"workplaceType": "unspecified", "categories": {"location": "Denver, CO (Hybrid)"}}, False),
+    ({"categories": {"location": "Denver, CO"}}, None),
+])
+def test_lever_workplace_type_says_whether_a_job_is_remote(data, remote):
+    lever = ats.parse_lever(ats.AtsRef("lever", "beta", LEVER_ID), {"text": "COO", **data})
+    assert lever.remote is remote
+
+
+@pytest.mark.parametrize(("job", "remote"), [
+    ({"workplaceType": "Hybrid", "isRemote": True, "location": "Remote"}, False),
+    ({"workplaceType": "OnSite", "location": "Austin, TX"}, False),
+    ({"workplaceType": "Remote", "location": "Austin, TX"}, True),
+    ({"isRemote": True, "location": "Austin, TX"}, True),
+    ({"location": "Austin, TX"}, None),
+])
+def test_ashby_workplace_type_says_whether_a_job_is_remote(job, remote):
+    data = {"jobs": [{"id": ASHBY_ID, "title": "COO", **job}]}
+    assert ats.parse_ashby(ats.AtsRef("ashby", "gamma", ASHBY_ID), data).remote is remote
+
+
+def test_a_greenhouse_hybrid_location_is_not_remote():
+    hybrid = {**GREENHOUSE, "location": {"name": "Hybrid - New York, NY"}}
+    assert ats.parse_greenhouse(ats.AtsRef("greenhouse", "acme", "123"), hybrid).remote is False
+
+
 def test_lever_and_ashby_parse():
     lever = ats.parse_lever(ats.AtsRef("lever", "beta", LEVER_ID), {
         "text": "COO", "hostedUrl": f"https://jobs.lever.co/beta/{LEVER_ID}", "workplaceType": "remote",

@@ -681,8 +681,10 @@ each is offered only when the server has a provider key (`env_ready`).
 - **`find_jobs`**: open postings, from Google Jobs (`job_search.providers`)
   for one title and place (queries built by `phases.plan_from_criteria`),
   kept only where wanted (`phases.keep_posting` → `places.fits`), deduped,
-  then the top 10 read (`phases.enrich_one` with 4 fetches each, 4 at once,
-  at most 40 s and never past the tool's own deadline less 5 s; reads still
+  taking the next page when a call kept fewer than `FILL_TO` (5) from the
+  pages asked for, then the top 10 read (`phases.enrich_one` with 4 fetches
+  each, 4 at once, at most 40 s and never past the tool's own deadline less
+  5 s; reads still
   going then are stopped). Every posting kept is in the session, unread,
   before any read starts, so a read cut short costs its check, not the list.
   Read = `verified` (still up at that link, pay from the posting); otherwise
@@ -697,6 +699,17 @@ each is offered only when the server has a provider key (`env_ready`).
   LA product-designer jobs, 5 read, 4 of them on boards until this step). Pay is
   `ranking.comp_line` over evidence, never the model's. 4 calls, 6 listing
   pages a run. The deep, ranked search with drafts is still a job search task.
+- **Remote only means remote.** `remote_only` (or a location of "Remote",
+  which is how they'd work, not a place) searches remote across the US and
+  keeps only postings that say remote: the location ("Remote - US",
+  "Anywhere"), Google's work-from-home flag, or a tag in the title
+  ("Designer (Remote)", never "Remote Sensing Analyst";
+  `normalize.is_remote`). Hybrid is not remote, whatever Google inferred. A
+  remote job open only abroad ("Remote - Canada") is left out when no place
+  abroad was named. Once read, the employer's own field (Lever's and Ashby's
+  `workplaceType`, `ats.workplace`) wins: a job it calls on-site or hybrid is
+  dropped from the run (its J id is not reused), counted as
+  `left_out_on_site_at_employer`.
 - **Blocks are rebuilt by id.** `places` (all a run can find, 360) and
   `job_postings` (≤30, read-at-employer first) come from the session, never
   the model's text; empty ids mean everything found, and `leave_out_ids` drops

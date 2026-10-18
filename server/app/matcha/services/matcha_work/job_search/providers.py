@@ -79,7 +79,7 @@ def _posting(raw: dict, *, links: list[dict], share_url: Any) -> Posting | None:
         return None
     ext = raw.get("detected_extensions") if isinstance(raw.get("detected_extensions"), dict) else {}
     location = _str(raw.get("location"), 200)
-    remote = normalize.is_remote(location, flag=True if ext.get("work_from_home") else None)
+    remote = normalize.is_remote(location, flag=True if ext.get("work_from_home") else None, title=title)
     return Posting(
         title=title,
         company=company,

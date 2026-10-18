@@ -291,7 +291,19 @@ def takes_remote(criteria: dict) -> bool:
 
 
 def is_remote(location: str, remote: bool | None) -> bool:
-    return remote is True or bool(_REMOTE.search(str(location or "").lower()))
+    """Remote as the posting says, else as its location text does. An explicit
+    False (the employer's own field: hybrid, on-site) wins over the text."""
+    return remote is True or (remote is None and bool(_REMOTE.search(str(location or "").lower())))
+
+
+def _names_us(location: str) -> bool:
+    """Whether a location text names the US itself ("Remote - US or Canada")."""
+    return any(place_key(part) in _US for fragment in _SPLIT.split(str(location or "").lower())
+               for part in fragment.split(","))
+
+
+def _abroad_only(location: str, places: list[Named]) -> bool:
+    return bool(places) and all(p.abroad for p in places) and not _names_us(location)
 
 
 def judge(location: str, remote: bool | None, criteria: dict) -> Verdict:
@@ -299,11 +311,15 @@ def judge(location: str, remote: bool | None, criteria: dict) -> Verdict:
     a search with these criteria, and why."""
     wanted = targets(criteria)
     if not wanted:
+        # A search that names no place searches the US (`phases.plan_from_criteria`):
+        # a remote job open only abroad ("Remote - Canada") isn't one they can take.
+        if is_remote(location, remote) and _abroad_only(location, named(location)):
+            return Verdict(False, "remote outside the US")
         return Verdict(True, "no places named")
     places = named(location)
     us_only = not any(t.abroad or (t.name and not t.points and not t.state) for t in wanted)
     if is_remote(location, remote) and takes_remote(criteria):
-        if places and all(p.abroad for p in places) and us_only:
+        if us_only and _abroad_only(location, places):
             return Verdict(False, "remote outside the US")
         return Verdict(True, "remote")
     anchors = tuple(p for t in wanted for p in t.points)

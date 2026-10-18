@@ -1,4 +1,6 @@
 """Ranking: posted pay first, never compared across currencies, unposted pay never $0."""
+import pytest
+
 from app.matcha.services.matcha_work.job_search import normalize, ranking
 
 
@@ -100,6 +102,30 @@ def test_comp_line():
     assert ranking.comp_line({"base": base(1_200_000, 1_200_000, "EUR")}) == "EUR 1.2M"
     assert ranking.comp_line({"bonus": {"status": "mentioned"},
                               "equity": {"status": "posted", "pct_min": 0.5}}) == "bonus · 0.5% equity"
+
+
+@pytest.mark.parametrize(("title", "remote"), [
+    ("Senior Product Designer (Remote)", True), ("Remote - Product Designer", True),
+    ("Product Designer | US Remote", True), ("Product Designer - Remote US", True),
+    ("Product Designer, Remote-first", True), ("Support Specialist - Work From Home", True),
+    ("Product Designer (Hybrid)", False), ("Product Designer - Hybrid - 3 days in office", False),
+    ("Product Designer (Remote or Hybrid)", True),
+    # Inside the role, the word is not a tag.
+    ("Remote Sensing Analyst", None), ("Hybrid Cloud Engineer", None),
+    ("Nurse - Remote Patient Monitoring", None), ("Product Designer", None),
+    ("Product Designer (Non-Remote)", None),
+])
+def test_remote_or_hybrid_in_a_title_counts_only_as_a_tag(title, remote):
+    assert normalize.is_remote("Austin, TX", title=title) is remote, title
+
+
+def test_hybrid_is_not_remote_whatever_the_flag():
+    assert normalize.is_remote("New York, NY (Hybrid)", flag=True) is False
+    assert normalize.is_remote("New York, NY (Hybrid)") is False
+    assert normalize.is_remote("Hybrid or Remote - US", flag=None) is True
+    assert normalize.is_remote("Austin, TX", flag=True, title="Designer (Hybrid)") is False
+    assert normalize.is_remote("Remote", title="Designer (Hybrid)") is True
+    assert normalize.is_remote("Austin, TX (not remote)") is None
 
 
 def test_normalize_helpers():

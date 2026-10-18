@@ -13,14 +13,18 @@ inside one tool call:
    (`phases.plan_from_criteria`: a city goes in the query text).
 2. Kept only where the person wants the job (`phases.keep_posting` →
    `places.fits`: within 50 miles of the place named, or remote when they'd
-   take it), deduped within the run.
+   take it; for remote only, remote and not hybrid), deduped within the run.
+   A call that kept fewer than `FILL_TO` from the pages asked for takes the
+   next page: a remote-only or one-city search leaves out much of a page.
 3. The top postings read from the employer's own posting, a few at a time
    (`phases.enrich_one`: the ATS's public API or the page's JobPosting data,
    title and employer matched), within the time the run has left. A posting
    read is `verified`: still up at that link, its pay in the posting's own
    words. It is `at_employer` only on an ATS or the employer's own host
    (`employer_host`); builtin.com and the like carry the same JobPosting
-   data but are boards, and are said to be.
+   data but are boards, and are said to be. A posting whose own page says
+   it isn't what they asked for (on-site or hybrid, for remote) is left out
+   once read.
 
 Every posting kept is in the run (and its id taken) before anything is read,
 so a read that runs out of time costs that posting's check, not the list.
@@ -65,6 +69,11 @@ TOOL_SECONDS = 80.0
 VERIFY_MARGIN = 5.0
 MAX_BLOCK = 30
 AUTO_BLOCK_AT = 3
+# A call that has kept fewer jobs than this from the pages it asked for takes
+# the next page, up to MAX_PAGES.
+FILL_TO = 5
+# A location that is how they'd work, not a place: searched as remote across the US.
+REMOTE_WORDS = {"remote", "remote us", "us remote", "remote usa", "remote only", "work from home", "wfh"}
 SOURCE_LABELS = {"greenhouse": "Greenhouse", "lever": "Lever", "ashby": "Ashby"}
 
 
@@ -73,6 +82,7 @@ class JobListingsSession:
     jobs: dict[str, dict] = field(default_factory=dict)  # short id -> job row, in found order
     keys: dict[str, str] = field(default_factory=dict)  # dedupe key -> short id
     paid: int = 0
+    issued: int = 0  # short ids given out: one left out once read is never reused
 
 
 def session_of(state: RunState) -> JobListingsSession:
@@ -276,7 +286,9 @@ async def _find(ctx: RunContext, state: RunState, args: dict, left: float) -> To
         return ToolOutput(payload={"error": "Job listing budget used up; finish with what you have."},
                           label="Job listing budget exhausted")
     location = " ".join(str(args.get("location") or "").split())[:120]
-    remote_only = bool(args.get("remote_only")) or location.lower() in ("remote", "remote us", "us remote")
+    remote_only = bool(args.get("remote_only"))
+    if location.lower() in REMOTE_WORDS:
+        remote_only, location = True, ""
     criteria = {"titles": [title], "locations": [location] if location else [],
                 "remote": "remote_only" if remote_only else None}
     provider = _provider()
@@ -287,43 +299,47 @@ async def _find(ctx: RunContext, state: RunState, args: dict, left: float) -> To
         pages = int(args.get("pages") or 1)
     except (TypeError, ValueError):
         pages = 1
+    asked = max(1, min(MAX_PAGES, pages))
     queries = phases.plan_from_criteria(title, criteria)["queries"][:1]
-    await ctx.progress.note(f"Looking for {title[:50]} jobs{' in ' + location[:40] if location else ''}…")
-    postings = []
+    what = f"{title[:50]}{' remote' if remote_only else ''} jobs{' in ' + location[:40] if location else ''}"
+    await ctx.progress.note(f"Looking for {what}…")
+    kept, listed, outside, not_remote, repeats = [], 0, 0, 0, 0
     try:
         for query in queries:
-            token = None
-            for _page in range(max(1, min(MAX_PAGES, pages))):
-                if session.paid >= MAX_PAID:
-                    break
+            token, page = None, 0
+            while page < MAX_PAGES and session.paid < MAX_PAID and (page < asked or len(kept) < FILL_TO):
                 session.paid += 1  # counted before the call: a page that left may be billed
                 found, token = await provider.search(query["q"], query["location"], page_token=token)
-                postings.extend(found)
+                page += 1
+                listed += len(found)
+                for posting in found:
+                    if remote_only and posting.remote is not True:
+                        not_remote += 1
+                        continue
+                    if not phases.keep_posting(posting, criteria):
+                        outside += 1
+                        continue
+                    key = normalize.dedupe_key(posting.company, posting.title, posting.location)
+                    if key in session.keys or any(
+                            normalize.same_posting(posting.title, posting.company, k.title, k.company) for k in kept):
+                        repeats += 1
+                        continue
+                    kept.append(posting)
                 if not token:
                     break
     except ProviderError as exc:
         logger.info("find_jobs listings failed: %s", exc)
-        if not postings:
+        if not listed:
             return ToolOutput(payload={"error": "Job listings are unavailable right now. Try web_search instead."},
                               status="error", audit={"title": title, "location": location, "error": str(exc)[:200]})
-    kept, outside, repeats = [], 0, 0
-    for posting in postings:
-        if not phases.keep_posting(posting, criteria):
-            outside += 1
-            continue
-        key = normalize.dedupe_key(posting.company, posting.title, posting.location)
-        if key in session.keys or any(normalize.same_posting(posting.title, posting.company, k.title, k.company)
-                                      for k in kept):
-            repeats += 1
-            continue
-        kept.append(posting)
     # In the run, unread, before anything is read: a read cut short loses its
     # check, not the job, and nothing else can count the same job as new.
     new: list[tuple[str, dict]] = []
     leads: list[tuple[str, Any, dict]] = []
     for posting in kept:
         lead = phases.lead_record(posting)
-        short_id = f"J{len(session.jobs) + 1}"
+        session.issued += 1
+        short_id = f"J{session.issued}"
         session.keys[lead["dedupe_key"]] = short_id
         session.jobs[short_id] = job_row(lead, None, posting.via)
         leads.append((short_id, posting, lead))
@@ -333,31 +349,49 @@ async def _find(ctx: RunContext, state: RunState, args: dict, left: float) -> To
     seconds = min(VERIFY_SECONDS, min(TOOL_SECONDS, left) - (time.monotonic() - started) - VERIFY_MARGIN)
     updates = await _read_some([lead for _, _, lead in leads[:VERIFY]], seconds)
     provenance: set[str] = set()
+    not_remote_read = 0
     for n, (short_id, posting, lead) in enumerate(leads):
-        row = job_row(lead, updates[n] if n < len(updates) else None, posting.via)
+        update = updates[n] if n < len(updates) else None
+        row = job_row(lead, update, posting.via)
+        if update is not None and not phases.keep_job(lead["company"], row["remote"], criteria, lead["location"]):
+            # Its own posting says on-site or hybrid: not remote, as Google had it.
+            del session.jobs[short_id]
+            not_remote_read += 1
+            continue
         provenance.update(u for u in (row["apply_url"], lead.get("source_url"),
                                       *((l or {}).get("url") for l in lead.get("apply_links") or [])) if u)
         session.jobs[short_id] = row
         new.append((short_id, row))
     payload: dict[str, Any] = {
         "title": title,
-        "location": location or "anywhere",
+        "location": location or ("remote" if remote_only else "anywhere"),
         "new_jobs": len(new),
         "live_at_employer": sum(1 for _, r in new if r["at_employer"]),
         "live_on_a_board": sum(1 for _, r in new if r["verified"] and not r["at_employer"]),
         "left_out_elsewhere": outside,
         "already_found": repeats,
-        "jobs": [model_line(i, r) for i, r in new],
     }
+    if remote_only:
+        payload["left_out_not_remote"] = not_remote
+    if not_remote_read:
+        payload["left_out_on_site_at_employer"] = not_remote_read
+    payload["jobs"] = [model_line(i, r) for i, r in new]
     if not new:
-        payload["note"] = ("No open postings matched there. Try a broader title, a nearby city, or remote."
-                           if not postings else "Every posting found was outside the place asked for.")
+        if not listed:
+            payload["note"] = "No open postings matched there. Try a broader title, a nearby city, or remote."
+        elif repeats and not (outside or not_remote or not_remote_read):
+            payload["note"] = "Every posting found was one this run already has."
+        elif remote_only:
+            payload["note"] = "None of the postings found were remote. Try a broader or related title."
+        else:
+            payload["note"] = "Every posting found was outside the place asked for."
     return ToolOutput(
         payload=payload,
         provenance=frozenset(provenance),
-        label=f"Found {len(new)} {title[:60]} jobs{' in ' + location[:40] if location else ''}",
-        audit={"title": title, "location": location, "listed": len(postings), "kept": len(new),
-               "at_employer": payload["live_at_employer"], "on_a_board": payload["live_on_a_board"]},
+        label=f"Found {len(new)} {what}",
+        audit={"title": title, "location": location, "remote_only": remote_only, "listed": listed,
+               "kept": len(new), "at_employer": payload["live_at_employer"],
+               "on_a_board": payload["live_on_a_board"]},
     )
 
 
@@ -375,8 +409,10 @@ FIND_JOBS = AgentTool(
         "properties": {
             "title": {"type": "string", "description": "The role, as a job title: 'senior product designer'"},
             "location": {"type": "string",
-                         "description": "A city and state, a state, 'Remote' or 'United States'. Leave out for anywhere"},
-            "remote_only": {"type": "boolean", "description": "Only remote jobs"},
+                         "description": "A city and state, a state or 'United States'. Leave out for anywhere, "
+                                        "and for remote only"},
+            "remote_only": {"type": "boolean",
+                            "description": "Only remote jobs (hybrid isn't): searched as remote across the US"},
             "pages": {"type": "integer", "minimum": 1, "maximum": MAX_PAGES,
                       "description": "Pages of Google Jobs results (about 10 each)"},
         },
@@ -399,7 +435,10 @@ _PROMPT = """Finding jobs (find_jobs):
 - When they ask for open roles ("find me product designer jobs in LA"), use find_jobs, not web_search: \
 LinkedIn, Indeed and Glassdoor pages can't be read, and job boards stay indexed long after a job closes.
 - One call per title and place; search two or three related titles or places in the same turn when the ask \
-is broad (they run at the same time). A job found twice is kept once.
+is broad. A job found twice is kept once.
+- Remote: "remote only" is remote_only with no location (a city searches that city's office jobs, which are then \
+left out). Hybrid isn't remote. "Remote or near Denver" is two calls: Denver, and remote_only. A remote job whose \
+location names states or a country ("Remote - CA, NY, TX") may hire only there: say so.
 - Lead with the jobs live at the employer (read on its ATS or its own site). Say which were only found on a \
 job board or only listed on Google Jobs. Pay is only what the posting states, with its quote: say "pay not \
 posted" when it isn't, never estimate one, and when the quote gives several cities' ranges, say whose is whose.
