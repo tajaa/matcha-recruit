@@ -1,4 +1,4 @@
-import { Hash, FolderOpen, MessageSquare, PanelLeftClose, Mail, MailOpen, Home, Users, ClipboardList, BookOpenCheck, Package, NotebookPen, CheckSquare, MessagesSquare, HardDrive, Briefcase, BriefcaseBusiness, FileSignature, Film } from 'lucide-react'
+import { Hash, FolderOpen, MessageSquare, PanelLeftClose, Mail, MailOpen, Home, Users, ClipboardList, BookOpenCheck, Package, NotebookPen, CheckSquare, MessagesSquare, HardDrive, Briefcase, FileSignature, Film } from 'lucide-react'
 import type { NavigateFunction } from 'react-router-dom'
 import { formatEventsBadge } from '../../../hooks/useLoggedEventsCount'
 import { RailNavButton } from './SidebarNavButton'
@@ -28,7 +28,6 @@ interface Props {
   showDrive: boolean
   showHrCases: boolean
   showWriteUps: boolean
-  showJobSearch: boolean
   loggedEventsCount: number
 }
 
@@ -58,7 +57,6 @@ export default function CollapsedRail({
   showDrive,
   showHrCases,
   showWriteUps,
-  showJobSearch,
   loggedEventsCount,
 }: Props) {
   return (
@@ -74,7 +72,6 @@ export default function CollapsedRail({
       <div className="w-6 border-t border-w-line/40 mb-1" />
 
       <RailNavButton icon={Home} label="Home" active={isActive(base)} onClick={() => navigate(base)} />
-      {showJobSearch && <RailNavButton icon={BriefcaseBusiness} label="Job search" active={pathname.startsWith(`${base}/jobs`)} onClick={() => navigate(`${base}/jobs`)} />}
       <RailNavButton icon={NotebookPen} label="Journals" active={pathname.startsWith(`${base}/journals`)} onClick={() => navigate(`${base}/journals`)} />
       {showRecaps && <RailNavButton icon={Film} label="Recaps" active={pathname.startsWith(`${base}/recaps`)} onClick={() => navigate(`${base}/recaps`)} />}
       {showTasks && (

@@ -83,6 +83,15 @@ marks that the person was told.
 - Get: the search's jobs as findings (`lead_item`; pay `verified` only when
   posted) plus `job_search`, the search itself. The Mac shows the search's own
   view (`JobSearchDetailView`).
+- Web workspace (`/{task_id}/workspace`): search metadata without a full
+  search read (its fingerprint is the search's, matching `/status`), or an
+  ordinary task with its selected finding (`item_id`).
+  Finished tasks are marked seen here too; the original detail contract stays
+  available to app clients. Search completion refreshes this metadata and
+  retries failures while open.
+- The REST list returns 50 tasks plus `next_cursor`; older pages use the
+  `(created_at, id)` boundary with the same owner, workspace and engine scope.
+  Chat's `list_tasks` keeps its existing 50-task response.
 - Status, cancel, delete go through `job_search/service.py`; item reads and
   marks, refine, more and document are refused (409).
 - Start: playbook `job_search` (`startable`, with the chains) builds a

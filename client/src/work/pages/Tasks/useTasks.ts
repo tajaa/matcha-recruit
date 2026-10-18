@@ -4,7 +4,7 @@ import {
   startAgentTaskRound, updateAgentTaskItem, type AgentTaskRoundKind,
 } from '../../api/matchaWork/agentTasks'
 import type { AgentTask, AgentTaskDetail, AgentTaskItemDetail, AgentTaskList } from '../../types'
-import { documentJournalId, errorText, isLive, pollMs, statusChanged } from '../../components/tasks/tasksLogic'
+import { documentJournalId, errorText, isJobSearch, isLive, pollMs, statusChanged } from '../../components/tasks/tasksLogic'
 
 /** The list refreshes on this slower beat, for tasks other than the open one. */
 const LIST_MS = 30_000
@@ -27,6 +27,8 @@ const LIST_MS = 30_000
  */
 export function useTasks(taskId: string | undefined, itemId: string | null) {
   const [list, setList] = useState<AgentTaskList | null>(null)
+  const [loadingOlder, setLoadingOlder] = useState(false)
+  const [olderError, setOlderError] = useState<string | null>(null)
   const [listError, setListError] = useState<string | null>(null)
   const [loadedDetail, setDetail] = useState<AgentTaskDetail | null>(null)
   const [detailFailure, setDetailFailure] = useState<Tagged | null>(null)
@@ -43,19 +45,33 @@ export function useTasks(taskId: string | undefined, itemId: string | null) {
   const itemError = itemFailure && itemFailure.id === itemId ? itemFailure.message : null
   const error = failure && failure.id === taskId ? failure.message : null
 
+  const open = detail ?? list?.tasks.find((task) => task.id === taskId)
+  const jobSearchId = open && isJobSearch(open) ? open.job_search_id : null
+  const chainDetail = jobSearchId ? null : detail
+
   const taskRef = useRef(taskId)
   const itemRef = useRef(itemId)
-  const detailRef = useRef(detail)
+  const detailRef = useRef(chainDetail)
   const shownItemRef = useRef<string | null>(item?.id ?? null)
   const busyRef = useRef(false)
   const listSeq = useRef(0)
+  const olderBusy = useRef(false)
+  const deleted = useRef(new Set<string>())
+  /** The open task's row as its own read last had it, which can land before the list. */
+  const openRow = useRef<AgentTask | null>(null)
+  const historyLoaded = useRef(false)
+  const seen = useRef(new Map<string, string>())
+  const bundledItem = useRef<{ task: string; item: string | null } | null>(null)
+  const listRef = useRef(list)
   const detailSeq = useRef(0)
+  const detailOut = useRef(0)
   const itemSeq = useRef(0)
   // Before any effect below reads them.
   useLayoutEffect(() => {
+    listRef.current = list
     taskRef.current = taskId
     itemRef.current = itemId
-    detailRef.current = detail
+    detailRef.current = chainDetail
     shownItemRef.current = item?.id ?? null
   })
 
@@ -75,45 +91,100 @@ export function useTasks(taskId: string | undefined, itemId: string | null) {
     if (finding) itemSeq.current += 1
   }, [])
 
-  /** The list again. The open task stays seen while it is on screen. */
+  /** Refresh recent tasks, keeping any older history the person has opened,
+   *  and the open task when it is older than them (opened from a link). */
   const loadList = useCallback(() => {
     const seq = ++listSeq.current
     return listAgentTasks().then(
       (loaded) => {
-        if (seq !== listSeq.current) return
-        setList({ ...loaded, tasks: loaded.tasks.map((t) => (t.id === taskRef.current ? { ...t, unseen: false } : t)) })
+        if (seq !== listSeq.current) return null
+        loaded = { ...loaded, tasks: loaded.tasks.map((task) =>
+          task.completed_at && seen.current.get(task.id) === task.completed_at ? { ...task, unseen: false } : task) }
+        setList((prev) => {
+          const last = loaded.tasks.at(-1)
+          if (!last || !loaded.next_cursor) return loaded
+          const kept = (t: AgentTask) => !loaded.tasks.some((fresh) => fresh.id === t.id) && newer(last, t)
+          const history = historyLoaded.current ? prev : null
+          let older = history ? history.tasks.filter(kept) : []
+          const open = prev?.tasks.find((t) => t.id === taskRef.current) ?? openRow.current
+          if (open && open.id === taskRef.current && !deleted.current.has(open.id) && kept(open)) {
+            older = placed(older, open)
+          }
+          return {
+            ...loaded, tasks: [...loaded.tasks, ...older],
+            next_cursor: history ? history.next_cursor : loaded.next_cursor,
+          }
+        })
         setListError(null)
+        return loaded
       },
-      (e: unknown) => { if (seq === listSeq.current) setListError(errorText(e, "Couldn't load your tasks.")) },
+      (e: unknown) => {
+        if (seq === listSeq.current) setListError(errorText(e, "Couldn't load your tasks."))
+        return null
+      },
     )
+  }, [])
+
+  const loadOlder = useCallback(async () => {
+    const cursor = listRef.current?.next_cursor
+    if (!cursor || olderBusy.current) return
+    olderBusy.current = true
+    historyLoaded.current = true
+    setLoadingOlder(true)
+    setOlderError(null)
+    try {
+      const loaded = await listAgentTasks(cursor)
+      // A page that left before a delete still has that task.
+      const page = loaded.tasks.filter((t) => !deleted.current.has(t.id))
+      setList((prev) => prev && prev.next_cursor === cursor ? {
+        ...prev, next_cursor: loaded.next_cursor,
+        tasks: [...prev.tasks, ...page.filter((t) => !prev.tasks.some((old) => old.id === t.id))]
+          .sort((a, b) => (newer(a, b) ? -1 : newer(b, a) ? 1 : 0)),
+      } : prev)
+    } catch (e) {
+      setOlderError(errorText(e, "Couldn't load older tasks."))
+    } finally {
+      olderBusy.current = false
+      setLoadingOlder(false)
+    }
   }, [])
 
   /** A task as the server has it now: on screen if it's still the open one,
    *  and in the list either way (opening it is what marks it seen). */
   const apply = useCallback((loaded: AgentTaskDetail) => {
+    if (loaded.completed_at && loaded.unseen === false) seen.current.set(loaded.id, loaded.completed_at)
+    const row = rowOf(loaded)
     if (taskRef.current === loaded.id) {
       setDetail(loaded)
       setDetailFailure(null)
+      openRow.current = row
     }
-    const seen = { ...rowOf(loaded), unseen: false }
-    setList((prev) => prev && {
-      ...prev,
-      tasks: prev.tasks.some((t) => t.id === loaded.id)
-        ? prev.tasks.map((t) => (t.id === loaded.id ? seen : t))
-        : [seen, ...prev.tasks],
-    })
+    setList((prev) => prev && { ...prev, tasks: placed(prev.tasks, row) })
   }, [])
 
-  const loadDetail = useCallback((id: string) => {
+  const loadDetail = useCallback((id: string, withItem = true) => {
     const seq = ++detailSeq.current
-    return getAgentTask(id).then(
-      (loaded) => { if (seq === detailSeq.current) apply(loaded) },
+    detailOut.current = seq
+    const selected = withItem && taskRef.current === id ? itemRef.current : null
+    if (withItem) bundledItem.current = { task: id, item: selected }
+    const findingSeq = withItem ? ++itemSeq.current : itemSeq.current
+    return getAgentTask(id, selected).then(
+      (loaded) => {
+        if (seq !== detailSeq.current) return false
+        apply(loaded)
+        if (selected && findingSeq === itemSeq.current && taskRef.current === id && itemRef.current === selected) {
+          if (loaded.selected_item) { setItem(loaded.selected_item); setItemLoadFailure(null) }
+          if (loaded.selected_item_error) setItemLoadFailure({ id: selected, message: loaded.selected_item_error })
+        }
+        return true
+      },
       (e: unknown) => {
         if (seq === detailSeq.current && taskRef.current === id) {
           setDetailFailure({ id, message: errorText(e, "Couldn't load this task.") })
         }
+        return false
       },
-    )
+    ).finally(() => { if (detailOut.current === seq) detailOut.current = 0 })
   }, [apply])
 
   /** The open finding again. A failure is shown in its pane only when there is
@@ -139,13 +210,21 @@ export function useTasks(taskId: string | undefined, itemId: string | null) {
     if (taskId) void loadDetail(taskId)
   }, [taskId, loadDetail])
 
+  // A deep link bundles its finding with the initial workspace read. Later
+  // finding selections use the item endpoint; searches own their lead reads.
+  // The bundle stands only for the selection it was read with: once the person
+  // moves on, coming back to that finding reads it again.
+  const hasChain = !!chainDetail
   useEffect(() => {
-    if (itemId && taskId) void refreshItem(itemId)
-  }, [taskId, itemId, refreshItem])
+    const bundled = bundledItem.current
+    if (bundled && (bundled.task !== taskId || bundled.item !== itemId)) bundledItem.current = null
+    if (!itemId || !taskId || !hasChain || bundledItem.current) return
+    void refreshItem(itemId)
+  }, [taskId, itemId, hasChain, refreshItem])
 
   // The poll: a live task's cheap status, a full reload only on a change; the
   // list on its slower beat. One timer, re-armed for the open task's pace.
-  const live = !!detail && isLive(detail)
+  const live = !!chainDetail && isLive(chainDetail)
   useEffect(() => {
     let polling = false
     let sinceList = 0
@@ -162,7 +241,6 @@ export function useTasks(taskId: string | undefined, itemId: string | null) {
           // Something newer than this status landed while it was out: the next tick looks again.
           if (taskRef.current === id && detailSeq.current === asked && statusChanged(current, status)) {
             await loadDetail(id)
-            if (itemRef.current) await refreshItem(itemRef.current)
             if (!isLive(status)) await loadList()
           }
         }
@@ -179,6 +257,19 @@ export function useTasks(taskId: string | undefined, itemId: string | null) {
     }, every)
     return () => window.clearInterval(timer)
   }, [live, loadDetail, refreshItem, loadList])
+
+  /** The open search's row after its status moved: re-read (which also marks a
+   *  finished search seen) unless the row already agrees. Resolves false when
+   *  it should be asked again, after a change or read in flight or a failure. */
+  const syncSearchStatus = useCallback(async (status: string) => {
+    const id = taskRef.current
+    if (!id) return true
+    if (busyRef.current || detailOut.current) return false
+    const mapped = ['done', 'failed', 'cancelled', 'queued'].includes(status) ? status : 'running'
+    const current = listRef.current?.tasks.find((t) => t.id === id)
+    if (current && current.status === mapped && !current.unseen) return true
+    return loadDetail(id)
+  }, [loadDetail])
 
   /** One change at a time. A change made from a finding's pane reports there
    *  (`finding`), since below the widest layout the pane covers the task. */
@@ -229,7 +320,7 @@ export function useTasks(taskId: string | undefined, itemId: string | null) {
     if (!task) return Promise.resolve()
     return perform("Couldn't save that.", async () => {
       await changeItem(() => updateAgentTaskItem(task, id, { user_state: state }))
-      await loadDetail(task)
+      await loadDetail(task, false)
     }, id)
   }, [perform, changeItem, loadDetail])
 
@@ -270,20 +361,22 @@ export function useTasks(taskId: string | undefined, itemId: string | null) {
   /** Delete a task. Resolves true once it's gone, so the page leaves it only
    *  then (a failure stays on screen). */
   const remove = useCallback(async (id: string): Promise<boolean> => {
-    let deleted = false
+    let gone = false
     await perform("Couldn't delete this task.", async () => {
       supersede()
       await deleteAgentTask(id)
-      deleted = true
+      gone = true
+      deleted.current.add(id)
       supersede() // a list read already out still has it
       setList((prev) => prev && { ...prev, tasks: prev.tasks.filter((t) => t.id !== id) })
       void loadList()
     })
-    return deleted
+    return gone
   }, [perform, supersede, loadList])
 
   return {
-    list, listError, loadList,
+    list, listError, loadList, loadingOlder, olderError, loadOlder,
+    open, jobSearchId, chainDetail, syncSearchStatus,
     detail, detailError, loadDetail,
     item, itemLoadError, itemError, setItemError,
     reloadItem: () => (itemRef.current ? refreshItem(itemRef.current) : Promise.resolve()),
@@ -299,7 +392,25 @@ function rowOf(detail: AgentTaskDetail): AgentTask {
   delete row.plan
   delete row.rounds
   delete row.items
+  delete row.selected_item
+  delete row.selected_item_id
+  delete row.selected_item_error
   return row
+}
+
+/** Whether `a` comes before `b` in the server's order: newest first. */
+function newer(a: AgentTask, b: AgentTask): boolean {
+  const at = a.created_at ?? ''
+  const bt = b.created_at ?? ''
+  return at > bt || (at === bt && a.id > b.id)
+}
+
+/** The list with `row` in it: replacing its old copy, or where the server's
+ *  order puts it (a new task at the top, one opened from a link lower down). */
+function placed(tasks: AgentTask[], row: AgentTask): AgentTask[] {
+  if (tasks.some((t) => t.id === row.id)) return tasks.map((t) => (t.id === row.id ? row : t))
+  const at = tasks.findIndex((t) => newer(row, t))
+  return at < 0 ? [...tasks, row] : [...tasks.slice(0, at), row, ...tasks.slice(at)]
 }
 
 /** Something kept for one task, so another task doesn't show it. */

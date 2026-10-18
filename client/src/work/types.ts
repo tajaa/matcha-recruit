@@ -1670,7 +1670,7 @@ export type AgentTask = {
   playbook?: string | null
   /** What kind of task it is, in the person's words ("Apartments", "Products"). */
   playbook_label?: string | null
-  /** `chain` (Espresso's own), `job_search` (a job search, opened in Job search). */
+  /** `chain` (Espresso's own), `job_search` (a job search, opened inside Tasks). */
   engine?: string | null
   job_search_id?: string | null
   title?: string | null
@@ -1694,6 +1694,9 @@ export type AgentTaskDetail = AgentTask & {
   plan?: AgentTaskPlan | null
   rounds?: AgentTaskRound[]
   items?: AgentTaskItem[]
+  selected_item_id?: string
+  selected_item?: AgentTaskItemDetail | null
+  selected_item_error?: string
 }
 
 export type AgentTaskStatusView = {
@@ -1711,6 +1714,7 @@ export type AgentTaskUsage = {
 
 export type AgentTaskList = {
   tasks: AgentTask[]
+  next_cursor?: string | null
   usage?: AgentTaskUsage | null
 }
 

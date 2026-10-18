@@ -13,7 +13,7 @@ import type {
 
 export const isLive = (task: Pick<AgentTask, 'status'>) => task.status === 'queued' || task.status === 'running'
 export const isWaiting = (task: Pick<AgentTask, 'status'>) => task.status === 'waiting'
-/** A job search: it opens in Job search's own page. */
+/** A job search: its own view opens inside Tasks. */
 export const isJobSearch = (task: Pick<AgentTask, 'engine' | 'job_search_id'>) =>
   task.engine === 'job_search' && !!task.job_search_id
 export const displayTitle = (task: Pick<AgentTask, 'title' | 'directive'>) => task.title || task.directive || ''
@@ -104,10 +104,6 @@ export const pollMs = (live: boolean) => (live ? 4_000 : 30_000)
 /** Whether the cheap status says what is on screen is out of date. */
 export const statusChanged = (detail: Pick<AgentTaskDetail, 'fingerprint' | 'status'>, status: AgentTaskStatusView) =>
   status.fingerprint !== detail.fingerprint || status.status !== detail.status
-
-/** The task that is this job search. */
-export const taskForSearch = <T extends AgentTask>(searchId: string, tasks: T[]): T | null =>
-  tasks.find((t) => isJobSearch(t) && t.job_search_id === searchId) ?? null
 
 // ─── A task's detail ───
 

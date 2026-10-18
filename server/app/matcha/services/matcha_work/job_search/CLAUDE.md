@@ -261,11 +261,29 @@ that conversation; a redraft that ends later doesn't tell them again.
 
 ## On the web
 
-The web has no Tasks section, so Job search is its own page on the personal
-surface: `/espresso/jobs` and `/espresso/jobs/:searchId?job=<lead id>`
-(`client/src/work/pages/JobSearch.tsx` + `pages/JobSearch/`, API module
-`client/src/work/api/matchaWork/jobSearch.ts`), with a sidebar entry for
-personal accounts. It is the Mac's job search on the same routes:
+On the personal web surface, job searches live inside Tasks at
+`/espresso/tasks/:taskId?item=<lead id>`, alongside the person's other tasks.
+There is no separate Job search sidebar entry. `pages/Tasks/JobSearchPane.tsx`
+opens the search's own ranked jobs and job pane, using the components in
+`pages/JobSearch/` and `api/matchaWork/jobSearch.ts`. Tasks starts a search
+with New job search, lists it, and deletes it through its pointer task.
+The old `/espresso/jobs` redirects to Tasks; `/espresso/jobs/:searchId?job=`
+looks up the pointer task and redirects to its `?item=` link (or Tasks when
+none is found). It resolves through `GET /agent-tasks/for-search/{search_id}`,
+a read-only lookup scoped to the owner and workspace, so the recent task
+list's 50-row page never drops an older link. Only a 404 falls back to Tasks;
+other lookup failures keep the search and job URL with a retry button. A new
+search opens its task through this same exact lookup, independently of list
+refreshes, and falls back to the search's own link (with its retry) only when
+that lookup fails. Tasks
+offers Load older tasks through a `(created_at, id)` cursor, so earlier searches
+can also be browsed without a saved link. Deleted searches and pointers
+are not recreated. While Tasks deletes a search, both its search controls and
+lead mutations are held; a failed deletion makes them available again.
+The new-search form reads only `/job-searches/setup` (consent and allowance),
+reports initialization failures and retries in place, preserving the person's
+fields and focus. Creation does not reload search history. The search guide opens on first use after
+the Tasks guide, and can be reopened from the search header.
 `jobSearchLogic.ts` ports `JobSearchViewModel`'s rules (filters, the 3/5
 widen count, Next steps progress, `parseBaseFloor`, `retryIsNewRequest`, pay
 lines) with tests, and `useJobSearch.ts` polls `/status` every 5 s only while
@@ -275,8 +293,15 @@ fingerprint, status or job count changes. Its reads are numbered per kind
 cancel, Draft email) takes a number when it starts and when it lands, so an
 older answer can't undo it; only reads of what is still open are dropped. A
 job's load and save failures show in its pane, which covers the search below
-`xl`. Differences from the Mac: the page
-lists searches and deletes them itself (Tasks does that on the Mac); Draft
+`xl`. The hook has no searches list (Tasks lists, starts and deletes them);
+only the search polls its detail. The web workspace endpoint returns
+lightweight search task metadata, with the search's own fingerprint (the one
+`/status` reports), or an ordinary task with its selected finding in the same
+response. When the search's status moves, Tasks refreshes this metadata once to
+persist `seen_at`, retrying only a read that missed while the task remains
+open; opening a search does not immediately reload the Tasks list. A search
+opened from a link that is older than the recent page stays listed across list
+refreshes. Draft
 email links to Gmail's own drafts folder, since the web has no Email ▸ Drafts
 view; Ask Espresso opens the one assistant conversation with the Mac's
 hand-off prompt in its composer, unsent.

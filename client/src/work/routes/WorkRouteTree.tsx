@@ -26,7 +26,7 @@ import Tasks from '../pages/Tasks'
 import Recap from '../pages/Recap'
 import Recaps from '../pages/Recaps'
 import Assistant from '../pages/Assistant'
-import JobSearch from '../pages/JobSearch'
+import JobSearchRedirect from '../pages/JobSearch'
 import SymChatList from '../pages/SymChat/SymChatList'
 import SymChatDetail from '../pages/SymChat/SymChatDetail'
 import Drive from '../pages/Drive'
@@ -108,10 +108,9 @@ export function WorkRouteTree({ surface }: { surface: WorkSurface }) {
           {/* The Espresso assistant: a private conversation per person, for
               personal accounts (the page says so to anyone else). */}
           <Route path="assistant" element={<Assistant />} />
-          {/* Job search, the macOS app's Job search on the web: personal
-              accounts only, like the assistant (the page says so to anyone else). */}
-          <Route path="jobs" element={<JobSearch />} />
-          <Route path="jobs/:searchId" element={<JobSearch />} />
+          {/* Older job-search links open the corresponding task and job. */}
+          <Route path="jobs" element={<JobSearchRedirect />} />
+          <Route path="jobs/:searchId" element={<JobSearchRedirect />} />
           {/* Sym-chat is business-only: the backend 403s personal workspaces,
               so the /espresso tree doesn't mount it at all. */}
           {businessWork && (

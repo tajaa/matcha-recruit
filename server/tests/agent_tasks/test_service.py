@@ -47,6 +47,7 @@ async def test_list_summary_and_get(conn):
     conn.on("FROM mw_agent_task_items WHERE task_id", [item_row()])
     conn.on("FROM mw_agent_task_rounds WHERE task_id", [round_row()])
     got = await service.get_task(TASK, USER)
+    assert got["unseen"] is False
     assert got["items"][0]["fields"]["price"]["display"] == "$3,200/mo" and got["rounds"][0]["n"] == 1
     assert conn.ran("SET seen_at = NOW()")
     conn.calls.clear()
@@ -165,3 +166,37 @@ async def test_find_by_request(conn):
     assert (await service.find_by_request(USER, TASK))["id"] == str(TASK)
     conn.on("request_id = $2", None)
     assert await service.find_by_request(USER, TASK) is None
+
+
+@pytest.mark.asyncio
+async def test_history_cursor_is_stable_scoped_and_has_no_boundary_overlap(conn):
+    from uuid import UUID
+
+    rows = [task_row(id=UUID(int=n + 1)) for n in range(51)]
+    conn.on("FROM mw_agent_tasks t", rows)
+    page = await service.list_task_page(USER, COMPANY, engines=("job_search",))
+    assert len(page["tasks"]) == 50
+    assert page["next_cursor"] == f"{rows[49]['created_at'].isoformat()}|{rows[49]['id']}"
+    sql, args = conn.calls[-1][1:]
+    assert "ORDER BY t.created_at DESC, t.id DESC LIMIT 51" in sql
+    assert args == (USER, COMPANY, ["job_search"])
+    conn.on("FROM mw_agent_tasks t", rows[50:])
+    last = await service.list_task_page(USER, COMPANY, engines=("job_search",), cursor=page["next_cursor"])
+    assert [t["id"] for t in last["tasks"]] == [str(rows[50]["id"])]
+    assert last["next_cursor"] is None
+    sql, args = conn.calls[-1][1:]
+    assert "(t.created_at, t.id) < ($4, $5)" in sql
+    assert "t.user_id = $1 AND t.company_id = $2 AND t.deleted_at IS NULL" in sql
+    assert args == (USER, COMPANY, ["job_search"], rows[49]["created_at"], rows[49]["id"])
+    conn.on("FROM mw_agent_tasks t", [])
+    assert await service.list_task_page(USER, COMPANY) == {"tasks": [], "next_cursor": None}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cursor", ["garbage", "2026-10-17|no-id", "2026-10-17T00:00:00|" + str(TASK),
+                                    "2026-10-17T00:00:00+00:00|bad-id"])
+async def test_history_rejects_invalid_cursors_before_reading(conn, cursor):
+    with pytest.raises(service.AgentTaskError) as exc:
+        await service.list_task_page(USER, COMPANY, cursor=cursor)
+    assert exc.value.code == 400
+    assert not conn.calls

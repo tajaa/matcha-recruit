@@ -1,37 +1,33 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
-  cancelJobSearch, createJobSearch, deleteJobSearch, draftJobEmail, getJobLead, getJobSearch,
-  getJobSearchStatus, listJobSearches, redraftJobApproach, rerankJobSearch, updateJobLead, widenJobSearch,
-  type JobLeadDetail, type JobSearchCreate, type JobSearchDetail, type JobSearchList, type JobSearchSummary,
-  type JobWeights,
+  cancelJobSearch, draftJobEmail, getJobLead, getJobSearch, getJobSearchStatus, redraftJobApproach,
+  rerankJobSearch, updateJobLead, widenJobSearch, type JobLeadDetail, type JobSearchDetail, type JobWeights,
 } from '../../api/matchaWork/jobSearch'
-import { errorCode, errorLead, errorText, isLive, needsPolling, statusChanged } from './jobSearchLogic'
+import { errorCode, errorLead, errorText, needsPolling, statusChanged } from './jobSearchLogic'
 
 /** How often a running search (or a job being drafted) checks its cheap status. */
 const POLL_MS = 5_000
 
 /**
- * The Job search page's state: the person's searches, the open search and its
- * ranked jobs, and the open job. Like the macOS app, a live search polls its
- * cheap status every few seconds and reloads the jobs only when its
- * fingerprint, status or job count changes. The URL owns which search and job
+ * A job-search task's state: the open search and its ranked jobs, and the open
+ * job (Tasks lists, starts and deletes searches). Like the macOS app, a live
+ * search polls its cheap status every few seconds and reloads the jobs only
+ * when its fingerprint, status or job count changes. The URL owns which search and job
  * are open; every answer is dropped if the person has moved on by the time it
  * arrives, and what is kept per search or per job is tagged with its id, so a
  * different one starts clean without resetting anything.
  *
- * Reads are numbered, per kind (the list, the open search, the open job). An
+ * Reads are numbered, per kind (the open search, the open job). An
  * answer is kept only if nothing newer was asked since: neither a later read
  * nor a change the person made. A change takes a number when it starts and
  * again when its answer lands, so a read that left before Redraft can't put
  * the old finished search back (and stop the polling), and a job read that
  * left before Mark Saved can't undo it. Only reads of what is still open are
- * dropped: a search or job opened while a change was out loads as usual. The
- * list has no beat of its own here, so a change that lands while a list read
- * is out asks for the list again instead of leaving it unread.
+ * dropped: a search or job opened while a change was out loads as usual.
  */
-export function useJobSearch(searchId: string | undefined, leadId: string | null) {
-  const [list, setList] = useState<JobSearchList | null>(null)
-  const [listError, setListError] = useState<string | null>(null)
+export function useJobSearch(
+  searchId: string | undefined, leadId: string | null, { mutationsDisabled = false } = {},
+) {
   const [loadedDetail, setDetail] = useState<JobSearchDetail | null>(null)
   const [detailFailure, setDetailFailure] = useState<Tagged | null>(null)
   const [loadedLead, setLead] = useState<JobLeadDetail | null>(null)
@@ -56,9 +52,9 @@ export function useJobSearch(searchId: string | undefined, leadId: string | null
   const detailRef = useRef(detail)
   const shownLeadRef = useRef<string | null>(lead?.id ?? null)
   const busyRef = useRef(false)
-  const listSeq = useRef(0)
-  /** The newest list read still on its way (0: none). */
-  const listOut = useRef(0)
+  // Deleting the owning task holds changes, including callbacks retained by
+  // a menu opened before deletion began. Reads may continue until unmount.
+  const mutationsDisabledRef = useRef(mutationsDisabled)
   const detailSeq = useRef(0)
   const leadSeq = useRef(0)
   // Before any effect below reads them.
@@ -67,6 +63,7 @@ export function useJobSearch(searchId: string | undefined, leadId: string | null
     leadRef.current = leadId
     detailRef.current = detail
     shownLeadRef.current = lead?.id ?? null
+    mutationsDisabledRef.current = mutationsDisabled
   })
 
   const setError = useCallback((message: string | null) => {
@@ -85,32 +82,12 @@ export function useJobSearch(searchId: string | undefined, leadId: string | null
     if (lead && leadRef.current === lead) leadSeq.current += 1
   }, [])
 
-  const loadList = useCallback(() => {
-    const seq = ++listSeq.current
-    listOut.current = seq
-    const landed = () => { if (listOut.current === seq) listOut.current = 0 }
-    return listJobSearches().then(
-      (loaded) => {
-        landed()
-        if (seq !== listSeq.current) return
-        setList(loaded)
-        setListError(null)
-      },
-      (e: unknown) => {
-        landed()
-        if (seq === listSeq.current) setListError(errorText(e, "Couldn't load your job searches."))
-      },
-    )
-  }, [])
-
-  /** A search as the server has it now: on screen if it's still the open one,
-   *  and in the list either way. */
+  /** A search as the server has it now, on screen if it's still the open one. */
   const apply = useCallback((loaded: JobSearchDetail) => {
     if (searchRef.current === loaded.id) {
       setDetail(loaded)
       setDetailFailure(null)
     }
-    setList((prev) => prev && { ...prev, searches: prev.searches.map((s) => (s.id === loaded.id ? loaded : s)) })
   }, [])
 
   const loadDetail = useCallback((id: string) => {
@@ -142,8 +119,6 @@ export function useJobSearch(searchId: string | undefined, leadId: string | null
     }
   }, [])
 
-  useEffect(() => { void loadList() }, [loadList])
-
   useEffect(() => {
     if (searchId) void loadDetail(searchId)
   }, [searchId, loadDetail])
@@ -167,7 +142,6 @@ export function useJobSearch(searchId: string | undefined, leadId: string | null
         if (searchRef.current !== searchId || detailSeq.current !== asked || !statusChanged(current, status)) return
         await loadDetail(searchId)
         if (leadRef.current) await refreshLead(leadRef.current)
-        if (!isLive(status.status)) await loadList()
       } catch {
         // A missed poll is retried on the next tick.
       } finally {
@@ -175,12 +149,12 @@ export function useJobSearch(searchId: string | undefined, leadId: string | null
       }
     }, POLL_MS)
     return () => window.clearInterval(timer)
-  }, [searchId, loadDetail, refreshLead, loadList])
+  }, [searchId, loadDetail, refreshLead])
 
   /** One change at a time. A change made from a job's pane reports there
    *  (`fromLead`), since below the widest layout the pane covers the search. */
   const perform = useCallback(async (fallback: string, action: () => Promise<void>, fromLead?: string) => {
-    if (busyRef.current) return
+    if (busyRef.current || mutationsDisabledRef.current) return
     busyRef.current = true
     setBusy(true)
     setError(null)
@@ -210,8 +184,7 @@ export function useJobSearch(searchId: string | undefined, leadId: string | null
     const updated = await request()
     supersede(search, lead)
     apply(updated)
-    if (listOut.current) void loadList() // a list read that left before this change
-  }, [supersede, apply, loadList])
+  }, [supersede, apply])
 
   /** Change a job: drop older reads of it, then show what the save returned. */
   const changeLead = useCallback(async (id: string, request: () => Promise<JobLeadDetail>) => {
@@ -267,19 +240,6 @@ export function useJobSearch(searchId: string | undefined, leadId: string | null
     return perform("Couldn't cancel this search.", () => change(search, () => cancelJobSearch(search)))
   }, [perform, change])
 
-  /** Delete a search. Resolves true once it's gone, so the page leaves it
-   *  only then (a failure stays on screen, beside the search). */
-  const remove = useCallback(async (id: string): Promise<boolean> => {
-    let deleted = false
-    await perform("Couldn't delete this search.", async () => {
-      await deleteJobSearch(id)
-      deleted = true
-      setList((prev) => prev && { ...prev, searches: prev.searches.filter((s) => s.id !== id) })
-      void loadList() // newer than any list read still out, which still has it
-    })
-    return deleted
-  }, [perform, loadList])
-
   /** The job as the server has it after a Draft email or Edit draft: in its
    *  pane, and in its row of the search. */
   const landEmail = useCallback((search: string, updated: JobLeadDetail | null) => {
@@ -319,24 +279,14 @@ export function useJobSearch(searchId: string | undefined, leadId: string | null
     return draft
   }, [perform, supersede, landEmail])
 
-  /** Start a search. Throws, so the form can keep the request id after a
-   *  dropped connection (`retryIsNewRequest`). */
-  const create = useCallback(async (body: JobSearchCreate): Promise<JobSearchSummary> => {
-    const created = await createJobSearch(body)
-    setList((prev) => prev && { ...prev, searches: [created, ...prev.searches.filter((s) => s.id !== created.id)] })
-    void loadList()
-    return created
-  }, [loadList])
-
   return {
-    list, listError, loadList,
     detail, detailError, loadDetail,
     lead, leadLoadError, leadError, setLeadError,
     reloadLead: () => (leadRef.current ? refreshLead(leadRef.current) : Promise.resolve()),
     busy, error, setError,
     emailNotConnected: issue === 'not_connected',
     emailDraftGone: issue === 'draft_gone',
-    setLeadState, saveNotes, rerank, widen, redraft, cancel, remove, draftEmail, create,
+    setLeadState, saveNotes, rerank, widen, redraft, cancel, draftEmail,
   }
 }
 

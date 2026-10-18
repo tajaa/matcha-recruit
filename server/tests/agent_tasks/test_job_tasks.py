@@ -256,6 +256,42 @@ async def test_a_search_without_its_row_gets_one(conn, monkeypatch):
     assert (await service.task_for_search(USER, SEARCH))["title"] == "COO" and not inserted.await_count
 
 
+@pytest.mark.asyncio
+async def test_old_search_lookup_is_independent_of_the_recent_list(conn, monkeypatch):
+    # A search can fall out of list_tasks' newest 50 rows, but its unique
+    # pointer is still resolved directly. No list scan or pointer repair.
+    monkeypatch.setattr(service, "list_tasks", AsyncMock(return_value=[task_row() for _ in range(50)]))
+    conn.on("t.job_search_id = $3", pointer())
+    view = await service.find_search_task(USER, COMPANY, SEARCH)
+    assert view["id"] == str(TASK) and view["job_search_id"] == str(SEARCH)
+    service.list_tasks.assert_not_awaited()
+    method, query, args = conn.calls[-1]
+    assert method == "fetchrow" and "LIMIT" not in query
+    assert args == (USER, COMPANY, SEARCH)
+    assert "t.user_id = $1 AND t.company_id = $2 AND t.job_search_id = $3" in query
+    assert "t.engine = 'job_search' AND t.deleted_at IS NULL" in query
+    assert "s.id IS NOT NULL AND s.deleted_at IS NULL" in query
+    assert not any(method == "execute" for method, _query, _args in conn.calls)
+
+
+@pytest.mark.asyncio
+async def test_search_lookup_never_recreates_missing_deleted_or_foreign_pointers(conn, monkeypatch):
+    inserted = AsyncMock()
+    monkeypatch.setattr(job_tasks, "insert_pointer", inserted)
+    conn.on("t.job_search_id = $3", lambda uid, cid, sid: (
+        pointer() if (uid, cid, sid) == (USER, COMPANY, SEARCH) else None
+    ))
+    for user, company, search in ((uuid4(), COMPANY, SEARCH), (USER, uuid4(), SEARCH), (USER, COMPANY, uuid4())):
+        with pytest.raises(service.AgentTaskError) as exc:
+            await service.find_search_task(user, company, search)
+        assert exc.value.code == 404
+    conn.on("t.job_search_id = $3", None)  # deleted or missing pointer/search
+    with pytest.raises(service.AgentTaskError) as exc:
+        await service.find_search_task(USER, COMPANY, SEARCH)
+    assert exc.value.code == 404
+    inserted.assert_not_awaited()
+
+
 # ── when a search stops ──────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
@@ -323,3 +359,30 @@ async def test_tell_sends_the_notification(monkeypatch):
     await notify.tell(FakeConn(), {**task, "status": "cancelled"})
     assert not sent.await_count
     assert isinstance(UUID(str(TASK)), UUID)
+
+
+@pytest.mark.asyncio
+async def test_web_job_metadata_marks_completion_seen_without_reading_the_full_search(conn, monkeypatch):
+    full = AsyncMock()
+    monkeypatch.setattr(job_service, "get_search", full)
+    conn.on("WHERE t.id = $1 AND t.user_id = $2", pointer(js_status="done", js_completed_at=NOW))
+    got = await service.get_task(TASK, USER, job_summary=True)
+    assert got["status"] == "done" and got["unseen"] is False
+    assert "items" not in got and "job_search" not in got
+    # The search's own fingerprint, which /status reports, so polling it doesn't see a change every tick.
+    searched = search_row(status="done", updated_at=NOW, progress='{"note": "Searching"}')
+    assert got["fingerprint"] == job_service.fingerprint(searched)
+    assert got["fingerprint"] != service.fingerprint(pointer(js_status="done", js_completed_at=NOW))
+    assert conn.ran("SET seen_at = NOW()")
+    full.assert_not_awaited()
+    conn.calls.clear()
+    conn.on("WHERE t.id = $1 AND t.user_id = $2", pointer())
+    await service.get_task(TASK, USER, job_summary=True)
+    assert not conn.ran("SET seen_at")
+    await service.get_task(TASK, USER, job_summary=True, mark_seen=False)
+    assert not conn.ran("SET seen_at")
+    for over in ({"js_status": None}, {"js_deleted_at": NOW}):
+        conn.on("WHERE t.id = $1 AND t.user_id = $2", pointer(**over))
+        with pytest.raises(service.AgentTaskError) as exc:
+            await service.get_task(TASK, USER, job_summary=True)
+        assert exc.value.code == 404

@@ -5,7 +5,7 @@ import {
   actionParams, actionStage, askEspressoPrompt, availableLabel, badge, buildFormValues, canFollowUp, cardFacts,
   documentJournalId, doneLine, factOrder, filterItems, firstTask, formErrorText, groupTasks, hiddenReason, homesLine,
   homesOrder, initialText, isJobSearch, latestSummary, layoutLine, linkLabel, parseField, planChips, rowFacts, rowMeta,
-  statusChanged, statusLabel, taskCardBody, taskCardLead, taskForSearch, unconfirmed, unitTerms, usageLine, webUrl,
+  statusChanged, statusLabel, taskCardBody, taskCardLead, unconfirmed, unitTerms, usageLine, webUrl,
 } from './tasksLogic'
 
 function task(overrides: Partial<AgentTask> = {}): AgentTask {
@@ -51,9 +51,6 @@ describe('tasks', () => {
     expect(isJobSearch({ engine: 'job_search', job_search_id: 's1' })).toBe(true)
     expect(isJobSearch({ engine: 'job_search', job_search_id: null })).toBe(false)
     expect(isJobSearch({ engine: 'chain', job_search_id: 's1' })).toBe(false)
-    const tasks = [task({ id: 'a' }), task({ id: 'b', engine: 'job_search', job_search_id: 's9' })]
-    expect(taskForSearch('s9', tasks)?.id).toBe('b')
-    expect(taskForSearch('nope', tasks)).toBeNull()
   })
 
   it('says a row kind and count like the Mac', () => {

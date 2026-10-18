@@ -1,15 +1,14 @@
 import { act, renderHook } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '../../../api/client'
 import { useJobSearch } from './useJobSearch'
-import type { JobLeadDetail, JobSearchDetail, JobSearchList } from '../../api/matchaWork/jobSearch'
+import type { JobLeadDetail, JobSearchDetail } from '../../api/matchaWork/jobSearch'
 
 const mock = vi.hoisted(() => ({
-  list: vi.fn(), get: vi.fn(), status: vi.fn(), lead: vi.fn(), update: vi.fn(), redraft: vi.fn(), rerank: vi.fn(),
+  get: vi.fn(), status: vi.fn(), lead: vi.fn(), update: vi.fn(), redraft: vi.fn(), rerank: vi.fn(),
   email: vi.fn(),
 }))
 vi.mock('../../api/matchaWork/jobSearch', () => ({
-  listJobSearches: mock.list,
   getJobSearch: mock.get,
   getJobSearchStatus: mock.status,
   getJobLead: mock.lead,
@@ -19,8 +18,6 @@ vi.mock('../../api/matchaWork/jobSearch', () => ({
   draftJobEmail: mock.email,
   widenJobSearch: vi.fn(),
   cancelJobSearch: vi.fn(),
-  deleteJobSearch: vi.fn(),
-  createJobSearch: vi.fn(),
 }))
 
 const job = (over: Partial<JobLeadDetail> = {}): JobLeadDetail => ({
@@ -37,8 +34,6 @@ const search = (over: Partial<JobSearchDetail> = {}): JobSearchDetail => ({
   leads: [job()], ...over,
 })
 
-const searches = (...rows: JobSearchDetail[]): JobSearchList => ({ searches: rows, usage: null, consent: null, available: true })
-
 function deferred<T>() {
   let resolve!: (value: T) => void
   const promise = new Promise<T>((r) => { resolve = r })
@@ -46,7 +41,6 @@ function deferred<T>() {
 }
 
 async function opened(leadId: string | null, searchId = 's1') {
-  mock.list.mockResolvedValue(searches(search()))
   const hook = renderHook(({ s, l }) => useJobSearch(s, l), { initialProps: { s: searchId as string | undefined, l: leadId } })
   await act(async () => {})
   return hook
@@ -118,21 +112,6 @@ describe('useJobSearch reads and changes', () => {
     await act(async () => { saving.resolve(job({ user_state: 'saved' })); await saved })
     await act(async () => { other.resolve(job({ id: 'l2', title: 'Chief Operating Officer' })) })
     expect(result.current.lead?.title).toBe('Chief Operating Officer')
-  })
-
-  it('asks for the list again when a change lands while a list read is out', async () => {
-    mock.get.mockResolvedValue(search())
-    const { result } = await opened(null)
-    const old = deferred<JobSearchList>()
-    mock.list.mockReturnValueOnce(old.promise)
-    let reading = Promise.resolve()
-    act(() => { reading = result.current.loadList() })
-    mock.rerank.mockResolvedValue(search({ status: 'enriching' }))
-    mock.list.mockResolvedValueOnce(searches(search({ status: 'enriching' })))
-    await act(async () => { await result.current.rerank({ base: 1, bonus: 0, equity: 0, fit: 0 }) })
-    await act(async () => { old.resolve(searches(search())); await reading })
-    expect(mock.list).toHaveBeenCalledTimes(3)
-    expect(result.current.list?.searches[0].status).toBe('enriching')
   })
 })
 
@@ -216,5 +195,49 @@ describe('useJobSearch Edit draft', () => {
     expect(draft).toBe('r-2')
     expect(result.current.emailDraftGone).toBe(false)
     expect(result.current.lead?.email_draft_id).toBe('r-2')
+  })
+})
+
+describe('useJobSearch inside Tasks', () => {
+  afterEach(() => vi.useRealTimers())
+
+  it('loads and polls the search', async () => {
+    vi.useFakeTimers()
+    mock.get.mockResolvedValueOnce(search({ status: 'discovering' })).mockResolvedValue(search())
+    mock.status.mockResolvedValue({ id: 's1', status: 'done', fingerprint: 'f2', lead_count: 1 })
+    const { result } = renderHook(() => useJobSearch('s1', null))
+    await act(async () => {})
+    expect(result.current.detail?.status).toBe('discovering')
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000) })
+    expect(mock.status).toHaveBeenCalledTimes(1)
+    expect(result.current.detail?.status).toBe('done')
+  })
+
+  it('guards retained mutation callbacks while the owning task is deleting, then allows recovery', async () => {
+    mock.get.mockResolvedValue(search())
+    mock.lead.mockResolvedValue(job())
+    mock.update.mockResolvedValue(job({ user_state: 'saved' }))
+    const { result, rerender } = renderHook(
+      ({ deleting }) => useJobSearch('s1', 'l1', { mutationsDisabled: deleting }),
+      { initialProps: { deleting: false } },
+    )
+    await act(async () => {})
+    const actions = result.current
+    rerender({ deleting: true })
+    await act(async () => {
+      await actions.setLeadState('saved', 'l1')
+      await actions.saveNotes('Notes to keep', 'l1')
+      await actions.redraft()
+      expect(await actions.draftEmail('l1')).toBeNull()
+      expect(await actions.draftEmail('l1', true)).toBeNull()
+      await actions.rerank({ base: 1, bonus: 0, equity: 0, fit: 0 })
+    })
+    expect(mock.update).not.toHaveBeenCalled()
+    expect(mock.redraft).not.toHaveBeenCalled()
+    expect(mock.email).not.toHaveBeenCalled()
+    expect(mock.rerank).not.toHaveBeenCalled()
+    rerender({ deleting: false })
+    await act(async () => { await actions.setLeadState('saved', 'l1') })
+    expect(mock.update).toHaveBeenCalledWith('s1', 'l1', { user_state: 'saved' })
   })
 })
