@@ -66,6 +66,8 @@ def test_the_router_is_gated_and_mounted():
         ("DELETE", "/assistant/abilities/{key}"),
         ("GET", "/assistant/conversations"), ("POST", "/assistant/conversations"),
         ("PATCH", "/assistant/conversations/{channel_id}"),
+        ("POST", "/assistant/conversations/{channel_id}/archive"),
+        ("POST", "/assistant/conversations/{channel_id}/restore"),
         ("GET", "/assistant/inputs/{input_id}/url"), ("DELETE", "/assistant/inputs/{input_id}"),
     }
     assert routes.router.prefix == "/assistant" and len(routes.router.dependencies) == 1
@@ -297,18 +299,67 @@ async def test_entitlements_say_what_the_workspace_has_switched_on(monkeypatch):
 @pytest.mark.asyncio
 async def test_conversations_are_paginated_and_owned_by_the_caller(wired):
     now = datetime.now(timezone.utc)
-    wired.conn.on("SELECT id, name, updated_at FROM channels", [
-        {"id": uuid4(), "name": f"Chat {i}", "updated_at": now} for i in range(51)])
     user = _user()
-    out = await routes.list_conversations(offset=50, current_user=user)
+    wired.conn.on("FROM channels", [
+        _row(user, name=f"Chat {i}", updated_at=now) for i in range(50)]
+        + [_row(user, name="Espresso", updated_at=now, slug=conversation.canonical_slug(user.id))])
+    out = await routes.list_conversations(offset=50, archived=False, current_user=user)
     assert len(out["conversations"]) == 50 and out["has_more"]
-    query = wired.conn.ran("SELECT id, name")[0]
-    assert query[2] == (wired.company, user.id, 50)
+    assert out["conversations"][0]["archived"] is False and out["conversations"][0]["main"] is False
+    query = wired.conn.ran("FROM channels")[0]
+    assert query[2] == (wired.company, user.id, 50, False)
     assert "assistant_user_id = $2" in query[1] and "channel_scope = 'assistant'" in query[1]
+    assert "(is_archived IS TRUE) = $4" in query[1]
     assert "ORDER BY updated_at DESC, id DESC LIMIT 51" in query[1]
-    wired.conn.on("SELECT id, name, updated_at FROM channels", [])
-    assert await routes.list_conversations(offset=0, current_user=user) == {
+    wired.conn.on("FROM channels", [])
+    assert await routes.list_conversations(offset=0, archived=True, current_user=user) == {
         "conversations": [], "has_more": False}
+    assert wired.conn.ran("FROM channels")[-1][2] == (wired.company, user.id, 0, True)
+
+
+def _row(user, *, name="Mail", updated_at=None, slug=None, archived=False, id=None):
+    return {"id": id or uuid4(), "name": name, "updated_at": updated_at,
+            "slug": slug or f"espresso-{user.id.hex}-{uuid4().hex}",
+            "assistant_user_id": user.id, "is_archived": archived}
+
+
+@pytest.mark.asyncio
+async def test_the_main_conversation_is_marked_and_cannot_be_archived(wired):
+    user, main = _user(), uuid4()
+    wired.conn.on("FROM channels", [_row(user, id=main, name="Espresso",
+                                         slug=conversation.canonical_slug(user.id))])
+    out = await routes.list_conversations(offset=0, archived=False, current_user=user)
+    assert out["conversations"][0]["main"] is True
+    # The update skips the main conversation's slug, then says why.
+    wired.conn.on("UPDATE channels SET is_archived", None)
+    wired.conn.on("SELECT id FROM channels", main)
+    with pytest.raises(HTTPException) as exc:
+        await routes.archive_conversation(main, current_user=user)
+    assert exc.value.status_code == 409
+    update = wired.conn.ran("UPDATE channels SET is_archived")[0]
+    assert update[2] == (True, main, wired.company, user.id, conversation.canonical_slug(user.id))
+    assert "slug <> $5" in update[1]
+    # Someone else's, or a channel that isn't a conversation: not found.
+    wired.conn.on("SELECT id FROM channels", uuid4())
+    with pytest.raises(HTTPException) as exc:
+        await routes.restore_conversation(uuid4(), current_user=user)
+    assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_archive_and_restore_flip_only_the_flag(wired):
+    user, channel = _user(), uuid4()
+    now = datetime.now(timezone.utc)
+    wired.conn.on("UPDATE channels SET is_archived",
+                  lambda archived, *_: _row(user, id=channel, updated_at=now, archived=archived))
+    out = await routes.archive_conversation(channel, current_user=user)
+    assert out["archived"] is True and out["id"] == str(channel) and out["main"] is False
+    out = await routes.restore_conversation(channel, current_user=user)
+    assert out["archived"] is False
+    first, second = wired.conn.ran("UPDATE channels SET is_archived")
+    assert first[2][0] is True and second[2][0] is False
+    # The list order is by updated_at: archiving doesn't touch it.
+    assert "updated_at" not in first[1].split("RETURNING")[0]
 
 
 @pytest.mark.asyncio
@@ -322,9 +373,10 @@ async def test_create_and_rename_preserve_company_and_owner_scope(wired, monkeyp
     assert create.await_args.kwargs == dict(user_id=user.id, company_id=wired.company,
                                           title="Café ☕", request_id=key)
     now = datetime.now(timezone.utc)
-    wired.conn.on("UPDATE channels SET name", {"id": channel, "name": "Mail", "updated_at": now})
+    wired.conn.on("UPDATE channels SET name", _row(user, id=channel, updated_at=now))
     out = await routes.rename_conversation(channel, AssistantConversationRename(title="Mail"), current_user=user)
-    assert out == {"id": str(channel), "title": "Mail", "updated_at": now.isoformat()}
+    assert out == {"id": str(channel), "title": "Mail", "updated_at": now.isoformat(),
+                   "archived": False, "main": False}
     query = wired.conn.ran("UPDATE channels SET name")[0]
     assert query[2] == ("Mail", channel, wired.company, user.id)
     assert "company_id = $3 AND assistant_user_id = $4" in query[1]

@@ -527,9 +527,18 @@ an owner-prefixed client request UUID as their slug, making create retries
 idempotent; channel + sole-owner membership are written in one transaction.
 
 - `GET /assistant/conversations` lists only this company and owner (50 at a
-  time); `POST` creates a separate history; `PATCH /{id}` renames only an owned
-  assistant channel. No member, invite, call, broadcast or generic channel
-  mutation path is opened by these routes.
+  time; `?archived=true` lists the archived ones); `POST` creates a separate
+  history; `PATCH /{id}` renames only an owned assistant channel;
+  `POST /{id}/archive` and `/{id}/restore` flip `channels.is_archived` and
+  nothing else (messages stay, `updated_at` is untouched so a restored session
+  goes back to its place). The main conversation (`conversation.canonical_slug`,
+  `main: true` in the list) can't be archived (409): `/assistant/channel` and
+  Home's web panel always open it. No member, invite, call, broadcast or
+  generic channel mutation path is opened by these routes.
+- The web page (`client/src/work/pages/Assistant.tsx`, `/assistant/:conversationId?`)
+  lists sessions beside the open one (`components/assistant/AssistantSessions.tsx`):
+  new, filter, rename, archive, restore; the open session is in the URL, else
+  the last one opened in that browser, else the most recent.
 - Espresso's desktop picker creates, names and reopens these conversations.
   Switching recreates its channel view so replies and attachments cannot cross
   conversations. Email handoffs open a new conversation with an editable draft

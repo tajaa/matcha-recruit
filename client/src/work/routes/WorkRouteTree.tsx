@@ -105,9 +105,11 @@ export function WorkRouteTree({ surface }: { surface: WorkSurface }) {
           {!businessWork && <Route path="recaps/:recapId" element={<Recap />} />}
           <Route path="tasks" element={<Tasks />} />
           <Route path="tasks/:taskId" element={<Tasks />} />
-          {/* The Espresso assistant: a private conversation per person, for
-              personal accounts (the page says so to anyone else). */}
-          <Route path="assistant" element={<Assistant />} />
+          {/* The Espresso assistant: a person's private sessions with
+              Espresso, for personal accounts (the page says so to anyone
+              else). One optional-segment route, so switching sessions keeps
+              the page (and its session list) mounted. */}
+          <Route path="assistant/:conversationId?" element={<Assistant />} />
           {/* Older job-search links open the corresponding task and job. */}
           <Route path="jobs" element={<JobSearchRedirect />} />
           <Route path="jobs/:searchId" element={<JobSearchRedirect />} />
