@@ -15,6 +15,9 @@ last turn, the single repair, and the commit pipeline:
 
 A transport error in a commit resolves the claim to `unknown`, never `failed`:
 the mail may have gone out, and saying it did not invites a second send.
+
+The read tools of a turn that neither writes nor asks run concurrently; every
+other turn runs its calls one at a time, in the order the model gave them.
 """
 from __future__ import annotations
 
@@ -462,6 +465,18 @@ async def run_agent(
             name_owner is not None and name_owner[1].effect in WRITES
             for name_owner in (owners.get(c["name"]) for c in response.function_calls)
         )
+        # A turn that only reads runs its tools at once: four page loads take
+        # as long as the slowest, not the sum. Budgets, search caps and the
+        # order of the outputs are still settled in call order (`run_tool`
+        # counts a call before its first await). A turn that writes or asks
+        # stays one call at a time: a commit's `resolve` may read what an
+        # earlier read in the same turn added, and an ask ends the run where
+        # it stands.
+        together = not acts and not any(
+            c["name"] in runner_tools and runner_tools[c["name"]].effect == "ask"
+            for c in response.function_calls
+        )
+        started: list[tuple[int, str, AgentTool, dict]] = []  # (output index, call id, tool, args)
         for call in response.function_calls:
             name, args = call["name"], dict(call["arguments"] or {})
             if name == contract.finish.name and acts:
@@ -527,7 +542,15 @@ async def run_agent(
                     outputs.append(tool_output_item(call["call_id"], out))
                     continue
                 state.hosted_calls += 1
+            if together:
+                started.append((len(outputs), call["call_id"], tool, args))
+                outputs.append({})  # filled in call order once every read is back
+                continue
             outputs.append(tool_output_item(call["call_id"], await run_tool(tool, args)))
+        if started:
+            answers = await asyncio.gather(*(run_tool(tool, args) for _, _, tool, args in started))
+            for (index, call_id, _, _), answer in zip(started, answers):
+                outputs[index] = tool_output_item(call_id, answer)
         pending = outputs
         if transcript is not None:
             transcript.extend(outputs)

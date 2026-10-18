@@ -247,5 +247,8 @@ async def test_the_runner_holds_brave_searches_to_the_hosted_limits(monkeypatch)
     fifth = json.loads(client.calls[2]["input"][1]["output"])
     assert fifth == {"error": web.SEARCH_EXHAUSTED}
     steps = [(c.args[4], c.args[7]) for c in record.await_args_list if c.args[2] == "web_search"]
-    assert steps == [("Searched: one", "ok"), ("Searched: two", "ok"), ("Too many searches at once", "skipped"),
-                     ("Searched: four", "ok"), ("Search budget exhausted", "skipped")]
+    # A turn of searches runs at once, so its steps are written as each one
+    # ends: the refusals (decided before any search starts) come first.
+    assert sorted(steps) == sorted([("Searched: one", "ok"), ("Searched: two", "ok"),
+                                    ("Too many searches at once", "skipped"),
+                                    ("Searched: four", "ok"), ("Search budget exhausted", "skipped")])

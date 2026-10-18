@@ -10,6 +10,7 @@ from uuid import UUID, uuid5
 from pydantic import ValidationError
 from app.matcha.models.matcha_work.sales import (
     CampaignCreate,
+    Prospect,
     ProspectImport,
     ProspectPatch,
     Template,
@@ -17,8 +18,11 @@ from app.matcha.models.matcha_work.sales import (
 from ... import sales_service as store
 from .. import consent
 from ..registry import Ability, AgentTool, ToolOutput
+from . import places as places_ability
 
 KEY = "sales"
+# Places saved from find_places in one call: the places block's own cap.
+MAX_PLACE_IMPORT = places_ability.MAX_BLOCK
 
 
 @dataclass
@@ -46,6 +50,25 @@ def _email_grounded(ctx, state, email):
     )
 
 
+def place_prospect(row):
+    """A place find_places found, as a prospect: the business, its own site,
+    what Maps lists about it, and where that came from. No person and no
+    email: Maps lists neither."""
+    facts = [
+        f"Phone: {row['phone']}" if row.get("phone") else "",
+        row.get("address") or "",
+        row.get("category") or "",
+        (f"{row['rating']:.1f}★ ({row.get('reviews') or 0:,} reviews)" if row.get("rating") is not None else ""),
+        f"Google Maps: {row['maps_url']}" if row.get("maps_url") else "",
+    ]
+    return Prospect(
+        company=row["name"][:200],
+        website=row.get("website") or "",
+        notes=" · ".join(f for f in facts if f)[:4000],
+        sources=[u for u in (row.get("website"), row.get("maps_url")) if u],
+    )
+
+
 UNGROUNDED_EMAIL = (
     "Only save an email address the person typed or that appears on a page you "
     "fetched in this run. Never guess one from a name."
@@ -55,7 +78,9 @@ UNGROUNDED_EMAIL = (
 def prompt_block(_ctx):
     return """Sales: save prospects, source-backed research and personalized drafts in campaigns.
 Start by listing sales workspaces/campaigns, or read the campaign ID the person supplied.
-For discovery, use web search and fetch the businesses' own sites. Never invent a person,
+For local businesses (cafes in LA, gyms in Austin), find them with find_places and save them with
+add_places_to_campaign by id: one call saves each one's name, website, phone and address with its
+Google Maps source. For anyone else, use web search and fetch their own sites. Never invent a person,
 email address or research fact. Keep the source URLs with every discovered prospect and
 research note. Leads without a verified email can be saved with an empty email.
 For imported lists, read the saved campaign rather than asking the person to paste again.
@@ -185,6 +210,19 @@ def build():
                     payload = await store.patch_prospect(
                         campaign_id, UUID(args["prospect_id"]), ctx.user_id, data
                     )
+                elif operation == "places":
+                    found = getattr(state.sessions.get(places_ability.KEY), "places", None) or {}
+                    if not found:
+                        raise ValueError("Find the places with find_places in this run first.")
+                    ids, _ = places_ability.chosen_ids(found, args.get("place_ids"), args.get("leave_out_ids"))
+                    rows = [found[i] for i in ids]
+                    if not rows:
+                        raise ValueError("Use ids find_places returned in this run.")
+                    if len(rows) > MAX_PLACE_IMPORT:
+                        raise ValueError(f"Save at most {MAX_PLACE_IMPORT} places per call.")
+                    payload = await store.import_prospects(
+                        campaign_id, ctx.user_id, ProspectImport(prospects=[place_prospect(r) for r in rows])
+                    )
                 elif operation == "template":
                     # The prompt says "only when asked"; this makes it true.
                     if not any("template" in t.lower() for t in _user_texts(ctx)):
@@ -283,6 +321,20 @@ def build():
                 )
                 | {"$defs": prospect_schema.get("$defs", {})},
                 "add",
+            ),
+            tool(
+                "add_places_to_campaign",
+                "draft",
+                "Save places find_places found in this run as prospects, by id (empty: every place found; "
+                "leave_out_ids drops some): name, website, phone, address and the Google Maps source, "
+                "without retyping them.",
+                schema(
+                    cid | {"place_ids": {"type": "array", "items": string,
+                                         "maxItems": MAX_PLACE_IMPORT},
+                           "leave_out_ids": {"type": "array", "items": string}},
+                    ["campaign_id", "place_ids"],
+                ),
+                "places",
             ),
             tool(
                 "update_sales_prospect",

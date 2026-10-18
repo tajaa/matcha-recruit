@@ -260,6 +260,18 @@ class _Api:
                     items.append(made)
         return items
 
+    async def search_pages(self, source: str, query: str, *, pages: int = 1,
+                           ll: str | None = None) -> list[ProviderItem]:
+        """Pages 1..`pages` of a search, one call each, stopping at the first
+        short page (there is nothing after it)."""
+        items: list[ProviderItem] = []
+        for page in range(1, max(1, pages) + 1):
+            found = await self.search(source, query, page=page, ll=ll)
+            items.extend(found)
+            if len(found) < MAX_RESULTS:
+                break
+        return items
+
     async def locate(self, query: str) -> tuple[str, tuple[float, float]] | None:
         """One place on the map, `(its name, (lat, lng))`: the place Google Maps
         answers with, else its first result."""
@@ -432,6 +444,33 @@ class GooglePlaces:
                     items.append(made)
         return items
 
+    async def search_pages(self, source: str, query: str, *, pages: int = 1,
+                           ll: str | None = None) -> list[ProviderItem]:
+        """Pages 1..`pages` (at most `MAX_PAGES`) in one walk of the page
+        tokens: `pages` calls, where `search(page=n)` for each would be
+        1 + 2 + … + n."""
+        if source != "places":
+            raise ValueError(f"{self.name} has no {source!r} search")
+        body: dict = {"textQuery": query, "pageSize": MAX_RESULTS, "languageCode": "en"}
+        box = map_box(ll)
+        if box:
+            body["locationRestriction"] = {"rectangle": box}
+        today = self._today()
+        items: list[ProviderItem] = []
+        token = None
+        for n in range(min(max(1, pages), MAX_PAGES)):
+            if n and not token:
+                break
+            data = await self._post({**body, "pageToken": token} if token else body, SEARCH_MASK)
+            token = data.get("nextPageToken")
+            rows = data.get("places")
+            for raw in (rows if isinstance(rows, list) else [])[:MAX_RESULTS]:
+                if isinstance(raw, dict):
+                    made = google_place_item(raw, today=today)
+                    if made is not None:
+                        items.append(made)
+        return items
+
     async def locate(self, query: str) -> tuple[str, tuple[float, float]] | None:
         """One place on the map, `(its name, (lat, lng))`: Google's first answer."""
         data = await self._post({"textQuery": query, "pageSize": 1, "languageCode": "en"}, LOCATE_MASK)
@@ -450,6 +489,12 @@ class Listings(search_apis.Fallback):
 
     async def search(self, source: str, query: str, *, page: int = 1, ll: str | None = None) -> list[ProviderItem]:
         at, items = await self.call(lambda api, _token: api.search(source, query, page=page, ll=ll))
+        return [replace(item, offers_token=self.tag(at, item.offers_token)) for item in items]
+
+    async def search_pages(self, source: str, query: str, *, pages: int = 1,
+                           ll: str | None = None) -> list[ProviderItem]:
+        """Several pages from the first API that answers (`search_pages` on it)."""
+        at, items = await self.call(lambda api, _token: api.search_pages(source, query, pages=pages, ll=ll))
         return [replace(item, offers_token=self.tag(at, item.offers_token)) for item in items]
 
     async def locate(self, query: str) -> tuple[str, tuple[float, float]] | None:

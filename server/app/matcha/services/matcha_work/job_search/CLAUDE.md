@@ -234,6 +234,11 @@ re-rank for unposted pay and given to the approach phase.
 
 ## In the assistant
 
+A quick look at open roles in chat is `agent_runtime/abilities/job_listings.py`
+(`find_jobs`): this package's listings, place filter and `enrich_one`, run in
+one tool call with no search row, no model phases and nothing saved (see the
+agent runtime's CLAUDE.md, "Places and job listings").
+
 `agent_runtime/abilities/jobs.py` (`private_only`, `jobs-1`): list and read
 searches and jobs, keep the person's status and notes (`update_job_lead`),
 re-rank (`rank_job_search`). `read_job_search` lists the search's matches

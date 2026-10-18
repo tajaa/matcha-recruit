@@ -1412,6 +1412,61 @@ export type AgentResultBlock =
       confirmation?: string | null
       handoff_url?: string | null
     }
+  /** Businesses `find_places` found on Google Maps, rebuilt by the server from
+   *  what the run saw (server: agent_runtime/abilities/places.py). */
+  | { type: 'places'; title?: string; places: AgentPlace[]; found?: number }
+  /** Open postings `find_jobs` found, pay as posted (abilities/job_listings.py). */
+  | { type: 'job_postings'; jobs: AgentJobPosting[]; found?: number }
+  /** Jobs from one of the person's saved searches (abilities/jobs.py). */
+  | { type: 'jobs'; search_id: string; jobs: AgentSavedJob[] }
+
+export type AgentPlace = {
+  id: string
+  name: string
+  category?: string
+  rating?: number
+  reviews?: number
+  price?: string
+  address?: string
+  phone?: string
+  website?: string
+  maps_url?: string
+}
+
+export type AgentJobPosting = {
+  id: string
+  title: string
+  company: string
+  location?: string
+  remote?: boolean | null
+  posted?: string
+  /** "$180K–$220K · 10% bonus", or "Pay not posted": never an estimate. */
+  pay?: string
+  pay_status?: 'posted' | 'mentioned' | 'not_disclosed' | string
+  /** Read at the link (still up there), not just listed on Google Jobs. */
+  verified?: boolean
+  /** Read on the employer's ATS or its own site, not a board that copies postings. */
+  at_employer?: boolean
+  /** Where it was read: "Greenhouse", "builtin.com"… */
+  read_on?: string | null
+  source?: string
+  via?: string
+  apply_url?: string
+}
+
+export type AgentSavedJob = {
+  id: string
+  rank?: number | null
+  title: string
+  company: string
+  location?: string | null
+  comp_line?: string | null
+  comp_status?: string | null
+  fit_score?: number | null
+  user_state?: string | null
+  approach_status?: string | null
+  apply_url?: string | null
+}
 
 export type AgentChatResultV2 = {
   schema: 'agent_result.v2'

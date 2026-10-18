@@ -151,8 +151,9 @@ _ID = {"type": "string"}
 _WEIGHT = {"type": "number", "minimum": 0, "maximum": 1}
 
 _PROMPT = """Job searches:
-- The person's job searches are saved in Espresso's Tasks section. Start a new one with start_task \
-(playbook job_search) if you have it; otherwise they start it from Tasks in the app. \
+- The person's job searches are saved in Espresso (Tasks on the Mac, Job search on the web). Start a new one \
+with start_task (playbook job_search) if you have it; otherwise they start it from Job search on the web or \
+Tasks on the Mac. For a quick look at open roles right now, use find_jobs when you have it. \
 list_job_searches, then read_job_search for the ranked jobs and read_job_lead for one job's posting, \
 pay evidence and drafted approach (outreach, answers, cover letter).
 - A search lists its strong matches (fit 4/5 or better) first; weaker_matches counts the jobs below \

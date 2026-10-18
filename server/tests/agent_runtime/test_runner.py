@@ -368,3 +368,66 @@ async def test_an_ask_tool_can_parse_its_own_question(monkeypatch):
     assert "Name the fields to ask." in client.calls[1]["input"][0]["output"] and seen == [ctx.run_id] * 2
     with pytest.raises(CatalogError):
         validate_tool(replace(read_tool(), parse_ask=parse))
+
+
+@pytest.mark.asyncio
+async def test_a_turn_that_only_reads_runs_its_tools_at_once(monkeypatch):
+    wire_store(monkeypatch)
+    running, most = 0, 0
+
+    async def slow(ctx, state, args, left):
+        nonlocal running, most
+        running += 1
+        most = max(most, running)
+        await asyncio.sleep(0.05)
+        running -= 1
+        return ToolOutput(payload={"value": args["q"]})
+
+    client = FakeClient([
+        response(*(call("lookup", {"q": q}) for q in ("a", "b", "c"))),
+        response(call("finish", {"answer": "ok"})),
+    ])
+    out = await run(client, [ability(read_tool("lookup", handler=slow))])
+    assert out.kind == "result" and most == 3
+    # The outputs go back in the order the model asked for them.
+    assert [o["output"] for o in client.calls[1]["input"]] == [
+        '{"value":"a"}', '{"value":"b"}', '{"value":"c"}',
+    ]
+
+
+@pytest.mark.asyncio
+async def test_concurrent_reads_still_keep_a_tools_budget_in_call_order(monkeypatch):
+    wire_store(monkeypatch)
+    tool = read_tool("lookup", max_calls=2, exhausted_message="No more lookups.")
+    client = FakeClient([
+        response(*(call("lookup", {"q": q}) for q in ("a", "b", "c"))),
+        response(call("finish", {"answer": "ok"})),
+    ])
+    await run(client, [ability(tool)])
+    outputs = [o["output"] for o in client.calls[1]["input"]]
+    assert outputs[:2] == ['{"value":"a"}', '{"value":"b"}'] and "No more lookups." in outputs[2]
+
+
+@pytest.mark.asyncio
+async def test_a_turn_with_a_write_runs_its_calls_one_at_a_time(monkeypatch):
+    wire_store(monkeypatch)
+    order = []
+
+    async def read(ctx, state, args, left):
+        order.append(f"start {args['q']}")
+        await asyncio.sleep(0.02)
+        order.append(f"end {args['q']}")
+        return ToolOutput(payload={"value": args["q"]})
+
+    async def save(ctx, state, args, left):
+        order.append("draft")
+        return ToolOutput(payload={"saved": True})
+
+    draft = AgentTool(name="save_note", effect="draft", description="Save.", parameters={"type": "object"},
+                      step_kind="draft", handler=save)
+    client = FakeClient([
+        response(call("lookup", {"q": "a"}), call("lookup", {"q": "b"}), call("save_note")),
+        response(call("finish", {"answer": "ok"})),
+    ])
+    await run(client, [ability(read_tool("lookup", handler=read), draft)])
+    assert order == ["start a", "end a", "start b", "end b", "draft"]

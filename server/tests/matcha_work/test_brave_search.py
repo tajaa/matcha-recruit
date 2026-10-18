@@ -199,3 +199,19 @@ def test_out_is_capped_and_logged_once(caplog):
     assert B.out_reason() == "second"
     clock.now += 61
     assert B.available(clock=clock)
+
+
+@pytest.mark.asyncio
+async def test_searches_at_once_are_spaced_to_the_rate():
+    clock, waits = Clock(), []
+
+    async def sleep(seconds):
+        waits.append(round(seconds, 2))
+
+    for _ in range(3):
+        await B._pace(sleep=sleep, clock=clock)
+    # The first goes now; each one after waits for its own slot.
+    assert waits == [1.05, 2.1]
+    clock.now += 10
+    await B._pace(sleep=sleep, clock=clock)
+    assert waits == [1.05, 2.1], "a search after a quiet spell goes at once"
