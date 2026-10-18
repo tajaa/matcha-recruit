@@ -25,7 +25,7 @@ export default function RecapPreferences() {
     <p className="my-3 text-xs leading-5 text-w-dim">Save a short private video of key steps and results from new Espresso tasks. Videos stay for 30 days. Source captures stay for 7 days. Idle time is left out.</p>
     <label className="flex items-center gap-2 text-sm text-w-text"><input type="checkbox" checked={value.enabled} disabled={busy} onChange={(e) => void update({ enabled: e.target.checked })} />Create task recap videos</label>
     <label className="mt-3 flex items-center gap-2 text-sm text-w-text"><input type="checkbox" checked={value.email_enabled} disabled={busy} onChange={(e) => void update({ email_enabled: e.target.checked })} />Email me a recap link when tasks finish</label>
-    <p className="mt-3 text-xs text-w-dim">Turning creation off stops unfinished videos. Existing videos can be deleted from Recaps.</p>
+    <p className="mt-3 text-xs text-w-dim">Turning creation off stops unfinished videos. Find and delete videos in Tasks → Recaps.</p>
     {error && <p role="alert" className="mt-2 text-xs text-amber-500">{error}</p>}
   </section>
 }

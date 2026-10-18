@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { AlertTriangle, BookOpen, Briefcase, ClipboardList, Loader2 } from 'lucide-react'
+import { AlertTriangle, BookOpen, Briefcase, ClipboardList, Film, Loader2, Settings } from 'lucide-react'
 import { useMe } from '../../hooks/useMe'
 import { useWorkBase } from '../routes/WorkSurfaceContext'
 import { useEntitlements } from '../hooks/useEntitlements'
@@ -19,6 +19,10 @@ import ActionModal from './Tasks/ActionModal'
 import TasksGuide, { TASKS_GUIDE_SEEN_KEY } from './Tasks/TasksGuide'
 import JobSearchPane from './Tasks/JobSearchPane'
 import NewJobSearch from './Tasks/NewJobSearch'
+import RecapList from '../components/recaps/RecapList'
+import RecapView from '../components/recaps/RecapView'
+import { recapsPath } from '../components/recaps/paths'
+import { useRecapPreferences } from '../hooks/useRecapPreferences'
 import type { AssistantDraftState } from './Assistant'
 
 function guideSeen(): boolean {
@@ -49,6 +53,14 @@ function TasksPage() {
   const { taskId } = useParams<{ taskId?: string }>()
   const [params, setParams] = useSearchParams()
   const itemId = params.get('item')
+  // Recaps are a second view of the same page (`?view=recaps`): the list on
+  // the left, the open recap in the middle. It shows for anyone recaps are
+  // available to, and for anyone a link sent here (they may still own some).
+  const recapsView = !taskId && params.get('view') === 'recaps'
+  const recapId = recapsView ? params.get('recap') : null
+  const recapSource = recapsView ? params.get('source_id') : null
+  const recapsOffered = !!useRecapPreferences()?.available || recapsView
+  const { me } = useMe()
   const t = useTasks(taskId, itemId)
   const { tasksEnabled, jobSearchEnabled } = useEntitlements()
   const [helpOpen, setHelpOpen] = useState(false)
@@ -66,10 +78,10 @@ function TasksPage() {
 
   // Nothing open on a wide screen: open the first task, as the Mac does.
   useEffect(() => {
-    if (taskId || !list || !wide()) return
+    if (taskId || recapsView || !list || !wide()) return
     const first = groupTasks(list.tasks)[0]?.[1][0]
     if (first) navigate(`${base}/tasks/${encodeURIComponent(first.id)}`, { replace: true })
-  }, [taskId, list, base, navigate])
+  }, [taskId, recapsView, list, base, navigate])
 
   const setItemParam = useCallback((id: string | null) => {
     setParams((prev) => {
@@ -129,9 +141,58 @@ function TasksPage() {
     setJournalId(await t.startRound('document'))
   }
 
+  const tabs = recapsOffered ? (
+    <ViewTabs
+      view={recapsView ? 'recaps' : 'tasks'}
+      onTasks={() => navigate(`${base}/tasks`)}
+      onRecaps={() => navigate(recapsPath(base))}
+    />
+  ) : null
+
+  if (recapsView) {
+    return (
+      <div className="flex h-full min-h-0">
+        <aside className={`min-h-0 w-full shrink-0 flex-col border-r border-w-line bg-w-surface md:w-72 ${recapId ? 'hidden md:flex' : 'flex'}`}>
+          <div className="space-y-2 border-b border-w-line px-4 py-3">
+            <div className="flex items-center gap-2">
+              {tabs}
+              <button type="button" onClick={() => navigate(`${base}/settings`)} aria-label="Recap settings" title="Recap settings"
+                className="rounded-md p-1 text-w-dim hover:bg-w-surface2 hover:text-w-text">
+                <Settings size={13} />
+              </button>
+            </div>
+            <p className="text-[10px] leading-4 text-w-dim">Short private videos of a task's key steps and results.</p>
+            {recapSource && (
+              <button type="button" onClick={() => navigate(recapsPath(base, { recap: recapId }))}
+                className="text-[10px] text-w-accent hover:underline">Showing one task's recaps · Show all</button>
+            )}
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+            <RecapList owner={me?.user.id} source={recapSource} selectedId={recapId}
+              onOpen={(recap) => navigate(recapsPath(base, { recap: recap.id, source: recapSource }))} />
+          </div>
+        </aside>
+        <main className={`min-h-0 min-w-0 flex-1 flex-col overflow-y-auto ${recapId ? 'flex' : 'hidden md:flex'}`}>
+          {recapId ? (
+            <RecapView
+              key={recapId}
+              recapId={recapId}
+              onDeleted={() => navigate(recapsPath(base, { source: recapSource }), { replace: true })}
+              onBack={() => navigate(recapsPath(base, { source: recapSource }))}
+            />
+          ) : (
+            <Message icon={<Film size={28} className="text-w-faint" />} title="Open a recap on the left"
+              text="Each recap is a short video of what a task did: the request, the pages it looked at, what needs your attention, and the result." />
+          )}
+        </main>
+      </div>
+    )
+  }
+
   return (
     <div className="flex h-full min-h-0">
       <TaskList
+        tabs={tabs}
         list={list}
         error={t.listError}
         loadingOlder={t.loadingOlder}
@@ -235,9 +296,27 @@ function TasksPage() {
   )
 }
 
+/** Tasks | Recaps, at the top of the list. */
+function ViewTabs({ view, onTasks, onRecaps }: { view: 'tasks' | 'recaps'; onTasks: () => void; onRecaps: () => void }) {
+  const tab = (active: boolean) => `inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-semibold transition-colors ${
+    active ? 'bg-w-surface2 text-w-text' : 'text-w-dim hover:text-w-text'}`
+  return (
+    <div role="tablist" aria-label="Tasks or recaps" className="flex flex-1 items-center gap-0.5">
+      <button type="button" role="tab" aria-selected={view === 'tasks'} onClick={onTasks} className={tab(view === 'tasks')}>
+        <ClipboardList size={13} className={view === 'tasks' ? 'text-w-accent' : ''} /> Tasks
+      </button>
+      <button type="button" role="tab" aria-selected={view === 'recaps'} onClick={onRecaps} className={tab(view === 'recaps')}>
+        <Film size={13} className={view === 'recaps' ? 'text-w-accent' : ''} /> Recaps
+      </button>
+    </div>
+  )
+}
+
 function TaskList({
-  list, error, loadingOlder, olderError, onOlder, selectedId, hiddenOnSmall, tasksEnabled, canSearchJobs, onOpen, onAsk, onNewJobSearch, onHelp, onRetry,
+  tabs, list, error, loadingOlder, olderError, onOlder, selectedId, hiddenOnSmall, tasksEnabled, canSearchJobs, onOpen, onAsk, onNewJobSearch, onHelp, onRetry,
 }: {
+  /** The Tasks | Recaps switch, in place of the heading, when recaps are offered. */
+  tabs: React.ReactNode
   list: AgentTaskList | null
   loadingOlder: boolean
   olderError: string | null
@@ -268,8 +347,10 @@ function TaskList({
     <aside className={`min-h-0 w-full shrink-0 flex-col border-r border-w-line bg-w-surface md:w-72 ${hiddenOnSmall ? 'hidden md:flex' : 'flex'}`}>
       <div className="space-y-2 border-b border-w-line px-4 py-3">
         <div className="flex items-center gap-2">
-          <ClipboardList size={15} className="text-w-accent" />
-          <h1 className="flex-1 text-sm font-semibold text-w-text">Tasks</h1>
+          {tabs ?? <>
+            <ClipboardList size={15} className="text-w-accent" />
+            <h1 className="flex-1 text-sm font-semibold text-w-text">Tasks</h1>
+          </>}
           <button type="button" onClick={onHelp} className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-w-dim hover:bg-w-surface2 hover:text-w-text">
             <BookOpen size={12} /> How it works
           </button>
