@@ -131,6 +131,8 @@ page scrolling. `src/styles/admin.css` owns the shared materials, scoped to the
 dark-only admin shell. Admin temporarily overrides the app theme without changing
 the saved preference and has no theme toggle. Use neutral selection and plan labels;
 reserve color for meaningful status, warnings, errors, and data visualizations.
+Use regular-weight controls, lightly weighted headings, flat buttons, and faint
+surface edges; avoid inset bevels, outlined pills, and extra button decoration.
 Pages do not add their own outer width/padding or fixed-height console frame.
 
 - `components/admin/adminNavigation.ts` defines seven sidebar categories and
