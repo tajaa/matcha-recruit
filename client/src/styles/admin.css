@@ -6,13 +6,14 @@ html[data-app-shell-bg="admin"] {
   --admin-floating: rgba(9, 10, 12, .65);
   --admin-rail: rgba(8, 9, 11, .6);
   --admin-field: rgba(0, 0, 0, .25);
-  --admin-edge: rgba(255, 255, 255, .1);
-  --admin-highlight: rgba(255, 255, 255, .1);
+  --admin-edge: rgba(255, 255, 255, .04);
   --admin-hover: rgba(255, 255, 255, .035);
-  --admin-selected: rgba(255, 255, 255, .075);
+  --admin-selected: rgba(255, 255, 255, .06);
   --admin-shadow: 0 8px 24px rgba(0, 0, 0, .16);
-  --admin-inset: inset 0 1px 0 var(--admin-highlight), inset 0 -1px 0 rgba(255, 255, 255, .025);
-  --admin-reflection: linear-gradient(125deg, rgba(255, 255, 255, .055), transparent 35%, transparent 70%, rgba(255, 255, 255, .015));
+  --admin-reflection: linear-gradient(125deg, rgba(255, 255, 255, .025), transparent 35%, transparent 70%, rgba(255, 255, 255, .01));
+  --font-weight-medium: 400;
+  --font-weight-semibold: 450;
+  --font-weight-bold: 500;
   --color-zinc-500: #a1a1a8;
   color-scheme: dark;
 }
@@ -43,7 +44,7 @@ html[data-app-shell-bg="admin"] .admin-shell {
   border: 1px solid var(--admin-edge);
   border-radius: 14px;
   background: var(--admin-reflection), var(--admin-rail);
-  box-shadow: var(--admin-inset), var(--admin-shadow);
+  box-shadow: var(--admin-shadow);
   -webkit-backdrop-filter: blur(32px);
   backdrop-filter: blur(32px);
 }
@@ -64,21 +65,19 @@ html[data-app-shell-bg="admin"] .admin-shell {
 }
 
 .admin-shell .admin-rail nav a[aria-current="page"] {
-  background: var(--admin-reflection), var(--admin-selected);
-  box-shadow: var(--admin-inset), 0 2px 6px rgba(0, 0, 0, .06);
-  font-weight: 500;
+  background: var(--admin-selected);
 }
 
 .admin-shell .admin-rail a[title="Matcha Admin"] span {
   font-family: inherit !important;
-  font-weight: 600;
+  font-weight: 450;
   font-size: 14px;
 }
 
 html[data-app-shell-bg="admin"] :is(.admin-toolbar, .admin-popover) {
   border-color: var(--admin-edge);
   background: var(--admin-reflection), var(--admin-floating);
-  box-shadow: var(--admin-inset), var(--admin-shadow);
+  box-shadow: var(--admin-shadow);
   -webkit-backdrop-filter: blur(32px);
   backdrop-filter: blur(32px);
 }
@@ -86,7 +85,7 @@ html[data-app-shell-bg="admin"] :is(.admin-toolbar, .admin-popover) {
 html[data-app-shell-bg="admin"] .admin-surface {
   border-radius: 10px;
   background: var(--admin-reflection), var(--admin-surface);
-  box-shadow: var(--admin-inset), 0 2px 12px rgba(0, 0, 0, .06);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, .06);
   -webkit-backdrop-filter: blur(20px);
   backdrop-filter: blur(20px);
 }
@@ -107,13 +106,18 @@ html[data-app-shell-bg="admin"] .admin-directory .admin-surface {
 
 html[data-app-shell-bg="admin"] .admin-directory a:hover .admin-surface {
   background-color: var(--admin-hover);
-  border-color: rgba(255, 255, 255, .28);
+  border-color: rgba(255, 255, 255, .08);
 }
 
 html[data-app-shell-bg="admin"] :is(.admin-field, .admin-tabbar) {
   border-color: var(--admin-edge);
   background: var(--admin-field);
-  box-shadow: var(--admin-inset);
+  box-shadow: none;
+}
+
+html[data-app-shell-bg="admin"] .admin-tabbar {
+  border-color: transparent;
+  background: transparent;
 }
 
 html[data-app-shell-bg="admin"] .admin-field {
@@ -126,24 +130,34 @@ html[data-app-shell-bg="admin"] select option {
 }
 
 html[data-app-shell-bg="admin"] .admin-field:focus {
-  border-color: var(--color-zinc-400);
-  --tw-ring-color: var(--admin-edge);
+  border-color: rgba(255, 255, 255, .2);
+  --tw-ring-color: rgba(255, 255, 255, .1);
 }
 
 html[data-app-shell-bg="admin"] .admin-tab[aria-pressed="true"] {
-  background: var(--admin-reflection), var(--admin-selected);
-  box-shadow: var(--admin-inset), 0 1px 4px rgba(0, 0, 0, .1);
+  background: var(--admin-selected);
+  box-shadow: none;
 }
 
 html[data-app-shell-bg="admin"] .admin-button {
   border-radius: 7px;
   padding-block: 4px;
+  font-weight: 400;
+  box-shadow: none;
 }
 
-html[data-app-shell-bg="admin"] .admin-button:is([data-admin-variant="primary"], [data-admin-variant="success"], [data-admin-variant="secondary"]) {
+html[data-app-shell-bg="admin"] .admin-button:is([data-admin-variant="primary"], [data-admin-variant="success"]) {
   color: var(--color-zinc-100);
-  background: var(--admin-reflection), var(--admin-selected);
-  box-shadow: var(--admin-inset), 0 0 0 1px var(--admin-edge);
+  background: rgba(255, 255, 255, .075);
+}
+
+html[data-app-shell-bg="admin"] .admin-button[data-admin-variant="secondary"] {
+  background: rgba(255, 255, 255, .025);
+}
+
+html[data-app-shell-bg="admin"] .admin-button:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, .35);
+  outline-offset: 2px;
 }
 
 html[data-app-shell-bg="admin"] .admin-button:hover:not(:disabled) {
@@ -167,7 +181,7 @@ html[data-app-shell-bg="admin"] .admin-button:hover:not(:disabled) {
 
 html[data-app-shell-bg="admin"] .admin-badge {
   display: inline-block;
-  border: 1px solid var(--admin-edge);
+  border: 1px solid transparent;
   border-radius: 4px;
   padding: 1px 5px;
   background: var(--admin-surface);
@@ -180,13 +194,16 @@ html[data-app-shell-bg="admin"] :is(.admin-table, .admin-list .overflow-hidden:h
   border-color: var(--admin-edge);
   border-radius: 10px;
   background: var(--admin-reflection), var(--admin-surface);
-  box-shadow: var(--admin-inset);
   -webkit-backdrop-filter: blur(20px);
   backdrop-filter: blur(20px);
 }
 
 html[data-app-shell-bg="admin"] :is(.admin-table, .admin-list) thead {
-  background: var(--admin-hover);
+  background: rgba(255, 255, 255, .02);
+}
+
+html[data-app-shell-bg="admin"] :is(.admin-table, .admin-list) :is(thead, tbody, tbody > tr) {
+  border-color: rgba(255, 255, 255, .035);
 }
 
 html[data-app-shell-bg="admin"] :is(.admin-table, .admin-list) tbody tr:hover {
