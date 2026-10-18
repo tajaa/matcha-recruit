@@ -125,10 +125,13 @@ client/src/
 ### Admin pages
 
 `routes/AdminRoutes.tsx` mounts `layouts/AdminLayout.tsx` inside the authenticated
-app shell. Settings is the design reference: one centered `max-w-6xl` canvas,
-small section headings, zinc cards and fields, restrained emerald selection,
-and normal page scrolling. Pages do not add their own outer width/padding or
-fixed-height console frame.
+app shell. The admin design uses one centered `max-w-6xl` canvas,
+small section headings, neutral glass surfaces, compact controls, and normal
+page scrolling. `src/styles/admin.css` owns the shared materials, scoped to the
+dark-only admin shell. Admin temporarily overrides the app theme without changing
+the saved preference and has no theme toggle. Use neutral selection and plan labels;
+reserve color for meaningful status, warnings, errors, and data visualizations.
+Pages do not add their own outer width/padding or fixed-height console frame.
 
 - `components/admin/adminNavigation.ts` defines seven sidebar categories and
   all thirty tool destinations. Six categories open directories at

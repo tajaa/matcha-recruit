@@ -240,19 +240,19 @@ export default function Individuals({ embedded = false }: { embedded?: boolean }
             const warn = !low && pct > 80
             return <tr key={user.user_id} className="hover:bg-zinc-800/20">
               <td className="max-w-60">
-                <Link to={`/admin/companies/${user.company_id}`} title={user.email} className="block truncate font-medium text-zinc-100 hover:text-emerald-400">{user.email}</Link>
+                <Link to={`/admin/companies/${user.company_id}`} title={user.email} className="block truncate font-medium text-zinc-100 hover:text-zinc-300">{user.email}</Link>
                 <div className="mt-0.5 flex items-center gap-2 text-[11px] text-zinc-500"><span className="truncate" title={user.name ?? undefined}>{user.name || '—'}</span>{user.is_suspended && <span className="shrink-0 text-red-300">Suspended</span>}</div>
               </td>
               <td className="whitespace-nowrap">
                 {user.subscription ? <>
-                  <div className="text-zinc-300">{user.subscription.pack_id} · <span className={user.subscription.status === 'active' ? 'text-emerald-400' : 'text-zinc-500'}>{user.subscription.status}</span></div>
+                  <div className="text-zinc-300">{user.subscription.pack_id} · <span className={user.subscription.status === 'active' ? 'text-zinc-200' : 'text-zinc-500'}>{user.subscription.status}</span></div>
                   <div className="mt-0.5 text-[10px] text-zinc-500">{fmtUsd(user.subscription.amount_cents)}{user.subscription.current_period_end && <> · renews {new Date(user.subscription.current_period_end).toLocaleDateString()}</>}</div>
-                </> : user.beta_features?.matcha_work_beta_full ? <span className="rounded border border-violet-500/40 bg-violet-500/10 px-1.5 py-0.5 text-[10px] text-violet-300">Pro · comped</span>
-                  : user.beta_features?.matcha_work_beta_lite ? <span className="rounded border border-sky-500/40 bg-sky-500/10 px-1.5 py-0.5 text-[10px] text-sky-300">Lite · comped</span> : <span className="text-zinc-500">Free</span>}
+                </> : user.beta_features?.matcha_work_beta_full ? <span className="admin-badge">Pro · comped</span>
+                  : user.beta_features?.matcha_work_beta_lite ? <span className="admin-badge">Lite · comped</span> : <span className="text-zinc-500">Free</span>}
               </td>
               <td className="tabular-nums">
                 <span className={low ? 'text-red-400' : warn ? 'text-amber-400' : 'text-zinc-300'}>{formatTokens(user.free_tokens_used)}</span>
-                <div className="mt-1 h-1 w-16 overflow-hidden rounded-full bg-zinc-800" title={`${user.free_tokens_used.toLocaleString()} of ${user.free_token_limit.toLocaleString()} free tokens used`}><div className={`h-full rounded-full ${low ? 'bg-red-500' : warn ? 'bg-amber-500' : 'bg-emerald-500'}`} style={{ width: `${pct}%` }} /></div>
+                <div className="mt-1 h-1 w-16 overflow-hidden rounded-full bg-zinc-800" title={`${user.free_tokens_used.toLocaleString()} of ${user.free_token_limit.toLocaleString()} free tokens used`}><div className={`h-full rounded-full ${low ? 'bg-red-500' : warn ? 'bg-amber-500' : 'bg-zinc-400'}`} style={{ width: `${pct}%` }} /></div>
               </td>
               <td className="whitespace-nowrap tabular-nums" title="Available free and subscription tokens">
                 <span className={low && !user.subscription_tokens_remaining ? 'font-medium text-red-400' : 'text-zinc-300'}>{formatTokens(user.free_tokens_remaining + user.subscription_tokens_remaining)}</span>

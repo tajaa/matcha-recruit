@@ -287,12 +287,12 @@ export default function Settings() {
               <Card
                 key={m.id}
                 className={`flex items-center gap-4 p-4 cursor-pointer transition-colors ${
-                  selectedMode === m.id ? 'border-emerald-500 bg-emerald-950/20' : 'hover:border-zinc-700'
+                  selectedMode === m.id ? 'border-zinc-500 bg-zinc-800/30' : 'hover:border-zinc-700'
                 }`}
                 onClick={() => setPendingMode(m.id)}
               >
                 <div className={`h-3 w-3 rounded-full border-2 shrink-0 ${
-                  selectedMode === m.id ? 'border-emerald-500 bg-emerald-500' : 'border-zinc-600'
+                  selectedMode === m.id ? 'border-zinc-300 bg-zinc-300' : 'border-zinc-600'
                 }`} />
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-zinc-100">
