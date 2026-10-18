@@ -156,8 +156,11 @@ Pages do not add their own outer width/padding or fixed-height console frame.
   or list/detail columns on the same open canvas.
 - The browser/server error tools share `ErrorConsole`; their containers retain
   separate API contracts, filters, copy payloads, and resolution actions.
-- Pricing is in Products & sales → Pricing, including Compliance, add-ons, Tell-Us,
-  and Espresso. Signup Links keeps comped/bespoke invitations.
+- Pricing is in Products & sales → Pricing. Matcha Incidents and Matcha Scheduler
+  have Stripe catalog controls (`components/admin/StripeCatalogPanel`); other
+  offerings stay in the collapsed Beta products section. Signup Links keeps
+  comped/bespoke invitations. Catalog API/types: `api/admin/stripeCatalog.ts` and
+  `types/stripeCatalog.ts`; signed webhook confirmations are separate from sync success.
 - Page implementation lives in the domain folders listed above; cross-cutting
   display components stay in `components/admin`. The HTTP/auth helper, backend
   permissions, and API payloads stay unchanged by presentation refactors.

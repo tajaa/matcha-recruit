@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 
 from app.core.services.stripe_service import StripeService, StripeServiceError
 from app.core.services.product_definitions import product_for_pack_id
+from app.core.services.stripe_catalog import CATALOG_EVENTS, reconcile_catalog_event
 from app.core.services.stripe_events import (
     CONSUMER_CORE,
     claim_stripe_event,
@@ -73,6 +74,12 @@ async def stripe_webhook(request: Request):
         return {"status": "duplicate", "event_id": event_id}
 
     try:
+        if event_type in CATALOG_EVENTS:
+            await reconcile_catalog_event(
+                event_object, livemode=bool(getattr(event, "livemode", False)),
+                account=getattr(event, "account", None),
+            )
+            return {"received": True}
         return await _route_event(event_type, event_object)
     except Exception:
         # Critical path failure — release the dedupe row so Stripe's

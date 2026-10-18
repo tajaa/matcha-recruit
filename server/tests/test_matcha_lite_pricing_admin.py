@@ -243,6 +243,8 @@ async def test_put_saves_when_the_loaded_version_is_current(monkeypatch):
     conn.fetchrow = AsyncMock(side_effect=[_EXISTING, saved])
     conn.execute = AsyncMock()
     monkeypatch.setattr(f"{MOD}.get_connection", _conn_ctx(conn))
+    stripe_sync = AsyncMock()
+    monkeypatch.setattr(f"{MOD}.sync_after_save", stripe_sync)
 
     result = await update_matcha_lite_pricing(
         _update_body(price_per_block_cents=4500, block_size=10, expected_updated_at=SAVED_AT.isoformat()),
@@ -251,6 +253,7 @@ async def test_put_saves_when_the_loaded_version_is_current(monkeypatch):
     )
 
     assert result.price_per_block_cents == 4500
+    stripe_sync.assert_awaited_once_with("incidents", changed_by="admin@example.com")
     # The version check is not part of the price, so it stays out of the history.
     _, _, old_values, new_values = conn.execute.call_args.args
     assert "updated_at" not in old_values

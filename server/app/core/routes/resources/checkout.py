@@ -13,6 +13,7 @@ from app.core.models.auth import CurrentUser
 from app.core.dependencies import get_optional_user
 from app.matcha.dependencies import require_client, get_client_company_id
 from app.core.services.redis_cache import check_rate_limit, client_ip
+from app.core.services.stripe_catalog import SCHEDULER_SLUG, checkout_line_item
 
 from app.core.routes.resources._shared import *  # noqa: F401,F403  (router objects + shared models/consts)
 logger = logging.getLogger(__name__)
@@ -118,6 +119,9 @@ async def create_lite_checkout(
             success_url=body.success_url,
             cancel_url=body.cancel_url,
             is_essentials=(row["signup_source"] == "matcha_lite_essentials"),
+            line_item=await checkout_line_item(
+                "incidents", row["signup_source"], headcount=headcount, amount_cents=amount_cents,
+            ),
         )
     except StripeServiceError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -214,6 +218,10 @@ async def create_custom_product_checkout(
             amount_cents=amount_cents or 0,
             success_url=body.success_url,
             cancel_url=body.cancel_url,
+            line_item=await checkout_line_item(
+                "scheduler", "scheduler", headcount=headcount, locations=location_count,
+                amount_cents=amount_cents or 0,
+            ) if product.slug == SCHEDULER_SLUG else None,
         )
     except StripeServiceError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -385,6 +393,9 @@ async def create_lite_upgrade_checkout(
             old_subscription_id=base_sub["stripe_subscription_id"],
             success_url=body.success_url,
             cancel_url=body.cancel_url,
+            line_item=await checkout_line_item(
+                "incidents", "matcha_lite", headcount=headcount, amount_cents=amount_cents,
+            ),
         )
     except StripeServiceError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

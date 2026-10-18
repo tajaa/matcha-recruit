@@ -43,7 +43,7 @@ Web `/work/*` (business) + `/espresso/*` (personal) and macOS **Espresso** (`pla
 ### Custom products — the admin product builder (`/admin/products`)
 Data-driven alternative to the ~10-touchpoint hardcoded products above — composed at `/admin/products`, live at `/p/<slug>/signup`. Materialized (not overlaid) grants, `product:<slug>` signup_source namespacing, per-seat/block/flat/free/contact-sales pricing.
 
-**Prices** for Lite/Essentials, the scheduling products and the Espresso plans are edited on one admin page, `/admin/pricing`. Every checkout builds its Stripe price inline from the database row, so a save there is what the next checkout charges; current subscribers keep their price. → `docs/PRODUCTS.md` §Pricing
+**Prices** are managed at `/admin/pricing`. Only **Matcha Incidents** (the existing Lite/Essentials plans) and **Matcha Scheduler** (`schedule-comm`) are commercial: admin saves sync reusable Stripe Products/Prices, checkout uses their IDs, and signed catalog webhooks confirm changes. Other offerings remain in the beta section. Current subscribers keep their price. → `docs/PRODUCTS.md` §Pricing
 
 Full mechanics (routers, endpoints, migrations, invariants) for every product above: `docs/PRODUCTS.md`.
 

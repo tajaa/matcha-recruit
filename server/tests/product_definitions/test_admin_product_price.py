@@ -51,6 +51,8 @@ async def test_price_change_updates_only_the_price_and_snapshots(monkeypatch):
     current = _row()
     conn, ctx = _conn(current, _row(price_cents=4500, updated_by=ADMIN.email))
     monkeypatch.setattr(routes, "get_connection", ctx)
+    stripe_sync = AsyncMock()
+    monkeypatch.setattr(routes, "sync_after_save", stripe_sync)
 
     result = await routes.set_product_price(current["id"], routes.PriceChange(price_cents=4500), ADMIN)
 
@@ -62,6 +64,7 @@ async def test_price_change_updates_only_the_price_and_snapshots(monkeypatch):
     assert update_args == [4500, ADMIN.email, current["id"]]
     history_sql = conn.execute.await_args.args[0]
     assert "product_definition_history" in history_sql
+    stripe_sync.assert_awaited_once_with("scheduler", changed_by=ADMIN.email)
 
 
 @pytest.mark.asyncio
