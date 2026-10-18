@@ -92,6 +92,31 @@ async def test_capture_acks_frames_and_stops_without_replaying_browser_actions(m
 
 
 @pytest.mark.asyncio
+async def test_a_frame_arriving_after_the_page_closed_is_dropped_quietly(monkeypatch):
+    # Seen on dev: the last screencast frame lands after the page closed, and
+    # its ack raised TargetClosedError out of the event callback.
+    class Closed(CDP):
+        async def send(self,name,params=None):
+            if name=="Page.screencastFrameAck":
+                self.commands.append((name,params))
+                raise RuntimeError("Target page, context or browser has been closed")
+            return await super().send(name,params)
+    conn=Conn();conn.fetchval.return_value=True;wire(monkeypatch,capture,conn)
+    monkeypatch.setattr(settings,"enabled",lambda:True);monkeypatch.setattr(settings,"available",lambda _:True)
+    monkeypatch.setattr(capture,"get_settings",lambda:SimpleNamespace(espresso_recaps_capture_enabled=True))
+    monkeypatch.setattr(scope,"source_for_run",AsyncMock(return_value=source()))
+    cdp=Closed();page=SimpleNamespace(context=SimpleNamespace(new_cdp_session=AsyncMock(return_value=cdp)))
+    token=scope.current_run.set(RUN)
+    try:
+        async with capture.window(page) as window:
+            window.accepted=True
+            await cdp.callback({"sessionId":2,"data":base64.b64encode(b"late frame").decode()})
+    finally:scope.current_run.reset(token)
+    assert ("Page.screencastFrameAck",{"sessionId":2}) in cdp.commands
+    assert window._kept is not None and window._kept[1]==[]
+
+
+@pytest.mark.asyncio
 async def test_refused_navigation_never_attaches_captured_frames(monkeypatch):
     conn=Conn();conn.fetchval.return_value=True;wire(monkeypatch,capture,conn)
     monkeypatch.setattr(settings,"enabled",lambda:True);monkeypatch.setattr(settings,"available",lambda _:True)

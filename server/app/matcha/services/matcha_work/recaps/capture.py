@@ -104,7 +104,13 @@ async def window(page, result: Window | None = None):
                 elapsed = time.monotonic() - started
                 # Ack every received frame, including discarded ones. No model
                 # or browser action waits for an encoder.
-                await cdp.send("Page.screencastFrameAck", {"sessionId": event["sessionId"]})
+                try:
+                    await cdp.send("Page.screencastFrameAck", {"sessionId": event["sessionId"]})
+                except Exception:
+                    # A frame still in flight when the page closes has no one to
+                    # ack. Raised here, it would surface as an asyncio callback
+                    # ERROR (a server error report) for a view that succeeded.
+                    return
                 if elapsed > 8 or len(frames) >= 64 or (frames and elapsed - frames[-1][0] < 0.125):
                     return
                 raw = event.get("data", "")
