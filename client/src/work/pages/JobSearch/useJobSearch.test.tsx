@@ -235,4 +235,32 @@ describe('useJobSearch inside Tasks', () => {
     expect(result.current.detail?.status).toBe('done')
     expect(mock.list).not.toHaveBeenCalled()
   })
+
+  it('guards retained mutation callbacks while the owning task is deleting, then allows recovery', async () => {
+    mock.get.mockResolvedValue(search())
+    mock.lead.mockResolvedValue(job())
+    mock.update.mockResolvedValue(job({ user_state: 'saved' }))
+    const { result, rerender } = renderHook(
+      ({ deleting }) => useJobSearch('s1', 'l1', { list: false, mutationsDisabled: deleting }),
+      { initialProps: { deleting: false } },
+    )
+    await act(async () => {})
+    const actions = result.current
+    rerender({ deleting: true })
+    await act(async () => {
+      await actions.setLeadState('saved', 'l1')
+      await actions.saveNotes('Notes to keep', 'l1')
+      await actions.redraft()
+      expect(await actions.draftEmail('l1')).toBeNull()
+      expect(await actions.draftEmail('l1', true)).toBeNull()
+      await actions.rerank({ base: 1, bonus: 0, equity: 0, fit: 0 })
+    })
+    expect(mock.update).not.toHaveBeenCalled()
+    expect(mock.redraft).not.toHaveBeenCalled()
+    expect(mock.email).not.toHaveBeenCalled()
+    expect(mock.rerank).not.toHaveBeenCalled()
+    rerender({ deleting: false })
+    await act(async () => { await actions.setLeadState('saved', 'l1') })
+    expect(mock.update).toHaveBeenCalledWith('s1', 'l1', { user_state: 'saved' })
+  })
 })

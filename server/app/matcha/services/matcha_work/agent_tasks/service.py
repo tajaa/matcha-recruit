@@ -159,6 +159,23 @@ async def list_tasks(user_id: UUID, company_id: UUID, *, engines: tuple[str, ...
     return [task_view(row) for row in rows]
 
 
+async def find_search_task(user_id: UUID, company_id: UUID, search_id: UUID) -> dict:
+    """Resolve an old search link without the recent task list's limit.
+
+    Read-only: missing or deleted pointers/searches are not recreated.
+    """
+    async with connection_or_direct() as conn:
+        row = await conn.fetchrow(
+            f"""{_SELECT}
+                WHERE t.user_id = $1 AND t.company_id = $2 AND t.job_search_id = $3
+                  AND t.engine = 'job_search' AND t.deleted_at IS NULL AND {job_tasks.VISIBLE}""",
+            user_id, company_id, search_id,
+        )
+    if row is None:
+        raise AgentTaskError("Job search not found.", 404)
+    return task_view(row)
+
+
 async def summary(user_id: UUID, company_id: UUID, *, engines: tuple[str, ...] = ENGINES) -> dict:
     """What the sidebar row shows: running, waiting for the person, finished unseen."""
     async with connection_or_direct() as conn:

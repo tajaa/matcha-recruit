@@ -269,8 +269,14 @@ opens the search's own ranked jobs and job pane, using the components in
 with New job search, lists it, and deletes it through its pointer task.
 The old `/espresso/jobs` redirects to Tasks; `/espresso/jobs/:searchId?job=`
 looks up the pointer task and redirects to its `?item=` link (or Tasks when
-none is found). The search guide opens on first use after the Tasks guide,
-and can be reopened from the search header.
+none is found). It resolves through `GET /agent-tasks/for-search/{search_id}`,
+a read-only lookup scoped to the owner and workspace, so the recent task
+list's 50-row limit never drops an older link. Deleted searches and pointers
+are not recreated. While Tasks deletes a search, both its search controls and
+lead mutations are held; a failed deletion makes them available again.
+The new-search form reports initialization failures and retries in place,
+preserving the person's fields. The search guide opens on first use after
+the Tasks guide, and can be reopened from the search header.
 `jobSearchLogic.ts` ports `JobSearchViewModel`'s rules (filters, the 3/5
 widen count, Next steps progress, `parseBaseFloor`, `retryIsNewRequest`, pay
 lines) with tests, and `useJobSearch.ts` polls `/status` every 5 s only while

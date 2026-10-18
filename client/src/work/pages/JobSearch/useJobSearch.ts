@@ -29,7 +29,10 @@ const POLL_MS = 5_000
  * list has no beat of its own here, so a change that lands while a list read
  * is out asks for the list again instead of leaving it unread.
  */
-export function useJobSearch(searchId: string | undefined, leadId: string | null, { list: withList = true } = {}) {
+export function useJobSearch(
+  searchId: string | undefined, leadId: string | null,
+  { list: withList = true, mutationsDisabled = false } = {},
+) {
   const [list, setList] = useState<JobSearchList | null>(null)
   const [listError, setListError] = useState<string | null>(null)
   const [loadedDetail, setDetail] = useState<JobSearchDetail | null>(null)
@@ -56,6 +59,9 @@ export function useJobSearch(searchId: string | undefined, leadId: string | null
   const detailRef = useRef(detail)
   const shownLeadRef = useRef<string | null>(lead?.id ?? null)
   const busyRef = useRef(false)
+  // Deleting the owning task holds changes, including callbacks retained by
+  // a menu opened before deletion began. Reads may continue until unmount.
+  const mutationsDisabledRef = useRef(mutationsDisabled)
   const listSeq = useRef(0)
   /** The newest list read still on its way (0: none). */
   const listOut = useRef(0)
@@ -67,6 +73,7 @@ export function useJobSearch(searchId: string | undefined, leadId: string | null
     leadRef.current = leadId
     detailRef.current = detail
     shownLeadRef.current = lead?.id ?? null
+    mutationsDisabledRef.current = mutationsDisabled
   })
 
   const setError = useCallback((message: string | null) => {
@@ -181,7 +188,7 @@ export function useJobSearch(searchId: string | undefined, leadId: string | null
   /** One change at a time. A change made from a job's pane reports there
    *  (`fromLead`), since below the widest layout the pane covers the search. */
   const perform = useCallback(async (fallback: string, action: () => Promise<void>, fromLead?: string) => {
-    if (busyRef.current) return
+    if (busyRef.current || mutationsDisabledRef.current) return
     busyRef.current = true
     setBusy(true)
     setError(null)

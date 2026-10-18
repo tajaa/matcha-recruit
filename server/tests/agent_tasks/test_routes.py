@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from app.core.models.auth import CurrentUser
 from app.matcha.models.matcha_work.agent_tasks import AgentTaskCreate, ItemPatch, RoundCreate
 from app.matcha.routes.matcha_work import agent_tasks as routes
+from tests._helpers.routes import iter_api_routes
 
 USER = CurrentUser(id=uuid4(), email="owner@example.test", role="client")
 TID, IID, CID = uuid4(), uuid4(), uuid4()
@@ -98,6 +99,22 @@ async def test_a_form_is_submitted_through_intake(monkeypatch):
     body = FormAnswer(values={"location": "SF"})
     assert await routes.answer_agent_task_form(TID, body, USER) == {"id": "task"}
     assert answer.await_args.args == (USER, TID, body)
+
+
+@pytest.mark.asyncio
+async def test_search_lookup_is_scoped_to_the_caller_and_workspace(monkeypatch):
+    lookup = AsyncMock(return_value={"id": str(TID), "job_search_id": str(IID)})
+    monkeypatch.setattr(routes, "get_client_company_id", AsyncMock(return_value=CID))
+    monkeypatch.setattr(routes.service, "find_search_task", lookup)
+    assert await routes.get_search_task(IID, USER) == {"id": str(TID), "job_search_id": str(IID)}
+    lookup.assert_awaited_once_with(USER.id, CID, IID)
+    lookup.side_effect = routes.service.AgentTaskError("Job search not found.", 404)
+    with pytest.raises(HTTPException) as exc:
+        await routes.get_search_task(IID, USER)
+    assert exc.value.status_code == 404
+    paths = {r.path for r in iter_api_routes(routes.router)}
+    assert "/agent-tasks/for-search/{search_id}" in paths
+    assert routes.router.dependencies[0].dependency is routes.require_tasks
 
 
 @pytest.mark.asyncio

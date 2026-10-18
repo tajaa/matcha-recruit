@@ -100,6 +100,13 @@ async def answer_agent_task_form(
     return await _call(intake.answer_form(current_user, prompt_id, body))
 
 
+@router.get("/for-search/{search_id}")
+async def get_search_task(search_id: UUID, current_user: CurrentUser = Depends(require_admin_or_client)):
+    """The caller's task for a search, including searches outside the recent list."""
+    company_id = await _company(current_user)
+    return await _call(service.find_search_task(current_user.id, company_id, search_id))
+
+
 @router.get("/{task_id}")
 async def get_agent_task(task_id: UUID, current_user: CurrentUser = Depends(require_admin_or_client)):
     return await _call(service.get_task(task_id, current_user.id))

@@ -31,7 +31,7 @@ export default function JobSearchPane({
 }) {
   const base = useWorkBase()
   const navigate = useNavigate()
-  const js = useJobSearch(searchId, leadId, { list: false })
+  const js = useJobSearch(searchId, leadId, { list: false, mutationsDisabled: deleting })
   const [helpOpen, setHelpOpen] = useState(false)
   const [guideDone, setGuideDone] = useState(guideSeen)
   const [draftedLeadId, setDraftedLeadId] = useState<string | null>(null)
@@ -112,7 +112,7 @@ export default function JobSearchPane({
           loadError={js.leadLoadError}
           error={js.leadError}
           canDraft={canDraft(detail)}
-          busy={js.busy}
+          busy={js.busy || deleting}
           emailNotConnected={js.emailNotConnected}
           emailDrafted={draftedLeadId === leadId}
           emailDraftGone={js.emailDraftGone}

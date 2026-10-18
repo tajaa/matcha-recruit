@@ -20,8 +20,10 @@ const inputClass = 'w-full rounded-md border border-w-line bg-w-surface2/60 px-2
  * their data, and starts only once they agree. Mirrors the macOS app's
  * New job search sheet.
  */
-export default function NewJobSearchModal({ list, onCreate, onCreated, onClose }: {
+export default function NewJobSearchModal({ list, loadError, onRetry, onCreate, onCreated, onClose }: {
   list: JobSearchList | null
+  loadError?: string | null
+  onRetry?: () => void
   onCreate: (body: JobSearchCreate) => Promise<JobSearchSummary>
   onCreated: (search: JobSearchSummary) => void
   onClose: () => void
@@ -49,7 +51,7 @@ export default function NewJobSearchModal({ list, onCreate, onCreated, onClose }
   const needsConsent = !(consent?.granted ?? false)
   const floor = parseBaseFloor(baseFloor)
   const canStart = ask.trim().length >= 3 && anyWeightAboveZero(weights) && (!needsConsent || agreed)
-    && !starting && !uploading && floor.kind !== 'invalid'
+    && !!list && !loadError && !starting && !uploading && floor.kind !== 'invalid'
   const usage = usageLine(list?.usage)
 
   useEffect(() => {
@@ -259,6 +261,13 @@ export default function NewJobSearchModal({ list, onCreate, onCreated, onClose }
             </div>
           )}
 
+          {loadError && (
+            <div role="alert" className="space-y-2 rounded-lg bg-amber-500/10 p-3 text-[11px] text-amber-500">
+              <p>{loadError}</p>
+              {onRetry && <button type="button" onClick={onRetry} className="font-semibold text-w-accent hover:underline">Try again</button>}
+            </div>
+          )}
+          {!list && !loadError && <p role="status" className="text-[11px] text-w-dim">Loading job search…</p>}
           {error && <p role="alert" className="text-[11px] text-amber-500">{error}</p>}
         </div>
 

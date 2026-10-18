@@ -3,8 +3,7 @@ import { Navigate, useParams, useSearchParams } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { useMe } from '../../hooks/useMe'
 import { useWorkBase } from '../routes/WorkSurfaceContext'
-import { listAgentTasks } from '../api/matchaWork/agentTasks'
-import { taskForSearch } from '../components/tasks/tasksLogic'
+import { getAgentTaskForSearch } from '../api/matchaWork/agentTasks'
 
 /** Old Job search links open the search's task, preserving the named job. */
 export default function JobSearchRedirect() {
@@ -17,8 +16,8 @@ export default function JobSearchRedirect() {
   useEffect(() => {
     if (!searchId || loading || !isPersonal) return
     let cancelled = false
-    void listAgentTasks().then(
-      (list) => { if (!cancelled) setResolved({ searchId, taskId: taskForSearch(searchId, list.tasks)?.id ?? null }) },
+    void getAgentTaskForSearch(searchId).then(
+      (task) => { if (!cancelled) setResolved({ searchId, taskId: task.id }) },
       () => { if (!cancelled) setResolved({ searchId, taskId: null }) },
     )
     return () => { cancelled = true }

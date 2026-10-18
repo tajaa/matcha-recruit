@@ -22,6 +22,9 @@ const taskPath = (id: string) => `${BASE}/${encodeURIComponent(id)}`
 const itemPath = (taskId: string, itemId: string) => `${taskPath(taskId)}/items/${encodeURIComponent(itemId)}`
 
 export const listAgentTasks = () => api.get<AgentTaskList>(BASE)
+/** Resolve a search's pointer without the recent list's 50-task limit. */
+export const getAgentTaskForSearch = (searchId: string) =>
+  api.get<AgentTask>(`${BASE}/for-search/${encodeURIComponent(searchId)}`)
 /** The sidebar row's counts: running, waiting for the person, finished unseen. */
 export const getAgentTasksSummary = () => api.get<AgentTasksSummary>(`${BASE}/summary`)
 /** Opening a finished task marks it seen. */

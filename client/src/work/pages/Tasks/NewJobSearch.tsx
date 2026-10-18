@@ -8,5 +8,14 @@ export default function NewJobSearch({ onCreated, onClose }: {
   onClose: () => void
 }) {
   const js = useJobSearch(undefined, null)
-  return <NewJobSearchModal list={js.list} onCreate={js.create} onCreated={onCreated} onClose={onClose} />
+  return (
+    <NewJobSearchModal
+      list={js.list}
+      loadError={js.listError}
+      onRetry={() => void js.loadList()}
+      onCreate={js.create}
+      onCreated={onCreated}
+      onClose={onClose}
+    />
+  )
 }

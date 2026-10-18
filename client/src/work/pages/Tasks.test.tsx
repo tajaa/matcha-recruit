@@ -172,6 +172,58 @@ describe('job searches in Tasks', () => {
     expect(screen.getByTestId('location')).toHaveTextContent('/espresso/tasks/t1')
   })
 
+  it('disables lead mutations during task deletion and restores them when deletion fails', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    mock.lead.mockResolvedValue({ ...lead, approach: { ...lead.approach, summary: 'Approach the hiring team.' } })
+    let rejectDeletion!: (reason: Error) => void
+    mock.remove.mockReturnValue(new Promise((_resolve, reject) => { rejectDeletion = reject }))
+    renderAt('/espresso/tasks/t1?item=l1')
+    await screen.findByRole('heading', { name: 'COO' })
+    fireEvent.change(screen.getByLabelText('Your notes'), { target: { value: 'Keep my note' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Mark…' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Delete this search' }))
+    await waitFor(() => expect(mock.remove).toHaveBeenCalledWith('t1'))
+    expect(screen.getByRole('button', { name: 'Draft email' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Mark…' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Redraft' })).toBeDisabled()
+    // A menu that was already open can still call its old handler.
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Saved' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Draft email' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Redraft' }))
+    expect(mock.update).not.toHaveBeenCalled()
+    expect(mock.email).not.toHaveBeenCalled()
+    await act(async () => rejectDeletion(new Error('offline')))
+    expect(screen.getByRole('button', { name: 'Draft email' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled()
+    expect(screen.getByLabelText('Your notes')).toHaveValue('Keep my note')
+  })
+
+  it('retries failed form initialization without losing entered fields', async () => {
+    mock.searches.mockRejectedValueOnce(new Error('offline')).mockResolvedValue({
+      searches: [], available: true, usage: null,
+      consent: { granted: false, disclosure: { version: 'jobs-1', title: 'What Job search shares', body: ['Search terms go to job sites.'] } },
+    })
+    renderAt()
+    fireEvent.click(await screen.findByRole('button', { name: 'New job search…' }))
+    const form = await screen.findByRole('dialog', { name: 'New job search' })
+    fireEvent.change(within(form).getByLabelText('What are you looking for?'), { target: { value: 'COO roles in Austin' } })
+    fireEvent.change(within(form).getByLabelText('Titles (optional)'), { target: { value: 'COO' } })
+    expect(await within(form).findByRole('alert')).toHaveTextContent("Couldn't load your job searches.")
+    expect(within(form).getByRole('button', { name: 'Start search' })).toBeDisabled()
+    expect(mock.create).not.toHaveBeenCalled()
+    fireEvent.click(within(form).getByRole('button', { name: 'Try again' }))
+    await waitFor(() => expect(within(form).queryByRole('alert')).not.toBeInTheDocument())
+    expect(within(form).getByLabelText('What are you looking for?')).toHaveValue('COO roles in Austin')
+    expect(within(form).getByLabelText('Titles (optional)')).toHaveValue('COO')
+    expect(within(form).getByRole('button', { name: 'Start search' })).toBeDisabled()
+    fireEvent.click(within(form).getByRole('checkbox', { name: 'I agree' }))
+    expect(within(form).getByRole('button', { name: 'Start search' })).toBeEnabled()
+    expect(mock.searches).toHaveBeenCalledTimes(2)
+    expect(mock.create).not.toHaveBeenCalled()
+  })
+
   it('opens the form in place, only loading its list while mounted', async () => {
     renderAt()
     await screen.findByRole('heading', { name: 'COO roles' })
