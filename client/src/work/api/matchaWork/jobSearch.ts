@@ -151,11 +151,14 @@ export interface JobSearchUsage {
   resets_at: string | null
 }
 
-export interface JobSearchList {
-  searches: JobSearchSummary[]
+export interface JobSearchSetup {
   usage: JobSearchUsage | null
   consent: { granted: boolean; disclosure: AssistantDisclosure | null } | null
   available: boolean
+}
+
+export interface JobSearchList extends JobSearchSetup {
+  searches: JobSearchSummary[]
 }
 
 export interface JobSearchCreate {
@@ -183,6 +186,7 @@ const searchPath = (id: string) => `${BASE}/${encodeURIComponent(id)}`
 const leadPath = (searchId: string, leadId: string) => `${searchPath(searchId)}/leads/${encodeURIComponent(leadId)}`
 
 export const listJobSearches = () => api.get<JobSearchList>(BASE)
+export const getJobSearchSetup = () => api.get<JobSearchSetup>(`${BASE}/setup`)
 export const createJobSearch = (body: JobSearchCreate) => api.post<JobSearchSummary>(BASE, body)
 export const getJobSearch = (id: string) => api.get<JobSearchDetail>(searchPath(id))
 export const getJobSearchStatus = (id: string) => api.get<JobSearchStatusView>(`${searchPath(id)}/status`)

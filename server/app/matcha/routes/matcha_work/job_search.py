@@ -44,6 +44,19 @@ async def list_job_searches(current_user: CurrentUser = Depends(require_admin_or
     company_id = await _company(current_user)
     return {
         "searches": await service.list_searches(current_user.id, company_id),
+        **await _setup(current_user),
+    }
+
+
+@router.get("/setup")
+async def job_search_setup(current_user: CurrentUser = Depends(require_admin_or_client)):
+    """Consent and allowance for the form, without loading search history or lead counts."""
+    await _company(current_user)
+    return await _setup(current_user)
+
+
+async def _setup(current_user: CurrentUser):
+    return {
         "usage": await quota.job_search_usage(current_user.id),
         "consent": {
             "granted": await enqueue.consent_granted(current_user.id),

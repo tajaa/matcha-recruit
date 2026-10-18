@@ -37,6 +37,17 @@ async function opened(itemId: string | null) {
 }
 
 describe('useTasks reads and changes', () => {
+  it('bundles a deep-linked finding before either the list or task has resolved', async () => {
+    const initial = deferred<AgentTaskDetail>()
+    mock.get.mockReturnValue(initial.promise)
+    const { result } = await opened('i1')
+    expect(mock.get).toHaveBeenCalledWith('t1', 'i1')
+    expect(mock.item).not.toHaveBeenCalled()
+    await act(async () => { initial.resolve(task({ selected_item: finding('new') })) })
+    expect(result.current.item?.title).toBe('The Avery')
+    expect(mock.item).not.toHaveBeenCalled()
+  })
+
   it("doesn't let a read that left before \"Search more\" put the finished task back", async () => {
     mock.get.mockResolvedValueOnce(task())
     const { result } = await opened(null)
@@ -55,8 +66,7 @@ describe('useTasks reads and changes', () => {
   })
 
   it("doesn't let a finding read that left before a Save undo it", async () => {
-    mock.get.mockResolvedValue(task())
-    mock.item.mockResolvedValueOnce(finding('new'))
+    mock.get.mockResolvedValue(task({ selected_item: finding('new') }))
     const { result } = await opened('i1')
     expect(result.current.item?.user_state).toBe('new')
 
@@ -89,8 +99,7 @@ describe('useTasks reads and changes', () => {
 
 describe('useTasks finding errors', () => {
   it("says a finding couldn't load, with no task-wide error, and clears it on a retry", async () => {
-    mock.get.mockResolvedValue(task())
-    mock.item.mockRejectedValueOnce(new ApiError('Finding not found.', 404, {}))
+    mock.get.mockResolvedValue(task({ selected_item_error: 'Finding not found.' }))
     const { result } = await opened('i1')
     expect(result.current.item).toBeNull()
     expect(result.current.itemLoadError).toBe('Finding not found.')
@@ -109,8 +118,7 @@ describe('useTasks finding errors', () => {
   })
 
   it('reports a change made from the pane in the pane', async () => {
-    mock.get.mockResolvedValue(task())
-    mock.item.mockResolvedValue(finding('new'))
+    mock.get.mockResolvedValue(task({ selected_item: finding('new') }))
     const { result } = await opened('i1')
 
     mock.update.mockRejectedValueOnce(new ApiError('Too many changes.', 429, {}))
@@ -153,5 +161,42 @@ describe('useTasks polling', () => {
     await opened(null)
     await act(async () => { await vi.advanceTimersByTimeAsync(4_000) })
     expect(mock.status).toHaveBeenCalledWith('t1')
+  })
+})
+
+describe('Tasks history', () => {
+  it('keeps older pages across recent refreshes, including one overlapping a page load', async () => {
+    const recent = { id: 'new', status: 'done', created_at: '2026-10-17T00:00:00+00:00' }
+    const older = { id: 'old', status: 'done', created_at: '2026-10-16T00:00:00+00:00' }
+    mock.list.mockResolvedValue({ tasks: [recent], next_cursor: 'next' })
+    const { result } = renderHook(() => useTasks(undefined, null))
+    await act(async () => {})
+    const history = deferred<{ tasks: typeof older[]; next_cursor: null }>()
+    mock.list.mockReturnValueOnce(history.promise)
+    let loading = Promise.resolve()
+    act(() => { loading = result.current.loadOlder() })
+    await act(async () => { await result.current.loadList() })
+    await act(async () => { history.resolve({ tasks: [older], next_cursor: null }); await loading })
+    expect(result.current.list?.tasks.map((t) => t.id)).toEqual(['new', 'old'])
+    await act(async () => { await result.current.loadList() })
+    expect(result.current.list?.tasks.map((t) => t.id)).toEqual(['new', 'old'])
+    expect(result.current.list?.next_cursor).toBeNull()
+  })
+
+  it('retries a failed history page and prevents duplicate page requests', async () => {
+    mock.list.mockResolvedValueOnce({ tasks: [], next_cursor: 'next' })
+    const { result } = renderHook(() => useTasks(undefined, null))
+    await act(async () => {})
+    mock.list.mockRejectedValueOnce(new Error('offline'))
+    await act(async () => { await result.current.loadOlder() })
+    expect(result.current.olderError).toBe("Couldn't load older tasks.")
+    const page = deferred<{ tasks: []; next_cursor: null }>()
+    mock.list.mockReturnValueOnce(page.promise)
+    let loading = Promise.resolve()
+    act(() => { loading = result.current.loadOlder(); void result.current.loadOlder() })
+    expect(mock.list).toHaveBeenCalledTimes(3)
+    await act(async () => { page.resolve({ tasks: [], next_cursor: null }); await loading })
+    expect(result.current.olderError).toBeNull()
+    expect(result.current.loadingOlder).toBe(false)
   })
 })

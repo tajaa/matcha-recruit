@@ -79,3 +79,16 @@ def test_request_bodies_are_bounded():
         JobSearchCreate(request_id=uuid4(), ask="x")
     with pytest.raises(ValidationError):
         JobSearchCreate(request_id=uuid4(), ask="COO roles", surprise=True)
+
+
+@pytest.mark.asyncio
+async def test_form_setup_does_not_load_search_history(monkeypatch):
+    history = AsyncMock()
+    monkeypatch.setattr(routes, "get_client_company_id", AsyncMock(return_value=CID))
+    monkeypatch.setattr(routes.service, "list_searches", history)
+    monkeypatch.setattr(routes.quota, "job_search_usage", AsyncMock(return_value={"remaining": 3}))
+    monkeypatch.setattr(routes.enqueue, "consent_granted", AsyncMock(return_value=False))
+    result = await routes.job_search_setup(USER)
+    assert result["usage"] == {"remaining": 3} and result["consent"]["granted"] is False
+    assert "searches" not in result and result["available"] is True
+    history.assert_not_awaited()

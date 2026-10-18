@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -147,16 +148,36 @@ _COUNTS = f"""(SELECT COUNT(*) FROM mw_agent_task_items i WHERE i.task_id = t.id
 _SELECT = f"SELECT t.*, {_COUNTS} FROM mw_agent_tasks t {job_tasks.JOIN}"
 
 
-async def list_tasks(user_id: UUID, company_id: UUID, *, engines: tuple[str, ...] = ENGINES) -> list[dict]:
+async def list_tasks(user_id: UUID, company_id: UUID, *, engines: tuple[str, ...] = ENGINES,
+                     before: tuple[datetime, UUID] | None = None, limit: int = MAX_LIST) -> list[dict]:
+    boundary = "AND (t.created_at, t.id) < ($4, $5)" if before else ""
     async with connection_or_direct() as conn:
         rows = await conn.fetch(
             f"""{_SELECT}
                 WHERE t.user_id = $1 AND t.company_id = $2 AND t.deleted_at IS NULL
                   AND t.engine = ANY($3::text[]) AND {job_tasks.VISIBLE}
-                ORDER BY t.created_at DESC LIMIT {MAX_LIST}""",
-            user_id, company_id, list(engines),
+                  {boundary}
+                ORDER BY t.created_at DESC, t.id DESC LIMIT {limit}""",
+            user_id, company_id, list(engines), *(before or ()),
         )
     return [task_view(row) for row in rows]
+
+
+async def list_task_page(user_id: UUID, company_id: UUID, *, engines=ENGINES, cursor: str | None = None) -> dict:
+    before = None
+    if cursor:
+        try:
+            stamp, task_id = cursor.split("|", 1)
+            created = datetime.fromisoformat(stamp)
+            if created.tzinfo is None:
+                raise ValueError("Timezone required")
+            before = (created, UUID(task_id))
+        except (ValueError, TypeError) as exc:
+            raise AgentTaskError("Invalid task history cursor.", 400) from exc
+    tasks = await list_tasks(user_id, company_id, engines=engines, before=before, limit=MAX_LIST + 1)
+    page = tasks[:MAX_LIST]
+    next_cursor = f"{page[-1]['created_at']}|{page[-1]['id']}" if len(tasks) > MAX_LIST else None
+    return {"tasks": page, "next_cursor": next_cursor}
 
 
 async def find_search_task(user_id: UUID, company_id: UUID, search_id: UUID) -> dict:
@@ -250,10 +271,18 @@ async def _job_task(conn, task, user_id: UUID, *, mark_seen: bool) -> dict:
     }
 
 
-async def get_task(task_id: UUID, user_id: UUID, *, mark_seen: bool = True) -> dict:
+async def get_task(task_id: UUID, user_id: UUID, *, mark_seen: bool = True, job_summary: bool = False) -> dict:
     async with connection_or_direct() as conn:
         task = await owned_task(conn, task_id, user_id)
         if _search_id(task) is not None:
+            if job_summary:
+                if task.get("js_status") is None or task.get("js_deleted_at") is not None:
+                    raise AgentTaskError("Job search not found.", 404)
+                view = task_view(task)
+                if mark_seen and view["completed_at"] is not None and view["status"] in RESTING:
+                    await conn.execute("UPDATE mw_agent_tasks SET seen_at = NOW() WHERE id = $1", task_id)
+                    view["unseen"] = False
+                return {**view, "fingerprint": fingerprint(task)}
             return await _job_task(conn, task, user_id, mark_seen=mark_seen)
         rows = await conn.fetch(
             f"SELECT * FROM mw_agent_task_items WHERE task_id = $1 {_ITEM_ORDER} LIMIT {MAX_ITEMS_SHOWN}",
@@ -264,8 +293,11 @@ async def get_task(task_id: UUID, user_id: UUID, *, mark_seen: bool = True) -> d
         )
         if mark_seen and task["completed_at"] is not None and task["status"] in RESTING:
             await conn.execute("UPDATE mw_agent_tasks SET seen_at = NOW() WHERE id = $1", task_id)
+    view = task_view(task)
+    if mark_seen and task["completed_at"] is not None and task["status"] in RESTING:
+        view["unseen"] = False
     return {
-        **task_view(task),
+        **view,
         "fingerprint": fingerprint(task),
         "plan": plan_view(dict(task)),
         "rounds": [round_view(r) for r in rounds],

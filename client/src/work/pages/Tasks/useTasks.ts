@@ -27,6 +27,8 @@ const LIST_MS = 30_000
  */
 export function useTasks(taskId: string | undefined, itemId: string | null) {
   const [list, setList] = useState<AgentTaskList | null>(null)
+  const [loadingOlder, setLoadingOlder] = useState(false)
+  const [olderError, setOlderError] = useState<string | null>(null)
   const [listError, setListError] = useState<string | null>(null)
   const [loadedDetail, setDetail] = useState<AgentTaskDetail | null>(null)
   const [detailFailure, setDetailFailure] = useState<Tagged | null>(null)
@@ -43,19 +45,31 @@ export function useTasks(taskId: string | undefined, itemId: string | null) {
   const itemError = itemFailure && itemFailure.id === itemId ? itemFailure.message : null
   const error = failure && failure.id === taskId ? failure.message : null
 
+  const open = detail ?? list?.tasks.find((task) => task.id === taskId)
+  const jobSearchId = open && isJobSearch(open) ? open.job_search_id : null
+  const chainDetail = jobSearchId ? null : detail
+
   const taskRef = useRef(taskId)
   const itemRef = useRef(itemId)
-  const detailRef = useRef(detail)
+  const detailRef = useRef(chainDetail)
   const shownItemRef = useRef<string | null>(item?.id ?? null)
   const busyRef = useRef(false)
   const listSeq = useRef(0)
+  const historySeq = useRef(0)
+  const olderBusy = useRef(false)
+  const historyLoaded = useRef(false)
+  const seen = useRef(new Map<string, string>())
+  const bundledItem = useRef<{ task: string; item: string | null } | null>(null)
+  const listRef = useRef(list)
   const detailSeq = useRef(0)
+  const detailOut = useRef(0)
   const itemSeq = useRef(0)
   // Before any effect below reads them.
   useLayoutEffect(() => {
+    listRef.current = list
     taskRef.current = taskId
     itemRef.current = itemId
-    detailRef.current = detail
+    detailRef.current = chainDetail
     shownItemRef.current = item?.id ?? null
   })
 
@@ -71,17 +85,28 @@ export function useTasks(taskId: string | undefined, itemId: string | null) {
    *  than it, so their answers are dropped. */
   const supersede = useCallback((finding = false) => {
     listSeq.current += 1
+    historySeq.current += 1
     detailSeq.current += 1
     if (finding) itemSeq.current += 1
   }, [])
 
-  /** The list again. The open task stays seen while it is on screen. */
+  /** Refresh recent tasks, keeping any older history the person has opened. */
   const loadList = useCallback(() => {
     const seq = ++listSeq.current
     return listAgentTasks().then(
       (loaded) => {
         if (seq !== listSeq.current) return null
-        setList({ ...loaded, tasks: loaded.tasks.map((t) => (t.id === taskRef.current ? { ...t, unseen: false } : t)) })
+        loaded = { ...loaded, tasks: loaded.tasks.map((task) =>
+          task.completed_at && seen.current.get(task.id) === task.completed_at ? { ...task, unseen: false } : task) }
+        setList((prev) => {
+          if (!prev || !historyLoaded.current || !loaded.next_cursor) return loaded
+          const last = loaded.tasks.at(-1)
+          const older = last ? prev.tasks.filter((t) =>
+            !loaded.tasks.some((fresh) => fresh.id === t.id)
+            && ((t.created_at ?? '') < (last.created_at ?? '')
+              || (t.created_at === last.created_at && t.id < last.id))) : []
+          return { ...loaded, tasks: [...loaded.tasks, ...older], next_cursor: prev.next_cursor }
+        })
         setListError(null)
         return loaded
       },
@@ -92,32 +117,67 @@ export function useTasks(taskId: string | undefined, itemId: string | null) {
     )
   }, [])
 
+  const loadOlder = useCallback(async () => {
+    const cursor = listRef.current?.next_cursor
+    if (!cursor || olderBusy.current) return
+    olderBusy.current = true
+    historyLoaded.current = true
+    setLoadingOlder(true)
+    setOlderError(null)
+    const asked = historySeq.current
+    try {
+      const loaded = await listAgentTasks(cursor)
+      if (asked !== historySeq.current) return
+      setList((prev) => prev && prev.next_cursor === cursor ? {
+        ...prev, next_cursor: loaded.next_cursor,
+        tasks: [...prev.tasks, ...loaded.tasks.filter((t) => !prev.tasks.some((old) => old.id === t.id))],
+      } : prev)
+    } catch (e) {
+      setOlderError(errorText(e, "Couldn't load older tasks."))
+    } finally {
+      olderBusy.current = false
+      setLoadingOlder(false)
+    }
+  }, [])
+
   /** A task as the server has it now: on screen if it's still the open one,
    *  and in the list either way (opening it is what marks it seen). */
   const apply = useCallback((loaded: AgentTaskDetail) => {
+    if (loaded.completed_at && loaded.unseen === false) seen.current.set(loaded.id, loaded.completed_at)
     if (taskRef.current === loaded.id) {
       setDetail(loaded)
       setDetailFailure(null)
     }
-    const seen = { ...rowOf(loaded), unseen: false }
+    const row = rowOf(loaded)
     setList((prev) => prev && {
       ...prev,
       tasks: prev.tasks.some((t) => t.id === loaded.id)
-        ? prev.tasks.map((t) => (t.id === loaded.id ? seen : t))
-        : [seen, ...prev.tasks],
+        ? prev.tasks.map((t) => (t.id === loaded.id ? row : t))
+        : [row, ...prev.tasks],
     })
   }, [])
 
-  const loadDetail = useCallback((id: string) => {
+  const loadDetail = useCallback((id: string, withItem = true) => {
     const seq = ++detailSeq.current
-    return getAgentTask(id).then(
-      (loaded) => { if (seq === detailSeq.current) apply(loaded) },
+    detailOut.current = seq
+    const selected = withItem && taskRef.current === id ? itemRef.current : null
+    if (withItem) bundledItem.current = { task: id, item: selected }
+    const findingSeq = withItem ? ++itemSeq.current : itemSeq.current
+    return getAgentTask(id, selected).then(
+      (loaded) => {
+        if (seq !== detailSeq.current) return
+        apply(loaded)
+        if (selected && findingSeq === itemSeq.current && taskRef.current === id && itemRef.current === selected) {
+          if (loaded.selected_item) { setItem(loaded.selected_item); setItemLoadFailure(null) }
+          if (loaded.selected_item_error) setItemLoadFailure({ id: selected, message: loaded.selected_item_error })
+        }
+      },
       (e: unknown) => {
         if (seq === detailSeq.current && taskRef.current === id) {
           setDetailFailure({ id, message: errorText(e, "Couldn't load this task.") })
         }
       },
-    )
+    ).finally(() => { if (detailOut.current === seq) detailOut.current = 0 })
   }, [apply])
 
   /** The open finding again. A failure is shown in its pane only when there is
@@ -143,17 +203,17 @@ export function useTasks(taskId: string | undefined, itemId: string | null) {
     if (taskId) void loadDetail(taskId)
   }, [taskId, loadDetail])
 
-  // Job searches load their leads through useJobSearch. The generic item
-  // endpoint refuses them, so wait until we know which engine owns this task.
-  const open = detail ?? list?.tasks.find((task) => task.id === taskId)
-  const canLoadItem = !!open && !isJobSearch(open)
+  // A deep link bundles its finding with the initial workspace read. Later
+  // finding selections use the item endpoint; searches own their lead reads.
   useEffect(() => {
-    if (itemId && taskId && canLoadItem) void refreshItem(itemId)
-  }, [taskId, itemId, canLoadItem, refreshItem])
+    if (!itemId || !taskId || !chainDetail) return
+    if (bundledItem.current?.task === taskId && bundledItem.current.item === itemId) return
+    void refreshItem(itemId)
+  }, [taskId, itemId, chainDetail, refreshItem])
 
   // The poll: a live task's cheap status, a full reload only on a change; the
   // list on its slower beat. One timer, re-armed for the open task's pace.
-  const live = !!detail && !isJobSearch(detail) && isLive(detail)
+  const live = !!chainDetail && isLive(chainDetail)
   useEffect(() => {
     let polling = false
     let sinceList = 0
@@ -164,13 +224,12 @@ export function useTasks(taskId: string | undefined, itemId: string | null) {
       try {
         const current = detailRef.current
         const id = taskRef.current
-        if (id && current && current.id === id && !isJobSearch(current) && isLive(current)) {
+        if (id && current && current.id === id && isLive(current)) {
           const asked = detailSeq.current
           const status = await getAgentTaskStatus(id)
           // Something newer than this status landed while it was out: the next tick looks again.
           if (taskRef.current === id && detailSeq.current === asked && statusChanged(current, status)) {
             await loadDetail(id)
-            if (itemRef.current) await refreshItem(itemRef.current)
             if (!isLive(status)) await loadList()
           }
         }
@@ -187,6 +246,15 @@ export function useTasks(taskId: string | undefined, itemId: string | null) {
     }, every)
     return () => window.clearInterval(timer)
   }, [live, loadDetail, refreshItem, loadList])
+
+  const syncSearchStatus = useCallback(async (status: string) => {
+    if (busyRef.current || detailOut.current) return
+    const mapped = ['done', 'failed', 'cancelled', 'queued'].includes(status) ? status : 'running'
+    const current = listRef.current?.tasks.find((t) => t.id === taskRef.current)
+    if (taskRef.current && (!current || current.status !== mapped || current.unseen)) {
+      await loadDetail(taskRef.current)
+    }
+  }, [loadDetail])
 
   /** One change at a time. A change made from a finding's pane reports there
    *  (`finding`), since below the widest layout the pane covers the task. */
@@ -237,7 +305,7 @@ export function useTasks(taskId: string | undefined, itemId: string | null) {
     if (!task) return Promise.resolve()
     return perform("Couldn't save that.", async () => {
       await changeItem(() => updateAgentTaskItem(task, id, { user_state: state }))
-      await loadDetail(task)
+      await loadDetail(task, false)
     }, id)
   }, [perform, changeItem, loadDetail])
 
@@ -291,7 +359,8 @@ export function useTasks(taskId: string | undefined, itemId: string | null) {
   }, [perform, supersede, loadList])
 
   return {
-    list, listError, loadList,
+    list, listError, loadList, loadingOlder, olderError, loadOlder,
+    open, jobSearchId, chainDetail, syncSearchStatus,
     detail, detailError, loadDetail,
     item, itemLoadError, itemError, setItemError,
     reloadItem: () => (itemRef.current ? refreshItem(itemRef.current) : Promise.resolve()),
@@ -307,6 +376,9 @@ function rowOf(detail: AgentTaskDetail): AgentTask {
   delete row.plan
   delete row.rounds
   delete row.items
+  delete row.selected_item
+  delete row.selected_item_id
+  delete row.selected_item_error
   return row
 }
 

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.core.models.auth import CurrentUser
 from app.matcha.dependencies import get_client_company_id, require_admin_or_client
@@ -77,10 +77,11 @@ async def tasks_summary(current_user: CurrentUser = Depends(require_admin_or_cli
 
 
 @router.get("")
-async def list_agent_tasks(current_user: CurrentUser = Depends(require_admin_or_client)):
+async def list_agent_tasks(current_user: CurrentUser = Depends(require_admin_or_client),
+                           cursor: str | None = Query(default=None, max_length=100)):
     company_id = await _company(current_user)
     return {
-        "tasks": await service.list_tasks(current_user.id, company_id, engines=_engines(current_user)),
+        **await _call(service.list_task_page(current_user.id, company_id, engines=_engines(current_user), cursor=cursor)),
         "usage": await allowance.task_usage(current_user.id),
     }
 
@@ -115,6 +116,25 @@ async def get_agent_task(task_id: UUID, current_user: CurrentUser = Depends(requ
 @router.get("/{task_id}/status")
 async def agent_task_status(task_id: UUID, current_user: CurrentUser = Depends(require_admin_or_client)):
     return await _call(service.status_view(task_id, current_user.id))
+
+
+@router.get("/{task_id}/workspace")
+async def agent_task_workspace(
+    task_id: UUID, current_user: CurrentUser = Depends(require_admin_or_client), item_id: UUID | None = None,
+):
+    """Dispatch the web workspace once: search metadata or a task and its selected finding.
+
+    Job search owns its full reads and polling. The original detail endpoint
+    keeps its full job payload for existing app clients.
+    """
+    task = await _call(service.get_task(task_id, current_user.id, job_summary=True))
+    if item_id and task.get("engine") != "job_search":
+        try:
+            task["selected_item"] = await service.get_item(task_id, item_id, current_user.id, user=current_user)
+        except service.AgentTaskError as exc:
+            task["selected_item_error"] = str(exc)
+        task["selected_item_id"] = str(item_id)
+    return task
 
 
 @router.get("/{task_id}/items/{item_id}")

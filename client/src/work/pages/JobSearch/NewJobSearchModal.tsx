@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { FileText, Loader2, X } from 'lucide-react'
 import { ApiError, parsePlanRequired } from '../../../api/client'
 import { getMyResume, uploadMyResume, type ProfileResume } from '../../../api/profileResume'
-import type { JobSearchCreate, JobSearchList, JobSearchSummary, RemotePreference } from '../../api/matchaWork/jobSearch'
+import type { JobSearchCreate, JobSearchSetup, JobSearchSummary, RemotePreference } from '../../api/matchaWork/jobSearch'
 import {
   DEFAULT_WEIGHTS, anyWeightAboveZero, dollars, errorText, parseBaseFloor, retryIsNewRequest, sameWeights,
   splitList, usageLine,
@@ -21,7 +21,7 @@ const inputClass = 'w-full rounded-md border border-w-line bg-w-surface2/60 px-2
  * New job search sheet.
  */
 export default function NewJobSearchModal({ list, loadError, onRetry, onCreate, onCreated, onClose }: {
-  list: JobSearchList | null
+  list: JobSearchSetup | null
   loadError?: string | null
   onRetry?: () => void
   onCreate: (body: JobSearchCreate) => Promise<JobSearchSummary>
@@ -68,6 +68,9 @@ export default function NewJobSearchModal({ list, loadError, onRetry, onCreate, 
 
   useEffect(() => {
     dialogRef.current?.focus()
+  }, [])
+
+  useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !starting) onClose() }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)

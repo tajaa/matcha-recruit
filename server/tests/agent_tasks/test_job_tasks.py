@@ -359,3 +359,26 @@ async def test_tell_sends_the_notification(monkeypatch):
     await notify.tell(FakeConn(), {**task, "status": "cancelled"})
     assert not sent.await_count
     assert isinstance(UUID(str(TASK)), UUID)
+
+
+@pytest.mark.asyncio
+async def test_web_job_metadata_marks_completion_seen_without_reading_the_full_search(conn, monkeypatch):
+    full = AsyncMock()
+    monkeypatch.setattr(job_service, "get_search", full)
+    conn.on("WHERE t.id = $1 AND t.user_id = $2", pointer(js_status="done", js_completed_at=NOW))
+    got = await service.get_task(TASK, USER, job_summary=True)
+    assert got["status"] == "done" and got["unseen"] is False
+    assert "items" not in got and "job_search" not in got and got["fingerprint"]
+    assert conn.ran("SET seen_at = NOW()")
+    full.assert_not_awaited()
+    conn.calls.clear()
+    conn.on("WHERE t.id = $1 AND t.user_id = $2", pointer())
+    await service.get_task(TASK, USER, job_summary=True)
+    assert not conn.ran("SET seen_at")
+    await service.get_task(TASK, USER, job_summary=True, mark_seen=False)
+    assert not conn.ran("SET seen_at")
+    for over in ({"js_status": None}, {"js_deleted_at": NOW}):
+        conn.on("WHERE t.id = $1 AND t.user_id = $2", pointer(**over))
+        with pytest.raises(service.AgentTaskError) as exc:
+            await service.get_task(TASK, USER, job_summary=True)
+        assert exc.value.code == 404

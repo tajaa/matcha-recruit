@@ -105,10 +105,6 @@ export const pollMs = (live: boolean) => (live ? 4_000 : 30_000)
 export const statusChanged = (detail: Pick<AgentTaskDetail, 'fingerprint' | 'status'>, status: AgentTaskStatusView) =>
   status.fingerprint !== detail.fingerprint || status.status !== detail.status
 
-/** The task that is this job search. */
-export const taskForSearch = <T extends AgentTask>(searchId: string, tasks: T[]): T | null =>
-  tasks.find((t) => isJobSearch(t) && t.job_search_id === searchId) ?? null
-
 // ─── A task's detail ───
 
 /** The newest round's summary that says something (a document round never does). */

@@ -5,22 +5,23 @@ import { WorkSurfaceProvider } from '../routes/WorkSurfaceContext'
 import type { AgentTaskDetail } from '../types'
 import type { JobLeadDetail, JobSearchDetail } from '../api/matchaWork/jobSearch'
 import Tasks from './Tasks'
+import JobSearchRedirect from './JobSearch'
 
 const mock = vi.hoisted(() => ({
   list: vi.fn(), task: vi.fn(), item: vi.fn(), remove: vi.fn(), search: vi.fn(), lead: vi.fn(),
   searches: vi.fn(), create: vi.fn(), update: vi.fn(), email: vi.fn(), status: vi.fn(), taskStatus: vi.fn(),
-  tasksEnabled: true, jobSearchEnabled: true, wide: false,
+  lookup: vi.fn(), setup: vi.fn(), tasksEnabled: true, jobSearchEnabled: true, wide: false,
 }))
 vi.mock('../../hooks/useMe', () => ({ useMe: () => ({ isPersonal: true }) }))
 vi.mock('../hooks/useEntitlements', () => ({ useEntitlements: () => mock }))
 vi.mock('../hooks/useTasksSummary', () => ({ notifyTasksChanged: vi.fn() }))
 vi.mock('../../api/profileResume', () => ({ getMyResume: () => Promise.resolve(null), uploadMyResume: vi.fn() }))
 vi.mock('../api/matchaWork/agentTasks', () => ({
-  listAgentTasks: mock.list, getAgentTask: mock.task, getAgentTaskItem: mock.item, deleteAgentTask: mock.remove,
+  getAgentTaskForSearch: mock.lookup, listAgentTasks: mock.list, getAgentTask: mock.task, getAgentTaskItem: mock.item, deleteAgentTask: mock.remove,
   getAgentTaskStatus: mock.taskStatus, updateAgentTaskItem: vi.fn(), startAgentTaskRound: vi.fn(), cancelAgentTask: vi.fn(),
 }))
 vi.mock('../api/matchaWork/jobSearch', () => ({
-  listJobSearches: mock.searches, getJobSearch: mock.search, getJobLead: mock.lead,
+  getJobSearchSetup: mock.setup, listJobSearches: mock.searches, getJobSearch: mock.search, getJobLead: mock.lead,
   createJobSearch: mock.create, updateJobLead: mock.update, draftJobEmail: mock.email,
   getJobSearchStatus: mock.status, redraftJobApproach: vi.fn(), rerankJobSearch: vi.fn(), widenJobSearch: vi.fn(),
   cancelJobSearch: vi.fn(), deleteJobSearch: vi.fn(),
@@ -54,6 +55,7 @@ function renderAt(path = '/espresso/tasks/t1') {
     <MemoryRouter initialEntries={[path]}>
       <WorkSurfaceProvider value="espresso">
         <Routes>
+          <Route path="/espresso/jobs/:searchId" element={<JobSearchRedirect />} />
           <Route path="/espresso/tasks" element={<Tasks />} />
           <Route path="/espresso/tasks/:taskId" element={<Tasks />} />
           <Route path="/espresso/assistant" element={<p>Assistant</p>} />
@@ -75,7 +77,8 @@ beforeEach(() => {
   mock.task.mockResolvedValue(pointer)
   mock.search.mockResolvedValue(search)
   mock.lead.mockResolvedValue(lead)
-  mock.searches.mockResolvedValue({ searches: [search], consent: { granted: true }, usage: null, available: true })
+  mock.lookup.mockResolvedValue({ ...pointer, id: 't2', job_search_id: 's2' })
+  mock.setup.mockResolvedValue({ searches: [search], consent: { granted: true }, usage: null, available: true })
 })
 
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals() })
@@ -106,11 +109,99 @@ describe('job searches in Tasks', () => {
     renderAt()
     await act(async () => {})
     const reads = mock.list.mock.calls.length
+    mock.task.mockResolvedValue(pointer)
     await act(async () => { await vi.advanceTimersByTimeAsync(5_000) })
     expect(mock.status).toHaveBeenCalledTimes(1)
     expect(mock.taskStatus).not.toHaveBeenCalled()
-    expect(mock.list).toHaveBeenCalledTimes(reads + 1)
+    expect(mock.list).toHaveBeenCalledTimes(reads)
+    expect(mock.task).toHaveBeenCalledTimes(2)
     expect(screen.getByRole('button', { name: /My job search/ })).toHaveTextContent('Done')
+  })
+
+  it('keeps field focus when Tasks polls while the new-search form is open', async () => {
+    vi.useFakeTimers()
+    renderAt()
+    await act(async () => {})
+    fireEvent.click(screen.getByRole('button', { name: 'New job search…' }))
+    await act(async () => {})
+    const field = screen.getByLabelText('What are you looking for?')
+    field.focus()
+    fireEvent.change(field, { target: { value: 'Keep typing' } })
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000) })
+    expect(field).toHaveFocus()
+    expect(field).toHaveValue('Keep typing')
+    expect(mock.setup).toHaveBeenCalledTimes(1)
+    expect(mock.searches).not.toHaveBeenCalled()
+  })
+
+  it('opens older job searches through task history and retains them across refreshes', async () => {
+    mock.list.mockResolvedValueOnce({ tasks: [pointer], next_cursor: 'older' })
+      .mockResolvedValueOnce({ tasks: [{ ...pointer, id: 'old-task', job_search_id: 'old-search', title: 'Older search' }], next_cursor: null })
+      .mockResolvedValue({ tasks: [pointer], next_cursor: 'older' })
+    renderAt('/espresso/tasks')
+    fireEvent.click(await screen.findByRole('button', { name: 'Load older tasks' }))
+    const older = await screen.findByRole('button', { name: /Older search/ })
+    expect(mock.list).toHaveBeenCalledWith('older')
+    fireEvent.click(older)
+    expect(screen.getByTestId('location')).toHaveTextContent('/espresso/tasks/old-task')
+  })
+
+  it('does not duplicate a slow metadata read while marking an opened search seen', async () => {
+    vi.useFakeTimers()
+    const loading = new Promise<AgentTaskDetail>(() => {})
+    mock.task.mockReturnValue(loading)
+    mock.list.mockResolvedValue({ tasks: [{ ...pointer, unseen: true }] })
+    renderAt()
+    await act(async () => {})
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+    expect(mock.task).toHaveBeenCalledTimes(1)
+    expect(mock.search).toHaveBeenCalledTimes(1)
+  })
+
+  it('loads a search only once and does not immediately reload the task list', async () => {
+    renderAt()
+    await screen.findByRole('heading', { name: 'COO roles' })
+    expect(mock.search).toHaveBeenCalledTimes(1)
+    expect(mock.task).toHaveBeenCalledTimes(1)
+    expect(mock.list).toHaveBeenCalledTimes(1)
+  })
+
+  it('retries persisting a finished search as seen while it remains open', async () => {
+    vi.useFakeTimers()
+    const running = { ...pointer, status: 'running', unseen: false }
+    mock.list.mockResolvedValue({ tasks: [running] })
+    mock.task.mockResolvedValueOnce(running).mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValue({ ...pointer, unseen: false })
+    mock.search.mockResolvedValueOnce({ ...search, status: 'discovering' }).mockResolvedValue(search)
+    mock.status.mockResolvedValue({ id: 's1', status: 'done', fingerprint: 'finished', lead_count: 1 })
+    renderAt()
+    await act(async () => {})
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000) })
+    expect(mock.task).toHaveBeenCalledTimes(2)
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000) })
+    expect(mock.task).toHaveBeenCalledTimes(3)
+    expect(screen.getByRole('button', { name: /My job search/ })).toHaveTextContent('Done')
+    expect(screen.queryByLabelText('New')).not.toBeInTheDocument()
+  })
+
+  it('keeps a newly created search recoverable when list and lookup reads fail', async () => {
+    mock.create.mockResolvedValue({ ...search, id: 's2' })
+    mock.lookup.mockRejectedValueOnce(new Error('offline'))
+    renderAt()
+    fireEvent.click(await screen.findByRole('button', { name: 'New job search…' }))
+    const form = await screen.findByRole('dialog', { name: 'New job search' })
+    await act(async () => {})
+    mock.list.mockRejectedValue(new Error('offline'))
+    fireEvent.change(within(form).getByLabelText('What are you looking for?'), { target: { value: 'COO jobs' } })
+    fireEvent.click(within(form).getByRole('button', { name: 'Start search' }))
+    await screen.findByRole('alert')
+    expect(screen.getByTestId('location')).toHaveTextContent('/espresso/jobs/s2')
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/espresso/tasks/t2'))
+    expect(mock.lookup).toHaveBeenCalledWith('s2')
+    expect(mock.create).toHaveBeenCalledTimes(1)
+    expect(mock.setup).toHaveBeenCalledTimes(1)
+    expect(mock.searches).not.toHaveBeenCalled()
   })
 
   it('opens a job-search row at /tasks and uses item for its selected job', async () => {
@@ -201,7 +292,7 @@ describe('job searches in Tasks', () => {
   })
 
   it('retries failed form initialization without losing entered fields', async () => {
-    mock.searches.mockRejectedValueOnce(new Error('offline')).mockResolvedValue({
+    mock.setup.mockRejectedValueOnce(new Error('offline')).mockResolvedValue({
       searches: [], available: true, usage: null,
       consent: { granted: false, disclosure: { version: 'jobs-1', title: 'What Job search shares', body: ['Search terms go to job sites.'] } },
     })
@@ -210,7 +301,7 @@ describe('job searches in Tasks', () => {
     const form = await screen.findByRole('dialog', { name: 'New job search' })
     fireEvent.change(within(form).getByLabelText('What are you looking for?'), { target: { value: 'COO roles in Austin' } })
     fireEvent.change(within(form).getByLabelText('Titles (optional)'), { target: { value: 'COO' } })
-    expect(await within(form).findByRole('alert')).toHaveTextContent("Couldn't load your job searches.")
+    expect(await within(form).findByRole('alert')).toHaveTextContent("Couldn't load job search setup.")
     expect(within(form).getByRole('button', { name: 'Start search' })).toBeDisabled()
     expect(mock.create).not.toHaveBeenCalled()
     fireEvent.click(within(form).getByRole('button', { name: 'Try again' }))
@@ -220,25 +311,27 @@ describe('job searches in Tasks', () => {
     expect(within(form).getByRole('button', { name: 'Start search' })).toBeDisabled()
     fireEvent.click(within(form).getByRole('checkbox', { name: 'I agree' }))
     expect(within(form).getByRole('button', { name: 'Start search' })).toBeEnabled()
-    expect(mock.searches).toHaveBeenCalledTimes(2)
+    expect(mock.setup).toHaveBeenCalledTimes(2)
     expect(mock.create).not.toHaveBeenCalled()
   })
 
-  it('opens the form in place, only loading its list while mounted', async () => {
+  it('opens the form in place, only loading setup while mounted', async () => {
     renderAt()
     await screen.findByRole('heading', { name: 'COO roles' })
-    expect(mock.searches).not.toHaveBeenCalled()
+    expect(mock.setup).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: 'New job search…' }))
     const form = await screen.findByRole('dialog', { name: 'New job search' })
-    await waitFor(() => expect(mock.searches).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(mock.setup).toHaveBeenCalledTimes(1))
     expect(screen.getByTestId('location')).toHaveTextContent('/espresso/tasks/t1')
     fireEvent.click(within(form).getByRole('button', { name: 'Close' }))
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     expect(mock.create).not.toHaveBeenCalled()
   })
 
-  it('reloads Tasks after creation and opens the new search’s pointer task', async () => {
-    const created = { ...search, id: 's2' }
+  it('resolves the exact task after creation and opens the new search’s pointer task', async () => {
+    const created = { ...search, id: 's2', title: 'New search' }
+    mock.task.mockImplementation(async (id: string) => id === 't2' ? { ...pointer, id, job_search_id: 's2' } : pointer)
+    mock.search.mockImplementation(async (id: string) => id === 's2' ? created : search)
     mock.create.mockImplementation(async () => {
       mock.list.mockResolvedValue({ tasks: [{ ...pointer, id: 't2', job_search_id: 's2' }, pointer] })
       return created
@@ -250,6 +343,9 @@ describe('job searches in Tasks', () => {
     fireEvent.change(within(form).getByLabelText('What are you looking for?'), { target: { value: 'COO roles in Austin' } })
     fireEvent.click(within(form).getByRole('button', { name: 'Start search' }))
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/espresso/tasks/t2'))
+    expect(await screen.findByRole('heading', { name: 'New search' })).toBeInTheDocument()
+    expect(mock.lookup).toHaveBeenCalledWith('s2')
+    expect(mock.create).toHaveBeenCalledTimes(1)
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 

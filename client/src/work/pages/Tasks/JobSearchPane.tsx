@@ -23,7 +23,7 @@ export default function JobSearchPane({
   onSelectLead: (id: string | null) => void
   onBack: () => void
   onDelete: () => void
-  onChanged: () => Promise<unknown>
+  onChanged: (status: string) => Promise<unknown>
   guideBlocked: boolean
   deleting: boolean
   deleteError: string | null
@@ -38,14 +38,14 @@ export default function JobSearchPane({
   const { detail } = js
   const guideOpen = !guideBlocked && (helpOpen || (!!detail && !guideDone))
 
-  // Defer the list refresh out of the effect's synchronous work. The search
-  // owns its polling; Tasks only needs to follow its status in the rail.
+  // The search owns polling. A transition updates task metadata and persists
+  // seen_at; failed metadata reads retry while this search remains open.
   const status = detail?.status
   useEffect(() => {
     if (!status) return
-    let cancelled = false
-    void Promise.resolve().then(() => { if (!cancelled) return onChanged() })
-    return () => { cancelled = true }
+    void onChanged(status)
+    const timer = window.setInterval(() => { if (!document.hidden) void onChanged(status) }, 5_000)
+    return () => window.clearInterval(timer)
   }, [status, onChanged])
 
   // A job no longer in this search (a stale link) closes.

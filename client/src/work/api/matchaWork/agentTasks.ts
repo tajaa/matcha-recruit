@@ -21,14 +21,16 @@ const BASE = '/matcha-work/agent-tasks'
 const taskPath = (id: string) => `${BASE}/${encodeURIComponent(id)}`
 const itemPath = (taskId: string, itemId: string) => `${taskPath(taskId)}/items/${encodeURIComponent(itemId)}`
 
-export const listAgentTasks = () => api.get<AgentTaskList>(BASE)
+export const listAgentTasks = (cursor?: string) =>
+  api.get<AgentTaskList>(cursor ? `${BASE}?cursor=${encodeURIComponent(cursor)}` : BASE)
 /** Resolve a search's pointer without the recent list's 50-task limit. */
 export const getAgentTaskForSearch = (searchId: string) =>
   api.get<AgentTask>(`${BASE}/for-search/${encodeURIComponent(searchId)}`)
 /** The sidebar row's counts: running, waiting for the person, finished unseen. */
 export const getAgentTasksSummary = () => api.get<AgentTasksSummary>(`${BASE}/summary`)
 /** Opening a finished task marks it seen. */
-export const getAgentTask = (id: string) => api.get<AgentTaskDetail>(taskPath(id))
+export const getAgentTask = (id: string, itemId?: string | null) =>
+  api.get<AgentTaskDetail>(`${taskPath(id)}/workspace${itemId ? `?item_id=${encodeURIComponent(itemId)}` : ''}`)
 /** Cheap to poll; the server also restarts a stalled task when asked. */
 export const getAgentTaskStatus = (id: string) => api.get<AgentTaskStatusView>(`${taskPath(id)}/status`)
 /** One finding, with the quote and page behind each fact. */

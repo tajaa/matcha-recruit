@@ -90,11 +90,23 @@ describe('old Job search URLs', () => {
     await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/espresso/tasks/t1?item=l1'))
   })
 
-  it.each(['missing', 'unavailable'])('falls back to Tasks when the task is %s', async (reason) => {
-    mock.lookup.mockRejectedValue(reason === 'missing' ? new ApiError('Job search not found.', 404, {}) : new Error('offline'))
+  it('falls back to Tasks only for a missing search', async () => {
+    mock.lookup.mockRejectedValue(new ApiError('Job search not found.', 404, {}))
     renderAt('/espresso/jobs/s1?job=l1')
     await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/espresso/tasks'))
   })
+
+  it.each([new Error('offline'), new ApiError('Server error', 500, {}), new ApiError('Unavailable', 403, {})])(
+    'preserves a failed deep link and retries without losing the job (%s)', async (failure) => {
+      mock.lookup.mockRejectedValueOnce(failure)
+      renderAt('/espresso/jobs/s1?job=l1')
+      await screen.findByRole('alert')
+      expect(screen.getByTestId('location')).toHaveTextContent('/espresso/jobs/s1?job=l1')
+      fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+      await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/espresso/tasks/t1?item=l1'))
+      expect(mock.lookup).toHaveBeenCalledTimes(2)
+    },
+  )
 
   it('ignores an older lookup after another search is opened', async () => {
     let finish!: (value: { id: string }) => void

@@ -23,6 +23,7 @@ const PAGES: Page[] = [
       'An apartment search takes a rent range and a place to measure from, like “at least 10 miles north or south of Lady Bird Lake.” Each building shows the rents its floor plans list (it fits when any plan is in your range), its distance and direction from there, and any move-in specials its page advertises.',
       'If it needs more, like a move-in date, it posts a short form in the chat. Fill it in, add files if it asks for them, and start it. Typing your answer works too.',
       'Job searches live here too: click New job search, or ask Espresso for one.',
+      'Click Load older tasks at the bottom of the list to browse earlier tasks and job searches.',
       'Running tasks show as a count next to Tasks in the sidebar, with a dot when one needs you.',
     ],
   },

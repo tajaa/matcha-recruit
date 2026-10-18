@@ -9,7 +9,7 @@ import type { AgentTask, AgentTaskAction, AgentTaskItemDetail, AgentTaskList } f
 import type { JobSearchSummary } from '../api/matchaWork/jobSearch'
 import {
   askEspressoPrompt, canFollowUp, displayTitle, groupTasks, isJobSearch, isLive, isWaiting, rowMeta, statusLabel,
-  taskForSearch, usageLine,
+  usageLine,
 } from '../components/tasks/tasksLogic'
 import { useTasks } from './Tasks/useTasks'
 import TaskDetail from './Tasks/TaskDetail'
@@ -55,9 +55,8 @@ function TasksPage() {
   const [guideDone, setGuideDone] = useState(guideSeen)
   const [journalId, setJournalId] = useState<string | null>(null)
   const [acting, setActing] = useState<{ item: AgentTaskItemDetail; action: AgentTaskAction } | null>(null)
-  const { detail, list } = t
-  const open = detail ?? list?.tasks.find((task) => task.id === taskId)
-  const jobSearchId = open && isJobSearch(open) ? open.job_search_id : null
+  const { chainDetail: detail, list, open, jobSearchId } = t
+  const closeNewSearch = useCallback(() => setCreating(false), [])
   const guideOpen = helpOpen || (list !== null && !guideDone)
 
   // The sidebar's count follows what this page has just seen, when that changes.
@@ -82,7 +81,7 @@ function TasksPage() {
 
   // A finding that is no longer in the task (a stale link) closes.
   useEffect(() => {
-    if (detail && !isJobSearch(detail) && itemId && !(detail.items ?? []).some((i) => i.id === itemId)) setItemParam(null)
+    if (detail && itemId && !(detail.items ?? []).some((i) => i.id === itemId)) setItemParam(null)
   }, [detail, itemId, setItemParam])
 
   function closeGuide() {
@@ -112,11 +111,11 @@ function TasksPage() {
     if (await t.remove(open.id)) navigate(`${base}/tasks`, { replace: true })
   }
 
-  async function searchCreated(search: JobSearchSummary) {
+  function searchCreated(search: JobSearchSummary) {
     setCreating(false)
-    const loaded = await t.loadList()
-    const task = taskForSearch(search.id, loaded?.tasks ?? [])
-    navigate(task ? `${base}/tasks/${encodeURIComponent(task.id)}` : `${base}/tasks`)
+    // The exact lookup preserves this search's URL and offers retry if opening
+    // it fails. A list refresh can't lose a successfully created search.
+    navigate(`${base}/jobs/${encodeURIComponent(search.id)}`)
   }
 
   async function makeDocument() {
@@ -128,6 +127,9 @@ function TasksPage() {
       <TaskList
         list={list}
         error={t.listError}
+        loadingOlder={t.loadingOlder}
+        olderError={t.olderError}
+        onOlder={() => void t.loadOlder()}
         selectedId={taskId ?? null}
         hiddenOnSmall={!!taskId}
         tasksEnabled={tasksEnabled}
@@ -150,7 +152,7 @@ function TasksPage() {
             onSelectLead={setItemParam}
             onBack={() => navigate(`${base}/tasks`)}
             onDelete={() => void removeTask()}
-            onChanged={t.loadList}
+            onChanged={t.syncSearchStatus}
             guideBlocked={guideOpen || !list || creating}
             deleting={t.busy}
             deleteError={t.error}
@@ -189,7 +191,7 @@ function TasksPage() {
         )}
       </main>
 
-      {itemId && detail && !jobSearchId && (
+      {itemId && detail && (
         <ItemPane
           item={t.item}
           loadError={t.itemLoadError}
@@ -208,7 +210,7 @@ function TasksPage() {
         />
       )}
 
-      {acting && detail && !jobSearchId && (
+      {acting && detail && (
         <ActionModal
           taskId={detail.id}
           itemId={acting.item.id}
@@ -220,16 +222,19 @@ function TasksPage() {
           }}
         />
       )}
-      {creating && <NewJobSearch onCreated={(search) => void searchCreated(search)} onClose={() => setCreating(false)} />}
+      {creating && <NewJobSearch onCreated={searchCreated} onClose={closeNewSearch} />}
       {guideOpen && <TasksGuide onClose={closeGuide} />}
     </div>
   )
 }
 
 function TaskList({
-  list, error, selectedId, hiddenOnSmall, tasksEnabled, canSearchJobs, onOpen, onAsk, onNewJobSearch, onHelp, onRetry,
+  list, error, loadingOlder, olderError, onOlder, selectedId, hiddenOnSmall, tasksEnabled, canSearchJobs, onOpen, onAsk, onNewJobSearch, onHelp, onRetry,
 }: {
   list: AgentTaskList | null
+  loadingOlder: boolean
+  olderError: string | null
+  onOlder: () => void
   error: string | null
   selectedId: string | null
   hiddenOnSmall: boolean
@@ -322,6 +327,11 @@ function TaskList({
             </section>
           ))
         )}
+        {olderError && <p role="alert" className="p-2 text-xs text-amber-500">{olderError}</p>}
+        {list?.next_cursor && <button type="button" onClick={onOlder} disabled={loadingOlder}
+          className="my-3 w-full rounded-md border border-w-line px-3 py-2 text-xs text-w-text disabled:opacity-50">
+          {loadingOlder ? 'Loading…' : 'Load older tasks'}
+        </button>}
       </div>
       {usage && <p className="border-t border-w-line px-4 py-2.5 text-[10px] text-w-dim">{usage}</p>}
     </aside>
