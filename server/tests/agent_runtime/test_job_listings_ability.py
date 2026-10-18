@@ -3,7 +3,7 @@ import pytest
 
 from app.matcha.services.matcha_work.agent_runtime import catalog, result
 from app.matcha.services.matcha_work.agent_runtime.abilities import job_listings as J
-from app.matcha.services.matcha_work.agent_runtime.context import RunState
+from app.matcha.services.matcha_work.agent_runtime.context import RunLimits, RunState
 from app.matcha.services.matcha_work.job_search.providers import Posting
 from app.matcha.services.matcha_work.search_apis import ProviderError
 
@@ -270,3 +270,51 @@ async def test_listing_pages_stop_at_the_runs_budget(monkeypatch, wired):
     st.sessions[J.KEY].paid = J.MAX_PAID - 1
     await find(st, provider, monkeypatch, title="product designer", location="Los Angeles, CA", pages=2)
     assert len(provider.asked) == 1 and st.sessions[J.KEY].paid == J.MAX_PAID
+
+
+def studios(first, last):
+    return [posting("Product Designer", f"Studio{n:02d}", "Los Angeles, CA") for n in range(first, last + 1)]
+
+
+@pytest.mark.asyncio
+async def test_a_call_reads_three_pages_unless_asked_for_fewer(monkeypatch, wired):
+    # One page kept about 5 in LA once the place filter and board copies were out.
+    st = state()
+    provider = Provider((studios(1, 10), "t2"), (studios(11, 20), "t3"), (studios(21, 30), None))
+    out = await find(st, provider, monkeypatch, title="product designer", location="Los Angeles, CA")
+    q = "product designer Los Angeles, CA"
+    assert provider.asked == [(q, None, None), (q, None, "t2"), (q, None, "t3")]
+    assert out.payload["new_jobs"] == 30 and st.sessions[J.KEY].paid == 3
+    lookup = Provider((studios(31, 40), "t2"))
+    await find(st, lookup, monkeypatch, title="product designer", location="Los Angeles, CA", pages=1)
+    assert len(lookup.asked) == 1 and st.sessions[J.KEY].paid == 4
+
+
+@pytest.mark.asyncio
+async def test_a_long_list_reaches_the_model_inside_the_output_budget(monkeypatch, wired):
+    st = state()
+    monkeypatch.setattr(J, "_provider", lambda: Provider((studios(1, 10), "t2"), (studios(11, 20), "t3"),
+                                                         (studios(21, 30), None)))
+    ctx = context(limits=RunLimits(max_tool_output_chars=4000))
+    out = await J.FIND_JOBS.handler(ctx, st, {"title": "product designer", "location": "Los Angeles, CA"}, 120)
+    shown = out.payload["jobs"]
+    assert 10 <= len(shown) < 30 and "not_shown_here" in out.payload and out.payload["new_jobs"] == 30
+    block, warnings = J.gate_block("job_postings", {"job_ids": []}, st)
+    assert len(block["jobs"]) == 30 and block["found"] == 30 and not warnings, "the block has every one"
+
+
+@pytest.mark.asyncio
+async def test_a_search_that_only_finds_repeats_says_so(monkeypatch, wired):
+    st = state()
+    await find(st, Provider((studios(1, 2), None)), monkeypatch, title="product designer", location="Los Angeles, CA")
+    again = await find(st, Provider((studios(1, 2), None)), monkeypatch, title="product designer",
+                       location="Los Angeles, CA")
+    assert again.payload["new_jobs"] == 0 and again.payload["already_found"] == 2
+    assert again.payload["note"] == "Every posting found was already found in this run."
+    far = [posting("Product Designer", "Faraway", "New York, NY")]
+    mixed = await find(st, Provider((studios(1, 1) + far, None)), monkeypatch, title="product designer",
+                       location="Los Angeles, CA")
+    assert mixed.payload["note"] == "Every posting found was outside the place asked for or already found in this run."
+    outside = await find(state(), Provider((far, None)), monkeypatch, title="product designer",
+                         location="Los Angeles, CA")
+    assert outside.payload["note"] == "Every posting found was outside the place asked for."
