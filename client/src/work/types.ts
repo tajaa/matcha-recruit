@@ -1612,6 +1612,8 @@ export type IntakeFormField = {
   optional?: boolean
   /** What it starts with (known already, or the field's default). */
   value?: unknown
+  /** A richer control to draw (`resume`: the saved résumé, or a drop-in). */
+  widget?: string
 }
 
 /** Something a finding can do (buy it, apply), as the server declares it:

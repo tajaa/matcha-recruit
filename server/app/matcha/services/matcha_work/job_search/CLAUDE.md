@@ -130,6 +130,19 @@ Worker: `workers/tasks/job_search.py`. Migration: `mwjobs01`
 - **The résumé never goes to the web run.** Its searches leave for the open
   web, so it gets only the ask, what the person set, the planned titles and
   what was already found (`prompts.discover_turn`).
+- **A suggested direction is the résumé's, word for word.** With a résumé the
+  plan may name up to 3 `directions` (`contracts.MAX_DIRECTIONS`): roles
+  beyond the titles asked for (Solutions Architect for an engineer who led
+  customer integrations), each with `why` and `evidence`. `check_directions`
+  keeps one only when its evidence is in the résumé text (`comp.verify_quote`)
+  and its title isn't one already asked for; no résumé, none. A kept one gets
+  a query of its own and a place among the first titles (board and web
+  searches take the first few), and later phases are told it
+  (`prompts.person_block`): the screen counts it as relevant. `get_search`
+  marks a job `direction` when it is squarely that title
+  (`normalize.title_covers`, every word, level words included) and not the
+  same job as one they asked for. The web shows "Beyond your title" with the
+  quote; the assistant reads them through `read_job_search`.
 
 ## The chain
 
@@ -233,6 +246,28 @@ hint (`service.PAY_LAW_STATES`: the employer-side list plus MA) is set at
 re-rank for unposted pay and given to the approach phase.
 
 ## In the assistant
+
+A run that can look for jobs (`tasks`, `job_listings` or `jobs`) is told
+whether a résumé is saved (`RunContext.saved_resume`, from
+`service.resume_on_file`: name, date, title, never the text). Saved: a
+`job_search` task uses it unless they say not to
+(`abilities/tasks.with_resume_default`). None: the model asks "a quick general
+search here, or a full job search task using your résumé?" (`tasks.QUICK` /
+`WITH_RESUME`); quick is `find_jobs`, résumé is the form below. `start_task`
+with `use_resume` and none saved is refused back to `ask_form`, and
+`job_tasks.start` refuses it too (422 `form_invalid`), for the form and chat
+alike. The form's `use_resume` field carries `widget: "resume"`: the web draws
+the saved résumé or a drop zone (`components/resume/ResumeFormField.tsx`),
+which saves it to the profile at once; asked for with none saved, the field is
+asked switched on (`intake` `prefill`) so the drop zone shows.
+
+The résumé itself is `user_resumes` (`core/routes/identity/profile_resume.py`):
+the original file in the private bucket (SSE-AES256, public access blocked,
+fifteen-minute links), its text and parsed fields in the row. The owner reads
+the text (`GET /users/me/resume`, `text`) and edits it
+(`PUT /users/me/resume/text`: re-parsed, the parsed fields kept if that fails,
+the file untouched); a recruiter's read never carries it. On the web it lives
+in Tasks → Résumé (`/tasks?view=resume`, `components/resume/ResumePane.tsx`).
 
 A quick look at open roles in chat is `agent_runtime/abilities/job_listings.py`
 (`find_jobs`): this package's listings, place filter and `enrich_one`, run in

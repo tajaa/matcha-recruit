@@ -122,9 +122,12 @@ async def test_a_pointer_is_written_with_the_search():
 async def test_starting_a_job_search_task(monkeypatch):
     from app.matcha.services.matcha_work.job_search import enqueue as job_enqueue
 
+    from app.matcha.services.matcha_work.job_search import service as search_service
+
     created = AsyncMock(return_value={"id": str(SEARCH)})
     monkeypatch.setattr(job_enqueue, "create_search", created)
     monkeypatch.setattr(service, "task_for_search", AsyncMock(return_value={"id": "task"}))
+    monkeypatch.setattr(search_service, "resume_on_file", AsyncMock(return_value={"filename": "cv.pdf"}))
     user = SimpleNamespace(id=USER, role="individual")
     body = AgentTaskCreate(request_id=uuid4(), playbook="job_search", directive="COO roles, pay matters most",
                            title="COO roles", consent_version="jobs-1")
@@ -138,6 +141,28 @@ async def test_starting_a_job_search_task(monkeypatch):
     assert create.criteria.titles == ["COO"] and create.criteria.base_floor == 200000
     assert create.use_resume is True and create.consent_version == "jobs-1"
     assert service.task_for_search.await_args.args == (USER, SEARCH)
+
+
+@pytest.mark.asyncio
+async def test_a_resume_search_needs_a_saved_resume(monkeypatch):
+    from app.matcha.services.matcha_work.job_search import enqueue as job_enqueue
+    from app.matcha.services.matcha_work.job_search import service as search_service
+
+    created = AsyncMock()
+    monkeypatch.setattr(job_enqueue, "create_search", created)
+    monkeypatch.setattr(search_service, "resume_on_file", AsyncMock(return_value=None))
+    body = AgentTaskCreate(request_id=uuid4(), playbook="job_search", directive="COO roles")
+    user = SimpleNamespace(id=USER, role="individual")
+    with pytest.raises(HTTPException) as exc:
+        await job_tasks.start(user, COMPANY, body, job_tasks.validate_brief({"titles": ["COO"], "use_resume": True}))
+    assert exc.value.status_code == 422 and exc.value.detail["code"] == "form_invalid"
+    assert exc.value.detail["errors"] == {"use_resume": job_tasks.RESUME_MISSING}
+    assert not created.await_count
+    # Without the résumé, nothing is checked: a general search starts.
+    created.return_value = {"id": str(SEARCH)}
+    monkeypatch.setattr(service, "task_for_search", AsyncMock(return_value={"id": "task"}))
+    await job_tasks.start(user, COMPANY, body, job_tasks.validate_brief({"titles": ["COO"]}))
+    assert created.await_count == 1
 
 
 @pytest.mark.asyncio

@@ -96,7 +96,10 @@ marks that the person was told.
   marks, refine, more and document are refused (409).
 - Start: playbook `job_search` (`startable`, with the chains) builds a
   `JobSearchCreate` from the brief and calls `create_search`, whose gates
-  apply (plan, allowance, `jobs` consent, one live search).
+  apply (plan, allowance, `jobs` consent, one live search). "Use my résumé"
+  with none saved is refused first (`RESUME_MISSING`, 422 `form_invalid` on
+  `use_resume`); how chat chooses between a quick look and a résumé search is
+  in `job_search/CLAUDE.md` ("In the assistant").
 - Who sees them: job search isn't behind the Tasks switch. Someone with job
   search but not Tasks gets the routes, reads and manages their searches, and
   starts nothing else (`routes._engines`).

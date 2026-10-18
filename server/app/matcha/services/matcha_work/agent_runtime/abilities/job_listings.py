@@ -423,8 +423,9 @@ employer's opening.
 job board or only listed on Google Jobs. Pay is only what the posting states, with its quote: say "pay not \
 posted" when it isn't, never estimate one, and when the quote gives several cities' ranges, say whose is whose.
 - Show them with a `job_postings` block (empty job_ids: every job found, live-at-employer first).
-- For a full search (more sources, fit against their résumé, drafted outreach and cover letters), start a \
-job search with start_task (playbook job_search) when you have it; otherwise tell them Job search does that."""
+- A full search (more sources, fit against their résumé, drafted outreach and cover letters, roles beyond \
+their title) is a job_search task: see "Job searches" under Tasks for when to start one or ask. Without \
+Tasks, tell them Job search does that."""
 
 JOB_POSTINGS_BLOCK: dict[str, Any] = {
     "type": "object",

@@ -26,6 +26,7 @@ from ..context import RunContext, RunState
 from ..registry import Ability, AgentTool, ToolOutput
 
 KEY = "tasks"
+JOB_SEARCH = "job_search"
 ALLOWANCE = "agent_tasks"
 PAGE = 20
 MAX_BLOCK_ITEMS = 5
@@ -46,6 +47,13 @@ def _uuid(value: Any, what: str = "a task") -> UUID:
         return UUID(str(value))
     except (TypeError, ValueError) as exc:
         raise ValueError(f"Use the id of {what} you listed or read.") from exc
+
+
+def with_resume_default(ctx: RunContext, brief: dict) -> dict:
+    """A job search uses the saved résumé unless the person said not to."""
+    if ctx.saved_resume is not None and "use_resume" not in brief:
+        return {**brief, "use_resume": True}
+    return brief
 
 
 def _user(ctx: RunContext) -> SimpleNamespace:
@@ -130,6 +138,14 @@ async def _start(ctx: RunContext, state: RunState, args: dict) -> ToolOutput:
         raise ValueError("Use one of the playbooks listed.")
     directive = " ".join(str(args.get("directive") or "").split())
     brief_raw = args.get("brief") if isinstance(args.get("brief"), dict) else {}
+    if playbook.key == JOB_SEARCH:
+        brief_raw = with_resume_default(ctx, brief_raw)
+        if brief_raw.get("use_resume") is True and ctx.saved_resume is None:
+            return ToolOutput(payload={
+                "started": False, "missing": ["use_resume"],
+                "next": "No résumé is saved. Call ask_form for job_search with use_resume missing (the "
+                        "form lets them drop it in), or run find_jobs for a quick general search.",
+            }, status="error")
     values, errors = intake.clean_values(playbook, brief_raw)
     missing = [f.key for f in playbook.intake
                if f.required and f.type not in ("file", "consent") and f.key not in values]
@@ -217,7 +233,31 @@ _ID = {"type": "string"}
 _IDS = {"type": "array", "items": {"type": "string"}}
 
 
-def _prompt(_ctx: RunContext) -> str:
+QUICK = "Quick general search"
+WITH_RESUME = "Full search with my résumé"
+
+
+def job_routing(ctx: RunContext | None) -> str:
+    """How a request for jobs is handled, given whether a résumé is saved."""
+    saved = getattr(ctx, "saved_resume", None)
+    if saved:
+        named = saved["filename"] + (f", updated {saved['updated_at']}" if saved.get("updated_at") else "")
+        return f"""- Job searches. Their résumé is saved ({named}). When they ask you to find jobs or roles for \
+them, start the job_search task with use_resume true (it is the default) unless they ask for a quick look or \
+not to use it. Say you're using their résumé, by its file name, and that it is in Tasks → Résumé, where they \
+can read and edit what Espresso uses. The search also suggests roles beyond their title that their résumé \
+supports. A quick look at what's open ("what's open at Stripe") needs no task: use find_jobs."""
+    return f"""- Job searches. No résumé is saved. When they ask you to find jobs or roles for them and haven't \
+said how, call ask_user once: "Should I run a quick general search here, or a full job search task using \
+your résumé?" with exactly the options "{QUICK}" and "{WITH_RESUME}". {QUICK}: use find_jobs and answer \
+here. {WITH_RESUME}: call ask_form for job_search with use_resume among the missing fields (and any other \
+field still needed); the form lets them drop in their résumé, keeps it private in Tasks → Résumé, and \
+starts the search. \
+Never start a job_search task with use_resume true yourself: there is no résumé to read. A quick look at \
+what's open ("what's open at Stripe") needs no question: use find_jobs."""
+
+
+def _prompt(ctx: RunContext) -> str:
     from app.matcha.services.matcha_work.agent_tasks import allowance, playbooks
 
     def field(f) -> str:
@@ -253,7 +293,8 @@ free, search more costs 1 unit, a document is free.
 Mission"), searches for more, or writes the findings into a document (not a job search: those are \
 re-ranked and redrafted with the job search tools); update_task_item saves or \
 dismisses a finding; cancel_task stops one. To show findings, add a `task` block with the task id and \
-up to 5 finding ids you read."""
+up to 5 finding ids you read.
+""" + job_routing(ctx)
 
 
 TASK_BLOCK = {

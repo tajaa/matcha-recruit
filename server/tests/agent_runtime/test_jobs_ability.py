@@ -130,3 +130,17 @@ def test_block_is_rebuilt_from_what_was_read(run):
     assert ability.gate("jobs", "junk", state)[0] is None
     empty = RunState(started=time.monotonic())
     assert ability.gate("jobs", {"search_id": SEARCH, "job_ids": [LEAD]}, empty)[0] is None
+
+
+@pytest.mark.asyncio
+async def test_the_assistant_reads_the_directions_a_search_suggested(run, monkeypatch):
+    _ability, _state, _ctx, call = run
+    direction = {"title": "Solutions Architect", "why": "You've led 20+ customer calls.", "evidence": "secret quote"}
+    view = {**search_view([lead(direction="Solutions Architect"), lead(id=str(uuid4()), direction=None)]),
+            "plan": {"directions": [direction]}}
+    monkeypatch.setattr(jobs.store, "get_search", AsyncMock(return_value=view))
+    page = await call("read_job_search", search_id=SEARCH)
+    assert page["search"]["directions"] == [{"title": "Solutions Architect", "why": "You've led 20+ customer calls."}]
+    assert [j["direction"] for j in page["jobs"]] == ["Solutions Architect", None]
+    monkeypatch.setattr(jobs.store, "get_search", AsyncMock(return_value=search_view([lead()])))
+    assert (await call("read_job_search", search_id=SEARCH))["search"]["directions"] == []

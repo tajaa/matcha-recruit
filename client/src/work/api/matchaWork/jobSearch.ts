@@ -78,11 +78,24 @@ export interface JobLeadSummary {
   email_draft_id: string | null
   email_drafted_at: string | null
   email_sent_at: string | null
+  /** The suggested direction (a role beyond their title) this job is, if any. */
+  direction?: string | null
+}
+
+/** A role beyond the titles they asked for that their résumé supports,
+ *  suggested by the search's plan. `evidence` is quoted from the résumé
+ *  (checked word for word before it is kept). */
+export interface JobDirection {
+  title: string
+  why: string
+  evidence: string
 }
 
 export interface JobSearchDetail extends JobSearchSummary {
   leads: JobLeadSummary[]
   fingerprint: string
+  /** What the search planned; `directions` only with a résumé. */
+  plan?: { directions?: JobDirection[] } | null
 }
 
 export interface JobSearchStatusView {
