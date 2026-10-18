@@ -460,3 +460,53 @@ describe('agent card helpers', () => {
     expect(splitTicketToken('plain text')).toEqual({ title: null, body: 'plain text' })
   })
 })
+
+describe('AgentCardMessage lists', () => {
+  const v2 = (blocks: unknown[]): AgentChatMetadata => ({
+    kind: 'agent_result',
+    run_id: 'r1',
+    result_v2: { schema: 'agent_result.v2', headline: 'Found them', summary: 'Here they are.', blocks: blocks as never },
+  })
+
+  it('shows places from Google Maps with safe links, folds a long list and offers CSV', () => {
+    const places = Array.from({ length: 10 }, (_, i) => ({
+      id: `P${i + 1}`, name: `Cafe ${i + 1}`, category: 'Coffee shop', rating: 4.5, reviews: 100 + i,
+      address: `${i} Sunset Blvd`, phone: '(213) 555-0001',
+      website: i === 0 ? 'javascript:alert(1)' : `https://cafe${i + 1}.test/`, maps_url: `https://maps.test/p${i + 1}`,
+    }))
+    render(<AgentCardMessage metadata={v2([{ type: 'places', title: 'LA cafes', places, found: 10 }])} content="" />)
+    expect(screen.getByText('LA cafes')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /CSV/ })).toBeTruthy()
+    // A non-http website is never a link.
+    expect(screen.queryByRole('link', { name: 'Cafe 1' })).toBeNull()
+    const site = screen.getByRole('link', { name: 'Cafe 2' })
+    expect(site.getAttribute('href')).toBe('https://cafe2.test/')
+    expect(site.getAttribute('rel')).toBe('noopener noreferrer nofollow')
+    expect(screen.getAllByRole('link', { name: /\(213\) 555-0001/ })[0].getAttribute('href')).toBe('tel:2135550001')
+    expect(screen.queryByText('Cafe 10')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Show all 10' }))
+    expect(screen.getByText('Cafe 10')).toBeTruthy()
+  })
+
+  it('shows job postings with pay as posted and whether each is live at the employer', () => {
+    render(<AgentCardMessage metadata={v2([{ type: 'job_postings', jobs: [
+      { id: 'J1', title: 'Senior Product Designer', company: 'Figma', location: 'Los Angeles, CA', pay: '$180K–$220K', pay_status: 'posted', verified: true, at_employer: true, read_on: 'Greenhouse', apply_url: 'https://job-boards.greenhouse.io/figma/jobs/1' },
+      { id: 'J2', title: 'Product Designer', company: 'Acme', location: 'Santa Monica, CA', pay: 'Pay not posted', pay_status: 'not_disclosed', verified: false },
+      { id: 'J3', title: 'Product Designer', company: 'Plug', location: 'Los Angeles, CA', pay: 'Pay not posted', verified: true, at_employer: false, read_on: 'builtin.com' },
+    ] }])} content="" />)
+    expect(screen.getByText('Live on builtin.com')).toBeTruthy()
+    expect(screen.getByText('$180K–$220K')).toBeTruthy()
+    expect(screen.getByText(/Live at the employer/)).toBeTruthy()
+    expect(screen.getByText('Listed on Google Jobs only')).toBeTruthy()
+    expect(screen.getByRole('link', { name: /Apply/ }).getAttribute('href')).toBe('https://job-boards.greenhouse.io/figma/jobs/1')
+  })
+
+  it('shows jobs from a saved search, which the web used to drop', () => {
+    render(<AgentCardMessage metadata={v2([{ type: 'jobs', search_id: 's1', jobs: [
+      { id: 'l1', rank: 1, title: 'COO', company: 'Headway', location: 'Remote', comp_line: '$250K–$300K', comp_status: 'posted', fit_score: 5, user_state: 'saved' },
+    ] }])} content="" />)
+    expect(screen.getByText('COO')).toBeTruthy()
+    expect(screen.getByText('$250K–$300K')).toBeTruthy()
+    expect(screen.getByText(/fit 5\/5/)).toBeTruthy()
+  })
+})

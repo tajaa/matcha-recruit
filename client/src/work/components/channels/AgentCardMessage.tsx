@@ -15,6 +15,7 @@ import { dayOffset, flightClock, flightDay, flightDuration, stopsText } from '..
 import { isAssistantPrompt } from './agentCardMessageHelpers'
 import { useWorkBase } from '../../routes/WorkSurfaceContext'
 import { IntakeFormCard, TaskCard } from '../tasks/TaskChatCards'
+import { JobPostingsList, PlacesList, SavedJobsList } from './AgentListBlocks'
 
 /**
  * Espresso's agent-card messages in a project chat, rendered as cards instead
@@ -309,7 +310,10 @@ const RESERVATION_TEXT: Record<string, string> = {
 }
 
 function isKnownBlock(block: { type: string }): block is AgentResultBlock {
-  return ['picks', 'flights', 'sections', 'sources', 'photos', 'screenshots', 'emails', 'events', 'reservation', 'purchase_setup'].includes(block.type)
+  return [
+    'picks', 'flights', 'sections', 'sources', 'photos', 'screenshots', 'emails', 'events', 'reservation',
+    'purchase_setup', 'places', 'job_postings', 'jobs',
+  ].includes(block.type)
 }
 
 const SETUP_ANCHOR = { payment_card: 'payment-cards', shipping_address: 'shipping-addresses' } as const
@@ -436,6 +440,12 @@ function Block({ block }: { block: AgentResultBlock }) {
       )
     case 'purchase_setup':
       return block.steps?.length ? <PurchaseSetup block={block} /> : null
+    case 'places':
+      return <PlacesList title={block.title} places={block.places ?? []} found={block.found} />
+    case 'job_postings':
+      return <JobPostingsList jobs={block.jobs ?? []} found={block.found} />
+    case 'jobs':
+      return <SavedJobsList searchId={block.search_id} jobs={block.jobs ?? []} />
     case 'reservation': {
       const link = httpUrl(block.handoff_url)
       return (

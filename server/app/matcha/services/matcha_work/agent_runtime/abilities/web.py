@@ -219,6 +219,8 @@ def brave_tool(*, untrusted: bool = False) -> AgentTool:
         # Brave, then (when it can't answer) the model's own search.
         timeout_seconds=SEARCH_TOOL_SECONDS,
         counts_as_search=True,
+        # The runner counts each search before it starts; Brave paces itself.
+        concurrent=True,
         exhausted_label="Search budget exhausted",
         exhausted_message=SEARCH_EXHAUSTED,
         describe=lambda args: f"Searched: {' '.join(str(args.get('query') or '').split())[:120]}",
@@ -253,6 +255,7 @@ def fetch_tool(*, fetch_page: FetchPage, max_fetches: int, fetch_seconds: float,
         step_kind="fetch",
         handler=handler,
         max_calls=max_fetches,
+        concurrent=True,
         # The page load has its own deadline; this is the backstop around it.
         timeout_seconds=fetch_seconds + 5,
         describe=lambda args: f"Read {host_of(str(args.get('url') or '').strip())}",

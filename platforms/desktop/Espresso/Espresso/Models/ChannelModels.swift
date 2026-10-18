@@ -368,6 +368,107 @@ struct AgentJobsBlock: Codable, Hashable {
     }
 }
 
+/// A business from Google Maps (`abilities/places.py`), as the server rebuilt
+/// it from what the run found: never the model's restatement.
+struct AgentPlace: Codable, Hashable {
+    let id: String
+    let name: String
+    var category: String? = nil
+    var rating: Double? = nil
+    var reviews: Int? = nil
+    var price: String? = nil
+    var address: String? = nil
+    var phone: String? = nil
+    var website: String? = nil
+    var mapsUrl: String? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, category, rating, reviews, price, address, phone, website
+        case mapsUrl = "maps_url"
+    }
+}
+
+struct AgentPlacesBlock: Codable, Hashable {
+    var title: String? = nil
+    let places: [AgentPlace]
+    /// Every place the run found; more than `places` when the answer picked some.
+    var found: Int? = nil
+}
+
+/// An open posting `find_jobs` found (`abilities/job_listings.py`). Pay is the
+/// posting's own; `atEmployer` means read on the employer's ATS or site.
+struct AgentJobPosting: Codable, Hashable {
+    let id: String
+    let title: String
+    let company: String
+    var location: String? = nil
+    var remote: Bool? = nil
+    var posted: String? = nil
+    var pay: String? = nil
+    var payStatus: String? = nil
+    var verified: Bool? = nil
+    var atEmployer: Bool? = nil
+    var readOn: String? = nil
+    var applyUrl: String? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, company, location, remote, posted, pay, verified
+        case payStatus = "pay_status"
+        case atEmployer = "at_employer"
+        case readOn = "read_on"
+        case applyUrl = "apply_url"
+    }
+
+    /// Whether it was found still up, and where.
+    var checked: String {
+        if atEmployer == true { return "Live at the employer" }
+        if verified == true { return "Live on \(readOn.flatMap { $0.isEmpty ? nil : $0 } ?? "a job board")" }
+        return "Listed on Google Jobs only"
+    }
+}
+
+struct AgentJobPostingsBlock: Codable, Hashable {
+    let jobs: [AgentJobPosting]
+    var found: Int? = nil
+}
+
+/// CSV for the lists Espresso finds, so a list goes into a spreadsheet or a
+/// CRM without copying it out of chat. The same columns as the web app's.
+enum AgentListCSV {
+    /// One cell: quoted when it needs to be, and never read as a formula by a
+    /// spreadsheet (a business name can start with "=" or "+").
+    static func cell(_ value: String?) -> String {
+        var text = value ?? ""
+        if let first = text.first, "=+-@\t\r".contains(first) { text = "'" + text }
+        guard text.contains(where: { $0 == "," || $0 == "\"" || $0 == "\n" || $0 == "\r" }) else { return text }
+        return "\"" + text.replacingOccurrences(of: "\"", with: "\"\"") + "\""
+    }
+
+    static func table(_ header: [String], _ rows: [[String?]]) -> String {
+        ([header.map { Optional($0) }] + rows).map { $0.map(cell).joined(separator: ",") }.joined(separator: "\r\n")
+    }
+
+    static func places(_ places: [AgentPlace]) -> String {
+        table(["Name", "Category", "Rating", "Reviews", "Price", "Address", "Phone", "Website", "Google Maps"],
+              places.map { [$0.name, $0.category, $0.rating.map { String($0) }, $0.reviews.map { String($0) },
+                            $0.price, $0.address, $0.phone, $0.website, $0.mapsUrl] })
+    }
+
+    static func jobPostings(_ jobs: [AgentJobPosting]) -> String {
+        table(["Title", "Company", "Location", "Remote", "Pay", "Posted", "Checked", "Apply"],
+              jobs.map { [$0.title, $0.company, $0.location, $0.remote == true ? "yes" : "", $0.pay, $0.posted,
+                          $0.checked, $0.applyUrl] })
+    }
+
+    /// "Independent coffee shops in LA" -> independent-coffee-shops-in-la.csv
+    static func filename(_ title: String?, fallback: String) -> String {
+        let slug = (title ?? "").lowercased()
+            .replacingOccurrences(of: "[^a-z0-9]+", with: "-", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        return (slug.isEmpty ? fallback : String(slug.prefix(60))) + ".csv"
+    }
+}
+
 struct AgentReservation: Codable, Hashable {
     let venue: String
     let when: String
@@ -412,6 +513,8 @@ enum AgentResultBlock: Codable, Hashable {
     case reservation(AgentReservation)
     case purchaseSetup(AgentPurchaseSetup)
     case jobs(AgentJobsBlock)
+    case places(AgentPlacesBlock)
+    case jobPostings(AgentJobPostingsBlock)
     case task(AgentTaskCard)
     case unknown(String)
 
@@ -465,6 +568,18 @@ enum AgentResultBlock: Codable, Hashable {
             } else {
                 self = .unknown(type)
             }
+        case "places":
+            if let block = try? AgentPlacesBlock(from: decoder) {
+                self = .places(block)
+            } else {
+                self = .unknown(type)
+            }
+        case "job_postings":
+            if let block = try? AgentJobPostingsBlock(from: decoder) {
+                self = .jobPostings(block)
+            } else {
+                self = .unknown(type)
+            }
         case "task":
             if let card = try? c.decode(AgentTaskCard.self, forKey: .task) {
                 self = .task(card)
@@ -514,6 +629,12 @@ enum AgentResultBlock: Codable, Hashable {
         case .jobs(let block):
             try block.encode(to: encoder)
             try c.encode("jobs", forKey: .type)
+        case .places(let block):
+            try block.encode(to: encoder)
+            try c.encode("places", forKey: .type)
+        case .jobPostings(let block):
+            try block.encode(to: encoder)
+            try c.encode("job_postings", forKey: .type)
         case .task(let card):
             try c.encode("task", forKey: .type)
             try c.encode(card, forKey: .task)

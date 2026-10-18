@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 /// The Espresso assistant's chat cards (server payloads: agent_runtime/):
 ///
@@ -212,6 +213,10 @@ extension AgentCardMessageView {
                 .buttonStyle(.plain)
                 .help("Open in Job search")
             }
+        case .places(let block):
+            if !block.places.isEmpty { PlacesListView(block: block) }
+        case .jobPostings(let block):
+            if !block.jobs.isEmpty { JobPostingsListView(block: block) }
         case .task(let task):
             // A task the answer is about: its findings open in Tasks.
             ForEach(task.items) { item in
@@ -504,5 +509,235 @@ private struct PurchaseSetupView: View {
         }
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(appState.themeText.opacity(0.04)))
+    }
+}
+
+// MARK: - Lists (places, open roles)
+
+/// Links in a list: http(s) only, and a phone number as `tel:` (FaceTime, or
+/// the iPhone nearby).
+private enum AgentListLinks {
+    static func http(_ string: String?) -> URL? {
+        guard let string, let url = URL(string: string),
+              ["http", "https"].contains(url.scheme?.lowercased() ?? ""), url.host != nil else { return nil }
+        return url
+    }
+
+    static func tel(_ phone: String) -> URL? {
+        let digits = phone.filter { $0.isNumber || $0 == "+" }
+        return digits.isEmpty ? nil : URL(string: "tel:\(digits)")
+    }
+
+    /// Asks where to save, then writes the CSV with a BOM so Excel reads UTF-8 names right.
+    static func save(_ csv: String, name: String) {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = name
+        panel.allowedContentTypes = [.commaSeparatedText]
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        try? ("\u{FEFF}" + csv).write(to: url, atomically: true, encoding: .utf8)
+    }
+}
+
+private struct AgentListHeader: View {
+    @Environment(AppState.self) private var appState
+    let title: String
+    let count: Int
+    let found: Int?
+    let save: () -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(title)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(appState.themeText)
+                .lineLimit(1)
+            Text("\u{00B7} \(count)\(found.map { $0 > count ? " of \($0)" : "" } ?? "")")
+                .font(.system(size: 11))
+                .foregroundColor(appState.themeTextSecondary)
+            Spacer(minLength: 8)
+            Button(action: save) {
+                Label("Save CSV", systemImage: "square.and.arrow.down")
+                    .font(.system(size: 11, weight: .medium))
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .help("Save this list as a CSV file")
+        }
+    }
+}
+
+private struct AgentListFold: View {
+    @Environment(AppState.self) private var appState
+    let total: Int
+    @Binding var showAll: Bool
+
+    var body: some View {
+        if total > AgentListFold.folded {
+            Button(showAll ? "Show fewer" : "Show all \(total)") { showAll.toggle() }
+                .buttonStyle(.plain)
+                .font(.system(size: 11))
+                .foregroundColor(appState.themeTextSecondary)
+        }
+    }
+
+    static let folded = 8
+}
+
+/// Businesses from Google Maps, each with its website, Maps link and phone.
+private struct PlacesListView: View {
+    @Environment(AppState.self) private var appState
+    let block: AgentPlacesBlock
+    @State private var showAll = false
+
+    var body: some View {
+        let shown = showAll ? block.places : Array(block.places.prefix(AgentListFold.folded))
+        VStack(alignment: .leading, spacing: 6) {
+            Divider().opacity(0.5)
+            AgentListHeader(title: block.title.flatMap { $0.isEmpty ? nil : $0 } ?? "Places",
+                            count: block.places.count, found: block.found) {
+                AgentListLinks.save(AgentListCSV.places(block.places),
+                                    name: AgentListCSV.filename(block.title, fallback: "places"))
+            }
+            ForEach(shown, id: \.id) { place in row(place) }
+            AgentListFold(total: block.places.count, showAll: $showAll)
+            Text("From Google Maps. Ratings and hours change; check before you call.")
+                .font(.system(size: 10))
+                .foregroundColor(appState.themeTextSecondary.opacity(0.7))
+        }
+    }
+
+    private func row(_ place: AgentPlace) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(place.name)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(appState.themeText)
+                        .lineLimit(1)
+                        .textSelection(.enabled)
+                    if let rating = place.rating {
+                        HStack(spacing: 2) {
+                            Image(systemName: "star.fill").foregroundColor(.yellow)
+                            Text(String(format: "%.1f", rating)).foregroundColor(appState.themeText)
+                            if let reviews = place.reviews {
+                                Text("(\(reviews.formatted()))").foregroundColor(appState.themeTextSecondary)
+                            }
+                        }
+                        .font(.system(size: 10))
+                    }
+                    if let price = place.price, !price.isEmpty {
+                        Text(price)
+                            .font(.system(size: 10))
+                            .foregroundColor(appState.themeTextSecondary)
+                    }
+                }
+                let line = [place.category, place.address].compactMap { $0 }.filter { !$0.isEmpty }
+                if !line.isEmpty {
+                    Text(line.joined(separator: " \u{00B7} "))
+                        .font(.system(size: 11))
+                        .foregroundColor(appState.themeTextSecondary)
+                        .lineLimit(1)
+                        .textSelection(.enabled)
+                }
+                if let phone = place.phone, !phone.isEmpty {
+                    HStack(spacing: 4) {
+                        if let tel = AgentListLinks.tel(phone) {
+                            Button { NSWorkspace.shared.open(tel) } label: { Image(systemName: "phone") }
+                                .buttonStyle(.plain)
+                                .help("Call \(phone)")
+                        }
+                        Text(phone).textSelection(.enabled)
+                    }
+                    .font(.system(size: 11))
+                    .foregroundColor(appState.themeTextSecondary)
+                }
+            }
+            Spacer(minLength: 0)
+            if let site = AgentListLinks.http(place.website) {
+                Button { NSWorkspace.shared.open(site) } label: { Image(systemName: "globe") }
+                    .buttonStyle(.plain)
+                    .help(site.host() ?? "Website")
+            }
+            if let maps = AgentListLinks.http(place.mapsUrl) {
+                Button { NSWorkspace.shared.open(maps) } label: { Image(systemName: "mappin.and.ellipse") }
+                    .buttonStyle(.plain)
+                    .help("Open in Google Maps")
+            }
+        }
+        .font(.system(size: 12))
+        .foregroundColor(appState.themeTextSecondary)
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(appState.themeText.opacity(0.04)))
+    }
+}
+
+/// Open roles `find_jobs` found: pay as posted, where each was found still up,
+/// and where to apply.
+private struct JobPostingsListView: View {
+    @Environment(AppState.self) private var appState
+    let block: AgentJobPostingsBlock
+    @State private var showAll = false
+
+    var body: some View {
+        let shown = showAll ? block.jobs : Array(block.jobs.prefix(AgentListFold.folded))
+        VStack(alignment: .leading, spacing: 6) {
+            Divider().opacity(0.5)
+            AgentListHeader(title: "Open roles", count: block.jobs.count, found: block.found) {
+                AgentListLinks.save(AgentListCSV.jobPostings(block.jobs), name: "jobs.csv")
+            }
+            ForEach(shown, id: \.id) { job in row(job) }
+            AgentListFold(total: block.jobs.count, showAll: $showAll)
+        }
+    }
+
+    private func row(_ job: AgentJobPosting) -> some View {
+        let place = job.location.flatMap { $0.isEmpty ? nil : $0 } ?? (job.remote == true ? "Remote" : nil)
+        let remoteToo = job.remote == true && (job.location.map { !$0.isEmpty && !$0.lowercased().contains("remote") } ?? false)
+        return VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .top, spacing: 8) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(job.title)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(appState.themeText)
+                        .lineLimit(1)
+                    Text([job.company, place, remoteToo ? "remote" : nil].compactMap { $0 }
+                        .joined(separator: " \u{00B7} "))
+                        .font(.system(size: 11))
+                        .foregroundColor(appState.themeTextSecondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+                if let apply = AgentListLinks.http(job.applyUrl) {
+                    Button { NSWorkspace.shared.open(apply) } label: {
+                        Label("Apply", systemImage: "arrow.up.right.square")
+                            .font(.system(size: 11, weight: .semibold))
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .help(apply.host() ?? "Apply")
+                }
+            }
+            HStack(spacing: 8) {
+                Text(job.pay.flatMap { $0.isEmpty ? nil : $0 } ?? "Pay not posted")
+                    .font(.system(size: 11, weight: job.payStatus == "posted" ? .semibold : .regular))
+                    .foregroundColor(job.payStatus == "posted" ? appState.themeText : appState.themeTextSecondary)
+                if let posted = job.posted, !posted.isEmpty {
+                    Text("Posted \(posted)")
+                        .font(.system(size: 11))
+                        .foregroundColor(appState.themeTextSecondary.opacity(0.8))
+                }
+                if job.atEmployer == true {
+                    Label(job.checked, systemImage: "checkmark.seal.fill")
+                        .font(.system(size: 11))
+                        .foregroundColor(.green)
+                } else {
+                    Text(job.checked)
+                        .font(.system(size: 11))
+                        .foregroundColor(job.verified == true ? appState.themeTextSecondary : .orange)
+                }
+            }
+        }
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(appState.themeText.opacity(0.04)))
     }
 }

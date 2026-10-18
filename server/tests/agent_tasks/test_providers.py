@@ -415,3 +415,33 @@ async def test_places_move_on_when_google_is_down_and_locate_follows():
     assert P.calls_per_search(listings, 2) == 1
     assert await listings.locate("Lady Bird Lake") == ("Lady Bird Lake", (30.25, -97.72))
     assert asked[-1] == "searchapi"
+
+
+@pytest.mark.asyncio
+async def test_google_places_search_pages_walks_the_tokens_once():
+    bodies = []
+
+    def handler(request):
+        body = json.loads(request.content)
+        bodies.append(body)
+        token = body.get("pageToken")
+        nxt = {None: "page-2", "page-2": "page-3", "page-3": None}[token]
+        return httpx.Response(200, json={"places": PLACES["places"][:1], **({"nextPageToken": nxt} if nxt else {})})
+
+    items = await _places(handler).search_pages("places", "coffee shops in Silver Lake", pages=3)
+    # Three pages for three calls, where search(page=1..3) would have made six.
+    assert len(items) == 3 and [b.get("pageToken") for b in bodies] == [None, "page-2", "page-3"]
+    bodies.clear()
+    assert len(await _places(handler).search_pages("places", "x", pages=P.MAX_PAGES + 2)) == 3 and len(bodies) == 3
+
+
+@pytest.mark.asyncio
+async def test_serp_search_pages_stop_at_a_short_page():
+    asked = []
+
+    def handler(request):
+        asked.append(dict(request.url.params))
+        return httpx.Response(200, json=MAPS)
+
+    items = await _api(handler).search_pages("places", "ramen", pages=3)
+    assert len(asked) == 1 and items, "a page shorter than 20 is the last"

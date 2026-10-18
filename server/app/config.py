@@ -250,6 +250,9 @@ class Settings:
     # Brave Search API: the agent runtime's web_search. Optional: unset, the
     # agents use their model's own web search (`matcha_work/brave_search.py`).
     brave_search_api_key: Optional[str] = None
+    # Brave's per-second rate for this key (1 on the free plan): how far apart
+    # one process spaces its searches (`brave_search._pace`).
+    brave_search_qps: float = 1.0
 
     # Google Sign-In (Continue with Google) — audience allowlist for
     # verify_google_id_token. iOS OAuth clients are public (no secret) and
@@ -487,6 +490,7 @@ def load_settings() -> Settings:
         google_maps_api_key=os.getenv("GOOGLE_MAPS_API_KEY"),
         google_weather_api_key=os.getenv("GOOGLE_WEATHER_API_KEY"),
         brave_search_api_key=os.getenv("BRAVE_SEARCH_API_KEY") or None,
+        brave_search_qps=float(os.getenv("BRAVE_SEARCH_QPS") or 1.0),
         google_ios_client_id=os.getenv("GOOGLE_IOS_CLIENT_ID"),
         google_web_client_id=os.getenv("GOOGLE_WEB_CLIENT_ID"),
         stripe_secret_key=os.getenv("STRIPE_SECRET_KEY"),

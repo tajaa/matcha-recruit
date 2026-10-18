@@ -471,6 +471,43 @@ final class JobSearchLogicTests: XCTestCase {
         XCTAssertEqual(again.blocks, result.blocks)
     }
 
+    func testAssistantPlacesAndJobPostingsBlocksRoundTrip() throws {
+        let json = """
+        {"headline": "Coffee shops in LA", "summary": "", "blocks": [
+          {"type": "places", "title": "Independent coffee shops in LA", "found": 190, "places": [
+            {"id": "P1", "name": "Woodcat Coffee", "category": "Coffee shop", "rating": 4.5, "reviews": 347,
+             "price": "$", "address": "1532 Sunset Blvd, Los Angeles, CA", "phone": "(213) 537-0147",
+             "website": "http://woodcatcoffee.com/", "maps_url": "https://www.google.com/maps/search/?api=1"},
+            {"id": "P2", "name": "=Cafe, \\"Two\\""}]},
+          {"type": "job_postings", "found": 9, "jobs": [
+            {"id": "J1", "title": "Product Designer", "company": "Otter", "location": "Los Angeles, CA",
+             "remote": true, "pay": "$150K–$180K", "pay_status": "posted", "verified": true,
+             "at_employer": true, "read_on": "Greenhouse", "apply_url": "https://job-boards.greenhouse.io/otter/1"},
+            {"id": "J2", "title": "Designer", "company": "Acme", "verified": true, "read_on": "builtin.com"},
+            {"id": "J3", "title": "Designer", "company": "Faraway"}]}
+        ]}
+        """
+        let result = try decode(AgentChatResultV2.self, json)
+        guard case .places(let places) = result.blocks.first else { return XCTFail("expected places") }
+        XCTAssertEqual(places.found, 190)
+        XCTAssertEqual(places.places.first?.mapsUrl, "https://www.google.com/maps/search/?api=1")
+        guard case .jobPostings(let postings) = result.blocks.last else { return XCTFail("expected job_postings") }
+        XCTAssertEqual(postings.jobs.map(\.checked),
+                       ["Live at the employer", "Live on builtin.com", "Listed on Google Jobs only"])
+        let again = try JSONDecoder().decode(AgentChatResultV2.self, from: JSONEncoder().encode(result))
+        XCTAssertEqual(again.blocks, result.blocks)
+
+        let csv = AgentListCSV.places(places.places).components(separatedBy: "\r\n")
+        XCTAssertEqual(csv[0], "Name,Category,Rating,Reviews,Price,Address,Phone,Website,Google Maps")
+        XCTAssertTrue(csv[1].hasPrefix("Woodcat Coffee,Coffee shop,4.5,347,$,\"1532 Sunset Blvd, Los Angeles, CA\""))
+        // A name that starts like a formula is never run by the spreadsheet.
+        XCTAssertTrue(csv[2].hasPrefix("\"'=Cafe, \"\"Two\"\"\""))
+        XCTAssertTrue(AgentListCSV.jobPostings(postings.jobs).contains(",yes,$150K–$180K,,Live at the employer,"))
+        XCTAssertEqual(AgentListCSV.filename("Independent coffee shops in LA", fallback: "places"),
+                       "independent-coffee-shops-in-la.csv")
+        XCTAssertEqual(AgentListCSV.filename(nil, fallback: "places"), "places.csv")
+    }
+
     func testJobSearchLivesInTasksNow() {
         // A saved sidebar order that still names the old section just drops it.
         XCTAssertNil(SidebarSectionOrderStore.Section(rawValue: "jobs"))

@@ -21,6 +21,10 @@ The monthly quota each response reports (`quota`: the day-or-longer window in
 its rate-limit headers) is saved as the latest snapshot, which Admin → AI Usage
 shows as searches left; every request is a row in the usage ledger.
 
+Requests from one process are spaced to Brave's per-second rate (`_pace`,
+`BRAVE_SEARCH_QPS`, 1 on the free plan), since a run's searches can go out
+together.
+
 Out means `available` is False and `search` raises `Unavailable(out=True)`
 without a request. Going out is logged as an error once, so it shows in
 Admin → Server Errors. It is remembered per process, not shared: a worker that
@@ -73,6 +77,43 @@ class Unavailable(Exception):
 
 _out_until = 0.0
 _out_reason = ""
+# When this process may send its next request (`_pace`).
+_next_at = 0.0
+
+
+def _pace_seconds() -> float:
+    """The gap between two requests: Brave's per-second rate (`BRAVE_SEARCH_QPS`,
+    1 on the free plan) with a little room."""
+    from app.config import get_settings
+
+    try:
+        qps = float(getattr(get_settings(), "brave_search_qps", 1.0) or 1.0)
+    except (RuntimeError, TypeError, ValueError):
+        qps = 1.0
+    return 1.05 / max(qps, 0.1)
+
+
+async def _pace(*, sleep: SleepFn, clock: Clock) -> None:
+    """Space this process's requests out to Brave's rate. A run's searches go
+    out together when a turn asks for several (`runner`: reads run at once),
+    and on the free plan the second of two in the same second is a 429. Each
+    caller takes the next free slot before it awaits anything, so the slots
+    are handed out in order without a lock (one event loop per process)."""
+    global _next_at
+    now = clock()
+    at = max(now, _next_at)
+    gap = _pace_seconds()
+    _next_at = at + gap
+    if at > now:
+        try:
+            await sleep(at - now)
+        except asyncio.CancelledError:
+            # Called off while waiting (the tool's timeout): give the slot back
+            # when nobody has queued behind it, so the next search isn't held
+            # for a request that never went out.
+            if _next_at == at + gap:
+                _next_at = at
+            raise
 
 
 def _key() -> str | None:
@@ -109,8 +150,8 @@ def mark_out(reason: str, seconds: float, *, clock: Clock = time.monotonic) -> N
 
 def reset() -> None:
     """Back in play (tests, and nothing else)."""
-    global _out_until, _out_reason
-    _out_until, _out_reason = 0.0, ""
+    global _out_until, _out_reason, _next_at
+    _out_until, _out_reason, _next_at = 0.0, "", 0.0
 
 
 def _parts(value: str | None) -> list[int | None]:
@@ -237,6 +278,9 @@ async def search(query: str, *, freshness: Any = None, count: int = COUNT,
         params["freshness"] = FRESHNESS[freshness]
     headers = {"X-Subscription-Token": key, "Accept": "application/json"}
     answered: list[httpx.Response] = []
+    await _pace(sleep=sleep, clock=clock)
+    if clock() < _out_until:  # went out while this one waited its turn
+        raise Unavailable(f"Brave search is out ({_out_reason})", out=True)
 
     async def send(client: httpx.AsyncClient) -> httpx.Response:
         response = await client.get(URL, params=params, headers=headers)
