@@ -2,7 +2,7 @@ import { useContext, useId, type ComponentProps, type ReactNode } from 'react'
 import { Button } from '../ui/Button'
 import { AdminPageContext } from './AdminPageContext'
 
-const field = 'admin-field rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 outline-none transition-colors focus:border-zinc-500 focus:ring-1 focus:ring-zinc-500 disabled:opacity-50'
+const field = 'admin-field rounded-lg border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-100 placeholder-zinc-500 outline-none transition-colors focus:border-zinc-500 focus:ring-1 focus:ring-zinc-500 disabled:opacity-50'
 const labelClass = 'mb-1.5 block text-xs font-medium text-zinc-300'
 
 type LabelProps = { label?: string }
@@ -45,7 +45,7 @@ export function AdminButton({ size = 'sm', variant = 'primary', className = '', 
 export function AdminCard({ className = '', ...props }: ComponentProps<'div'>) {
   const border = /(?:^|\s)border-(?:zinc|emerald|red|amber|orange|sky|blue|white|transparent)/.test(className) ? '' : 'admin-border border-zinc-800'
   const background = /(?:^|\s)bg-/.test(className) ? '' : 'admin-surface bg-zinc-900/50'
-  return <div className={`rounded-lg border p-4 ${border} ${background} ${className}`} {...props} />
+  return <div className={`rounded-lg border p-3 ${border} ${background} ${className}`} {...props} />
 }
 
 type SectionProps = { title: ReactNode; description?: ReactNode; actions?: ReactNode; className?: string }
@@ -70,7 +70,7 @@ export function AdminSection({ title, description, actions, children, className 
 }
 
 export function AdminFilterBar({ className = '', ...props }: ComponentProps<'div'>) {
-  return <div className={`mb-6 flex flex-wrap items-center gap-3 ${className}`} {...props} />
+  return <div className={`mb-3 flex flex-wrap items-center gap-2 ${className}`} {...props} />
 }
 
 export function AdminStat({ label, value, hint, icon, tone }: { label: ReactNode; value: ReactNode; hint?: ReactNode; icon?: ReactNode; tone?: 'gap' | 'ok' }) {

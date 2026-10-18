@@ -12,7 +12,7 @@ export default function AdminLayout() {
   return (
     <div className="mx-auto w-full min-w-0 max-w-6xl">
       {area && (
-        <div className={`mb-4 flex flex-wrap items-center justify-between gap-3 ${page && area.to !== page.to ? 'admin-toolbar sticky top-14 z-20 rounded-xl border px-3 py-2.5 md:top-2' : ''}`}>
+        <div className={`mb-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 ${page && area.to !== page.to ? 'admin-toolbar sticky top-14 z-20 rounded-lg border px-2.5 py-1.5 md:top-2' : ''}`}>
           {page && area.to !== page.to && <Link to={area.to} className="inline-flex items-center gap-2 text-xs font-medium text-zinc-200 hover:text-white"><ArrowLeft size={14} />Back to {area.label}</Link>}
         <nav aria-label="Breadcrumb" className="text-xs text-zinc-500">
           <ol className="flex flex-wrap items-center gap-2">

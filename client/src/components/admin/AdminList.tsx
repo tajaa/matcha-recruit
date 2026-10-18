@@ -5,11 +5,11 @@ import type { AdminPaginationState } from './useAdminPagination'
 
 /** Compact list density shared by account pages and either table renderer. */
 export function AdminList({ children }: { children: ReactNode }) {
-  return <div className="admin-list min-w-0 [&_header]:mb-4 [&_header_h1]:text-xl [&_table]:text-xs [&_th]:px-3! [&_th]:py-2! [&_td]:px-3! [&_td]:py-2! [&_td]:align-middle">{children}</div>
+  return <div className="admin-list min-w-0 [&_header]:mb-3 [&_header_h1]:text-lg [&_table]:text-xs [&_th]:px-3! [&_th]:py-1.5! [&_td]:px-3! [&_td]:py-1! [&_td]:align-middle">{children}</div>
 }
 
 export function AdminMetricRow({ items }: { items: readonly { label: string; value: ReactNode }[] }) {
-  return <dl className="mb-4 flex flex-wrap items-center gap-x-6 gap-y-2 border-b border-zinc-800 pb-3">
+  return <dl className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-zinc-800 pb-2">
     {items.map((item) => <div key={item.label} className="flex items-baseline gap-2">
       <dt className="text-xs text-zinc-400">{item.label}</dt>
       <dd className="text-sm font-semibold tabular-nums text-zinc-100">{item.value}</dd>

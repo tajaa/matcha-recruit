@@ -88,9 +88,9 @@ export default function AppLayout({ sidebar, variant }: { sidebar: ReactNode; lo
         {/* Sidebar — full height now that nothing sits above it.
             Mobile: full-width overlay (translate).
             Desktop: icon-only when collapsed (width transition). */}
-        <div className={`${isAdmin ? 'admin-rail' : ''} fixed bottom-0 left-0 top-0 z-50 w-60 overflow-hidden transition-all duration-200 ease-in-out
+        <div className={`${isAdmin ? 'admin-rail w-52' : 'w-60'} fixed bottom-0 left-0 top-0 z-50 overflow-hidden transition-all duration-200 ease-in-out
           ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}
-          md:translate-x-0 ${sidebarCollapsed ? 'md:w-14' : 'md:w-60'}
+          md:translate-x-0 ${sidebarCollapsed ? 'md:w-14' : isAdmin ? 'md:w-52' : 'md:w-60'}
         `}>
           {sidebar}
           <button
@@ -103,8 +103,8 @@ export default function AppLayout({ sidebar, variant }: { sidebar: ReactNode; lo
         </div>
 
         {/* Main content — pt-16 on mobile clears the floating menu trigger. */}
-        <main className={`p-4 pt-16 transition-[margin] duration-200 ease-in-out md:p-8 md:pt-8 ${
-          sidebarCollapsed ? 'md:ml-14' : 'md:ml-60'
+        <main className={`p-4 pt-16 transition-[margin] duration-200 ease-in-out ${isAdmin ? 'md:p-6' : 'md:p-8 md:pt-8'} ${
+          sidebarCollapsed ? 'md:ml-14' : isAdmin ? 'md:ml-52' : 'md:ml-60'
         }`}>
           <Outlet />
         </main>
