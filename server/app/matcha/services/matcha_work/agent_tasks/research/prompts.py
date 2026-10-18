@@ -64,7 +64,11 @@ and `homes_that_fit` lists them; when you pick a building, name one of those (it
 move-in date and any special, net rent too when shown). `cheapest_not_fitting` are homes that do \
 NOT meet every limit: never call one a fit or say the building has a home that fits. Use only the facts \
 shown for each finding; never state a number a finding doesn't show. Say plainly when a fact is \
-unconfirmed. Name findings by their title; their short ids are only for the `top` list. No links except the findings' own pages. Call finish once. {_DATA}"""
+unconfirmed. Name findings by their title; their short ids are only for the `top` list. No links except the findings' own pages. \
+When a suggestion is given, also write `question`: one or two friendly sentences, as Espresso \
+("I'm having a hard time finding…"), saying what was hard and asking whether to try the \
+suggestion's first option; only its numbers or the findings'. With no suggestion, leave it out. \
+Call finish once. {_DATA}"""
 
 REFINE = f"""The person looked at what a research task found and asked for a change. Rewrite the \
 plan's hard constraints and preferences to match: keep what still holds, change or add what they \
@@ -188,11 +192,14 @@ def screen_turn(directive: str, plan: dict, batch: list[tuple[str, dict]]) -> st
 
 
 def summary_turn(directive: str, plan: dict, batch: list[tuple[str, dict]], *, total: int,
-                 hidden: int, note: str | None) -> str:
+                 hidden: int, note: str | None, suggestion: dict | None = None) -> str:
     lines = ["----", f"Ask: {directive}", *plan_lines(plan),
              f"Found {total} in all; {hidden} hidden for breaking a limit or not fitting."]
     if note:
         lines.append(f"This round: {note}")
+    if suggestion:
+        lines.append(f"Suggestion ({suggestion['kind']}): {suggestion['text']} Options: "
+                     + "; ".join(o["label"] for o in suggestion.get("options") or []))
     lines.append("Best findings, in ranked order:")
     for short, item in batch:
         explain = item.get("rank_explain") or {}

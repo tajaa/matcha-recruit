@@ -241,8 +241,23 @@ def _clean(text: Any, limit: int) -> str:
     return " ".join(html.unescape(_TAGS.sub("", str(text or ""))).split())[:limit]
 
 
-def results(body: dict, count: int = COUNT) -> list[dict]:
-    """The web results, as the model sees them: title, URL, how old, what it says."""
+def _thumbnail(item: dict) -> str | None:
+    """A result's picture: the page's own image when Brave names it, else
+    Brave's copy. None for a site's logo."""
+    thumb = item.get("thumbnail")
+    if not isinstance(thumb, dict) or thumb.get("logo"):
+        return None
+    for key in ("original", "src"):
+        url = thumb.get(key)
+        if isinstance(url, str) and url.startswith("https://"):
+            return url[:1000]
+    return None
+
+
+def results(body: dict, count: int = COUNT, *, images: bool = False) -> list[dict]:
+    """The web results, as the model sees them: title, URL, how old, what it
+    says. With `images`, each result's picture too (`image`), for code that
+    uses it; the model is never shown one."""
     out = []
     for item in ((body.get("web") or {}).get("results") or [])[:count]:
         if not isinstance(item, dict):
@@ -257,11 +272,13 @@ def results(body: dict, count: int = COUNT) -> list[dict]:
         extra = [_clean(s, 300) for s in item.get("extra_snippets") or [] if s]
         if extra:
             row["more"] = extra[:3]
+        if images and _thumbnail(item):
+            row["image"] = _thumbnail(item)
         out.append(row)
     return out
 
 
-async def search(query: str, *, freshness: Any = None, count: int = COUNT,
+async def search(query: str, *, freshness: Any = None, count: int = COUNT, images: bool = False,
                  transport: httpx.AsyncBaseTransport | None = None,
                  sleep: SleepFn = asyncio.sleep, clock: Clock = time.monotonic) -> list[dict]:
     """Up to `count` (`COUNT` unless asked, at most `MAX_COUNT`) web results
@@ -309,4 +326,4 @@ async def search(query: str, *, freshness: Any = None, count: int = COUNT,
     if spent is not None:
         # That was the last one: the next search would be refused.
         mark_out("Brave has no searches left this period", spent, clock=clock)
-    return results(body, count)
+    return results(body, count, images=images)

@@ -319,6 +319,6 @@ async def test_rerank_and_rank_phase(conn):
     assert await phases.rerank(FakeConn(), task_row()) == 0
     conn.on("WHERE id = $1 AND dispatch_token = $2", 1)
     conn.on("SELECT * FROM mw_agent_tasks WHERE id = $1", task_row())
-    assert (await phases.rank_phase(task_row(), _deps(), _guard())).phase == phases.SUMMARIZE
+    assert (await phases.rank_phase(task_row(), _deps(), _guard())).phase == phases.FILL
     conn.on("WHERE id = $1 AND dispatch_token = $2", None)
     assert (await phases.rank_phase(task_row(), _deps(), _guard())).phase is None

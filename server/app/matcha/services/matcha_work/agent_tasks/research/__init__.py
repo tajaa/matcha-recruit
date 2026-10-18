@@ -1,9 +1,12 @@
 """The research playbook: go and find things (a home, a product, a place) and keep what fits.
 
-  plan       -> providers -> discover -> enrich -> screen -> rank -> summarize
-  (refine)   -> refine -> summarize, or enrich (new facts to check), or
+  plan       -> providers -> discover -> enrich -> screen -> rank -> fill -> summarize
+  (refine)   -> refine -> fill, or enrich (new facts to check), or
                 providers (what's left can't satisfy the change)
-  (more)     -> providers -> discover -> ...
+  (more)     -> fill (the next ten from those waiting), else providers -> discover -> ...
+
+`fill` may send a round back to discover when too few findings can be shown
+(`fill.py`). A round shows ten at a time (`batches.py`).
 
 See `../CLAUDE.md` for the evidence rules and budgets.
 """
@@ -14,7 +17,7 @@ from dataclasses import replace
 from app.core.services import agent_surfaces
 
 from ..playbook import Playbook
-from . import kinds, model_phases, phases, ranking
+from . import fill, kinds, model_phases, phases, ranking
 from .brief import INTAKE, validate_brief, validator
 from .fields import LIBRARY
 
@@ -25,6 +28,7 @@ PHASES = {
     "enrich": phases.enrich,
     "screen": model_phases.screen,
     "rank": phases.rank_phase,
+    "fill": fill.fill,
     "summarize": model_phases.summarize,
     "refine": model_phases.refine,
 }
@@ -45,7 +49,7 @@ PLAYBOOK = Playbook(
     field_library=LIBRARY,
     phases=PHASES,
     first_phase="plan",
-    round_phases={"refine": "refine", "more": "providers", "document": "document"},
+    round_phases={"refine": "refine", "more": "fill", "document": "document"},
     rerank=phases.rerank,
     describe_constraint=ranking.describe,
     item_actions=("save", "dismiss", "note", "more_like_this"),

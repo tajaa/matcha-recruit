@@ -26,10 +26,11 @@ from app.matcha.services.matcha_work.agent_runtime.phase_run import NoteProgress
 
 from .. import items as items_mod
 from .. import model_run
-from . import contracts, kinds, prompts
+from . import batches, contracts, kinds, prompts, suggest
 from . import fields as F
+from . import fill as fill_mod
 from .phases import (
-    BUDGETS, DISCOVER, ENRICH, PROVIDERS, RANK, SCREEN, SUMMARIZE, Deps, _chain, count_items,
+    BUDGETS, DISCOVER, ENRICH, FILL, PROVIDERS, RANK, SCREEN, Deps, _chain, count_items,
     cursor_of, fill_plans, item_room, own_page, plan_of, rerank,
 )
 
@@ -111,7 +112,7 @@ async def plan(task: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
             ),
             instructions=prompts.plan_instructions(today, kind), user_text=user_text,
             limits=PLAN_LIMITS, progress=_progress(guard), client_factory=deps.client,
-            first_note="Planning…", first_input=_first_input(user_text, files),
+            first_note="Planning…", first_input=_first_input(user_text, files), escalate=True,
         )
         planned = outcome.result
     except runner.AgentRunError:
@@ -269,7 +270,7 @@ async def screen(task: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
             ),
             instructions=prompts.SCREEN, user_text=prompts.screen_turn(task.get("directive") or "", plan_, shown),
             limits=SCREEN_LIMITS, progress=_progress(guard), client_factory=deps.client,
-            first_note=f"Checking {len(rows)} findings…",
+            first_note=f"Checking {len(rows)} findings…", escalate=True,
         )
         verdicts: dict[str, dict] = outcome.result
     except runner.AgentRunError:
@@ -334,27 +335,70 @@ def fill_top(top: list[dict], shown: list[dict], want: int = TOP_PICKS) -> list[
 
 async def summarize(task: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
     cursor = cursor_of(task)
+    plan_ = plan_of(task)
+    batched = batches.uses_batches(plan_)
+    item_kind = plan_.get("item_kind")
+    diagnosis = None
     async with connection_or_direct() as conn:
-        rows = await conn.fetch(
-            f"""SELECT id, title, subtitle, url, fields, units, fit_score, fit_reasons, rank_explain
-                FROM mw_agent_task_items WHERE task_id = $1 AND rank_band < 9
-                ORDER BY rank LIMIT {SUMMARY_TOP}""",
-            task["id"],
-        )
+        if batched:
+            round_kind = await fill_mod.round_kind(conn, task)
+            released, _looked = await fill_mod.released_and_looked_up(conn, task["id"])
+            ranked = await fill_mod.ranked_rows(conn, task["id"])
+            # A refine re-picks the best ten under the changed plan; other rounds show the next ten.
+            exclude = set() if round_kind == "refine" else set(released)
+            rows = batches.pick(ranked, item_kind=item_kind, plan=plan_, exclude=exclude)
+            picked = {str(r["id"]) for r in rows}
+            waiting = [r for r in ranked if str(r["id"]) not in exclude | picked]
+            hidden_by = {r["field"]: int(r["n"]) for r in await conn.fetch(
+                """SELECT v->>'field' AS field, COUNT(DISTINCT i.id) AS n
+                   FROM mw_agent_task_items i,
+                        jsonb_array_elements(CASE WHEN jsonb_typeof(i.violations) = 'array'
+                                                  THEN i.violations ELSE '[]'::jsonb END) v
+                   WHERE i.task_id = $1 AND i.rank_band >= 9
+                   GROUP BY 1""",
+                task["id"],
+            ) if r["field"]}
+            hidden_prices = [float(r["price"]) for r in await conn.fetch(
+                """SELECT (fields->'price'->>'value')::float8 AS price FROM mw_agent_task_items
+                   WHERE task_id = $1 AND rank_band >= 9 AND fields->'price'->>'status' = 'verified'
+                     AND jsonb_typeof(fields->'price'->'value') = 'number'""",
+                task["id"],
+            ) if r["price"] is not None]
+            room = await item_room(conn, task["id"])
+        else:
+            rows = await conn.fetch(
+                f"""SELECT id, title, subtitle, url, fields, units, fit_score, fit_reasons, rank_explain
+                    FROM mw_agent_task_items WHERE task_id = $1 AND rank_band < 9
+                    ORDER BY rank LIMIT {SUMMARY_TOP}""",
+                task["id"],
+            )
         total = await count_items(conn, task["id"])
         visible = await count_items(conn, task["id"], "AND rank_band < 9")
         urls = [r["url"] for r in await conn.fetch(
             "SELECT url FROM mw_agent_task_items WHERE task_id = $1 AND url IS NOT NULL", task["id"],
         )]
+    if batched:
+        ready_waiting = len(batches.pick(waiting, item_kind=item_kind, plan=plan_, n=len(waiting)))
+        diagnosis = suggest.diagnose(
+            plan=plan_, shown=len(rows), ready_waiting=ready_waiting,
+            short=batches.shortfall(waiting, item_kind=item_kind, plan=plan_), hidden_by=hidden_by,
+            hidden_prices=hidden_prices, room=room,
+            waiting_prices=[p for p in (_price(r) for r in waiting) if p is not None],
+            # What other sites say the ones over the limit cost: the limit it would take.
+            over_prices=[p for p in (_price(r) for r in waiting if batches.over_limit(r, plan_)) if p is not None],
+        )
     shown = [items_mod.view_for_model(row) for row in rows]
     note = cursor.get("note")
-    plan_ = plan_of(task)
     # Numbers the summary may state besides the findings' own: the ask, its
     # limits and the counts it is told.
     context = " ".join([task.get("directive") or "", *prompts.plan_lines(plan_),
                         *(json.dumps(c.get("value"), default=str) for c in plan_.get("constraints") or []),
-                        str(total), str(visible), str(total - visible), note or ""])
+                        str(total), str(visible), str(total - visible), note or "",
+                        suggest.numbers_allowed(diagnosis)])
     summary = fallback_summary(shown, total=total, hidden=total - visible, note=note)
+    if batched and not shown:
+        summary["headline"] = "Nothing ready to show yet" if total else summary["headline"]
+    phrased = None
     if shown:
         batch = {f"F{i + 1}": item["id"] for i, item in enumerate(shown)}
         try:
@@ -370,14 +414,25 @@ async def summarize(task: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
                 ),
                 instructions=prompts.SUMMARIZE,
                 user_text=prompts.summary_turn(task.get("directive") or "", plan_, list(zip(batch, shown)),
-                                               total=total, hidden=total - visible, note=note),
+                                               total=total, hidden=total - visible, note=note,
+                                               suggestion=diagnosis),
                 limits=SUMMARY_LIMITS, progress=_progress(guard), client_factory=deps.client,
-                first_note="Writing up what it found…",
+                first_note="Writing up what it found…", escalate=True,
             )
+            phrased = outcome.result.pop("question", None)
             summary = {**outcome.result, "top": fill_top(outcome.result["top"], shown), "origin": "model"}
         except runner.AgentRunError:
             logger.info("research summary fell back to the ranking task=%s", task["id"])
     summary["counts"] = {"found": total, "shown": visible, "hidden": total - visible}
+    if batched:
+        summary["batch"] = [str(r["id"]) for r in rows]
+        summary["looked_up"] = list(cursor.get("looked_up") or [])
+        everyone = set(released) | set(summary["batch"])
+        summary["counts"] = {"found": total, "shown": len(everyone), "hidden": total - visible,
+                             "waiting": len(waiting), "ready_waiting": ready_waiting}
+        question = suggest.view(diagnosis, phrased)
+        if question is not None:
+            summary["question"] = question
     async with connection_or_direct() as conn:
         await conn.execute(
             """UPDATE mw_agent_task_rounds SET summary = $4::jsonb
@@ -386,7 +441,14 @@ async def summarize(task: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
             task["id"], guard.token, int(task["current_round"]), json.dumps(summary, default=str),
         )
     return PhaseOutcome(status="done", cursor={k: v for k, v in cursor.items() if k == "round_failed"},
-                        progress={"note": summary["headline"], "found": total, "shown": visible})
+                        progress={"note": summary["headline"], "found": total,
+                                  "shown": summary["counts"]["shown"]})
+
+
+def _price(row: Any) -> float | None:
+    price = (decode_jsonb(row["fields"], {}) or {}).get("price")
+    value = price.get("value") if isinstance(price, dict) else None
+    return float(value) if isinstance(value, (int, float)) else None
 
 
 # ── refine ───────────────────────────────────────────────────────────────────
@@ -414,7 +476,7 @@ async def refine(task: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
             instructions=prompts.refine_instructions(today, kinds.of(task)),
             user_text=prompts.refine_turn(task.get("directive") or "", plan_, change),
             limits=REFINE_LIMITS, progress=_progress(guard), client_factory=deps.client,
-            first_note="Reading your change…",
+            first_note="Reading your change…", escalate=True,
         )
     except runner.AgentRunError:
         message = "Couldn't work out that change. Try saying it another way."
@@ -424,7 +486,7 @@ async def refine(task: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
     old_fields = set(plan_.get("fields") or []) | {c["field"] for c in plan_.get("constraints") or []}
     new_keys = [k for k in dict.fromkeys([*changed["fields"], *(c["field"] for c in changed["constraints"])])
                 if k not in old_fields]
-    nxt = PhaseOutcome(status="running", phase=SUMMARIZE, cursor={"note": note}, progress={"note": note})
+    nxt = PhaseOutcome(status="running", phase=FILL, cursor={"note": note}, progress={"note": note})
     async with connection_or_direct() as conn:
         written = await conn.fetchval(
             """UPDATE mw_agent_tasks SET plan = $3::jsonb WHERE id = $1 AND dispatch_token = $2 RETURNING 1""",

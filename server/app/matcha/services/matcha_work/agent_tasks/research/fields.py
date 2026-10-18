@@ -77,7 +77,9 @@ PRESENCE = frozenset({"specials"})
 STATUS_RANK = {"verified": 2, "claimed": 1}
 # Among entries of the same status, structured data beats text, text beats a model;
 # a building's leasing system (its homes one by one, current) beats both.
-ORIGIN_RANK = {"leasing": 4, "provider": 3, "jsonld": 3, "page_text": 2, "browser": 2, "geocode": 2, "model": 1}
+# `search`: a web search result's snippet of some page (`fill.py`), always `claimed`.
+ORIGIN_RANK = {"leasing": 4, "provider": 3, "jsonld": 3, "page_text": 2, "browser": 2, "geocode": 2, "model": 1,
+               "search": 1}
 
 _TAG_WORDS: dict[str, dict[str, tuple[str, ...]]] = {
     "pets": {

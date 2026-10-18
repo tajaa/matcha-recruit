@@ -250,7 +250,7 @@ def refining(conn, monkeypatch):
 async def test_refine_goes_to_the_summary_when_nothing_new_is_needed(refining, monkeypatch):
     _model(monkeypatch, _refined())
     out = await M.refine(task_row(), _deps(), _guard())
-    assert out.phase == phases.SUMMARIZE and out.cursor == {"note": "Mission only"}
+    assert out.phase == phases.FILL and out.cursor == {"note": "Mission only"}
     M.rerank.assert_awaited_once()
 
 
@@ -260,11 +260,11 @@ async def test_refine_copies_floor_plans_for_homes_that_fit_only_now(refining, m
     fill = AsyncMock()
     monkeypatch.setattr(M, "fill_plans", fill)
     out = await M.refine(task_row(), _deps(), _guard())
-    assert out.phase == phases.SUMMARIZE
+    assert out.phase == phases.FILL
     assert _refined()["constraints"][0] in fill.await_args.args[1]["constraints"]  # the plan as changed
     # Copying them is a nicety: a failure never fails the refine.
     fill.side_effect = RuntimeError("s3 down")
-    assert (await M.refine(task_row(), _deps(), _guard())).phase == phases.SUMMARIZE
+    assert (await M.refine(task_row(), _deps(), _guard())).phase == phases.FILL
 
 
 @pytest.mark.asyncio

@@ -182,8 +182,9 @@ daily limit counts by `decided_at`.
 - `done` / `failed` / `cancelled`: resting.
 - Every piece of work is a round (`initial`, `refine`, `more`, `document`).
   A round costs its `units` unless it failed: `close_round` marks it failed
-  when the task failed, the phase said `round_failed`, or a "search more" added
-  nothing. Cancelled counts (like job search).
+  when the task failed, the phase said `round_failed`, or a "search more"
+  showed nothing more (an empty batch; before batches, nothing new found).
+  Cancelled counts (like job search).
 - A deleted task keeps its row and rounds (blanked), so it still counts.
 
 ## Telling the person (`notify.py`, `mail.py`)
@@ -213,8 +214,69 @@ chain sooner than the main worker's hourly `reconcile`).
 
 ## Research (`research/`)
 
-`plan -> providers -> discover -> enrich -> screen -> rank -> summarize`;
-refine starts at `refine`, "search more" at `providers`.
+`plan -> providers -> discover -> enrich -> screen -> rank -> fill -> summarize`;
+refine starts at `refine` (then `fill`), "search more" at `fill`.
+
+### Ten at a time (`research/batches.py`, `research/fill.py`, `research/suggest.py`)
+
+A round doesn't show everything it found. It releases a **batch**: the best
+findings not shown yet that meet their kind's bar, at most `BATCH` (10), in
+rank order. The rest wait, and "10 more" (a `more` round, 1 unit) releases the
+next batch from them before it searches again.
+
+- **The bar** (`batches.REQUIRED`): a listing needs a price (its own or its
+  homes' rents), a photo and a phone number; a place a photo and a phone
+  number; a product a price and a photo. Generic research has none. A finding
+  that can't be priced, pictured or called waits; the summary says how many do.
+  So does one whose only price is claimed (another site's figure) and outside
+  the person's price limit (`batches.over_limit`): a claimed fact never breaks
+  a limit in the ranking, but on 2026-10-18 13 of the 19 apartments released
+  on a look-up's rent were over a $3,200 limit. Those figures feed the
+  suggestion's "raise the limit to …" instead.
+- **No new column.** Released ids are each round's `summary["batch"]`. A task
+  whose plan has `batches` (every plan `finalize_plan` makes now) shows only
+  those plus what the person saved or chose: `get_task` (`batches.shown`), the
+  list's `shown_count`, documents (`batches.SHOWN_SQL`), and the chat card and
+  email picks (`chat.picked_from`). A task planned before batches shows
+  everything, and `fill` passes it straight to the summary. A refine re-picks
+  the best ten under the changed plan, shown before or not. A more round costs
+  its unit when it released a batch, even one only from the waiting list, and
+  is free when it released nothing, whatever it found (`close_round`).
+- **`fill`** (after `rank`): (1) the best waiting findings that lack a price,
+  photo or phone get one Brave search each (`ROUND_LOOK_UPS` 12 a round,
+  counted in the cursor's `look_ups`; each finding once a task:
+  `summary["looked_up"]`), for the finding by name and place
+  (`Deps.search`). A result about it (its own site first, else a title that
+  names it) may give its picture (Brave's thumbnail, `results(images=True)`;
+  never shown to a model) and, for a building, the rents its snippet states,
+  and a phone number. Those are **`claimed`, origin `search`**: a search
+  engine's copy of someone else's page, shown with its source, never meeting a
+  hard limit. (2) The ten about to be released get up to `PHOTOS_PER_ITEM` (2)
+  photos each, copied then (`enrich` no longer copies photos for a batched
+  task: the old 24-a-task cap went to whatever was read first, not to what was
+  shown). (3) A more round with fewer than ten ready runs its own search
+  (`next_step`); otherwise the summary releases what there is and, under ten,
+  asks (below). No model is sent back to search from here: measured on dev
+  2026-10-18 (SF and NYC apartments, LA cafes), a Haiku then Sonnet web search
+  on a short batch found 2 of the 42 apartments shown, for nearly all of the
+  round's model cost (~$0.36 a task against ~$0.01) and two extra minutes;
+  35 of the 42 prices came from the look-ups.
+- **Sonnet only when Haiku's answer fails** (`model_run`): a short phase
+  (plan, screen, summarize, refine) whose answer failed its checks on Haiku
+  gets one more try on Sonnet (`escalate=True`), and the next phase is Haiku's
+  again. Discover is never retried: it is too long to run twice in a step.
+  `ESPRESSO_TASKS_SONNET=off` turns it off. Each one is logged
+  (`espresso task escalated`) and its run row carries the model.
+- **The suggestion** (`suggest.diagnose`, `summary["question"]`): a thin batch
+  (under ten) offers widening to the nearest sizeable places (offline
+  gazetteer, `job_search/places.py`), raising the limit that hid the most to
+  the lowest figure it hid (rounded up to $100), or keeping looking; a broad
+  one (a full batch, 30+ more ready, at most one limit) offers narrowing. The
+  options are code's, each a follow-up the app can start as is (`round`:
+  `refine`, free, or `more`, a unit, with its `directive`). The summary model
+  only phrases `question` ("I'm having a hard time finding…"), its numbers
+  checked like the summary's; code's sentence otherwise. The apps don't draw
+  the options yet.
 
 | Piece | File |
 |---|---|
@@ -403,7 +465,8 @@ widgets are not read yet.
 - **Every fact carries its evidence and a status.** `verified`: structured
   data (a provider, the page's schema.org JSON-LD), the item's own page text
   (`scan_listing_text`), or a model claim whose quote is printed on the item's
-  own page. `claimed`: a model claim quoted from some other page. Anything else
+  own page. `claimed`: a model claim quoted from some other page, or what a
+  Brave result about the finding says (origin `search`, `fill.py`). Anything else
   is not stored. A quote must pass `fields.verify_quote` and state the value
   (`fields.supports`).
 - **Hard constraints act on verified facts only.** Missing or claimed means
@@ -423,8 +486,10 @@ widgets are not read yet.
   failed, keeps Google's page.
 - **Links are provenance-gated.** A candidate's URL must be one the run saw
   (a search result, a page it loaded, or a link printed on one: `fetch.py`);
-  photos only ones a loaded page showed, rehosted on our CDN
-  (`images.rehost_urls`), at most 3 per finding and 24 per task.
+  photos only ones a loaded page showed or a Brave result about the finding
+  carried (`fill.py`), rehosted on our CDN (`images.rehost_urls`): 2 per
+  finding when its batch is released, or, for a task planned before batches,
+  at most 3 per finding and 24 per task.
 - **A summary states only numbers its findings show**, or the person's own
   ask, limits and the counts (`unsupported_numbers`, `context`);
   a reason that doesn't is dropped, a headline that doesn't gets one repair,

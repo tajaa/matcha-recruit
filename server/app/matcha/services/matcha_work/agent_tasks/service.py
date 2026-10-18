@@ -26,6 +26,7 @@ from app.database import connection_or_direct, decode_jsonb
 
 from . import items as items_mod
 from . import job_tasks, playbooks
+from .research import batches
 
 LIVE = ("queued", "running")
 OPEN = (*LIVE, "waiting")
@@ -142,7 +143,7 @@ def fingerprint(row) -> str:
 
 _COUNTS = f"""(SELECT COUNT(*) FROM mw_agent_task_items i WHERE i.task_id = t.id) AS item_count,
              (SELECT COUNT(*) FROM mw_agent_task_items i WHERE i.task_id = t.id
-                AND i.rank_band < 9) AS shown_count,
+                AND i.rank_band < 9 AND {batches.SHOWN_SQL}) AS shown_count,
              {job_tasks.COLUMNS}"""
 # Every read of a task row: its own counts, and its search's state when it is one.
 _SELECT = f"SELECT t.*, {_COUNTS} FROM mw_agent_tasks t {job_tasks.JOIN}"
@@ -308,6 +309,9 @@ async def get_task(task_id: UUID, user_id: UUID, *, mark_seen: bool = True, job_
         view = task_view(task)
         if mark_seen:
             await _mark_seen(conn, task, view)
+    # Ten at a time: only what a round released, and what the person marked.
+    rows = batches.shown(list(rows), plan=decode_jsonb(task.get("plan"), {}) or {},
+                         released_ids=batches.released(r["summary"] for r in rounds))
     return {
         **view,
         "fingerprint": fingerprint(task),
@@ -409,24 +413,36 @@ async def patch_item(task_id: UUID, item_id: UUID, user_id: UUID, *, user_state:
         return await _detail(conn, task, row, user_id, user)
 
 
+# The round released findings (`research/batches.py`).
+_RELEASED_ANY = """(jsonb_array_length(CASE WHEN jsonb_typeof(r.summary->'batch') = 'array'
+                                        THEN r.summary->'batch' ELSE '[]'::jsonb END) > 0)"""
+# A "search more" that gave the person nothing more: free.
+_MORE_FOR_NOTHING = f"""(r.kind = 'more' AND NOT {_RELEASED_ANY}
+                         AND (r.items_added = 0 OR COALESCE(r.summary ? 'batch', false)))"""
+
+
 async def close_round(conn, task_id: UUID) -> bool:
     """Settle the current round once its task stops: failed (free) when the
-    task failed, the round was called off, or a "search more" found nothing
-    new; cancelled when the task was; done otherwise. A task now waiting keeps
+    task failed, the round was called off, or a "search more" showed nothing
+    more (a task shown in batches: its batch was empty, whatever it found;
+    one from before batches: it found nothing new); cancelled when the task
+    was; done otherwise. A task now waiting keeps
     its round open and starts its wait. True when this call settled the round
     (once a round: a settled round is never settled again)."""
     settled = await conn.execute(
-        """UPDATE mw_agent_task_rounds r
+        f"""UPDATE mw_agent_task_rounds r
            SET status = CASE
                    WHEN t.status = 'failed' THEN 'failed'
                    WHEN t.status = 'cancelled' THEN 'cancelled'
                    WHEN t.phase_cursor ? 'round_failed' THEN 'failed'
-                   WHEN r.kind = 'more' AND r.items_added = 0 THEN 'failed'
+                   WHEN {_MORE_FOR_NOTHING} THEN 'failed'
                    ELSE 'done' END,
                error = CASE
                    WHEN t.status = 'failed' THEN t.error
                    WHEN t.phase_cursor ? 'round_failed' THEN t.phase_cursor->>'round_failed'
-                   WHEN r.kind = 'more' AND r.items_added = 0 THEN 'Nothing new turned up.'
+                   WHEN {_MORE_FOR_NOTHING}
+                       THEN CASE WHEN r.items_added = 0 THEN 'Nothing new turned up.'
+                                 ELSE 'Nothing more could be shown.' END
                    ELSE r.error END,
                completed_at = NOW()
            FROM mw_agent_tasks t

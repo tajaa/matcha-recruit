@@ -273,6 +273,8 @@ def finalize_plan(plan: dict, brief: dict, *, today: date, kind: SearchKind | No
         "nice_to_haves": list(brief.get("nice_to_haves") or []),
         "avoid": list(brief.get("avoid") or []),
         "location": location,
+        # Shown ten at a time (`batches.py`).
+        "batches": True,
     }
 
 
@@ -509,6 +511,8 @@ SUMMARY_SCHEMA = {
             "id": {"type": "string", "description": "A finding's short id, e.g. F1"},
             "why": {"type": "string", "description": "One sentence, using only facts shown for it"},
         }, "required": ["id", "why"]}},
+        "question": {"type": "string",
+                     "description": "Only when a suggestion is given: one or two friendly sentences asking it"},
     },
     "required": ["headline", "summary", "sections", "top"],
 }
@@ -576,7 +580,14 @@ def normalize_summary(args: dict, *, batch: dict[str, str], item_texts: dict[str
             warnings.append("Dropped a reason that stated a number its finding doesn't show")
             why = ""
         top.append({"item_id": item_id, "why": why})
-    return {"headline": headline, "summary": summary, "sections": sections, "top": top[:5]}, warnings
+    out = {"headline": headline, "summary": summary, "sections": sections, "top": top[:5]}
+    question = name_findings(_text(result.get("question"), 400), titles)
+    if question:
+        if unsupported_numbers(question, everything):
+            warnings.append("Dropped the question: it stated a number no finding or suggestion shows")
+        else:
+            out["question"] = question
+    return out, warnings
 
 
 # ── refine ───────────────────────────────────────────────────────────────────
