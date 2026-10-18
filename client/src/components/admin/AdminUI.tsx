@@ -2,7 +2,7 @@ import { useContext, useId, type ComponentProps, type ReactNode } from 'react'
 import { Button } from '../ui/Button'
 import { AdminPageContext } from './AdminPageContext'
 
-const field = 'rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 outline-none transition-colors focus:border-zinc-500 focus:ring-1 focus:ring-zinc-500 disabled:opacity-50'
+const field = 'admin-field rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 outline-none transition-colors focus:border-zinc-500 focus:ring-1 focus:ring-zinc-500 disabled:opacity-50'
 const labelClass = 'mb-1.5 block text-xs font-medium text-zinc-300'
 
 type LabelProps = { label?: string }
@@ -38,13 +38,13 @@ export function AdminSelect({ label, id, options, placeholder, children, classNa
   return label ? <label htmlFor={selectId}><span className={labelClass}>{label}</span>{select}</label> : select
 }
 
-export function AdminButton({ size = 'sm', ...props }: ComponentProps<typeof Button>) {
-  return <Button size={size} {...props} />
+export function AdminButton({ size = 'sm', variant = 'primary', className = '', ...props }: ComponentProps<typeof Button>) {
+  return <Button size={size} variant={variant} data-admin-variant={variant} className={`admin-button ${className}`} {...props} />
 }
 
 export function AdminCard({ className = '', ...props }: ComponentProps<'div'>) {
-  const border = /(?:^|\s)border-(?:zinc|emerald|red|amber|orange|sky|blue|white|transparent)/.test(className) ? '' : 'border-zinc-800'
-  const background = /(?:^|\s)bg-/.test(className) ? '' : 'bg-zinc-900/50'
+  const border = /(?:^|\s)border-(?:zinc|emerald|red|amber|orange|sky|blue|white|transparent)/.test(className) ? '' : 'admin-border border-zinc-800'
+  const background = /(?:^|\s)bg-/.test(className) ? '' : 'admin-surface bg-zinc-900/50'
   return <div className={`rounded-lg border p-4 ${border} ${background} ${className}`} {...props} />
 }
 
@@ -82,7 +82,7 @@ export function AdminStat({ label, value, hint, icon, tone }: { label: ReactNode
 }
 
 export function AdminTable({ className = '', ...props }: ComponentProps<'table'>) {
-  return <div className="overflow-x-auto rounded-lg border border-zinc-800">
+  return <div className="admin-table overflow-x-auto rounded-lg border border-zinc-800">
     <table className={`w-full text-left text-sm text-zinc-300 [&_thead]:border-b [&_thead]:border-zinc-800 [&_thead]:bg-zinc-900/50 [&_th]:px-4 [&_th]:py-3 [&_th]:text-xs [&_th]:font-medium [&_th]:text-zinc-500 [&_td]:px-4 [&_td]:py-3 [&_tbody>tr+tr]:border-t [&_tbody>tr+tr]:border-zinc-800/60 ${className}`} {...props} />
   </div>
 }

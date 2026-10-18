@@ -2,7 +2,7 @@ import { AdminTable } from '../../../../components/admin/AdminUI'
 import { Link } from 'react-router-dom'
 import { AdminActionMenu } from '../../../../components/admin/AdminActionMenu'
 import { StatusBadge } from './StatusBadge'
-import { TIER_BADGE, TIER_LABEL } from './constants'
+import { TIER_LABEL } from './constants'
 import { fmtUsd, relTime, tierFromRegistration } from './helpers'
 import type { Registration, Tab } from './types'
 
@@ -61,7 +61,7 @@ export function RegistrationTable({
               </td>
               {showTier && (
                 <td >
-                  <span className={`inline-block text-[10px] px-1.5 py-0.5 rounded border ${TIER_BADGE[tier]}`}>
+                  <span className="admin-badge">
                     {TIER_LABEL[tier]}
                   </span>
                 </td>

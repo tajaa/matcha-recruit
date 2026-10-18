@@ -5,7 +5,7 @@ import type { AdminPaginationState } from './useAdminPagination'
 
 /** Compact list density shared by account pages and either table renderer. */
 export function AdminList({ children }: { children: ReactNode }) {
-  return <div className="min-w-0 [&_header]:mb-4 [&_header_h1]:text-xl [&_table]:text-xs [&_th]:px-3! [&_th]:py-2! [&_td]:px-3! [&_td]:py-2! [&_td]:align-middle">{children}</div>
+  return <div className="admin-list min-w-0 [&_header]:mb-4 [&_header_h1]:text-xl [&_table]:text-xs [&_th]:px-3! [&_th]:py-2! [&_td]:px-3! [&_td]:py-2! [&_td]:align-middle">{children}</div>
 }
 
 export function AdminMetricRow({ items }: { items: readonly { label: string; value: ReactNode }[] }) {

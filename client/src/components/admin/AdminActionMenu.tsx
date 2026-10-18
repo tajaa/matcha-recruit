@@ -45,7 +45,7 @@ export function AdminActionMenu({ label, items }: { label: string; items: readon
     <AdminButton ref={trigger} aria-label={label} title={label} aria-haspopup="menu" aria-expanded={!!position} aria-controls={position ? id : undefined} variant="ghost" className="p-1.5!" onClick={() => position ? setPosition(null) : open()} onKeyDown={(event) => {
       if (event.key === 'ArrowDown') { event.preventDefault(); open() }
     }}><MoreHorizontal size={16} /></AdminButton>
-    {position && createPortal(<div ref={menu} id={id} role="menu" aria-label={label} style={position} className="fixed z-40 max-h-80 w-52 max-w-[calc(100vw-16px)] overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-900 p-1 shadow-xl" onKeyDown={(event) => {
+    {position && createPortal(<div ref={menu} id={id} role="menu" aria-label={label} style={position} className="admin-popover fixed z-40 max-h-80 w-52 max-w-[calc(100vw-16px)] overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-900 p-1 shadow-xl" onKeyDown={(event) => {
       const entries = Array.from(menu.current?.querySelectorAll<HTMLElement>('[role="menuitem"]:not([disabled])') ?? [])
       const index = entries.indexOf(document.activeElement as HTMLElement)
       if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {

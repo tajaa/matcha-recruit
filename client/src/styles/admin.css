@@ -1,0 +1,192 @@
+/* Admin-only materials. Shared utilities still carry layout and semantic data
+   colors; these tokens own chrome, including menus portaled to document.body. */
+html[data-app-shell-bg="admin"] {
+  --admin-canvas: #17181b;
+  --admin-glow: rgba(255, 255, 255, .065);
+  --admin-surface: rgba(255, 255, 255, .035);
+  --admin-floating: rgba(35, 36, 40, .88);
+  --admin-rail: rgba(28, 29, 33, .8);
+  --admin-field: rgba(0, 0, 0, .15);
+  --admin-edge: rgba(255, 255, 255, .1);
+  --admin-highlight: rgba(255, 255, 255, .07);
+  --admin-hover: rgba(255, 255, 255, .065);
+  --admin-selected: rgba(255, 255, 255, .12);
+  --admin-shadow: 0 8px 32px rgba(0, 0, 0, .12);
+  --admin-inset: inset 0 1px 0 var(--admin-highlight);
+  --color-zinc-500: #99999f;
+  color-scheme: dark;
+}
+
+html:root[data-app-shell-bg="admin"] {
+  background-color: var(--admin-canvas);
+}
+
+html[data-app-shell-bg="admin"] .admin-shell {
+  background: radial-gradient(ellipse at 25% 0%, var(--admin-glow), transparent 65%), var(--admin-canvas);
+  color: var(--color-zinc-200);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-feature-settings: 'cv11', 'ss01';
+}
+
+/* Floating rail stays within the existing 240px / 56px layout footprint. */
+.admin-shell .admin-rail {
+  padding: 10px 0 10px 10px;
+}
+
+.admin-shell .admin-rail aside {
+  border: 1px solid var(--admin-edge);
+  border-radius: 20px;
+  background: var(--admin-rail);
+  box-shadow: var(--admin-inset), var(--admin-shadow);
+  -webkit-backdrop-filter: blur(28px) saturate(.8);
+  backdrop-filter: blur(28px) saturate(.8);
+}
+
+.admin-shell .admin-rail nav a {
+  height: 36px;
+  margin: 2px 0;
+  border-radius: 10px;
+  font-weight: 400;
+}
+
+.admin-shell .admin-rail nav a:hover {
+  background: var(--admin-hover);
+}
+
+.admin-shell .admin-rail nav a[aria-current="page"] {
+  background: var(--admin-selected);
+  box-shadow: var(--admin-inset), 0 2px 6px rgba(0, 0, 0, .06);
+  font-weight: 500;
+}
+
+.admin-shell .admin-rail a[title="Matcha Admin"] span {
+  font-family: inherit !important;
+  font-weight: 600;
+  font-size: 15px;
+}
+
+html[data-app-shell-bg="admin"] :is(.admin-toolbar, .admin-popover) {
+  border-color: var(--admin-edge);
+  background: var(--admin-floating);
+  box-shadow: var(--admin-inset), var(--admin-shadow);
+  -webkit-backdrop-filter: blur(24px);
+  backdrop-filter: blur(24px);
+}
+
+html[data-app-shell-bg="admin"] .admin-surface {
+  border-radius: 14px;
+  background: linear-gradient(135deg, var(--admin-highlight), transparent 60%), var(--admin-surface);
+  box-shadow: var(--admin-inset), 0 2px 8px rgba(0, 0, 0, .025);
+}
+
+html[data-app-shell-bg="admin"] .admin-border {
+  border-color: var(--admin-edge);
+}
+
+html[data-app-shell-bg="admin"] .admin-directory .admin-surface {
+  border-radius: 16px;
+  padding: 20px;
+}
+
+html[data-app-shell-bg="admin"] .admin-directory a:hover .admin-surface {
+  background-color: var(--admin-hover);
+  border-color: var(--color-zinc-600);
+}
+
+html[data-app-shell-bg="admin"] :is(.admin-field, .admin-tabbar) {
+  border-color: var(--admin-edge);
+  background: var(--admin-field);
+  box-shadow: var(--admin-inset);
+}
+
+html[data-app-shell-bg="admin"] .admin-field {
+  border-radius: 9px;
+}
+
+html[data-app-shell-bg="admin"] select option {
+  color: var(--color-zinc-100);
+  background: var(--color-zinc-900);
+}
+
+html[data-app-shell-bg="admin"] .admin-field:focus {
+  border-color: var(--color-zinc-400);
+  --tw-ring-color: var(--admin-edge);
+}
+
+html[data-app-shell-bg="admin"] .admin-tab[aria-pressed="true"] {
+  background: var(--admin-selected);
+  box-shadow: var(--admin-inset), 0 1px 4px rgba(0, 0, 0, .1);
+}
+
+html[data-app-shell-bg="admin"] .admin-button {
+  border-radius: 9px;
+}
+
+html[data-app-shell-bg="admin"] .admin-button:is([data-admin-variant="primary"], [data-admin-variant="success"], [data-admin-variant="secondary"]) {
+  color: var(--color-zinc-100);
+  background: var(--admin-selected);
+  box-shadow: var(--admin-inset), 0 0 0 1px var(--admin-edge);
+}
+
+html[data-app-shell-bg="admin"] .admin-button:hover:not(:disabled) {
+  background: var(--admin-hover);
+}
+
+/* Keep color for warnings, errors, and charts. Interactive chrome uses silver
+   instead of the old green accent; descendants inherit the neutral ramp. */
+.admin-shell :is(button, a, input, select, textarea) {
+  --color-emerald-100: var(--color-zinc-100);
+  --color-emerald-200: var(--color-zinc-200);
+  --color-emerald-300: var(--color-zinc-200);
+  --color-emerald-400: var(--color-zinc-300);
+  --color-emerald-500: var(--color-zinc-400);
+  --color-emerald-600: var(--color-zinc-600);
+  --color-emerald-700: var(--color-zinc-700);
+  --color-emerald-800: var(--color-zinc-800);
+  --color-emerald-900: var(--color-zinc-900);
+  --color-emerald-950: var(--color-zinc-950);
+}
+
+html[data-app-shell-bg="admin"] .admin-badge {
+  display: inline-block;
+  border: 1px solid var(--admin-edge);
+  border-radius: 6px;
+  padding: 2px 6px;
+  background: var(--admin-surface);
+  color: var(--color-zinc-300);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+html[data-app-shell-bg="admin"] :is(.admin-table, .admin-list .overflow-hidden:has(> .overflow-x-auto > table)) {
+  border-color: var(--admin-edge);
+  border-radius: 12px;
+  background: var(--admin-surface);
+  box-shadow: var(--admin-inset);
+}
+
+html[data-app-shell-bg="admin"] :is(.admin-table, .admin-list) thead {
+  background: var(--admin-hover);
+}
+
+html[data-app-shell-bg="admin"] :is(.admin-table, .admin-list) tbody tr:hover {
+  background: var(--admin-hover);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  html[data-app-shell-bg="admin"] {
+    --admin-surface: #242529;
+    --admin-floating: #292a2e;
+    --admin-rail: #202125;
+  }
+  html[data-app-shell-bg="admin"] :is(.admin-rail aside, .admin-toolbar, .admin-popover) {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-shell *, html[data-app-shell-bg="admin"] .admin-popover {
+    transition: none !important;
+  }
+}

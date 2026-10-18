@@ -60,19 +60,10 @@ function tierFromCompany(c: Company): Exclude<Tier, 'all'> {
   return 'platform'
 }
 
-const TIER_BADGE_CLASS: Record<Exclude<Tier, 'all'>, string> = {
-  free: 'border-zinc-600 bg-zinc-700/30 text-zinc-300',
-  lite: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
-  x: 'border-teal-500/40 bg-teal-500/10 text-teal-300',
-  compliance: 'border-amber-500/40 bg-amber-500/10 text-amber-300',
-  platform: 'border-violet-500/40 bg-violet-500/10 text-violet-300',
-  personal: 'border-sky-500/40 bg-sky-500/10 text-sky-300',
-}
-
 function TierBadge({ c }: { c: Company }) {
   const tier = tierFromCompany(c)
   return (
-    <span className={`inline-block text-[10px] px-1.5 py-0.5 rounded border ${TIER_BADGE_CLASS[tier]}`}>
+    <span className="admin-badge">
       {TIER_LABEL[tier]}
     </span>
   )
@@ -288,7 +279,7 @@ export default function Companies() {
                   {c.healthcare_specialties && c.healthcare_specialties.length > 0 && (
                     <div className="flex flex-wrap gap-1 mt-1">
                       {c.healthcare_specialties.map((s) => (
-                        <span key={s} className="text-[10px] px-1.5 py-0.5 rounded-full border border-violet-500/30 bg-violet-500/10 text-violet-300">
+                        <span key={s} className="admin-badge">
                           {HEALTHCARE_SPECIALTIES.find((x) => x.value === s)?.label ?? s}
                         </span>
                       ))}
@@ -385,7 +376,7 @@ export default function Companies() {
                     onClick={() => toggleSpecialty(s.value)}
                     className={`text-xs text-left px-2 py-1.5 rounded transition-colors ${
                       form.healthcare_specialties.includes(s.value)
-                        ? 'bg-violet-500/20 text-violet-300'
+                        ? 'bg-zinc-700/40 text-zinc-100'
                         : 'text-zinc-500 hover:text-zinc-300 bg-zinc-800/30'
                     }`}
                   >

@@ -8,7 +8,6 @@ import AdminCategoryPage from '../../pages/admin/AdminCategoryPage'
 import AdminSidebar from './AdminSidebar'
 
 vi.mock('../../hooks/useMe', () => ({ useMe: () => ({ me: null, hasFeature: () => false, isBetaFeature: () => false }) }))
-vi.mock('../shared/ThemeToggle', () => ({ default: () => null }))
 
 function renderPage(pathname: string) {
   return render(<MemoryRouter initialEntries={[pathname]}>
@@ -21,6 +20,11 @@ function renderPage(pathname: string) {
 }
 
 describe('AdminSidebar', () => {
+  it('keeps admin dark only without a theme switch', () => {
+    renderPage('/admin/areas/customers')
+    expect(screen.queryByRole('button', { name: /^(Light|Dark) mode$/ })).not.toBeInTheDocument()
+  })
+
   it.each(ADMIN_AREAS.flatMap((area) => area.pages.map((page) => ({ area, page }))))('selects $area.label on $page.to while keeping the category destination', ({ area, page }) => {
     renderPage(`${page.to}/detail`)
     const sidebar = screen.getByRole('complementary')
