@@ -254,3 +254,13 @@ async def test_brave_out_while_a_search_waited_its_turn_sends_nothing():
         await B.search("lip balm", transport=httpx.MockTransport(lambda r: seen.append(r) or _ok([])),
                        sleep=sleep, clock=clock)
     assert out.value.out and seen == []
+
+
+@pytest.mark.asyncio
+async def test_a_later_page_is_asked_for_by_offset():
+    _found, seen = await _search(_ok([]), offset=2, count=20)
+    assert seen[0].url.params["offset"] == "2" and seen[0].url.params["count"] == "20"
+    _found, seen = await _search(_ok([]), offset=50)
+    assert seen[0].url.params["offset"] == str(B.MAX_OFFSET)
+    _found, seen = await _search(_ok([]))
+    assert "offset" not in seen[0].url.params, "the first page sends none"

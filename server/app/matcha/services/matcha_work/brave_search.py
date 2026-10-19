@@ -50,6 +50,8 @@ URL = "https://api.search.brave.com/res/v1/web/search"
 COUNT = 10
 # Brave answers at most 20 results a request (code's board searches ask for that).
 MAX_COUNT = 20
+# Pages past the first, in units of `count`: Brave serves up to the tenth.
+MAX_OFFSET = 9
 TIMEOUT_SECONDS = 10.0
 # How long Brave stays out after a refused key or a 402: long enough not to
 # ask on every search, short enough that a fixed key or a paid bill is used
@@ -278,12 +280,14 @@ def results(body: dict, count: int = COUNT, *, images: bool = False) -> list[dic
     return out
 
 
-async def search(query: str, *, freshness: Any = None, count: int = COUNT, images: bool = False,
-                 transport: httpx.AsyncBaseTransport | None = None,
+async def search(query: str, *, freshness: Any = None, count: int = COUNT, offset: int = 0,
+                 images: bool = False, transport: httpx.AsyncBaseTransport | None = None,
                  sleep: SleepFn = asyncio.sleep, clock: Clock = time.monotonic) -> list[dict]:
     """Up to `count` (`COUNT` unless asked, at most `MAX_COUNT`) web results
-    for `query`, under the rules in the docstring."""
+    for `query`, under the rules in the docstring; `offset` pages of `count`
+    in (0, the first page, to `MAX_OFFSET`)."""
     count = max(1, min(int(count), MAX_COUNT))
+    offset = max(0, min(int(offset), MAX_OFFSET))
     key = _key()
     if key is None:
         raise Unavailable("Brave search has no key", out=True)
@@ -291,6 +295,8 @@ async def search(query: str, *, freshness: Any = None, count: int = COUNT, image
         raise Unavailable(f"Brave search is out ({_out_reason})", out=True)
     params: dict[str, Any] = {"q": query[:400], "count": count, "extra_snippets": "true",
                               "result_filter": "web", "text_decorations": "false"}
+    if offset:
+        params["offset"] = offset
     if isinstance(freshness, str) and freshness in FRESHNESS:
         params["freshness"] = FRESHNESS[freshness]
     headers = {"X-Subscription-Token": key, "Accept": "application/json"}

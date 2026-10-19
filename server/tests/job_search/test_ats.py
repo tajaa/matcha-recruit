@@ -42,6 +42,16 @@ def test_rejects_everything_else(url):
     assert ats.detect(url) is None
 
 
+@pytest.mark.parametrize("url", [
+    "https://boards.greenhouse.io/acme/jobs/123", f"https://jobs.lever.co/beta/{LEVER_ID}",
+    f"https://jobs.eu.lever.co/beta/{LEVER_ID}", f"https://jobs.ashbyhq.com/gamma/{ASHBY_ID}",
+    "https://apply.workable.com/delta/j/9A1F916774/",
+])
+def test_a_board_url_reads_back_as_its_ref(url):
+    ref = ats.detect(url)
+    assert ats.detect(ref.board_url()) == ref
+
+
 def test_api_urls_are_fixed_hosts():
     assert ats.AtsRef("greenhouse", "acme", "1").api_url().startswith(
         "https://boards-api.greenhouse.io/v1/boards/acme/jobs/1?questions=true")
@@ -147,6 +157,28 @@ async def test_fetch_goes_through_the_safe_fetcher():
     assert lever.title == "COO"
     ashby = await ats.fetch(ats.AtsRef("ashby", "g", ASHBY_ID), fetch_fn=AsyncMock(return_value=response({"jobs": []})))
     assert ashby is None
+
+
+@pytest.mark.asyncio
+async def test_read_says_closed_only_when_the_ats_did():
+    """A 404, a board without the job or an unpublished Workable job is
+    closed; a timeout, a server error or a cut-off body says nothing either
+    way, so a stored posting isn't hidden for a slow answer."""
+    lever = ats.AtsRef("lever", "beta", LEVER_ID)
+    ashby = ats.AtsRef("ashby", "g", ASHBY_ID)
+    for ref, result in ((lever, response({}, status=404)), (lever, response({}, status=410)),
+                        (ashby, response({"jobs": []})), (WORKABLE_REF, response({"state": "closed"})),
+                        (lever, response({"text": ""}))):
+        got = await ats.read(ref, fetch_fn=AsyncMock(return_value=result))
+        assert got.closed is True and (got.posting is None or not got.posting.title), result.status
+    for ref, result in ((lever, response({}, status=500)), (lever, response({}, status=429)),
+                        (lever, response({}, truncated=True)), (lever, response(b"<html>")),
+                        (ashby, response({"error": "busy"})), (lever, response(["list"]))):
+        got = await ats.read(ref, fetch_fn=AsyncMock(return_value=result))
+        assert got == ats.AtsRead(None, closed=False), result.status
+    assert await ats.read(lever, fetch_fn=AsyncMock(side_effect=TimeoutError())) == ats.AtsRead(None)
+    live = await ats.read(lever, fetch_fn=AsyncMock(return_value=response({"text": "COO"})))
+    assert live.posting.title == "COO" and live.closed is False
 
 
 def test_page_extract_reads_job_postings():

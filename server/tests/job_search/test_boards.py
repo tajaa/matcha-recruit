@@ -20,7 +20,7 @@ def conn(monkeypatch):
     from tests.agent_runtime.helpers import FakeConn, connection
 
     conn = FakeConn()
-    for module in (phases, chain):
+    for module in (phases, chain, boards):
         monkeypatch.setattr(module, "connection_or_direct", connection(conn))
     monkeypatch.setattr(boards, "PACE_SECONDS", 0)
     return conn
@@ -98,15 +98,17 @@ async def test_find_collects_each_board_link_once(conn):
     }
     calls = []
 
-    async def web_search(query, count):
-        calls.append((query, count))
+    async def web_search(query, count, offset=0):
+        calls.append((query, count, offset))
         return answers.get(len(calls) - 1, [])
 
     guard = Guard()
-    links, worked = await boards.find(search_row(), ["COO"], {}, phases.Deps(web_search=web_search), guard)
+    links, worked, pages = await boards.find(search_row(), ["COO"], {}, phases.Deps(web_search=web_search), guard)
     assert worked and [link["url"] for link in links] == [GH, LEVER]
     assert links[0] == {"url": GH, "title": "", "company": "", "location": ""}
-    assert len(calls) == 4 and all(count == boards.RESULTS for _q, count in calls)
+    assert len(calls) == 4 and all(count == boards.RESULTS and offset == 0 for _q, count, offset in calls)
+    # Each page Brave answered, for the read step to record once its postings are read.
+    assert pages == [{"query": q, "offset": 0, "last": True} for q, _c, _o in calls]
     assert conn.ran(GRANT)[0][2] == (SEARCH, 4, phases.MAX_PROVIDER_CALLS)
     assert guard.notes == ["Searched employers' job boards (4 of 4)…"]
     assert not conn.ran(REFUND)  # all four used
@@ -117,7 +119,7 @@ async def test_find_stops_when_brave_is_out_and_gives_back_the_rest(conn):
     conn.on(GRANT, lambda _id, want, _limit: want)
     seen = []
 
-    async def web_search(query, _count):
+    async def web_search(query, _count, offset=0):
         seen.append(query)
         if len(seen) == 1:
             raise brave_search.Unavailable("too slow")  # this search only
@@ -125,8 +127,8 @@ async def test_find_stops_when_brave_is_out_and_gives_back_the_rest(conn):
             return [{"url": LEVER}]
         raise brave_search.Unavailable("no searches left", out=True)
 
-    links, worked = await boards.find(search_row(), ["COO"], {}, phases.Deps(web_search=web_search), Guard())
-    assert worked and [link["url"] for link in links] == [LEVER]
+    links, worked, pages = await boards.find(search_row(), ["COO"], {}, phases.Deps(web_search=web_search), Guard())
+    assert worked and [link["url"] for link in links] == [LEVER] and [p["query"] for p in pages] == [seen[1]]
     assert len(seen) == 3
     # Four reserved, two used: the one Brave refused for good and the one never asked go back.
     assert conn.ran(REFUND)[0][2] == (SEARCH, 2)
@@ -136,16 +138,16 @@ async def test_find_stops_when_brave_is_out_and_gives_back_the_rest(conn):
 async def test_find_with_no_budget_or_no_answers(conn):
     conn.on(GRANT, 0)
     web_search = AsyncMock(return_value=[{"url": GH}])
-    links, worked = await boards.find(search_row(), ["COO"], {}, phases.Deps(web_search=web_search), Guard())
+    found = await boards.find(search_row(), ["COO"], {}, phases.Deps(web_search=web_search), Guard())
     # A spent budget (earlier passes searched) is not a source that was down.
-    assert (links, worked) == ([], True)
+    assert found == ([], True, [])
     web_search.assert_not_awaited()
 
     conn.on(GRANT, lambda _id, want, _limit: want)
     web_search = AsyncMock(side_effect=brave_search.Unavailable("Brave search has no key", out=True))
-    assert await boards.find(search_row(), ["COO"], {}, phases.Deps(web_search=web_search), Guard()) == ([], False)
+    assert await boards.find(search_row(), ["COO"], {}, phases.Deps(web_search=web_search), Guard()) == ([], False, [])
     assert web_search.await_count == 1
-    assert await boards.find(search_row(), [], {}, phases.Deps(web_search=web_search), Guard()) == ([], False)
+    assert await boards.find(search_row(), [], {}, phases.Deps(web_search=web_search), Guard()) == ([], False, [])
 
 
 @pytest.mark.asyncio
@@ -154,8 +156,8 @@ async def test_a_cancelled_search_stops_spending_its_searches(conn):
     search stops, and what it did not use goes back."""
     conn.on(GRANT, lambda _id, want, _limit: want)
     web_search = AsyncMock(return_value=[{"url": LEVER}])
-    links, worked = await boards.find(search_row(), ["COO", "Chief Operating Officer", "Head of Operations"], {},
-                                      phases.Deps(web_search=web_search), Guard(current=False))
+    links, worked, _ = await boards.find(search_row(), ["COO", "Chief Operating Officer", "Head of Operations"], {},
+                                         phases.Deps(web_search=web_search), Guard(current=False))
     assert worked and [link["url"] for link in links] == [LEVER]
     assert web_search.await_count == 4  # the check comes after the fourth
     assert conn.ran(REFUND)[0][2] == (SEARCH, 12 - 4)
@@ -166,6 +168,61 @@ async def test_find_caps_the_links(conn, monkeypatch):
     conn.on(GRANT, lambda _id, want, _limit: want)
     monkeypatch.setattr(boards, "MAX_LINKS", 3)
     many = [{"url": f"https://job-boards.greenhouse.io/acme/jobs/{i}"} for i in range(10)]
-    links, _ = await boards.find(search_row(), ["COO"], {}, phases.Deps(web_search=AsyncMock(return_value=many)),
-                                 Guard())
+    links, _, _ = await boards.find(search_row(), ["COO"], {}, phases.Deps(web_search=AsyncMock(return_value=many)),
+                                    Guard())
     assert len(links) == 3
+
+
+def stored_row(url, title="Chief Operating Officer", location="Austin, TX"):
+    import json as _json
+
+    from app.matcha.services.matcha_work.job_search import ats, normalize
+
+    ref = ats.detect(url)
+    record = {"title": title, "company": ref.board, "location": location, "remote": False, "source_url": url,
+              "dedupe_key": normalize.dedupe_key(ref.board, title, location), "ats": ref.view()}
+    return {"provider": ref.provider, "board_key": ref.board, "job_key": ref.job_id, "url": url, "live": True,
+            "fresh": True, "record": _json.dumps(record)}
+
+
+@pytest.mark.asyncio
+async def test_find_starts_from_stored_postings_and_asks_for_the_next_page(conn):
+    """What earlier searches read comes first; a search sent today asks for
+    its next page; one read to its end isn't sent, or reserved."""
+    from app.matcha.services.matcha_work.job_search import postings
+
+    stored = "https://jobs.ashbyhq.com/stored/0f6b2a4e-1111-2222-3333-444455556666"
+    searches = boards.board_searches(["COO"], {})
+    conn.on(GRANT, lambda _id, want, _limit: want)
+    conn.on("FROM mw_job_board_searches", [
+        {"query": postings.query_key(searches[0]), "next_offset": 2, "exhausted": False},
+        {"query": postings.query_key(searches[1]), "next_offset": 1, "exhausted": True},
+    ])
+    conn.on("to_tsquery", [stored_row(stored), stored_row(GH.replace("4001", "9"), title="Forklift Operator")])
+    calls = []
+
+    async def web_search(query, count, offset=0):
+        calls.append((query, offset))
+        return [{"url": GH}, {"url": stored}]
+
+    links, worked, pages = await boards.find(search_row(), ["COO"], {}, phases.Deps(web_search=web_search), Guard())
+    assert worked and [link["url"] for link in links] == [stored, GH], "a stored Forklift Operator isn't a COO"
+    assert calls == [(searches[0], 2), (searches[2], 0), (searches[3], 0)]
+    assert conn.ran(GRANT)[0][2] == (SEARCH, 3, phases.MAX_PROVIDER_CALLS)
+    assert pages[0] == {"query": searches[0], "offset": 2, "last": True}
+
+    # Every one read to its end today: the stored postings, nothing sent.
+    conn.on("FROM mw_job_board_searches", [{"query": postings.query_key(q), "next_offset": 1, "exhausted": True}
+                                           for q in searches])
+    web_search = AsyncMock()
+    found = await boards.find(search_row(), ["COO"], {}, phases.Deps(web_search=web_search), Guard())
+    assert found == ([{"url": stored, "title": "", "company": "", "location": ""}], True, [])
+    web_search.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_pages_are_recorded_for_the_next_search(conn):
+    await boards.record_searched([{"query": '"COO" site:jobs.lever.co', "offset": 1, "last": False}, "junk", {}])
+    assert conn.ran("INSERT INTO mw_job_board_searches")[0][2] == (['"coo" site:jobs.lever.co'], [2], [False])
+    await boards.record_searched([])
+    assert len(conn.ran("INSERT INTO mw_job_board_searches")) == 1

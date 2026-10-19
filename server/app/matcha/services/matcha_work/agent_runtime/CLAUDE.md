@@ -703,6 +703,19 @@ area are found with `web_search` and read on their own sites.
   evidence, never the model's). The model gets one line a job fitted to the
   output budget (`fit_lines`); every one stays in the session. The
   deep, ranked search with the web and drafts is still a job search task.
+- **Asking again doesn't redo the work** (`job_search/postings.py`, the
+  `_store` seam). Live postings earlier searches read with a related title in
+  the place come first; one read live in the last 12 hours isn't read again,
+  one its board said is closed is skipped, and what is read is stored. A
+  board search sent in the last day asks Brave for its next page (the
+  payload's `searched_further`); one read to its end isn't sent, and when all
+  were the note says to try a related title, a nearby place or remote. A page
+  is remembered only once every posting it linked to is settled. Jobs an
+  answer in this conversation showed (the 5 latest done runs, 24 hours, by
+  apply link and board posting: `_shown_before`) are counted as
+  `shown_in_earlier_answers`, not listed again. With Brave down, stored
+  postings still answer (`searching` says so). The prompt tells the model to
+  call again for "any others?", adding a related title or place.
 - **Blocks are rebuilt by id.** `job_postings` (all a run can find, 120, in
   found order) comes from the session, never the model's text; empty ids mean
   everything found, and `leave_out_ids` drops a few. A `find_jobs` run that

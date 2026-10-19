@@ -119,6 +119,13 @@ _SENIORITY = {"chief", "head", "vice", "president", "senior", "executive", "dire
               "group", "deputy", "interim", "acting", "founding", "first", "sr", "team", "leader"}
 
 
+def work_words(title: str) -> set[str]:
+    """A title's words about the work, not its level ("Head of People" ->
+    human, resources); all of them for a title of level words alone (CEO)."""
+    words = title_words(title)
+    return (words - _SENIORITY) or words
+
+
 def _kin(a: str, b: str) -> bool:
     """The same word, or one a short inflection of the other ("market" and
     "marketing", "operation" and "operations"); never "operations" and
