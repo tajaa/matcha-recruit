@@ -137,6 +137,7 @@ async def screen(search: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
     batch = {f"J{i + 1}": str(row["id"]) for i, row in enumerate(rows)}
     jobs = [_screen_job(short, row) for short, row in zip(batch, rows)]
     person, _resume = await _person(search)
+    worked = True
     try:
         outcome = await run_model_phase(
             search, phase="screen", abilities=(),
@@ -151,24 +152,19 @@ async def screen(search: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
         verdicts: dict[str, dict] = outcome.result
     except runner.AgentRunError:
         logger.info("job search screening failed; keeping the batch search=%s", search["id"])
-        verdicts = {}
-    ids = [UUID(lead_id) for lead_id in batch.values()]
+        verdicts, worked = {}, False
+    # A job the model skipped (the contract lets a few go) stays pending and
+    # is shown once more in the next batch; skipped again, it is kept in with
+    # no fit, as a batch the model couldn't rate at all is. Counted as
+    # matches, up to 8 of 40 skipped jobs could be drafted unseen.
+    cursor = decode_jsonb(search.get("phase_cursor"), {}) or {}
+    asked_again = {str(i) for i in (cursor.get("rescreen") or []) if isinstance(cursor, dict)}
+    rescreen = [i for i in batch.values() if worked and i not in verdicts and i not in asked_again]
+    ids = [UUID(lead_id) for lead_id in batch.values() if lead_id not in rescreen]
     relevant = [verdicts.get(str(i), {}).get("relevant", True) for i in ids]
     async with connection_or_direct() as conn:
-        await conn.execute(
-            """UPDATE mw_job_leads AS l
-               SET screen_status = CASE WHEN v.relevant THEN 'relevant' ELSE 'irrelevant' END,
-                   fit_score = v.fit, fit_reasons = v.reasons::jsonb, screen_reason = NULLIF(v.reason, ''),
-                   updated_at = NOW()
-               FROM unnest($3::uuid[], $4::bool[], $5::int[], $6::text[], $7::text[])
-                    AS v(id, relevant, fit, reasons, reason)
-               WHERE l.id = v.id AND l.search_id = $1
-                 AND EXISTS (SELECT 1 FROM mw_job_searches WHERE id = $1 AND dispatch_token = $2)""",
-            search["id"], guard.token, ids, relevant,
-            [verdicts.get(str(i), {}).get("fit") for i in ids],
-            [json.dumps(verdicts.get(str(i), {}).get("reasons") or []) for i in ids],
-            [verdicts.get(str(i), {}).get("reason") or "" for i in ids],
-        )
+        if ids:
+            await _write_verdicts(conn, search, guard, ids, relevant, verdicts)
         left = int(await conn.fetchval(
             "SELECT COUNT(*) FROM mw_job_leads WHERE search_id = $1 AND screen_status = 'pending'",
             search["id"],
@@ -178,10 +174,29 @@ async def screen(search: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
             search["id"],
         ) or 0)
     if left:
-        return PhaseOutcome(status="screening", progress={"note": f"Screened; {left} to go…", "relevant": kept})
+        return PhaseOutcome(status="screening", cursor={"rescreen": sorted(asked_again | set(rescreen))},
+                            progress={"note": f"Screened; {left} to go…", "relevant": kept})
     return PhaseOutcome(
-        status="enriching",
+        status="enriching", cursor={},
         progress={"note": f"{kept} jobs fit. Reading the postings for pay…", "relevant": kept},
+    )
+
+
+async def _write_verdicts(conn, search: dict, guard: Guard, ids: list[UUID], relevant: list[bool],
+                          verdicts: dict[str, dict]) -> None:
+    await conn.execute(
+        """UPDATE mw_job_leads AS l
+           SET screen_status = CASE WHEN v.relevant THEN 'relevant' ELSE 'irrelevant' END,
+               fit_score = v.fit, fit_reasons = v.reasons::jsonb, screen_reason = NULLIF(v.reason, ''),
+               updated_at = NOW()
+           FROM unnest($3::uuid[], $4::bool[], $5::int[], $6::text[], $7::text[])
+                AS v(id, relevant, fit, reasons, reason)
+           WHERE l.id = v.id AND l.search_id = $1
+             AND EXISTS (SELECT 1 FROM mw_job_searches WHERE id = $1 AND dispatch_token = $2)""",
+        search["id"], guard.token, ids, relevant,
+        [verdicts.get(str(i), {}).get("fit") for i in ids],
+        [json.dumps(verdicts.get(str(i), {}).get("reasons") or []) for i in ids],
+        [verdicts.get(str(i), {}).get("reason") or "" for i in ids],
     )
 
 

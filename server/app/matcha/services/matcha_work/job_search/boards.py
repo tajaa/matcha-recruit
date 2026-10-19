@@ -50,15 +50,16 @@ def _city(text: str) -> str:
 def board_searches(titles: list[str], criteria: dict, must: int = 0) -> list[str]:
     """The searches for one search's boards: each title on each host, and
     the first titles in each place on each host, taken in turn so a search
-    with places gets both before the cap. Host by host, and title by place
-    (`phases.cover`), so even a capped list searches every title (the first
-    `must` at least) and every place."""
+    with places gets both before the cap. Titles and hosts, and places and
+    hosts, are paired with `phases.cover`, so even a capped list searches
+    every title (the first `must` at least), every place and every host:
+    listed host by host, two places were enough to leave Ashby unsearched."""
     titles = [t for t in titles if t][:max(TITLES, must)]
     remote = " remote" if criteria.get("remote") == "remote_only" else ""
     spots = [_city(t.label) for t in places.targets(criteria) if t.points or t.name][:PLACES]
-    wide = [f'"{title}"{remote} site:{host}' for host in HOSTS for title in titles]
-    local = [f'"{title}" "{spot}" site:{host}' for host in HOSTS
-             for title, spot in phases.cover(titles[:LOCAL_TITLES], spots)]
+    wide = [f'"{title}"{remote} site:{host}' for title, host in phases.cover(titles, list(HOSTS))]
+    local = [f'"{title}" "{spot}" site:{host}'
+             for (title, spot), host in phases.cover(phases.cover(titles[:LOCAL_TITLES], spots), list(HOSTS))]
     turns = []
     for i in range(max(len(wide), len(local))):
         turns += [s for s in (local[i] if i < len(local) else None, wide[i] if i < len(wide) else None) if s]

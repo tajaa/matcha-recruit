@@ -41,8 +41,9 @@ class Guard:
 def test_board_searches():
     titles = ["Chief People Officer", "CHRO", "VP People", "Head of People", "Fifth Title"]
     wide = boards.board_searches(titles, {})
-    # Host by host: every title on the first host before any on the second.
-    assert wide[:4] == [f'"{title}" site:job-boards.greenhouse.io' for title in titles[:4]]
+    # Titles and hosts in turn (`phases.cover`): the first four reach every
+    # title and every host, so a capped list has each of both in it.
+    assert wide[:4] == [f'"{title}" site:{host}' for title, host in zip(titles, boards.HOSTS)]
     assert len(wide) == 16 and not any("Fifth Title" in q for q in wide)
     # A fifth typed title (or kept direction) is searched too.
     assert len(boards.board_searches(titles, {}, must=5)) == 20
@@ -51,8 +52,8 @@ def test_board_searches():
     local = boards.board_searches(titles, {"locations": ["San Diego, CA", "Remote", "Orange County, CA"]})
     assert local[:4] == ['"Chief People Officer" "San Diego" site:job-boards.greenhouse.io',
                          '"Chief People Officer" site:job-boards.greenhouse.io',
-                         '"CHRO" "Orange County" site:job-boards.greenhouse.io',
-                         '"CHRO" site:job-boards.greenhouse.io']
+                         '"CHRO" "Orange County" site:boards.greenhouse.io',
+                         '"CHRO" site:boards.greenhouse.io']
     assert len(local) == boards.MAX_SEARCHES and len(set(local)) == len(local)
     assert any('"Orange County"' in q for q in local) and not any('"Remote"' in q for q in local)
     assert boards.board_searches(["COO"], {"remote": "remote_only"})[0] == '"COO" remote site:job-boards.greenhouse.io'
@@ -69,6 +70,23 @@ def test_a_capped_list_still_searches_every_typed_title_and_place():
     assert len(searches) == boards.MAX_SEARCHES
     assert all(any(f'"{t}"' in q for q in searches) for t in typed)
     assert all(any(f'"{town.split(",")[0]}"' in q for q in searches) for town in towns)
+
+
+@pytest.mark.parametrize("towns", [
+    ["Austin, TX"], ["Austin, TX", "Dallas, TX"],
+    ["Austin, TX", "Dallas, TX", "Houston, TX", "Denver, CO", "Phoenix, AZ", "Seattle, WA"],
+])
+def test_every_host_is_searched_under_the_cap(towns):
+    """Listed host by host, two places were enough to push Ashby past the
+    cap; with eight typed titles and six places, Ashby and Lever both went."""
+    typed = [f"Title {n}" for n in range(1, 9)]
+    for titles, must in ((["COO", "Chief Operating Officer", "VP Ops", "Head of Operations"], 0), (typed, len(typed))):
+        searches = boards.board_searches(titles, {"locations": towns}, must=must)
+        assert len(searches) <= boards.MAX_SEARCHES
+        for host in boards.HOSTS:
+            assert any(f"site:{host}" in q for q in searches), (host, towns, must)
+            # Each host gets a wide search (any place) too.
+            assert any(q.endswith(f"site:{host}") and q.count('"') == 2 for q in searches), (host, towns)
 
 
 @pytest.mark.asyncio

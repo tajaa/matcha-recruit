@@ -79,7 +79,8 @@ _TITLE_ABBREVIATIONS = {
     "cfo": "chief financial officer", "cto": "chief technology officer", "cmo": "chief marketing officer",
     "cro": "chief revenue officer", "cpo": "chief product officer", "ops": "operations", "sr": "senior",
     "jr": "junior", "mgr": "manager", "dir": "director", "gm": "general manager",
-    "hr": "human resources", "chro": "chief human resources officer",
+    "hr": "human resources", "chro": "chief human resources officer", "people": "human resources",
+    "nursing": "nurse", "operating": "operations",
 }
 # Words a board adds around a title without changing the job.
 _TITLE_FILLER = {"of", "and", "the", "for", "a", "an", "to", "at", "in", "remote", "hybrid", "onsite", "on",
@@ -91,7 +92,9 @@ _UNNAMED_EMPLOYERS = {"confidential", "undisclosed", "stealth", "anonymous"}
 def title_words(title: str) -> set[str]:
     words: list[str] = []
     for word in _words(title):
-        words += _TITLE_ABBREVIATIONS.get(word, word).split()
+        # Spelled out, then each word mapped once more: "COO" is "chief
+        # operations officer", like "Director of Operations".
+        words += [_TITLE_ABBREVIATIONS.get(w, w) for w in _TITLE_ABBREVIATIONS.get(word, word).split()]
     return {w for w in words if w not in _TITLE_FILLER}
 
 
@@ -104,7 +107,10 @@ def same_title(a: str, b: str) -> bool:
     if not x or not y:
         return False
     both = len(x & y)
-    return x == y or (both / len(x) >= 0.75 and both / len(y) >= 0.6)
+    # Whichever side is the longer one may be the one that adds a little:
+    # a lead's "COO - Austin, TX" is the board's "Chief Operating Officer"
+    # in either order.
+    return x == y or (both / min(len(x), len(y)) >= 0.8 and both / max(len(x), len(y)) >= 0.6)
 
 
 # Words that say how senior a title is, not what the job is.
@@ -113,8 +119,19 @@ _SENIORITY = {"chief", "head", "vice", "president", "senior", "executive", "dire
               "group", "deputy", "interim", "acting", "founding", "first", "sr", "team", "leader"}
 
 
-def _stems(words: set[str]) -> set[str]:
-    return {w[:5] for w in words}
+def _kin(a: str, b: str) -> bool:
+    """The same word, or one a short inflection of the other ("market" and
+    "marketing", "operation" and "operations"); never "operations" and
+    "operator", or "people" and "peoplesoft", which a five-letter stem took
+    for the same."""
+    if a == b:
+        return True
+    short, long_ = sorted((a, b), key=len)
+    return len(short) >= 4 and long_.startswith(short) and len(long_) - len(short) <= 3
+
+
+def _shares(x: set[str], y: set[str]) -> bool:
+    return any(_kin(a, b) for a in x for b in y)
 
 
 def title_covers(title: str, want: str) -> bool:
@@ -122,8 +139,9 @@ def title_covers(title: str, want: str) -> bool:
     the title ("Senior Solutions Architect, AI" for "Solutions Architect").
     Level words count here ("Engineering Manager" is not any engineer), unlike
     `related_title`, which one shared word satisfies."""
-    words = _stems(title_words(want))
-    return bool(words) and words <= _stems(title_words(title))
+    words = title_words(want)
+    have = title_words(title)
+    return bool(words) and all(any(_kin(w, h) for h in have) for w in words)
 
 
 def related_title(title: str, wanted: list[str]) -> bool:
@@ -131,36 +149,65 @@ def related_title(title: str, wanted: list[str]) -> bool:
     is ("Director of Operations" for "Chief Operating Officer", "HR Business
     Partner" for "Head of HR"), so a board posting that only names a wanted
     title somewhere ("Software Engineer") isn't read as a lead. Level is the
-    screen's to judge; True when nothing is wanted."""
+    screen's to judge; True when nothing is wanted. A wanted title made only
+    of level words (CEO, President, General Manager) has no work word to
+    share, so a posting must carry the whole title: an Account Executive is
+    not a Chief Executive Officer."""
     if not any(w for w in wanted):
         return True
-    words = _stems(title_words(title))
+    words = title_words(title)
     for want in wanted:
-        core = title_words(want) - _SENIORITY or title_words(want)
-        if _stems(core) & words:
+        core = title_words(want) - _SENIORITY
+        if core and _shares(core, words):
             return True
+        if not core and title_covers(title, want) and (words & _SENIORITY) <= title_words(want):
+            return True  # the whole title, and no level word of its own: a VP of Sales is not a President
     return False
 
 
 def named_employer(company: str) -> str:
     """The employer's name run together for comparing ("BMW Group" -> bmw), or
     "" when the listing hides it ("Confidential")."""
-    words = [w for w in company_key(company).split() if w not in _UNNAMED_EMPLOYERS]
+    words = company_key(company).split()
+    if any(w in _UNNAMED_EMPLOYERS for w in words):
+        return ""  # "Stealth Startup", "Confidential Company": nobody is named
     return "".join(w for w in words if w not in _GENERIC_NAME_WORDS) or "".join(words)
 
 
 def same_employer(company: str, other: str) -> bool | None:
     """Whether `other` (an ATS board's name for itself, "hellobackpack", or a
-    page's hiring organization) is `company`'s employer: it contains one of
-    the name's distinctive words, or the whole short name. None when either
-    side names nobody, so there is nothing to compare."""
-    there = "".join(_words(other))
-    if not there or not named_employer(company):
+    page's hiring organization) is `company`'s employer. None when either
+    side names nobody, so there is nothing to compare.
+
+    A board token (one run-together word) is the employer when it is the
+    whole name run together, the name's first words run together
+    ("deltadental" for Delta Dental of California), or contains the whole
+    distinctive name when that is five letters or more ("hellobackpack" for
+    Backpack). One word of a longer name is not enough: Delta Air Lines'
+    "delta" is not Delta Dental's, and "metabase" is not Meta's.
+
+    A name in words (a page's hiring organization) is the employer when its
+    distinctive words are the name's, or the name's are its ("Lahey Health"
+    for Beth Israel Lahey Health); sharing some while each has its own
+    ("Delta Dental" and "Delta Air Lines") is not the same employer."""
+    mine = named_employer(company)
+    others = _words(other)
+    if not mine or not others:
         return None
     words = name_words(company) - _UNNAMED_EMPLOYERS
-    if words:
-        return any(w in there for w in words)
-    return named_employer(company) in there
+    if len(others) == 1:
+        token = others[0]
+        if token == mine or token == "".join(company_key(company).split()):
+            return True  # the distinctive name, or the whole name, run together
+        parts = [w for w in company_key(company).split() if w not in _GENERIC_NAME_WORDS and w not in _UNNAMED_EMPLOYERS]
+        if len(parts) > 1 and token in {"".join(parts[:k]) for k in range(2, len(parts) + 1)}:
+            return True
+        return len(mine) >= 5 and mine in token
+    theirs = name_words(other) - _UNNAMED_EMPLOYERS
+    if not words or not theirs:
+        yours = named_employer(other)
+        return bool(yours) and (yours == mine or (len(mine) >= 5 and mine in yours) or (len(yours) >= 5 and yours in mine))
+    return words <= theirs or theirs <= words
 
 
 def state_of(location: str) -> str | None:

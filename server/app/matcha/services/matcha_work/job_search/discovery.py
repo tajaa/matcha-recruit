@@ -420,9 +420,12 @@ def _ats_record(found: ats.AtsPosting, posting: dict) -> dict:
     # the board's employer, else the board's own name.
     claimed = normalize.clean_text(posting.get("company"), 200)
     company = found.company or (claimed if normalize.same_employer(claimed, found.ref.board) else "")
+    # The posting's own location only: a web run's claim about where a job
+    # is must not decide `places.fits` (a model given results with no
+    # location in them kept one of six that fit, prod 2026-10-17).
     return _record(
         title=found.title, company=company or _board_name(found.ref.board),
-        location=found.location or normalize.clean_text(posting.get("location"), 200),
+        location=found.location or "",
         remote=found.remote, description=found.description, findings=found.findings,
         url=found.url or posting["url"], source=found.ref.provider,
         ats_data={**found.ref.view(), "questions": found.questions},
@@ -436,7 +439,7 @@ def _text(value) -> str:
 
 def _page_record(job: dict, page_url: str, posting: dict) -> dict:
     url = normalize.http_url(job.get("url")) or page_url
-    location = _text(job.get("location") or posting.get("location"))
+    location = _text(job.get("location"))  # the page's, never the web run's claim
     return _record(
         title=_text(job["title"]),
         company=_text(job.get("company") or posting.get("company")),
