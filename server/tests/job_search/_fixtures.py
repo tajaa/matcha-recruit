@@ -34,3 +34,52 @@ def lead_row(**over):
         "rank_explain": '{"flags": []}', "approach": "{}", "approach_status": "none",
         "user_state": "new", "notes": "", "created_at": NOW, "updated_at": NOW, **over,
     }
+
+
+class MemoryStore:
+    """`postings.Store` in memory: what was saved is fresh, and live rows match."""
+
+    def __init__(self):
+        from app.matcha.services.matcha_work.job_search import postings
+
+        self._p = postings
+        self.rows: dict = {}
+        self.sent_pages: dict[str, tuple[int, bool]] = {}
+        self.searched_pages: list[tuple[str, int, bool]] = []
+        self.looked_up: list = []
+
+    def put(self, record, *, fresh=True):
+        key = self._p.key_of_record(record)
+        self.rows[key] = self._p.Stored(key, record["source_url"], True, fresh, record)
+
+    async def known(self, keys):
+        self.looked_up += list(keys)
+        return {k: self.rows[k] for k in keys if k in self.rows}
+
+    async def matching(self, titles, criteria, *, limit=0):
+        return self._p.keep([r for r in self.rows.values() if r.live], titles, criteria)
+
+    async def save(self, records, closed=()):
+        for record in records:
+            if self._p.key_of_record(record) is not None:
+                self.put(record)
+        for key in closed:
+            self.rows[key] = self._p.Stored(key, "", False, True, None)
+
+    async def sent(self, queries):
+        keys = [self._p.query_key(q) for q in queries]
+        return {k: self.sent_pages[k] for k in keys if k in self.sent_pages}
+
+    async def searched(self, pages):
+        for page, last in pages:
+            self.sent_pages[self._p.query_key(page.query)] = (page.offset + 1, last)
+            self.searched_pages.append((page.query, page.offset, last))
+
+    def opener(self):
+        from contextlib import asynccontextmanager
+
+        @asynccontextmanager
+        async def opened():
+            yield self
+
+        return opened
