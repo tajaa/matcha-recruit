@@ -1,7 +1,7 @@
-"""The paid search APIs research tasks use: SearchAPI.io, SerpApi and Google's
-Places API, and the request rules Brave's web search (`brave_search.py`)
-follows too. Job search uses none of the first two: since 2026-10-18 it runs
-on Brave and Claude alone.
+"""The request rules for the paid APIs Espresso's agents call: Google's Places
+API (research tasks' Google Maps) and Brave's web search (`brave_search.py`).
+No search API (SearchAPI, SerpApi) is called since 2026-10-18: job search and
+research tasks run on Brave, Claude and Google's own APIs.
 
 `answer` makes one request under the rules both follow:
 - 401 or 403: the key was refused. `fatal`: asking again can't help.
@@ -79,12 +79,6 @@ def out_of_searches(status: int, body: Any) -> str | None:
     if status == 402 or _NO_SEARCHES_LEFT.search(said):
         return said or "no searches left"
     return None
-
-
-def result_error(data: dict) -> str:
-    """The error an answer carries, or "" when it only says there were no results."""
-    error = str(data.get("error") or "")
-    return "" if "hasn't returned any results" in error or "no results" in error.lower() else error
 
 
 def provider_id(name: str) -> str:

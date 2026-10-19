@@ -64,7 +64,8 @@ def test_a_kind_fixes_its_plan_and_adds_its_limits():
     assert plan["queries"] == ["1 bedroom San Francisco"]
     # The fallback plan is its kind too.
     products = contracts.plan_from_brief("organic lip balm", {"budget_max": 15}, today=TODAY, kind=kinds.PRODUCTS)
-    assert products["item_kind"] == "product" and products["source"] == "shopping"
+    # Products are the web search's (no Google Shopping since 2026-10-18).
+    assert products["item_kind"] == "product" and products["source"] == "web"
     assert products["fields"][:3] == ["price", "rating", "review_count"]
     # Without a kind, nothing changes.
     plain = contracts.plan_from_brief("lip balm", {}, today=TODAY)
@@ -89,7 +90,7 @@ def test_the_planner_is_told_the_kind_and_the_answers():
     assert "Kind of search: Apartments." in prompts.refine_instructions(TODAY, kinds.APARTMENTS)
     assert "Kind of search" not in prompts.refine_instructions(TODAY)
     text = prompts.plan_instructions(TODAY, kinds.PRODUCTS)
-    assert "Kind of search: Products. Its item_kind and source are fixed (product, shopping)." in text
+    assert "Kind of search: Products. Its item_kind and source are fixed (product, web)." in text
     assert "Kind of search" not in prompts.plan_instructions(TODAY)
     turn = prompts.plan_turn("1bd sf", {**APARTMENT_BRIEF, "odd_key": "x"}, None, labels=kinds.APARTMENTS.labels())
     assert "Rent up to (a month): 3500" in turn and "Bedrooms (at least): 1" in turn and "Odd key: x" in turn

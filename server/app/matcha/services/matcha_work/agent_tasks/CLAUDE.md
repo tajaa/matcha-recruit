@@ -286,7 +286,7 @@ next batch from them before it searches again.
 | Field library, reading pages, checking claims (pure) | `fields.py` |
 | Hard constraints, bands, scores (pure) | `ranking.py` |
 | Finish contracts and their checks (pure) | `contracts.py` |
-| Google Maps from Google's Places API (New) Text Search (`GooglePlaces`, `GOOGLE_MAPS_API_KEY`, the key Tell-Us uses), else as Shopping is; Google Shopping via SearchAPI (`SEARCH_API_KEY`), else SerpApi (`SERP_API_KEY`); a Shopping product's stores (`stores`, `with_store`); `choose_provider(source)` puts the ones with keys in that order (`Listings`), so Shopping falls back to SerpApi and Maps to the SERP APIs, by `matcha_work/search_apis.py`'s rules (shared with job search): one that refuses for good (a refused key, no searches left) is dropped for the phase and logged once as an error, one still down after its retry is passed over when another follows. With every one refused, nothing more is asked that round (no store lookups either); the web search still runs | `providers.py` |
+| Google Maps from Google's Places API (New) Text Search (`GooglePlaces`, `GOOGLE_MAPS_API_KEY`, the key Tell-Us uses), the only provider: `choose_provider("places")` wraps it (`Listings`) by `matcha_work/search_apis.py`'s rules, so a refused key or spent quota is dropped for the phase and logged once as an error, and the web search still runs. Without the key, or for any other source, there is no provider. No search API: Google Shopping (SearchAPI, else SerpApi) and the SERP APIs' Maps were taken out on 2026-10-18, so products are the model's web search (Brave) read on the stores' own pages | `providers.py` |
 | The model's page loader: agent cards' page facts plus the page's same-site links | `fetch.py` |
 | No-model phases, `rerank`, `Deps` | `phases.py` |
 | Model phases | `model_phases.py` |
@@ -307,7 +307,7 @@ refine):
 
 | Kind | Finding | Starts at | Its own questions | Its limits | Actions |
 |---|---|---|---|---|---|
-| `products` | product | Google Shopping | budget each, must / nice / avoid, needed by | price | Buy |
+| `products` | product | the web | budget each, must / nice / avoid, needed by | price | Buy |
 | `apartments` | listing | Google Maps (buildings), then the web | where (required), rent up to / from a month, beds, baths, pets, move-in, a place to measure from + miles at least / at most + directions | rent/month ≤ and ≥, beds ≥, baths ≥, pets includes, available ≤ move-in, distance ≥ / ≤, direction any of | Apply |
 | `places` | place | Google Maps | near (required), must / nice / avoid | — | — |
 
@@ -477,16 +477,13 @@ widgets are not read yet.
 - **The person's own limits win.** A brief's budget and date become
   constraints the plan can't drop; a refine may change one, but one the model
   merely left out stays.
-- **A Shopping finding links to a store, not Google.** Neither provider puts a
-  store's link in its results (only Google's product page), so `run_providers`
-  asks for each new product's stores (SearchAPI `google_product_offers` with
-  `product_token`, SerpApi `google_immersive_product` with
-  `immersive_product_page_token`), at most `STORE_LOOKUPS` (12) a round, best
-  of each query first, and keeps the listing's seller there (else the first
-  store, with its price and name). That page is then the finding's own, so
-  `enrich` reads it (availability, schema.org data) and the dedupe key no
-  longer changes with the query. A product past the lookups, or whose lookup
-  failed, keeps Google's page.
+- **A product finding is a store's own page.** Products come from the
+  model's web search (Brave), so a finding links to the store's page, which
+  `enrich` reads (price, availability, schema.org data). Until 2026-10-18 they
+  came from Google Shopping through SearchAPI, which linked to Google's own
+  product page and took a store look-up per product; findings from then keep
+  `provider = 'google_shopping'` and their links (`providers.store_link`
+  still unwraps Google's redirects for Buy).
 - **Links are provenance-gated.** A candidate's URL must be one the run saw
   (a search result, a page it loaded, or a link printed on one: `fetch.py`);
   photos only ones a loaded page showed or a Brave result about the finding
@@ -499,8 +496,8 @@ widgets are not read yet.
   then the ranking-only summary. Its top picks are always five (or every
   finding shown): the model's, then the ranking's best it left out
   (`fill_top`).
-- **Budgets per round** (`Budgets`): 30 provider calls (searches and store
-  lookups; Google Places pages by token, so page n of a search is n calls:
+- **Budgets per round** (`Budgets`): 30 provider calls (Google Maps
+  searches; Google Places pages by token, so page n of a search is n calls:
   `providers.calls_per_search`), 160 page loads (a building may cost
   `BUILDING_LOADS` four: its page, its floor plans page and its leasing system,
   whose unit map is two), 24 browser views, reserved with `chain.grant` before use and refunded after.

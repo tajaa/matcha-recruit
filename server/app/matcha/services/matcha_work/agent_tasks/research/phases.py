@@ -1,7 +1,9 @@
 """The research phases that use no model. Each runs inside one worker task.
 
-  providers  Google Shopping or Google Maps for products and places: findings
-             with price, rating and link as provider data
+  providers  Google Maps (Google's own Places API) for places and homes:
+             findings with rating, address and link as provider data.
+             Products are found by the model's web search (no Google
+             Shopping since 2026-10-18: no search API)
   enrich     each finding's own page: its schema.org data, then (for a home) a
              conservative scan of its text; an apartment building's homes to
              let one by one from the leasing system its site names
@@ -49,9 +51,8 @@ logger = logging.getLogger(__name__)
 
 BUDGETS = Budgets()
 QUERY_CONCURRENCY = 3
-# Queries sent to the provider a round: Shopping also looks each product up at
-# its stores, so fewer; Maps has an area per query (north and south both).
-PROVIDER_QUERIES = {"shopping": 4, "places": 6}
+# Queries sent to Google Maps a round (it has an area per query, north and south both).
+PROVIDER_QUERIES = 6
 # Apartment buildings kept from Google Maps a round: each may take
 # BUILDING_LOADS page loads, within the round's page loads.
 PROVIDER_BUILDINGS = 30
@@ -67,9 +68,6 @@ PLAN_IMAGES = 8
 PLAN_IMAGE_SECONDS = 45.0
 PLAN_FILL_SECONDS = 30.0
 PLAN_IMAGE_CONCURRENCY = 4
-# Shopping products looked up at their stores per round (one provider call
-# each, within the round's provider budget alongside its searches).
-STORE_LOOKUPS = 20
 ENRICH_BATCH = 12
 # Looking up the place distances are measured from, when lookups fail.
 ANCHOR_TRIES = 3
@@ -140,7 +138,7 @@ async def _default_search(query: str) -> list[dict]:
 
 @dataclass
 class Deps:
-    # The listings API for a source (`places`, `shopping`), or None.
+    # Google Maps for `places` (Google's own Places API), or None.
     provider: Callable[[str], Any] = providers.choose_provider
     page_fetch: Callable[..., Awaitable[Any]] = fetch_public
     # Model phases: the model client for a model id, and the model's page tools.
@@ -298,65 +296,17 @@ def interleave(lists: list[list]) -> list:
     return out
 
 
-def store_lookups(found: list[providers.ProviderItem], known: set[tuple[str, str]], limit: int,
-                  asks: Callable[[str], bool] = lambda _token: True) -> list[int]:
-    """Which findings to ask the stores for, best first: on Google's page, with a
-    token the provider still `asks` with, and new (not a name and seller the
-    task has, or already picked)."""
-    picked, seen = [], set(known)
-    for n, item in enumerate(found):
-        name = (items_mod.title_key(item.title), items_mod.title_key(item.subtitle))
-        if (not item.offers_token or not asks(item.offers_token) or not providers.is_google(item.url)
-                or not name[0] or name in seen):
-            continue
-        seen.add(name)
-        picked.append(n)
-        if len(picked) >= limit:
-            break
-    return picked
-
-
-async def with_stores(task: dict, provider: Any, found: list[providers.ProviderItem],
-                      known: set[tuple[str, str]], today: date,
-                      limit: int = STORE_LOOKUPS) -> list[providers.ProviderItem]:
-    """Shopping findings at a store's own page, for as many as the budget and
-    `limit` (at most `STORE_LOOKUPS` a round, never more than the task has room
-    to keep) allow; the rest keep Google's link."""
-    picks = store_lookups(found, known, limit, asks=lambda token: providers.asks(provider, token))
-    if not picks:
-        return found
-    budget = Budget(left=await chain.grant(_chain(), task["id"], "provider_calls", len(picks),
-                                           BUDGETS.provider_calls))
-    gate = asyncio.Semaphore(QUERY_CONCURRENCY)
-    out = list(found)
-    refused: list[providers.ProviderError] = []
-
-    async def one(n: int) -> None:
-        async with gate:
-            # Nothing more once every API refused for good (it may have while this one waited).
-            if refused or not budget.take():
-                return
-            try:
-                out[n] = providers.with_store(found[n], await provider.stores(found[n].offers_token), today=today)
-            except providers.ProviderError as exc:
-                if exc.fatal:
-                    refused.append(exc)
-                logger.info("research store lookup failed task=%s: %s", task["id"], exc)
-
-    await asyncio.gather(*(one(n) for n in picks))
-    await chain.refund(_chain(), task["id"], "provider_calls", budget.left)
-    return out
-
-
 async def run_providers(task: dict, deps: Deps, guard: chain.Guard) -> PhaseOutcome:
-    """Products and places from their provider, then on to the model's search."""
+    """Places from Google Maps, then on to the model's search. Any other
+    source (products too: a task planned for Google Shopping before
+    2026-10-18 among them) is the web search alone."""
     plan = plan_of(task)
     cursor = cursor_of(task)
     source = plan.get("source")
     anchor = await ensure_anchor(task, deps, guard)
-    provider = deps.provider(source) if source in ("shopping", "places") else None
-    if source in ("shopping", "places") and provider is None:
-        logger.info("research task=%s wanted %s but no listings provider is configured", task["id"], source)
+    provider = deps.provider(source) if source == "places" else None
+    if source == "places" and provider is None:
+        logger.info("research task=%s wanted places but GOOGLE_MAPS_API_KEY isn't set", task["id"])
     added = 0
     if provider is not None:
         kind = kinds.of(task)
@@ -364,7 +314,7 @@ async def run_providers(task: dict, deps: Deps, guard: chain.Guard) -> PhaseOutc
         around = (geo.areas(anchor, brief_of(task)) if source == "places" and anchor is not None
                   and kind is not None and kind.area_query else [])
         searches = [(kind.area_query, ll) for ll in around] + [
-            (q, None) for q in [q for q in plan.get("queries") or [] if q][:PROVIDER_QUERIES[source]]]
+            (q, None) for q in [q for q in plan.get("queries") or [] if q][:PROVIDER_QUERIES]]
         page = int(cursor.get("provider_page") or 1)
         cost = providers.calls_per_search(provider, page)
         budget = Budget(left=await chain.grant(_chain(), task["id"], "provider_calls", len(searches) * cost,
@@ -382,12 +332,12 @@ async def run_providers(task: dict, deps: Deps, guard: chain.Guard) -> PhaseOutc
                     per_query[n] = await provider.search(source, query, page=page, **({"ll": ll} if ll else {}))
                 except providers.ProviderError as exc:
                     if exc.fatal:
-                        # Every API refused for good (the provider logged it as an error):
-                        # the web search still runs, and no store is asked either.
+                        # Google refused for good (the provider logged it as an error):
+                        # nothing more is asked, and the web search still runs.
                         refused.append(exc)
                     logger.info("research provider query failed task=%s: %s", task["id"], exc)
 
-        await guard.note("Searching Google Shopping…" if source == "shopping" else "Searching Google Maps…")
+        await guard.note("Searching Google Maps…")
         await asyncio.gather(*(one(n, q, ll) for n, (q, ll) in enumerate(searches)))
         await chain.refund(_chain(), task["id"], "provider_calls", budget.left)
         found = prerank([as_kind(i, plan, anchor) for i in interleave(per_query)], plan)
@@ -395,18 +345,12 @@ async def run_providers(task: dict, deps: Deps, guard: chain.Guard) -> PhaseOutc
             room = await item_room(conn, task["id"])
             if plan.get("item_kind") == "listing":
                 room = min(room, PROVIDER_BUILDINGS)
-            # Paid lookups only for findings the task still has room to keep.
-            look_up = source == "shopping" and bool(found) and room > 0 and not refused
-            known = await items_mod.known_names(conn, task["id"]) if look_up else set()
-        if look_up:
-            found = await with_stores(task, provider, found, known, deps.today(), limit=min(STORE_LOOKUPS, room))
-        async with connection_or_direct() as conn:
             added = await items_mod.insert_items(conn, task, guard.token, int(task["current_round"]),
                                                  [provider_record(i) for i in found], room=room)
     return PhaseOutcome(
         status="running", phase=DISCOVER, cursor={**cursor, "provider_added": added},
-        progress={"note": f"Found {added} from {'Google Shopping' if source == 'shopping' else 'Google Maps'}. "
-                          "Searching the web…" if provider is not None else "Searching the web…"},
+        progress={"note": f"Found {added} on Google Maps. Searching the web…" if provider is not None
+                  else "Searching the web…"},
     )
 
 

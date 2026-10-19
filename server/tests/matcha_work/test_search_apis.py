@@ -58,12 +58,6 @@ async def test_what_each_answer_means():
         assert said in str(exc) and not exc.fatal and not exc.down and len(seen) == 1
 
 
-def test_errors_that_only_say_there_were_no_results():
-    assert A.result_error({"error": "Google hasn't returned any results for this query."}) == ""
-    assert A.result_error({"error": "No results found"}) == "" and A.result_error({}) == ""
-    assert A.result_error({"error": "Unsupported location"}) == "Unsupported location"
-
-
 class Api:
     def __init__(self, name, *answers):
         self.name, self.answers, self.asked = name, list(answers), []

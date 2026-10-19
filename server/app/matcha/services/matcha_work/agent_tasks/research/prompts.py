@@ -15,8 +15,8 @@ finish once, with no other tools.
 
 - item_kind: what one finding is. A home to rent or buy is a listing; something to buy is a \
 product; a restaurant, shop or venue is a place.
-- source: shopping for products, places for restaurants, shops and venues, web for everything \
-else (homes, events, services).
+- source: places for restaurants, shops and venues (Google Maps), web for everything else \
+(products, homes, events, services).
 - queries: up to 8 short search queries a person would type, most specific first. Put the place \
 in the query text. Vary them (synonyms, nearby areas, the official sources).
 - fields: the facts to collect for each finding, from the list allowed. Only ones that matter here.

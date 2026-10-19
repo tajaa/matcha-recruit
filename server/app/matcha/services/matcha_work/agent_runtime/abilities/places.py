@@ -8,7 +8,8 @@ themselves: name, kind, rating, address, phone and website, as data.
 
 The provider is research tasks' (`agent_tasks/research/providers.py`,
 `choose_provider("places")`): Google's Places API (New) Text Search with
-`GOOGLE_MAPS_API_KEY`, else SearchAPI, else SerpApi, by `search_apis`' rules.
+`GOOGLE_MAPS_API_KEY`, by `search_apis`' rules. Without that key it isn't
+offered (the SearchAPI/SerpApi fallback was taken out on 2026-10-18).
 Only the query text leaves the server, as with `web_search`, so nothing needs
 switching on. Every page is a paid call (Google's Enterprise Text Search SKU,
 recorded in the usage ledger), held to `MAX_PAID` a run.
@@ -67,7 +68,7 @@ def session_of(state: RunState) -> PlacesSession:
 
 
 def _provider() -> Any:
-    """The places APIs with keys, in order; None with none. Tests patch this seam."""
+    """Google Places when its key is set; None otherwise. Tests patch this seam."""
     from app.matcha.services.matcha_work.agent_tasks.research.providers import choose_provider
 
     return choose_provider("places")

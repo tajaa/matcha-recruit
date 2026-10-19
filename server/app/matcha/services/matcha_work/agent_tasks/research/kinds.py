@@ -7,7 +7,7 @@ same way; what it changes:
 * `intake`: what Espresso asks for (an apartment's beds and move-in date), and
   `brief_model`, the check of the answers.
 * `item_kind`, `source`: what one finding is and where the search starts
-  (Google Shopping, Google Maps, the web). The plan can't change them.
+  (Google Maps, or the web). The plan can't change them.
 * `fields`: the facts shown for every finding, in order.
 * `limits`: the person's answers as hard limits (at least 2 beds, takes
   dogs), kept like a typed budget: the plan can't drop them, a refine may
@@ -83,11 +83,13 @@ PRODUCTS = SearchKind(
     label="Products",
     description=(
         "Find a product to buy and compare where to buy it: price, rating, reviews, whether it's in "
-        "stock and shipping, from Google Shopping and the stores' own pages. Each finding can be bought "
-        "(Espresso opens the store's checkout; it never pays)."
+        "stock and shipping, from the stores' own pages, found with web search. Each finding can be "
+        "bought (Espresso opens the store's checkout; it never pays)."
     ),
     item_kind="product",
-    source="shopping",
+    # Found with the model's web search (Brave) and read on the store's own
+    # page: Google Shopping came through SearchAPI, taken out 2026-10-18.
+    source="web",
     fields=("price", "rating", "review_count", "seller", "in_stock", "shipping", "brand"),
     intake=_intake(
         "budget_max", "must_haves", "nice_to_haves", "avoid", "needed_by", "reference_files",

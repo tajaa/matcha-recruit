@@ -680,8 +680,8 @@ provider key, or Brave answering for jobs).
 
 - **`find_places`**: businesses in an area from Google Maps, through research
   tasks' provider (`agent_tasks/research/providers.choose_provider("places")`:
-  Google Places Text Search with `GOOGLE_MAPS_API_KEY`, else SearchAPI, else
-  SerpApi). Up to 3 pages of 20 a query in one walk of the page tokens
+  Google Places Text Search with `GOOGLE_MAPS_API_KEY`, and nothing else
+  since 2026-10-18: no key, not offered). Up to 3 pages of 20 a query in one walk of the page tokens
   (`search_pages`: n pages = n paid calls), 8 calls and 18 paid pages a run;
   the prompt states that budget, so the model picks areas instead of starting
   searches that are refused.

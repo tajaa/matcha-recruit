@@ -220,18 +220,6 @@ def test_google_maps_results_carry_their_point():
 
 
 @pytest.mark.asyncio
-async def test_locate_asks_google_maps_for_one_place():
-    api = providers.SearchApi("key")
-    api._get = AsyncMock(return_value={"place_result": {"title": "Lady Bird Lake",
-                                                        "gps_coordinates": {"latitude": LAKE[0], "longitude": LAKE[1]}}})
-    assert await api.locate("Lady Bird Lake, Austin") == ("Lady Bird Lake", LAKE)
-    api._get = AsyncMock(return_value={"local_results": [{"title": "Lake", "gps_coordinates": {"latitude": 1, "longitude": 2}}]})
-    assert await api.locate("x") == ("Lake", (1.0, 2.0))
-    api._get = AsyncMock(return_value={"local_results": [{"title": "Lake"}]})
-    assert await api.locate("x") is None
-
-
-@pytest.mark.asyncio
 async def test_the_anchor_is_found_once_and_kept_in_the_plan(conn):
     provider = AsyncMock()
     provider.locate = AsyncMock(return_value=("Lady Bird Lake", LAKE))
@@ -321,18 +309,6 @@ def test_the_map_is_searched_in_every_direction_asked():
     assert geo.areas(ANCHOR, {}) == []
     west = geo.areas(ANCHOR, {"directions": ["west"]})[0]
     assert round(geo.miles(LAKE, tuple(float(x) for x in west[1:-4].split(",")))) == geo.DIRECTION_MILES
-
-
-@pytest.mark.asyncio
-async def test_a_map_search_is_centred_where_asked():
-    for api in (providers.SearchApi("key"), providers.SerpApi("key")):
-        api._get = AsyncMock(return_value={"local_results": []})
-        await api.search("places", "apartments", ll="@30.4,-97.7,12z")
-        assert api._get.await_args.args[0]["ll"] == "@30.4,-97.7,12z"
-        await api.search("places", "apartments")
-        assert "ll" not in api._get.await_args.args[0]
-        await api.search("shopping", "lip balm", ll="@30.4,-97.7,12z")
-        assert "ll" not in api._get.await_args.args[0]
 
 
 @pytest.mark.asyncio
