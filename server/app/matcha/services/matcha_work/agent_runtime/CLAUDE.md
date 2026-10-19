@@ -685,12 +685,16 @@ offered only while Brave can answer (`env_ready`). There is no places tool:
 2026-10-18 with the rest of Espresso's Google API calls, so businesses in an
 area are found with `web_search` and read on their own sites.
 
+The step-by-step call map of `find_jobs` (and of a job search task's
+discovery, which runs the same steps) is in `../job_search/CLAUDE.md`, "How a
+search finds jobs".
+
 - **`find_jobs`**: open postings on employers' own job boards, on Brave alone
   (no search API: its Google Jobs source, SearchAPI else SerpApi, was taken
   out on 2026-10-18). One title and place makes up to 8 Brave searches
   (`boards.board_searches`: the title on Greenhouse, Lever and Ashby, in the
-  place and anywhere; 24 a run, about 3 calls with a place, past 25 s a call
-  stops searching). Every board job link in the answers (`ats.detect`) not
+  place and anywhere, a whole state as its name and its job hubs; 24 a run,
+  about 3 calls with a place, past 25 s a call stops starting searches). Every board job link in the answers (`ats.detect`) not
   read earlier in the run is read from its board's API
   (`discovery.read_posting`, 2 fetches, 8 at once, up to 80 links, at most
   40 s and never past the tool's own deadline less 5 s; reads still going

@@ -30,7 +30,7 @@ no source is `web`.
 | Piece | File | What it owns |
 |---|---|---|
 | Discovery | `discovery.py` | The `discovering` phase in three steps: code's Brave searches of Greenhouse, Lever and Ashby (`boards.py`), a model web search for postings elsewhere, then reading each one (ATS API or JSON-LD) into an already-read lead |
-| Boards | `boards.py` | Code's board searches: Brave (`Deps.web_search`, 20 results each) for each title on each board host and in each place named, ≤24 a search, 1 a second; every Greenhouse/Lever/Ashby job link in the answers goes to the read step, after the stored postings that fit. No model chooses |
+| Boards | `boards.py` | Code's board searches: Brave (`Deps.web_search`, 20 results each) for each title on each board host and in each place named (a whole state by its name and its job hubs, `STATE_HUBS`), ≤24 a search, 1 a second; every Greenhouse/Lever/Ashby job link in the answers goes to the read step, after the stored postings that fit. No model chooses |
 | Stored postings | `postings.py` | Every board posting read, kept (`mw_job_postings`): reused when read live in the last 12 h, skipped when its board said closed in the last 14 days, and `matching` a later search's titles and places. Board searches Brave was sent (`mw_job_board_searches`): the same one within a day asks for its next page. Fails soft |
 | Places | `places.py` (pure) + `data/us_places.tsv.gz` | Whether a job is in a place the person named (`fits`): its location text split into places, put on the map with the US Census gazetteer (offline, built by `server/scripts/build_job_places.py`), kept within 50 miles of one of theirs, or remote when they'd take it |
 | ATS | `ats.py` | Greenhouse / Lever / Ashby / Workable detection from apply links, their public APIs, application questions (Greenhouse's, and Workable's public form); `fetch(ref, more=take)`: one call the caller pays for first, and Workable's form a second paid with `more()` (asked only for a published posting); `most_reads(ref)`, what to reserve; `NAMES`, each ATS by name; `find_on_board`, the employer's own Greenhouse, Lever or Ashby board found by name |
@@ -52,6 +52,73 @@ Worker: `workers/tasks/job_search.py`. Migrations: `mwjobs01`
 (`mw_job_searches`, `mw_job_leads`, run kind `job_search`), `mwjobs03`
 (`source = 'workable'` allowed), `mwjobs04` (`mw_job_postings`,
 `mw_job_board_searches`).
+
+## How a search finds jobs (call map)
+
+The quick chat look-up (`find_jobs`, "Quick") and a job search task's
+discovery ("Full") run the same steps on the same functions. Read this before
+the code; the Invariants below say why each rule holds.
+
+```
+ENTRY
+  Quick: runner.run_agent → find_jobs → agent_runtime/abilities/job_listings._find
+  Full:  discovery.discover → _search_boards → boards.find       (boards step)
+                            → _read → read_postings              (read step)
+
+1. PLACES TO SEARCH IN
+   boards.board_searches(titles, criteria)
+     ├─ boards.search_places(criteria)
+     │    ├─ places.targets(criteria)        offline Census gazetteer
+     │    └─ boards.STATE_HUBS[state]        a whole state: its name + hubs (CA → LA, SF, San Diego)
+     └─ phases.cover(...)                    titles × places × board hosts, each reached before a repeat
+
+2. STORED POSTINGS
+   Quick: job_listings._store()  ·  Full: postings.store(connection_or_direct)
+     ├─ Store.sent(searches)                 SELECT mw_job_board_searches
+     └─ Store.matching(titles, criteria)     SELECT mw_job_postings (title tsvector index)
+          └─ postings.keep → normalize.related_title + phases.keep_job
+
+3. BRAVE SEARCH
+   postings.plan(searches, sent)             page 0 / next page / skip (read to its end)
+   Quick: job_listings._web_search  ·  Full: deps.web_search
+     └─ brave_search.search(query, count=20, offset=page)        → Brave API
+   postings.key_of_url → ats.detect          board job links only
+   postings.last_page                        was it the search's last page?
+
+4. READ EACH LINK
+   Store.known(keys)                         SELECT mw_job_postings
+     read live < 12 h → stored record · closed < 14 d → skip · else read:
+   Quick: _read_some (8 at once, 40 s) → _read(url)
+   Full:  read_postings (6 at once, 240 s)
+     └─ discovery.read_posting
+          └─ postings.Reads.fetch → ats.read(ref)
+               ├─ safe_fetch.fetch_public(ref.api_url())          → the board's public API
+               └─ ats.parse_greenhouse / parse_lever / parse_ashby / parse_workable
+
+5. SAVE
+   Store.save(read, closed)                  INSERT … ON CONFLICT mw_job_postings
+   Store.searched(pages)                     INSERT … ON CONFLICT mw_job_board_searches
+     Full: boards.record_searched, in the read step once the links are read
+
+6. FILTER + ANSWER
+   normalize.related_title                   a related title?
+   phases.keep_job → places.fits             in a place named, or remote?
+   Quick: _shown_before(ctx)                 SELECT mw_project_agent_runs (jobs shown in this chat)
+   normalize.same_posting                    the same job on two boards?
+   Quick: job_row → model_line → job_postings block (gate_block)
+   Full:  phases.insert_leads → mw_job_leads
+          → model_phases.screen (Claude: fit against the résumé)
+          → phases.enrich → service.rerank (ranking.py)
+          → model_phases.approach (Claude: drafts for the top 8)
+```
+
+The Full search also runs the web step between boards and read
+(`discovery.web_run`: a Claude run with web search only, from
+`discovery.web_searches`, for careers pages and other boards); its links go
+through step 4 too. Outside services called: Brave (step 3), the boards'
+public APIs and employers' pages (step 4), and Claude (the chat run, and the
+Full search's plan, web, screen and approach). Everything else is our own
+Postgres or code.
 
 ## Invariants
 
@@ -91,7 +158,12 @@ Worker: `workers/tasks/job_search.py`. Migrations: `mwjobs01`
   alone ("Canada") keeps the jobs its postings place there (`Target.country`);
   nationwide phrases ("US only", "Open to relocation") name no place; regions
   ("Midwest", "East Coast") are measured from their biggest city (`ALIASES`);
-  "not remote" is not remote. Tests: `tests/job_search/test_places.py`.
+  "not remote" is not remote. A whole state keeps a job anywhere in it, and
+  its board searches name the state and its job hubs
+  (`boards.search_places`, `STATE_HUBS`: California is also Los Angeles, San
+  Francisco and San Diego), since most postings write "Los Angeles, CA" and
+  never the state. Until 2026-10-19 a state got no board search in it at all:
+  "California" was searched nationwide and filtered afterwards. Tests: `tests/job_search/test_places.py`.
 - **A board or web posting is kept only for a related title.** A board search
   for "Chief People Officer" turns up any job that names it somewhere, so a
   posting read from the boards or the web is kept only when its title shares
