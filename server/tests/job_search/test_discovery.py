@@ -34,7 +34,7 @@ REFUND = "SET fetch_calls = GREATEST(fetch_calls - $2, 0)"
 @pytest.fixture
 def conn(monkeypatch):
     conn = FakeConn()
-    for module in (discovery, phases, agent_phase, phase_run, chain):
+    for module in (discovery, discovery.boards, phases, agent_phase, phase_run, chain):
         monkeypatch.setattr(module, "connection_or_direct", connection(conn))
     wire_store(monkeypatch)
     monkeypatch.setattr(phase_run.store, "mark_run", AsyncMock())
@@ -69,7 +69,7 @@ def claim(url, title="Chief People Officer", company="Acme", location="San Diego
 async def test_a_search_starts_on_the_boards_with_no_google_jobs(conn, monkeypatch):
     """Brave and Claude only since 2026-10-18: a new search, or one whose cursor
     still says `listings` (in flight at the deploy), starts on the boards."""
-    find = AsyncMock(return_value=([], True))
+    find = AsyncMock(return_value=([], True, []))
     monkeypatch.setattr(discovery.boards, "find", find)
     assert not hasattr(phases, "listings") and not hasattr(phases.Deps(), "provider")
     for cursor in ("{}", json.dumps({"step": "listings"})):
@@ -80,7 +80,7 @@ async def test_a_search_starts_on_the_boards_with_no_google_jobs(conn, monkeypat
 
 @pytest.mark.asyncio
 async def test_the_boards_are_searched_by_code_then_read(conn, monkeypatch):
-    find = AsyncMock(return_value=([claim(GH, title="", company="", location="")], True))
+    find = AsyncMock(return_value=([claim(GH, title="", company="", location="")], True, []))
     monkeypatch.setattr(discovery.boards, "find", find)
     out = await discovery.discover(places_search("boards"), phases.Deps(), guard())
     assert out.status == "discovering" and out.cursor["step"] == "read" and out.cursor["boards_ok"] is True
@@ -90,7 +90,7 @@ async def test_the_boards_are_searched_by_code_then_read(conn, monkeypatch):
     assert titles[0] == "Chief People Officer" and criteria["locations"][0] == "Orange County, CA"
 
     # Nothing on the boards: on to the web.
-    find.return_value = ([], False)
+    find.return_value = ([], False, [])
     out = await discovery.discover(places_search("boards"), phases.Deps(), guard())
     assert out.cursor["step"] == "web" and out.cursor["boards_ok"] is False
 
@@ -574,3 +574,48 @@ async def test_each_read_says_what_became_of_its_postings(conn):
         "boards": {"links": 8, "unread": 1, "kept": 3}}
     assert discovery.add_reads(search, "web", Counter(links=2, kept=0)) == {
         "boards": {"links": 5, "kept": 2}, "web": {"links": 2}}
+
+
+@pytest.mark.asyncio
+async def test_the_read_step_reuses_what_was_just_read_and_skips_what_closed(conn):
+    """A posting read live in the last hours becomes a lead with no read (and
+    no fetch reserved for it), one its board said is closed isn't read, and
+    what is read is stored; the pages the boards answered are recorded once
+    their postings are read, and leave the cursor."""
+    lever = discovery._ats_record(ats_found(ats.detect(LEVER), LEVER, remote=False),
+                                  {"url": LEVER, "company": "Brightpath Health"})
+    conn.on("SELECT dedupe_key, title, company, source_url, apply_links FROM mw_job_leads", [])
+    conn.on("FROM mw_job_postings", [
+        {"provider": "lever", "board_key": "brightpath", "job_key": "0f6b2a4e-1111-2222-3333-444455556666",
+         "url": LEVER, "live": True, "fresh": True, "record": json.dumps(lever)},
+        {"provider": "ashby", "board_key": "gone", "job_key": "0f6b2a4e-8888-2222-3333-444455556666",
+         "url": GONE, "live": False, "fresh": True, "record": None},
+    ])
+    conn.on(GRANT, lambda _id, want, _limit: want)
+    conn.on("INSERT INTO mw_job_leads", 2)
+    conn.on("SELECT COUNT(*) FROM mw_job_leads", 2)
+    fetch = AsyncMock(side_effect=ats_fetch)
+    deps = phases.Deps(ats_find=NO_BOARD, ats_fetch=fetch, page_fetch=AsyncMock())
+    search = at_step("read", boards_ok=True, postings=[claim(GH), claim(LEVER), claim(GONE)],
+                     searched=[{"query": '"Chief People Officer" site:jobs.lever.co', "offset": 0, "last": False}])
+    out = await discovery.discover(search, deps, guard())
+
+    assert [c.args[0].job_id for c in fetch.await_args_list] == ["4001"]
+    assert conn.ran("SET fetch_calls = cur.before")[0][2] == (SEARCH, 1, phases.MAX_FETCHES)
+    leads = json.loads(conn.ran("INSERT INTO mw_job_leads")[0][2][2])
+    assert sorted(lead["company"] for lead in leads) == ["Acme", "Brightpath Health"]
+    saved = json.loads(conn.ran("INSERT INTO mw_job_postings AS p")[0][2][0])
+    assert [row["board_key"] for row in saved] == ["acme"], "only what was read now is saved"
+    assert out.progress["reads"]["boards"] == {"links": 3, "unread": 1, "kept": 2}
+    assert conn.ran("INSERT INTO mw_job_board_searches")[0][2] == (
+        ['"chief people officer" site:jobs.lever.co'], [1], [False])
+    assert "searched" not in out.cursor
+
+
+@pytest.mark.asyncio
+async def test_boards_with_nothing_to_read_record_their_pages_at_once(conn, monkeypatch):
+    find = AsyncMock(return_value=([], True, [{"query": "q", "offset": 2, "last": True}]))
+    monkeypatch.setattr(discovery.boards, "find", find)
+    out = await discovery.discover(places_search("boards"), phases.Deps(), guard())
+    assert out.cursor["step"] == "web" and "searched" not in out.cursor
+    assert conn.ran("INSERT INTO mw_job_board_searches")[0][2] == (["q"], [3], [True])

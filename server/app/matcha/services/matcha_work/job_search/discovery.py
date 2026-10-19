@@ -21,6 +21,9 @@ Three steps, each its own worker task (the step is `phase_cursor.step`):
             own location isn't in a place the person named (`places.fits`).
             What is kept is a lead already read (pay with its evidence, the
             application's questions), which enrich doesn't read again.
+            Every board posting read is stored (`postings.py`): one read live
+            in the last hours is used as read, and one its board said is
+            closed isn't read again.
 
 `read` follows `boards` and each web run. The web step runs at most
 `WEB_RUNS` times, each handed its share of the searches code writes
@@ -41,6 +44,7 @@ boards.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import html
 import logging
 import re
@@ -56,6 +60,7 @@ from app.matcha.services.matcha_work.agent_runtime.registry import Ability
 
 from . import ats, boards, contracts, normalize, phases, prompts
 from . import comp as comp_mod
+from . import postings as posting_store
 from .agent_phase import SearchProgress, run_model_phase
 from .phases import MAX_LEADS, Deps
 
@@ -104,11 +109,14 @@ async def discover(search: dict, deps: Deps, guard: chain.Guard) -> PhaseOutcome
 
 async def _search_boards(search: dict, deps: Deps, guard: chain.Guard, cursor: dict) -> PhaseOutcome:
     titles, criteria = _titles_and_criteria(search)
-    postings, worked = await boards.find(search, titles, criteria, deps, guard, must=_must(search))
+    found, worked, pages = await boards.find(search, titles, criteria, deps, guard, must=_must(search))
     cursor = {**cursor, "boards_ok": worked}
-    if postings:
-        return PhaseOutcome(status="discovering", cursor={**cursor, "step": READ, "postings": postings},
-                            progress={"note": f"Reading {len(postings)} postings on employers' job boards…"})
+    if found:
+        # The pages are recorded once their postings are read (`_read`).
+        return PhaseOutcome(status="discovering",
+                            cursor={**cursor, "step": READ, "postings": found, "searched": pages},
+                            progress={"note": f"Reading {len(found)} postings on employers' job boards…"})
+    await boards.record_searched(pages)
     return PhaseOutcome(status="discovering", cursor={**cursor, "step": WEB},
                         progress={"note": "Searching the web…"})
 
@@ -220,8 +228,9 @@ def web_searches(titles: list[str], criteria: dict, must: int = 0) -> list[str]:
 async def _read(search: dict, deps: Deps, guard: chain.Guard, cursor: dict) -> PhaseOutcome:
     tally: Counter = Counter()
     added = await read_postings(search, deps, guard, cursor.get("postings") or [], tally)
+    await boards.record_searched(cursor.get("searched") or [])
     web_added = int(cursor.get("web_added") or 0) + added
-    cursor = {**cursor, "postings": [], "web_added": web_added}
+    cursor = {**{k: v for k, v in cursor.items() if k != "searched"}, "postings": [], "web_added": web_added}
     runs = int(cursor.get("web_runs") or 0)
     reads = add_reads(search, "web" if runs else "boards", tally)
     if runs < WEB_RUNS and web_added < WEB_TARGET and (added or searches_for(search, runs)):
@@ -271,59 +280,77 @@ async def read_postings(search: dict, deps: Deps, guard: chain.Guard, postings: 
                         tally: Counter | None = None) -> int:
     """Read each posting the boards or a web run found and save the live,
     new ones with a related title, where the person wants them, as leads.
-    Returns how many were added; `tally` counts what became of each
-    (`READ_OUTCOMES`)."""
+    A board posting read live in the last `postings.LIVE_HOURS` is used as
+    read (no fetch reserved), one its board said is closed is `unread`, and
+    every board posting read here is stored, live or closed. Returns how many
+    were added; `tally` counts what became of each (`READ_OUTCOMES`)."""
     tally = Counter() if tally is None else tally
     titles, criteria = _titles_and_criteria(search)
+    links = [p for p in postings if isinstance(p, dict) and isinstance(p.get("url"), str)]
+    keys = {p["url"]: posting_store.key_of_url(p["url"]) for p in links}
     async with connection_or_direct() as conn:
         rows = await conn.fetch(
             "SELECT dedupe_key, title, company, source_url, apply_links FROM mw_job_leads WHERE search_id = $1",
             search["id"],
         )
+        stored = await posting_store.Store(conn).known([k for k in keys.values() if k is not None])
     known = {row["source_url"] for row in rows}
     for row in rows:
         known.update(link.get("url") for link in decode_jsonb(row["apply_links"], []) or [] if isinstance(link, dict))
     room = MAX_LEADS - len(rows)
-    links = [p for p in postings if isinstance(p, dict) and isinstance(p.get("url"), str)]
     tally["links"] += len(links)
-    todo = []
+    todo, reused = [], []
     for posting in links:
+        held = stored.get(keys[posting["url"]])  # type: ignore[arg-type]
         if posting["url"] in known:
             tally["known"] += 1
         elif phases.aggregator(posting["url"]):
             tally["aggregator"] += 1
+        elif held is not None and held.fresh and held.live and held.record:
+            reused.append(held.record)  # read live in the last few hours: not read again
+        elif held is not None and held.fresh and not held.live:
+            tally["unread"] += 1  # its board said it was closed, days ago at most
         else:
             todo.append(posting)
-    if room <= 0 or not todo:
-        tally["full"] += len(todo)
+    if room <= 0 or not (todo or reused):
+        tally["full"] += len(todo) + len(reused)
         return 0
     # A board posting is an API read or two (`ats.most_reads`; unused ones are
     # given back); a page may take a few (`read_posting`).
     want = sum(ats.most_reads(ref) if (ref := ats.detect(p["url"])) is not None else READS_PER_POSTING
                for p in todo)
-    budget = Budget(left=await phases.grant(search["id"], "fetch_calls", want, phases.MAX_FETCHES))
+    budget = Budget(left=await phases.grant(search["id"], "fetch_calls", want, phases.MAX_FETCHES) if want else 0)
     gate = asyncio.Semaphore(READ_CONCURRENCY)
     today = datetime.now(timezone.utc).date()
+    reads = posting_store.Reads(deps.ats_fetch)
+    reading = dataclasses.replace(deps, ats_fetch=reads.fetch)
 
     async def one(posting: dict) -> dict | None:
         async with gate:
             try:
-                return await read_posting(posting, deps, budget.take, today=today)
+                return await read_posting(posting, reading, budget.take, today=today)
             except Exception:
                 logger.warning("job posting read failed url=%s", posting["url"][:200], exc_info=True)
                 return None
 
-    await guard.note(f"Reading {len(todo)} postings…")
+    await guard.note(f"Reading {len(todo) + len(reused)} postings…")
     tasks = [asyncio.create_task(one(p)) for p in todo]
-    done, late = await asyncio.wait(tasks, timeout=READ_SECONDS)
+    done, late = await asyncio.wait(tasks, timeout=READ_SECONDS) if tasks else (set(), set())
     for task in late:
         task.cancel()
     if late:
         await asyncio.gather(*late, return_exceptions=True)
         logger.info("job search dropped %d postings still loading at the deadline search=%s", len(late), search["id"])
     tally["late"] += len(late)
-    records = [task.result() for task in tasks if task in done]
-    await phases.refund(search["id"], "fetch_calls", budget.left)
+    read = [task.result() for task in tasks if task in done]
+    if want:
+        await phases.refund(search["id"], "fetch_calls", budget.left)
+    async with posting_store.store(connection_or_direct) as store:
+        await store.save([r for r in read if r is not None], sorted(reads.closed))
+    if reused:
+        logger.info("job search reused %d postings read in the last %dh search=%s",
+                    len(reused), posting_store.LIVE_HOURS, search["id"])
+    records = reused + read
     kept = [(row["dedupe_key"], row["title"], row["company"]) for row in rows]
     new = []
     for record in records:
