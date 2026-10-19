@@ -32,6 +32,7 @@ from typing import Any
 from uuid import UUID
 
 from app.database import connection_or_direct, decode_jsonb
+from app.matcha.services.matcha_work.agent_card.schema import normalize_url
 from app.matcha.services.matcha_work.agent_runtime.chain import Guard, PhaseOutcome
 
 from . import batches
@@ -43,7 +44,6 @@ from .phases import (
     brief_of,
     cursor_of,
     item_room,
-    normalize_url,
     plan_of,
 )
 

@@ -36,13 +36,6 @@ def dedupe_key(record: dict) -> str:
     return f"t:{title_key(record.get('title'))}|{title_key(record.get('subtitle'))[:60]}"
 
 
-async def known_names(conn, task_id: UUID) -> set[tuple[str, str]]:
-    """The (name, seller or place) of every finding the task has: `insert_items`
-    skips another with the same, so there is no point looking one up."""
-    rows = await conn.fetch("SELECT title, subtitle FROM mw_agent_task_items WHERE task_id = $1", task_id)
-    return {(title_key(row["title"]), title_key(row["subtitle"])) for row in rows}
-
-
 async def insert_items(conn, task: dict, token: UUID, round_n: int, records: list[dict], *, room: int) -> int:
     """Add new findings (at most `room`) if this chain still owns the task; a
     finding already there (same page, or same name) is skipped. Returns how

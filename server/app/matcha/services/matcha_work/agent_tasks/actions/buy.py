@@ -37,7 +37,7 @@ from app.matcha.services.matcha_work.agent_card.chat_flow import format_money
 from app.matcha.services.matcha_work.agent_card.page_extract import site_of
 
 from ..playbook import IntakeField
-from ..research import providers
+from ..research.links import store_link
 from .base import ActionContext, ActionError, ItemAction, Line, Proposal, outcome
 
 logger = logging.getLogger(__name__)
@@ -57,7 +57,7 @@ FILL_IN = IntakeField(key="fill_in", label="Fill in my email and saved address",
 
 def store_page(item: dict) -> str | None:
     """The finding's store page: an http(s) link that isn't one of Google's."""
-    return providers.store_link(item.get("url"))
+    return store_link(item.get("url"))
 
 
 def available(ctx: ActionContext) -> str | None:

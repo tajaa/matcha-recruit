@@ -235,7 +235,7 @@ async def test_refine_and_more_restart_the_chain(rounds):
     assert insert[2][7] == allowance.ROUND_UNITS["more"]
     [restart] = rounds.conn.ran("SET status = 'queued', phase = $2")
     assert restart[2][1] == "research.fill"  # the next ten from those waiting, before any search
-    assert json.loads(restart[2][4]) == {"more": True, "provider_page": 2, "web_runs": 0, "like": [str(ITEM)]}
+    assert json.loads(restart[2][4]) == {"more": True, "web_runs": 0, "like": [str(ITEM)]}
 
 
 @pytest.mark.asyncio

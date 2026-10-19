@@ -48,8 +48,6 @@ DISCOVER_VIEWS = 2
 FETCH_SECONDS = 25.0
 TARGET = 30
 TARGET_MORE = 20
-# Products and places: past this many from the provider, the web adds little.
-PROVIDER_ENOUGH = 15
 SCREEN_BATCH = 30
 SUMMARY_TOP = 10
 TOP_PICKS = 5
@@ -150,9 +148,8 @@ async def discover(task: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
             "SELECT title FROM mw_agent_task_items WHERE task_id = $1 AND id = ANY($2::uuid[])",
             task["id"], [UUID(i) for i in cursor.get("like") or []],
         )] if cursor.get("like") else []
-    enough_from_provider = int(cursor.get("provider_added") or 0) >= PROVIDER_ENOUGH and not more
     new = 0
-    if room > 0 and runs < max_runs and added < target and not enough_from_provider:
+    if room > 0 and runs < max_runs and added < target:
         new = await _discover_run(task, deps, guard, plan_=plan_, today=today, room=room,
                                   target=min(target - added, contracts.MAX_CANDIDATES),
                                   found=found, like=like, more=more)
@@ -500,7 +497,7 @@ async def refine(task: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
         if (outcome.result["search_again"] or visible < MIN_SURVIVORS) and room > 0:
             nxt = PhaseOutcome(
                 status="running", phase=PROVIDERS,
-                cursor={"refine": True, "note": note, "provider_page": 1, "web_runs": 0},
+                cursor={"refine": True, "note": note, "web_runs": 0},
                 progress={"note": f"{note} Searching again…"},
             )
         elif new_keys:

@@ -544,6 +544,12 @@ def rent_spans(text: str) -> list[tuple[float, float | None, re.Match]]:
     return [f for f in found if 100 <= f[0] <= 50_000]
 
 
+def starts_from(text: str) -> bool:
+    """Whether the text gives a rent as where rents start ("starting at
+    $1,125", "from $1,800/mo"): a building's, not one home's."""
+    return bool(_RENT_FROM.search(text))
+
+
 def building_rent(text: str, *, url: str, today: date) -> dict | None:
     """The price entry for a building: its lowest rent, with every span its
     floor plans state (`spans`, [low, high], high None for "starting at"),

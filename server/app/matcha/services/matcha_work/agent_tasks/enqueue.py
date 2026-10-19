@@ -369,15 +369,11 @@ async def _new_round(conn, user, task: dict, *, kind: str, directive: str, item_
             "UPDATE mw_agent_tasks SET current_round = $2, updated_at = NOW() WHERE id = $1", task["id"], n,
         )
         return False
-    more_rounds = int(await conn.fetchval(
-        "SELECT COUNT(*) FROM mw_agent_task_rounds WHERE task_id = $1 AND kind = 'more'", task["id"],
-    ) or 0)
-    cursor = ({"more": True, "provider_page": more_rounds + 1, "web_runs": 0,
-               "like": [str(i) for i in item_ids]} if kind == "more" else {})
+    cursor = ({"more": True, "web_runs": 0, "like": [str(i) for i in item_ids]} if kind == "more" else {})
     await conn.execute(
         """UPDATE mw_agent_tasks
            SET status = 'queued', phase = $2, dispatch_token = $3, lease_until = NULL, attempts = 0,
-               current_round = $4, phase_cursor = $5::jsonb, provider_calls = 0, fetch_calls = 0,
+               current_round = $4, phase_cursor = $5::jsonb, fetch_calls = 0,
                browser_views = 0, completed_at = NULL, waiting_since = NULL, needs = NULL, error = NULL,
                progress = progress || $6::jsonb, updated_at = NOW()
            WHERE id = $1""",

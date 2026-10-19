@@ -20,12 +20,12 @@ from dataclasses import dataclass, field
 from typing import Callable, Sequence
 
 from .abilities import (
-    calendar, domains, email, files, flights, job_listings, jobs, places, purchase, reservations, sales,
+    calendar, domains, email, files, flights, job_listings, jobs, purchase, reservations, sales,
     screenshots, shopping, tasks, web,
 )
 from .registry import Ability, validate_catalog
 
-ALWAYS_ON = ("web", "shopping", "places", "job_listings")
+ALWAYS_ON = ("web", "shopping", "job_listings")
 
 # The order is the order tools are offered in, and the order of the prompt.
 Builder = Callable[[], Ability]
@@ -65,11 +65,10 @@ def build_catalog(*, fetch_page, max_fetches: int = 10, fetch_seconds: float = 2
     abilities = [
         web.build(fetch_page=fetch_page, max_fetches=max_fetches, fetch_seconds=fetch_seconds,
                   untrusted=True),
-        # Businesses in an area from Google Maps, and live job postings read
-        # from the employer's own board. Read-only and keyless for the person
-        # (only the query leaves the server), so project chats get them too;
-        # each is offered only when the server has a provider key.
-        places.build(),
+        # Live job postings read from the employer's own board, found with
+        # Brave. Read-only and keyless for the person (only the query leaves
+        # the server), so project chats get it too; offered only while Brave
+        # can answer.
         job_listings.build(),
         # A real browser for pages drawn by JavaScript, plus screenshots.
         # Offered only where the browser queue exists (`enqueue.queue_for`).

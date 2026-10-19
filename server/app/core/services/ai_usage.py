@@ -26,8 +26,9 @@ escape hatch: it overrides the label for every wrapped call issued inside the
 Use sparingly (each distinct label is a permanent row in "by feature"); the
 default stack-derived label is right for the other ~100 call sites.
 
-Paid APIs that bill per request rather than per token (Brave, SearchAPI,
-SerpApi, Google Places, through `matcha_work/search_apis.answer`) log here too,
+Paid APIs that bill per request rather than per token (Brave, through
+`matcha_work/search_apis.answer`; SearchAPI, SerpApi and Google Places until
+2026-10-18, whose rows and prices stay for the history) log here too,
 one row per request: `record_api_call`, priced from `API_PRICING`. Claude's
 hosted web search bills per search on top of the tokens, so each one Anthropic
 reports is its own `anthropic / web_search` row. Quota a provider reports on its
@@ -116,11 +117,12 @@ API_PRICING: dict[tuple[str, str], float] = {
     # account's plan (the Free plan's 2,000 a month cost nothing), so
     # BRAVE_SEARCH_USD_PER_1000 overrides it; see `api_price`.
     ("brave", "web_search"): 0.005,
-    # Google Places API (New) Text Search, first volume tier. The SKU is the
-    # dearest field the request's mask asks for: research/providers.py's
-    # SEARCH_MASK (website, phone, rating, hours) is Enterprise, LOCATE_MASK
-    # (name and location) is Pro. Google's free monthly calls per SKU (1,000
-    # Enterprise, 5,000 Pro) are not netted out, so this overstates a quiet month.
+    # Google Places API (New) Text Search, first volume tier, for the rows
+    # research tasks logged until 2026-10-18 (nothing calls Places now). The
+    # SKU was the dearest field the request's mask asked for: a search's
+    # (website, phone, rating, hours) Enterprise, an anchor's (name and
+    # location) Pro. Google's free monthly calls per SKU (1,000 Enterprise,
+    # 5,000 Pro) are not netted out, so this overstates a quiet month.
     ("google_places", "text_search_enterprise"): 0.035,
     ("google_places", "text_search_pro"): 0.032,
     # Claude's hosted web search: $10 per 1,000 searches, on top of tokens.

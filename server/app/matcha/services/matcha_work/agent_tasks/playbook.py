@@ -103,7 +103,6 @@ class ItemField:
 class Budgets:
     """Per round, except `items` and `images` (per task)."""
 
-    provider_calls: int = 30
     # An apartment building may take four: its site, its floor plans page
     # and its leasing system (`research/units.py`).
     fetch_calls: int = 160

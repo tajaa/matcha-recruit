@@ -9,8 +9,8 @@ import pytest
 from app.core.services.safe_fetch import FetchedResponse, UnsafeURL
 from app.matcha.services.matcha_work.agent_runtime import chain
 from app.matcha.services.matcha_work.agent_runtime.chain import Budget, Guard
-from app.matcha.services.matcha_work.agent_tasks import items as items_mod, orchestrator
-from app.matcha.services.matcha_work.agent_tasks.research import phases, providers
+from app.matcha.services.matcha_work.agent_tasks import orchestrator
+from app.matcha.services.matcha_work.agent_tasks.research import phases
 from tests.agent_runtime.helpers import FakeConn, connection
 
 from ._fixtures import ITEM, PLAN, TASK, TODAY, TOKEN, item_row, task_row
@@ -48,7 +48,6 @@ def test_helpers():
     assert not phases.own_page("https://shopping.google.co.uk/p") and not phases.own_page(None)
     page = {"og_image": "https://img.test/og.jpg", "products": [{"images": ["https://img.test/p.jpg", 7]}]}
     assert [i["source_url"] for i in phases.page_images(page, "t", "u")] == ["https://img.test/p.jpg", "https://img.test/og.jpg"]
-    assert phases.provider_record(providers.ProviderItem(kind="product", title="Balm", url="https://s.test", image_url="https://i.test/a"))["image_candidates"][0]["page_url"] == "https://s.test"
     assert phases.cursor_of({"phase_cursor": "[1]"}) == {} and phases.plan_of({}) == {}
 
 
@@ -61,184 +60,16 @@ async def test_item_room_grows_after_search_more():
 
 
 @pytest.mark.asyncio
-async def test_a_later_page_is_charged_every_call_it_makes(conn, monkeypatch):
-    provider = AsyncMock()
-    provider.search = AsyncMock(return_value=[])
-    monkeypatch.setattr(providers, "calls_per_search", lambda _provider, page: page)
-    monkeypatch.setattr(items_mod, "insert_items", AsyncMock(return_value=0))
-    conn.on("COUNT(*) FROM mw_agent_task_items", 0)
-    conn.on("RETURNING GREATEST(LEAST($2, $3 - cur.before), 0)", lambda row_id, want, limit: min(want, 5))
-    task = task_row(plan=json.dumps({**PLAN, "source": "places", "queries": ["a", "b", "c"]}),
-                    phase_cursor=json.dumps({"provider_page": 2}))
-    await phases.run_providers(task, _deps(provider=lambda *_: provider), _guard())
-    assert conn.ran("provider_calls AS before")[0][2][1] == 6  # three searches, two calls each
-    assert provider.search.await_count == 2  # five granted: room for two searches, not two and a half
-    assert conn.ran("SET provider_calls = GREATEST(provider_calls - $2, 0)")[-1][2][1] == 1
-
-
-@pytest.mark.asyncio
-async def test_providers_add_findings_then_hand_to_the_web(conn, monkeypatch):
-    provider = AsyncMock()
-    provider.search = AsyncMock(side_effect=[
-        [providers.ProviderItem(kind="product", title="Balm", url="https://shop.test/b", provider="google_shopping")],
-        providers.ProviderError("rate limited"),
-    ])
-    insert = AsyncMock(return_value=1)
-    monkeypatch.setattr(items_mod, "insert_items", insert)
-    conn.on("COUNT(*) FROM mw_agent_task_items", 0)
-    task = task_row(plan=json.dumps({**PLAN, "source": "shopping", "queries": ["balm", "lip balm"]}),
-                    phase_cursor=json.dumps({"provider_page": 2}))
-    asked = []
-    out = await phases.run_providers(task, _deps(provider=lambda source: asked.append(source) or provider), _guard())
-    assert out.phase == phases.DISCOVER and out.cursor["provider_added"] == 1 and "Google Shopping" in out.progress["note"]
-    assert asked == ["shopping"]
-    assert provider.search.await_args_list[0].kwargs == {"page": 2}
-    assert insert.await_args.args[4][0]["origin"] == "provider"
-    # The web: no provider to ask.
-    out = await phases.run_providers(task_row(), _deps(provider=lambda *_: provider), _guard())
-    assert out.phase == phases.DISCOVER and out.progress["note"] == "Searching the web…"
-
-
-@pytest.mark.asyncio
-async def test_listings_that_refused_for_good_are_asked_no_more(conn, monkeypatch):
-    provider = AsyncMock()
-    provider.search = AsyncMock(side_effect=[
-        [_shop("Balm", "Acme")],
-        providers.ProviderError("no research listings API left", fatal=True),
-    ])
-    insert = AsyncMock(return_value=1)
-    monkeypatch.setattr(items_mod, "insert_items", insert)
-    monkeypatch.setattr(phases, "QUERY_CONCURRENCY", 1)
-    conn.on("COUNT(*) FROM mw_agent_task_items", 0)
-    task = task_row(plan=json.dumps({**PLAN, "source": "shopping", "queries": ["a", "b", "c", "d"]}))
-    out = await phases.run_providers(task, _deps(provider=lambda *_: provider), _guard())
-    assert provider.search.await_count == 2 and out.phase == phases.DISCOVER  # the web search still runs
-    # What was found is kept, at Google's page: no store is asked.
-    provider.stores.assert_not_awaited()
-    assert [r["title"] for r in insert.await_args.args[4]] == ["Balm"]
-    # The calls it never made are given back.
-    assert conn.ran("SET provider_calls = GREATEST(provider_calls - $2, 0)")[-1][2][1] == 2
-
-
-@pytest.mark.asyncio
-async def test_store_lookups_stop_once_every_api_refused(conn, monkeypatch):
-    provider = AsyncMock()
-    provider.stores = AsyncMock(side_effect=providers.ProviderError("no research listings API left", fatal=True))
-    monkeypatch.setattr(phases, "QUERY_CONCURRENCY", 1)
-    found = [_shop("Balm", "Acme", n=1), _shop("Wax", "Bee Co", n=2), _shop("Tin", "Tin Co", n=3)]
-    out = await phases.with_stores(task_row(), provider, found, set(), TODAY)
-    assert out == found and provider.stores.await_count == 1
-    assert conn.ran("SET provider_calls = GREATEST(provider_calls - $2, 0)")[-1][2][1] == 2
-    # A token whose API was dropped is never looked up, or counted.
-    listings = providers.Listings([providers.SearchApi("k"), providers.SerpApi("k")])
-    listings._dropped[0] = providers.ProviderError("spent", fatal=True)
-    tagged = [_shop("Balm", "Acme", token="0:t")]
-    assert await phases.with_stores(task_row(), listings, tagged, set(), TODAY) == tagged
-
-
-GOOGLE = "https://www.google.com/search?ibp=oshop&q={q}&prds=productid:{n}"
-
-
-def _shop(title, seller, *, n=1, q="balm", token="tok"):
-    return providers.ProviderItem(kind="product", title=title, subtitle=seller, url=GOOGLE.format(q=q, n=n),
-                                  provider="google_shopping", offers_token=token)
-
-
-def test_the_best_of_each_query_first_and_which_to_look_up():
-    assert phases.interleave([[1, 2, 3], [], [4]]) == [1, 4, 2, 3] and phases.interleave([]) == []
-    found = [
-        _shop("Balm", "Acme"),
-        _shop("Balm", "Acme", q="lip balm"),           # the same listing from another query
-        _shop("Old", "Shop"),                           # the task has it
-        _shop("No token", "Shop", token=None),
-        providers.ProviderItem(kind="product", title="Own page", subtitle="Shop", url="https://shop.test/x",
-                               offers_token="tok"),
-        _shop("", "Shop"),
-        _shop("Wax", "Bee Co"),
-        _shop("Tin", "Bee Co"),
-    ]
-    assert phases.store_lookups(found, {("old", "shop")}, limit=5) == [0, 6, 7]
-    assert phases.store_lookups(found, set(), limit=2) == [0, 2]
-
-
-@pytest.mark.asyncio
-async def test_shopping_findings_are_kept_at_their_stores_page(conn, monkeypatch):
-    provider = AsyncMock()
-    provider.search = AsyncMock(side_effect=[
-        [_shop("Balm", "Acme", n=1), _shop("Wax", "Bee Co", n=2)],
-        [_shop("Balm", "Acme", n=1, q="lip balm"), _shop("Tin", "Tin Co", n=3, q="lip balm")],
-    ])
-
-    async def stores(token):
-        if token == "fail":
-            raise providers.ProviderError("SerpApi answered 500")
-        return [providers.Store(name="Acme", link="https://acme.test/balm", price=4.0)]
-
-    provider.stores = AsyncMock(side_effect=stores)
-    insert = AsyncMock(return_value=3)
-    monkeypatch.setattr(items_mod, "insert_items", insert)
-    conn.on("COUNT(*) FROM mw_agent_task_items", 0)
-    conn.on("SELECT title, subtitle FROM mw_agent_task_items", [{"title": "Tin", "subtitle": "Tin Co"}])
-    task = task_row(plan=json.dumps({**PLAN, "source": "shopping", "queries": ["balm", "lip balm"]}))
-    out = await phases.run_providers(task, _deps(provider=lambda *_: provider), _guard())
-    assert out.cursor["provider_added"] == 3
-    records = insert.await_args.args[4]
-    # Each query's best first; the repeat and the one the task has aren't looked up.
-    assert [r["title"] for r in records] == ["Balm", "Balm", "Wax", "Tin"]
-    assert provider.stores.await_count == 2
-    assert records[0]["url"] == "https://acme.test/balm" and records[0]["subtitle"] == "Acme"
-    # Wax's seller isn't among the stores: the first store's page, name and price.
-    assert records[2]["url"] == "https://acme.test/balm" and records[2]["fields"]["price"]["value"] == 4.0
-    assert records[3]["url"].startswith("https://www.google.com/")
-
-    # A failed lookup keeps Google's link; with no budget left nothing is asked.
-    provider.search = AsyncMock(return_value=[_shop("Balm", "Acme", token="fail")])
-    provider.stores.reset_mock()
-    await phases.run_providers(task, _deps(provider=lambda *_: provider), _guard())
-    assert insert.await_args.args[4][0]["url"].startswith("https://www.google.com/")
-    conn.on("RETURNING GREATEST(LEAST($2, $3 - cur.before), 0)", lambda row_id, want, limit: 0)
-    provider.search = AsyncMock(return_value=[_shop("Balm", "Acme")])
-    provider.stores.reset_mock()
-    assert (await phases.with_stores(task, provider, [_shop("Balm", "Acme")], set(), TODAY))[0].url.startswith(
-        "https://www.google.com/")
-    provider.stores.assert_not_awaited()
-
-
-def test_shopping_results_are_ranked_before_the_lookups():
-    """The lookups go to what the person will see first, not to whatever the
-    search listed first."""
-    def rated(title, rating, n):
-        item = _shop(title, "Shop", n=n)
-        return replace(item, fields={"rating": {"value": rating, "status": "verified",
-                                                "evidence": {"quote": f"rating {rating}", "url": item.url,
-                                                             "origin": "provider"}}})
-
-    found = [rated("Okay", 3.9, 1), rated("Best", 4.9, 2), rated("Good", 4.4, 3)]
-    plan = {"constraints": [], "preferences": [{"field": "rating", "weight": 1.0}], "fit_weight": 0}
-    assert [i.title for i in phases.prerank(found, plan)] == ["Best", "Good", "Okay"]
-    assert phases.prerank(found[:1], plan) == found[:1]
-    assert phases.STORE_LOOKUPS == 20
-
-
-@pytest.mark.asyncio
-async def test_store_lookups_are_only_paid_for_findings_there_is_room_for(conn, monkeypatch):
-    provider = AsyncMock()
-    provider.stores = AsyncMock(return_value=[providers.Store(name="Acme", link="https://acme.test/balm")])
-    monkeypatch.setattr(items_mod, "insert_items", AsyncMock(return_value=0))
-    task = task_row(plan=json.dumps({**PLAN, "source": "shopping", "queries": ["balm"]}))
-    three = [_shop("Balm", "Acme"), _shop("Wax", "Bee Co", n=2), _shop("Tin", "Tin Co", n=3)]
-    # Room for one more finding: one lookup.
-    provider.search = AsyncMock(return_value=three)
-    conn.on("COUNT(*) FROM mw_agent_task_items", phases.BUDGETS.items - 1)
-    await phases.run_providers(task, _deps(provider=lambda *_: provider), _guard())
-    assert provider.stores.await_count == 1
-    # Full: nothing is looked up, and nothing is asked about what it has.
-    provider.stores.reset_mock()
-    conn.calls.clear()
-    conn.on("COUNT(*) FROM mw_agent_task_items", phases.BUDGETS.items)
-    await phases.run_providers(task, _deps(provider=lambda *_: provider), _guard())
-    provider.stores.assert_not_awaited()
-    assert not conn.ran("SELECT title, subtitle FROM mw_agent_task_items")
+async def test_every_task_is_the_web_search_alone(conn):
+    """No Google Shopping or Google Maps since 2026-10-18: a task planned for
+    either before then, and every task since, goes straight to the web."""
+    for source in ("shopping", "places", "web"):
+        task = task_row(plan=json.dumps({**PLAN, "source": source, "queries": ["ramen"]}),
+                        phase_cursor=json.dumps({"provider_page": 2}))
+        out = await phases.run_providers(task, _deps(), _guard())
+        assert out.phase == phases.DISCOVER and out.progress["note"] == "Searching the web…"
+        assert out.cursor == {"provider_page": 2}
+    assert not conn.ran("INSERT INTO mw_agent_task_items") and not conn.ran("provider_calls")
 
 
 @pytest.mark.asyncio

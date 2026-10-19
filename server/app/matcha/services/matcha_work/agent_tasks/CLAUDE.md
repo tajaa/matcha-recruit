@@ -218,7 +218,10 @@ chain sooner than the main worker's hourly `reconcile`).
 ## Research (`research/`)
 
 `plan -> providers -> discover -> enrich -> screen -> rank -> fill -> summarize`;
-refine starts at `refine` (then `fill`), "search more" at `fill`.
+refine starts at `refine` (then `fill`), "search more" at `fill`. Every finding
+comes from the model's web search (Brave) and is read on its own page: no
+research task calls a Google API or a search API. `providers` only places the
+anchor now (`run_providers`), and stays a phase because tasks in flight are at it.
 
 ### Ten at a time (`research/batches.py`, `research/fill.py`, `research/suggest.py`)
 
@@ -286,7 +289,7 @@ next batch from them before it searches again.
 | Field library, reading pages, checking claims (pure) | `fields.py` |
 | Hard constraints, bands, scores (pure) | `ranking.py` |
 | Finish contracts and their checks (pure) | `contracts.py` |
-| Google Maps from Google's Places API (New) Text Search (`GooglePlaces`, `GOOGLE_MAPS_API_KEY`, the key Tell-Us uses), else as Shopping is; Google Shopping via SearchAPI (`SEARCH_API_KEY`), else SerpApi (`SERP_API_KEY`); a Shopping product's stores (`stores`, `with_store`); `choose_provider(source)` puts the ones with keys in that order (`Listings`), so Shopping falls back to SerpApi and Maps to the SERP APIs, by `matcha_work/search_apis.py`'s rules (shared with job search): one that refuses for good (a refused key, no searches left) is dropped for the phase and logged once as an error, one still down after its retry is passed over when another follows. With every one refused, nothing more is asked that round (no store lookups either); the web search still runs | `providers.py` |
+| A finding's own page and link, never Google's or a search engine's (`own_page`, `is_google`, `store_link`: Buy and Apply unwrap Google's redirects on findings from before 2026-10-18). No provider: Google Maps (Google's Places API) and Google Shopping (SearchAPI, else SerpApi) were taken out on 2026-10-18, so every kind is the model's web search (Brave) read on the findings' own pages | `links.py` |
 | The model's page loader: agent cards' page facts plus the page's same-site links | `fetch.py` |
 | No-model phases, `rerank`, `Deps` | `phases.py` |
 | Model phases | `model_phases.py` |
@@ -307,9 +310,9 @@ refine):
 
 | Kind | Finding | Starts at | Its own questions | Its limits | Actions |
 |---|---|---|---|---|---|
-| `products` | product | Google Shopping | budget each, must / nice / avoid, needed by | price | Buy |
-| `apartments` | listing | Google Maps (buildings), then the web | where (required), rent up to / from a month, beds, baths, pets, move-in, a place to measure from + miles at least / at most + directions | rent/month ≤ and ≥, beds ≥, baths ≥, pets includes, available ≤ move-in, distance ≥ / ≤, direction any of | Apply |
-| `places` | place | Google Maps | near (required), must / nice / avoid | — | — |
+| `products` | product | the web | budget each, must / nice / avoid, needed by | price | Buy |
+| `apartments` | listing | the web | where (required), rent up to / from a month, beds, baths, pets, move-in, a place to measure from + miles at least / at most + directions | rent/month ≤ and ≥, beds ≥, baths ≥, pets includes, available ≤ move-in, distance ≥ / ≤, direction any of | Apply |
+| `places` | place | the web | near (required), must / nice / avoid | — | — |
 
 A kind's answers become constraints with `source: brief`, like a typed
 budget: the plan can't drop them, a refine may change them (its
@@ -324,15 +327,23 @@ read as a monthly rent. `research` stays the catch-all. A task row's
 ### Distance from a named place (`research/geo.py`)
 
 An apartments brief's `near` ("Lady Bird Lake") is the anchor: found once per
-task by `phases.ensure_anchor` (Google Maps through the places provider, one
-provider call; else the US Census geocoder for a street address) and kept in the plan
-as `anchor` (`{name, lat, lng, source, label}`, or `{name, error}`, so a place
-that can't be found isn't looked up again). A lookup that failed rather than
-found nothing (a provider error, a geocoder error, or no provider calls left)
-is kept with `transient` and `tries`, and the next step tries again, up to
-`ANCHOR_TRIES` (3) times in all; otherwise one rate limit would leave every
-distance Unconfirmed for the life of the task. A finding's point: a Google Maps
-result's point (`gps_coordinates`, or Places `location`: `ProviderItem.point`), its page's schema.org `geo`
+task by `phases.ensure_anchor` (`geo.resolve_anchor`: the US Census geocoder
+for a street address, else the offline Census gazetteer for a city or town
+named on its own, `geo.town_point`: "Santa Monica", "Austin, TX") and kept in
+the plan as `anchor` (`{name, lat, lng, source, label}`, or `{name, error}`, so
+a place that can't be found isn't looked up again). A landmark ("Lady Bird
+Lake", "Downtown Austin") is on neither, so its distances are Unconfirmed:
+until 2026-10-18 Google Maps found those, and it is not asked any more. A
+town named without a state is the one in the brief's `location`
+(`places.target_near`: its state, within 50 mi of its city), never the
+largest of that name anywhere: in review, "Pasadena" in a Los Angeles search
+was Texas's, every home measured some 1,400 mi away, and the distance limit
+hid them all. No such town there (LA's Venice): not found. A geocoder that
+failed rather than found nothing (with no town to fall back on) is kept with
+`transient` and `tries`, and the next step tries again, up to `ANCHOR_TRIES`
+(3) times in all. The shared `core/services/geo.geocode` reads an outage as
+no match, so the anchor uses `geocode_or_raise`, which raises
+`GeocoderUnavailable` for a timeout, a 5xx or an answer that isn't its JSON. A finding's point: its page's schema.org `geo`
 (`page_extract` adds `geo` to a listing or place only when the page has one),
 else its stored address through the Census geocoder (a street number needed).
 `distance` (miles, straight line, shown "12.4 mi north") and `direction` (the
@@ -344,28 +355,13 @@ from. `min_miles` / `max_miles` / `directions` become `distance gte` /
 no distance limits, preferences or columns. `near` itself isn't refinable (a
 new place is a new task); the miles and directions are.
 
-Where the map is searched follows the limits, not the planner's queries:
-`geo.areas` puts a map centre (`@lat,lng,12z`, the providers' `ll`) out in
-each direction asked (between the miles, or 5 past "at least", or
-`DIRECTION_MILES` with none), or on the anchor for "within", and
-`run_providers` searches the kind's `area_query` ("apartments") around each
-before the plan's own queries, at 13z (at 12z Google drifted to the city's
-dense middle: a centre 15 mi south came back 4-9 mi out). `GooglePlaces` turns
-`ll` into a `locationRestriction` rectangle (`providers.map_box`: 5 mi each way
-at 13z, doubling per zoom level out), so its answers stay inside the area; the
-search APIs take `ll` as a map centre. Live on 2026-10-15, Lady Bird Lake +
-"at least 10 mi, north or south": 20 places 10–17 mi north (19 with their own
-site), 12 places 11–20 mi south (7). A planner that
-writes four northern suburbs and one southern one still gets the south
-searched, and with two or more directions `prerank` takes the room (30
-buildings) from each in turn (`by_direction`), not whichever way most
-queries leaned. A distance preference always ranks nearer first: the model
+The limits don't steer the search: the planner's queries do, and code
+measures what comes back. A distance preference always ranks nearer first: the model
 can't flip `higher_is_better` on a computed field ("at least 10 miles" is a
 limit, not a wish to be far away; a run where it did ranked Georgetown at 33
 mi over Kyle at 18 and cut the south).
 
-Google Maps results in an apartments task are listings (`phases.as_kind`),
-without Maps' "cuisine" and price level. Move-in specials (`specials`) are read
+Move-in specials (`specials`) are read
 from a listing page's text by `scan_listing_text` (time free, then money off,
 then deposit, then fees and Look & Lease; the biggest kind wins) or claimed by
 the model with a quote. A preference on `specials` ranks a finding that has
@@ -373,7 +369,15 @@ any above one that doesn't (`fields.PRESENCE`: the only text fields a
 preference may name).
 
 A building's rent is every figure its floor plans state, not one number.
-`enrich_one` treats a Google Maps listing as a building: its page and then its
+`enrich_one` treats a listing as a building when its page shows it is one
+(`building_page`: it names its leasing system, says it is an ApartmentComplex
+(`page_extract` keeps that type when a node has several), or links its own
+floor plans page. A page that states one plain rent is one home's
+(`one_home`), even a unit's page on the building's site, whose menu links
+Floor Plans and whose every page may say ApartmentComplex: it is read as one
+home, beds and all. A Google Maps row from before 2026-10-18 always is a
+building.) The page's links are read once, in a thread (`plan_links`), and
+reused for the floor plans page. Its page and then its
 floor plans page (`plans_link`, same site; viewed in the browser when the
 figures are drawn by JavaScript) are read by `building_rent`, which keeps each
 plan's `[low, high]` in `price.spans` (`high` None for "starting at") and shows
@@ -477,16 +481,13 @@ widgets are not read yet.
 - **The person's own limits win.** A brief's budget and date become
   constraints the plan can't drop; a refine may change one, but one the model
   merely left out stays.
-- **A Shopping finding links to a store, not Google.** Neither provider puts a
-  store's link in its results (only Google's product page), so `run_providers`
-  asks for each new product's stores (SearchAPI `google_product_offers` with
-  `product_token`, SerpApi `google_immersive_product` with
-  `immersive_product_page_token`), at most `STORE_LOOKUPS` (12) a round, best
-  of each query first, and keeps the listing's seller there (else the first
-  store, with its price and name). That page is then the finding's own, so
-  `enrich` reads it (availability, schema.org data) and the dedupe key no
-  longer changes with the query. A product past the lookups, or whose lookup
-  failed, keeps Google's page.
+- **A product finding is a store's own page.** Products come from the
+  model's web search (Brave), so a finding links to the store's page, which
+  `enrich` reads (price, availability, schema.org data). Until 2026-10-18 they
+  came from Google Shopping through SearchAPI, which linked to Google's own
+  product page and took a store look-up per product; findings from then keep
+  `provider = 'google_shopping'` and their links (`links.store_link`
+  still unwraps Google's redirects for Buy).
 - **Links are provenance-gated.** A candidate's URL must be one the run saw
   (a search result, a page it loaded, or a link printed on one: `fetch.py`);
   photos only ones a loaded page showed or a Brave result about the finding
@@ -499,9 +500,7 @@ widgets are not read yet.
   then the ranking-only summary. Its top picks are always five (or every
   finding shown): the model's, then the ranking's best it left out
   (`fill_top`).
-- **Budgets per round** (`Budgets`): 30 provider calls (searches and store
-  lookups; Google Places pages by token, so page n of a search is n calls:
-  `providers.calls_per_search`), 160 page loads (a building may cost
+- **Budgets per round** (`Budgets`): 160 page loads (a building may cost
   `BUILDING_LOADS` four: its page, its floor plans page and its leasing system,
   whose unit map is two), 24 browser views, reserved with `chain.grant` before use and refunded after.
   80 findings per task, 120 once it searched more. Counters reset when a

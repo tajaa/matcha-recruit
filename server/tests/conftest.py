@@ -45,9 +45,9 @@ os.environ["OPENAI_API_1"] = ""
 os.environ["BRAVE_SEARCH_API_KEY"] = ""
 # And its per-plan price: tests price Brave at list (ai_usage.API_PRICING).
 os.environ["BRAVE_SEARCH_USD_PER_1000"] = ""
-# And the paid listing APIs (Google Maps, Google Jobs through SearchAPI or
-# SerpApi): with a key, the assistant offers find_places and find_jobs, so a
-# full run's ability lists depended on the developer's server/.env.
+# And the listing APIs Espresso called until 2026-10-18 (Google Maps, Google
+# Jobs through SearchAPI or SerpApi): nothing reads them now, but a full run
+# must not depend on the developer's server/.env if one comes back.
 os.environ["GOOGLE_MAPS_API_KEY"] = ""
 os.environ["SEARCH_API_KEY"] = ""
 os.environ["SERP_API_KEY"] = ""

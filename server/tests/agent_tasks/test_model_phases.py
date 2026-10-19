@@ -135,9 +135,6 @@ async def test_discover_stops_when_enough_or_nothing(conn, monkeypatch):
         await M.discover(task_row(phase_cursor=json.dumps({"web_runs": 1})), _deps(), _guard())
     conn.on("COUNT(*) FROM mw_agent_task_items", 4)
     insert.reset_mock()
-    # The provider found plenty: straight on to reading pages.
-    out = await M.discover(task_row(phase_cursor=json.dumps({"provider_added": 20})), _deps(), _guard())
-    assert out.phase == phases.ENRICH and insert.await_count == 0
     # "Search more" that found nothing new: rank and say so.
     conn.on("AND id = ANY($2::uuid[])", [{"title": "Sunny 1BR"}])
     seen = _model(monkeypatch, {"candidates": [], "notes": ""})
@@ -310,10 +307,10 @@ async def test_a_kind_of_search_plans_as_its_kind(conn, monkeypatch):
                                 "queries": ["1 bedroom"], "fields": ["rating"], "constraints": [],
                                 "preferences": [], "fit_weight": 0.4, "prefer_sources": [], "summary": ""})
     await M.plan(task_row(playbook="apartments", brief=brief), _deps(), _guard())
-    assert "Kind of search: Apartments. Its item_kind and source are fixed (listing, places)." in seen[0]["instructions"]
+    assert "Kind of search: Apartments. Its item_kind and source are fixed (listing, web)." in seen[0]["instructions"]
     assert "Bedrooms (at least): 1" in seen[0]["user_text"] and "Pets: dogs" in seen[0]["user_text"]
     saved = json.loads(conn.ran("SET plan = $3::jsonb")[0][2][2])
-    assert saved["item_kind"] == "listing" and saved["source"] == "places"
+    assert saved["item_kind"] == "listing" and saved["source"] == "web"
     assert saved["fields"][:3] == ["price", "specials", "beds"] and "rating" in saved["fields"]
     limits = {(c["field"], c["op"]) for c in saved["constraints"] if c["source"] == "brief"}
     assert limits == {("price", "lte"), ("beds", "gte"), ("pets", "includes"), ("available_date", "before")}

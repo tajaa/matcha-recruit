@@ -42,7 +42,6 @@ from app.matcha.services.matcha_work import brave_search
 
 from ..context import RunContext, RunState
 from ..registry import Ability, AgentTool, ToolOutput
-from .places import fit_lines
 
 logger = logging.getLogger(__name__)
 
@@ -141,6 +140,22 @@ def model_line(short_id: str, row: dict) -> str:
     parts.append(f"live at the employer ({row['read_on']})" if row["at_employer"] else f"live on {row['read_on']}")
     parts.append(row["apply_url"] or "no link")
     return " | ".join(parts)
+
+
+# Jobs the model always sees, however long the lines.
+MIN_ROWS = 10
+
+
+def fit_lines(lines: list[str], budget: int, min_rows: int = MIN_ROWS) -> tuple[list[str], int]:
+    """As many lines as fit `budget` characters (never fewer than `min_rows`),
+    and how many were left out; the block keeps every one."""
+    kept, used = [], 0
+    for line in lines:
+        if len(kept) >= min_rows and used + len(line) + 4 > budget:
+            break
+        kept.append(line)
+        used += len(line) + 4
+    return kept, len(lines) - len(kept)
 
 
 _LATE = object()  # a read still going at the deadline
