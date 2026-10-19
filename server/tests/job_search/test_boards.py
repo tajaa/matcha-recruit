@@ -60,6 +60,34 @@ def test_board_searches():
     assert boards.board_searches([], {"locations": ["Austin, TX"]}) == []
 
 
+def test_a_whole_state_is_searched_by_name_and_its_job_hubs():
+    """Before 2026-10-19 a state got no searches in it ("California" was
+    searched nationwide only, and kept California jobs after): it is now its
+    name and its job hubs, each named place before any hub."""
+    assert boards.search_places({"locations": ["California"]}) == [
+        "California", "Los Angeles", "San Francisco", "San Diego"]
+    assert boards.search_places({"locations": ["CA"]})[0] == "California"
+    assert boards.search_places({"locations": ["California", "Texas"]}) == [
+        "California", "Texas", "Los Angeles", "Austin", "San Francisco", "Dallas"]
+    assert boards.search_places({"locations": ["Texas", "Denver, CO"]})[:2] == ["Texas", "Denver"]
+    assert boards.search_places({"locations": ["San Diego, CA", "Remote"]}) == ["San Diego"]
+    assert boards.search_places({}) == []
+    assert set(boards.STATE_HUBS) == set(boards.normalize.STATES.values())
+    # find_jobs' eight: each of the four, each on its own board, beside the four nationwide.
+    quick = boards.board_searches(["Chief People Officer"], {"locations": ["California"]})[:8]
+    assert [q for q in quick if q.count('"') == 4] == [
+        '"Chief People Officer" "California" site:job-boards.greenhouse.io',
+        '"Chief People Officer" "Los Angeles" site:boards.greenhouse.io',
+        '"Chief People Officer" "San Francisco" site:jobs.lever.co',
+        '"Chief People Officer" "San Diego" site:jobs.ashbyhq.com']
+    # A job search's capped list still reaches every host and every hub.
+    full = boards.board_searches(["Chief People Officer", "Head of HR", "CHRO", "VP of People"],
+                                 {"locations": ["California"]})
+    assert len(full) == boards.MAX_SEARCHES
+    assert all(any(f"site:{host}" in q for q in full) for host in boards.HOSTS)
+    assert all(any(f'"{spot}"' in q for q in full) for spot in ("California", "Los Angeles", "San Diego"))
+
+
 def test_a_capped_list_still_searches_every_typed_title_and_place():
     """When the Google Jobs step went (2026-10-18), so did its query per typed
     title and place: eight typed titles and six places are each searched."""

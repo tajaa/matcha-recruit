@@ -32,7 +32,7 @@ from app.database import connection_or_direct
 from app.matcha.services.matcha_work import brave_search
 from app.matcha.services.matcha_work.agent_runtime import chain
 
-from . import phases, places, postings
+from . import normalize, phases, places, postings
 from .phases import Deps
 
 logger = logging.getLogger(__name__)
@@ -52,9 +52,50 @@ MAX_LINKS = 160
 STORED_LINKS = 60
 
 
+# A whole state's job hubs, searched by name beside the state: most postings
+# write "Los Angeles, CA" and never "California", so a state searched by its
+# name alone found little, and before 2026-10-19 a state got no searches in
+# it at all ("California" was searched nationwide). The state still keeps a
+# job anywhere in it (`places.fits`); these only decide what Brave is asked.
+STATE_HUBS = {
+    "AL": ("Birmingham", "Huntsville"), "AK": ("Anchorage",), "AZ": ("Phoenix", "Tucson"),
+    "AR": ("Little Rock", "Bentonville"), "CA": ("Los Angeles", "San Francisco", "San Diego"),
+    "CO": ("Denver", "Boulder"), "CT": ("Stamford", "Hartford"), "DE": ("Wilmington",),
+    "DC": ("Washington",), "FL": ("Miami", "Tampa", "Orlando"), "GA": ("Atlanta",), "HI": ("Honolulu",),
+    "ID": ("Boise",), "IL": ("Chicago",), "IN": ("Indianapolis",), "IA": ("Des Moines",),
+    "KS": ("Overland Park", "Wichita"), "KY": ("Louisville", "Lexington"), "LA": ("New Orleans", "Baton Rouge"),
+    "ME": ("Portland",), "MD": ("Baltimore", "Bethesda"), "MA": ("Boston", "Cambridge"),
+    "MI": ("Detroit", "Grand Rapids", "Ann Arbor"), "MN": ("Minneapolis",), "MS": ("Jackson",),
+    "MO": ("St. Louis", "Kansas City"), "MT": ("Billings", "Bozeman"), "NE": ("Omaha", "Lincoln"),
+    "NV": ("Las Vegas", "Reno"), "NH": ("Manchester", "Nashua"), "NJ": ("Newark", "Jersey City", "Princeton"),
+    "NM": ("Albuquerque", "Santa Fe"), "NY": ("New York", "Buffalo", "Rochester"),
+    "NC": ("Charlotte", "Raleigh", "Durham"), "ND": ("Fargo",), "OH": ("Columbus", "Cleveland", "Cincinnati"),
+    "OK": ("Oklahoma City", "Tulsa"), "OR": ("Portland",), "PA": ("Philadelphia", "Pittsburgh"),
+    "RI": ("Providence",), "SC": ("Charleston", "Greenville"), "SD": ("Sioux Falls",),
+    "TN": ("Nashville", "Memphis"), "TX": ("Austin", "Dallas", "Houston"), "UT": ("Salt Lake City", "Lehi"),
+    "VT": ("Burlington",), "VA": ("Arlington", "Richmond", "Reston"), "WA": ("Seattle", "Bellevue"),
+    "WV": ("Charleston",), "WI": ("Milwaukee", "Madison"), "WY": ("Cheyenne",),
+}
+_STATE_NAMES = {code: name.title().replace(" Of ", " of ") for name, code in normalize.STATES.items()}
+
+
 def _city(text: str) -> str:
     """A place as a search phrase: "San Diego, CA" -> San Diego."""
     return str(text or "").split(",")[0].strip()
+
+
+def search_places(criteria: dict) -> list[str]:
+    """The places to search in, as phrases: each place named, and a whole
+    state by its name and its job hubs (`STATE_HUBS`). Each place named comes
+    before any hub, so a second state isn't pushed past `PLACES`."""
+    groups = []
+    for target in places.targets(criteria):
+        if target.points or target.name:
+            groups.append([_city(target.label)])
+        elif target.state:
+            groups.append([_STATE_NAMES.get(target.state, target.label), *STATE_HUBS.get(target.state, ())])
+    ranked = [group[i] for i in range(max(map(len, groups), default=0)) for group in groups if i < len(group)]
+    return list(dict.fromkeys(ranked))[:PLACES]
 
 
 def board_searches(titles: list[str], criteria: dict, must: int = 0) -> list[str]:
@@ -66,7 +107,7 @@ def board_searches(titles: list[str], criteria: dict, must: int = 0) -> list[str
     listed host by host, two places were enough to leave Ashby unsearched."""
     titles = [t for t in titles if t][:max(TITLES, must)]
     remote = " remote" if criteria.get("remote") == "remote_only" else ""
-    spots = [_city(t.label) for t in places.targets(criteria) if t.points or t.name][:PLACES]
+    spots = search_places(criteria)
     wide = [f'"{title}"{remote} site:{host}' for title, host in phases.cover(titles, list(HOSTS))]
     local = [f'"{title}" "{spot}" site:{host}'
              for (title, spot), host in phases.cover(phases.cover(titles[:LOCAL_TITLES], spots), list(HOSTS))]
