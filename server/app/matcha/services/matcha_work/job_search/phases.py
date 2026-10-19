@@ -1,11 +1,15 @@
 """The deterministic parts of one job search. Each runs inside one worker task.
 
-  listings  Google Jobs, page by page, deduped into leads (no model), when a
-            listings API is set up: the first step of `discovery.discover`
   enrich    each lead's ATS API or the company's posting page: full text, pay
             with evidence, application questions; then the ranking (no model).
             A posting is the lead's only when its title and employer match:
-            Google lists other employers' jobs among a posting's apply links
+            Google Jobs, which searches used to start from, listed other
+            employers' jobs among a posting's apply links
+
+Postings come from Brave and Claude only (`discovery.py`): code's Brave
+searches of the ATS boards and a Claude run's web search. The Google Jobs step
+(SearchAPI, else SerpApi) was taken out on 2026-10-18; leads it found before
+then keep `source = 'google_jobs'` and read as they did.
 
 `plan_from_criteria` is the plan when the model plan fails. The model phases
 (plan, the web search in discover, screen, approach) are in `model_phases.py`
@@ -14,7 +18,7 @@ and `discovery.py`; the order is in `orchestrator.PHASES`.
 Every write checks the search's dispatch token (`Guard`), so a cancelled
 search, or a chain a reconcile replaced, stops writing at the next check.
 
-Paid calls (Google Jobs, Brave's board searches, page and ATS fetches) are reserved on the search row
+Paid calls (Brave's board searches, page and ATS fetches) are reserved on the search row
 BEFORE they are made (`grant`), and only what went unused is given back
 (`refund`). A task killed mid-phase gives nothing back, so its retry works
 from what is left and can never spend a second budget.
@@ -28,6 +32,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 from uuid import UUID
@@ -38,18 +43,18 @@ from app.matcha.services.matcha_work.agent_card.page_extract import job_postings
 from app.matcha.services.matcha_work.agent_runtime import chain
 from app.matcha.services.matcha_work.agent_runtime.chain import Budget, PhaseOutcome
 
-from . import ats, normalize, places, providers, ranking
+from . import ats, normalize, places, ranking
 from . import comp as comp_mod
+from .contracts import titles_in
 from .service import fit_floor, rerank
 
 logger = logging.getLogger(__name__)
 
-MAX_QUERIES = 8
-PAGES_PER_QUERY = 3
-QUERY_CONCURRENCY = 3
 # Per search, across retries: a retried discover never buys a second budget.
-# Google Jobs takes at most MAX_QUERIES * PAGES_PER_QUERY (24), Brave's board
-# searches at most `boards.MAX_SEARCHES` (24).
+# Brave's board searches take at most `boards.MAX_SEARCHES` (24) a pass. The
+# room for two passes is kept: a boards step re-claimed after a worker restart
+# runs again, and a search begun before 2026-10-18 had spent calls on Google
+# Jobs, which would otherwise leave its boards step with none.
 MAX_PROVIDER_CALLS = 48
 MAX_LEADS = 120
 ENRICH_BATCH = 24
@@ -93,7 +98,6 @@ async def _default_web_search(query: str, count: int) -> list[dict]:
 
 @dataclass
 class Deps:
-    provider: Callable[[], Any] = providers.choose_provider
     ats_fetch: Callable[..., Awaitable[Any]] = ats.fetch
     ats_find: Callable[..., Awaitable[Any]] = ats.find_on_board
     page_fetch: Callable[..., Awaitable[Any]] = fetch_public
@@ -134,69 +138,63 @@ class Guard(chain.Guard):
 
 # ── plan ─────────────────────────────────────────────────────────────────────
 
-def plan_from_criteria(ask: str, criteria: dict) -> dict:
-    """Search queries straight from what the person entered.
+# The role in an ask, for a search with no typed title whose model plan
+# failed: every search quotes its titles as an exact phrase, so the whole
+# sentence would find nothing.
+_ASK_OPENING = re.compile(
+    r"^(?:(?:please|hi|hey)\W+)*(?:i\s*(?:'|\u2019)?m\s+|i\s+am\s+)?"
+    r"(?:(?:looking|searching|hunting)\s+for|(?:i\s+)?(?:want|need)|find(?:\s+me)?|"
+    r"search\s+for|help\s+me\s+find|get\s+me)\s+", re.I)
+_ASK_FILLER = re.compile(
+    r"^(?:an?|the|some|new|remote|hybrid|on-?site|full[- ]time|part[- ]time|contract|"
+    r"(?:jobs?|roles?|positions?|work)\s+as(?:\s+an?)?)\s+", re.I)
+_ASK_END = re.compile(
+    r"\s+(?:jobs?|roles?|positions?|openings?|opportunities|in|at|near|around|for|with|that|"
+    r"which|who|where|paying|making|remote(?:ly)?|hybrid)\b|[,.;:!?()]", re.I)
+ASK_TITLE_WORDS = 6
+# Not a role: a search with none is left to the web run's own searches.
+_NOT_A_ROLE = {"something", "anything", "work", "job", "role", "position", "career", "opportunity"}
 
-    Google Jobs' `location` parameter only takes Google's own place names, so
-    a city goes into the query text and only the country goes in `location`.
-    """
-    titles = [t for t in (criteria.get("titles") or []) if t] or [" ".join(ask.split())[:100]]
-    locations = [loc for loc in (criteria.get("locations") or []) if loc] or ["United States"]
-    remote_only = criteria.get("remote") == "remote_only"
-    queries = []
-    for title in titles:
-        for location in locations:
-            key = location.strip().lower()
-            if key in NATIONWIDE:
-                q, loc = title, "United States"
-            elif key == "remote":
-                q, loc = f"{title} remote", "United States"
-            else:
-                q, loc = f"{title} {location}", None
-            if remote_only and "remote" not in q.lower():
-                q = f"{q} remote"
-            queries.append({"q": q[:160], "location": loc})
-    seen, unique = set(), []
-    for query in queries:
-        key = (query["q"].lower(), query["location"])
-        if key not in seen:
-            seen.add(key)
-            unique.append(query)
-    return {"queries": unique[:MAX_QUERIES], "source": "criteria"}
+
+def title_from_ask(ask: str) -> str:
+    """The role an ask names ("find me a senior product designer job in
+    Austin" -> "senior product designer"), at most `ASK_TITLE_WORDS` words;
+    empty when it names none."""
+    text = _ASK_OPENING.sub("", " ".join(str(ask or "").split()))
+    while (stripped := _ASK_FILLER.sub("", text)) != text:
+        text = stripped
+    end = _ASK_END.search(text)
+    title = " ".join((text[:end.start()] if end else text).split()[:ASK_TITLE_WORDS])
+    return "" if title.lower() in _NOT_A_ROLE else title
+
+
+def plan_from_criteria(ask: str, criteria: dict) -> dict:
+    """The titles to search, straight from what the person entered (or the
+    role their ask names, when they entered none): the plan when the model
+    plan fails."""
+    titles = titles_in(criteria.get("titles")) or titles_in([title_from_ask(ask)])
+    return {"titles": titles, "source": "criteria"}
+
+
+def must_search(criteria: dict, plan: dict) -> int:
+    """How many of the plan's first titles every code-written search takes:
+    each one the person typed and each direction kept, which the plan lists
+    first (`model_phases.plan`), however few titles a search usually takes."""
+    directions = [d.get("title") for d in plan.get("directions") or [] if isinstance(d, dict)]
+    return len(titles_in([*(criteria.get("titles") or []), *directions]))
+
+
+def cover(firsts: list, seconds: list) -> list[tuple]:
+    """Every (first, second) pair, ordered so each of both lists is reached
+    before any pair repeats one: a capped list of searches still has every
+    title and every place in it."""
+    if not firsts or not seconds:
+        return []
+    reach = [(firsts[i % len(firsts)], seconds[i % len(seconds)]) for i in range(max(len(firsts), len(seconds)))]
+    return list(dict.fromkeys([*reach, *((f, s) for f in firsts for s in seconds)]))
 
 
 # ── discover ─────────────────────────────────────────────────────────────────
-
-def lead_record(posting: providers.Posting) -> dict:
-    """One discovered posting as a `mw_job_leads` insert row."""
-    url = posting.share_url or (posting.apply_links[0]["url"] if posting.apply_links else None)
-    findings = []
-    if posting.salary_text:
-        findings += comp_mod.scan_base(posting.salary_text, origin="google_jobs", url=url, known_pay=True)
-    findings += comp_mod.scan_text(posting.description, origin="google_jobs", url=url)
-    comp = comp_mod.combine(findings)
-    lo, hi, currency = comp_mod.annual_range(comp)
-    return {
-        "dedupe_key": normalize.dedupe_key(posting.company, posting.title, posting.location),
-        "title": posting.title,
-        "company": posting.company,
-        "location": posting.location,
-        "state_code": normalize.state_of(posting.location),
-        "remote": posting.remote,
-        "schedule_type": posting.schedule_type,
-        "posted_text": posting.posted_text,
-        "provider_job_id": posting.provider_job_id,
-        "source_url": url,
-        "apply_links": posting.apply_links,
-        "description": posting.description,
-        "highlights": posting.highlights,
-        "comp": comp,
-        "comp_status": comp_mod.comp_status(comp),
-        "comp_annual_min": lo,
-        "comp_annual_max": hi,
-        "comp_currency": currency,
-    }
-
 
 def keep_job(company: str, remote: bool | None, criteria: dict, location: str = "") -> bool:
     """Not an employer they excluded, remote the way they asked, and in a
@@ -212,15 +210,10 @@ def keep_job(company: str, remote: bool | None, criteria: dict, location: str = 
     return places.fits(location, remote, criteria)
 
 
-def keep_posting(posting: providers.Posting, criteria: dict) -> bool:
-    return keep_job(posting.company, posting.remote, criteria, posting.location)
-
-
 async def insert_leads(search: dict, token: UUID, records: list[dict]) -> int:
     """New leads, under the chain's token; a lead already found is kept as it
-    was. A record's `source` defaults to Google Jobs; one discovery already
-    read from its own posting (`enriched`) carries its `ats` and is not read
-    again by enrich."""
+    was. One discovery already read from its own posting (`enriched`)
+    carries its `ats` and is not read again by enrich."""
     if not records:
         return 0
     async with connection_or_direct() as conn:
@@ -232,7 +225,7 @@ async def insert_leads(search: dict, token: UUID, records: list[dict]) -> int:
                         apply_links, ats, description, highlights, comp, comp_status,
                         comp_annual_min, comp_annual_max, comp_currency, enriched_at)
                    SELECT $1, $2, r.dedupe_key, r.title, r.company, r.location, r.state_code,
-                          r.remote, r.schedule_type, r.posted_text, COALESCE(r.source, 'google_jobs'),
+                          r.remote, r.schedule_type, r.posted_text, COALESCE(r.source, 'web'),
                           r.provider_job_id, r.source_url, r.apply_links, COALESCE(r.ats, '{}'::jsonb),
                           r.description, r.highlights, r.comp, r.comp_status, r.comp_annual_min,
                           r.comp_annual_max, r.comp_currency,
@@ -259,76 +252,6 @@ async def lead_count(search_id: UUID) -> int:
         return int(await conn.fetchval(
             "SELECT COUNT(*) FROM mw_job_leads WHERE search_id = $1", search_id,
         ) or 0)
-
-
-# How the Google Jobs step went (`listings`).
-LISTED = "ok"            # it ran (it may have found nothing)
-NO_LISTINGS = "none"     # no listings API is set up
-REFUSED = "refused"      # every API refused for good: a refused key, no searches left
-LISTINGS_FAILED = "failed"  # every query failed, for now
-
-
-async def listings(search: dict, deps: Deps, guard: chain.Guard) -> str:
-    """Google Jobs, when a listings API is set up: up to 3 pages per query, 3
-    queries at a time, deduped and saved as leads. Returns how it went
-    (`LISTED`, `NO_LISTINGS`, `REFUSED`, `LISTINGS_FAILED`); none of those
-    stops the search, since the web is searched next (`discovery.py`)."""
-    provider = deps.provider()
-    if provider is None:
-        return NO_LISTINGS
-    criteria = decode_jsonb(search.get("criteria"), {}) or {}
-    queries = ((decode_jsonb(search.get("plan"), {}) or {}).get("queries") or [])[:MAX_QUERIES]
-    room = max(0, MAX_LEADS - await lead_count(search["id"]))
-    budget = Budget(left=await grant(search["id"], "provider_calls",
-                                     len(queries) * PAGES_PER_QUERY, MAX_PROVIDER_CALLS))
-    state = {"errors": 0, "refused": False}
-    records: dict[str, dict] = {}
-    gate = asyncio.Semaphore(QUERY_CONCURRENCY)
-
-    async def run_query(query: dict) -> None:
-        token = None
-        for _page in range(PAGES_PER_QUERY):
-            async with gate:
-                # Checked once it's this query's turn: others may have refused meanwhile.
-                if state["refused"] or len(records) >= room or not budget.take():
-                    return
-                try:
-                    postings, token = await provider.search(
-                        query["q"], query.get("location"), page_token=token,
-                    )
-                except providers.ProviderError as exc:
-                    if exc.fatal:
-                        # Every listings API refused for good (the provider logged it):
-                        # nothing more is asked, and what was found is kept.
-                        state["refused"] = True
-                        return
-                    state["errors"] += 1
-                    logger.info("job search query failed search=%s: %s", search["id"], exc)
-                    return
-            for posting in postings:
-                if keep_posting(posting, criteria):
-                    record = lead_record(posting)
-                    if record["dedupe_key"] in records or any(
-                        normalize.same_posting(record["title"], record["company"], r["title"], r["company"])
-                        for r in records.values()
-                    ):
-                        continue
-                    records[record["dedupe_key"]] = record
-            if not token:
-                return
-
-    await guard.note("Searching Google Jobs…")
-    results = await asyncio.gather(*(run_query(q) for q in queries), return_exceptions=True)
-    await refund(search["id"], "provider_calls", budget.left)
-    for result in results:
-        if isinstance(result, BaseException):
-            raise result
-    await insert_leads(search, guard.token, list(records.values())[:room])
-    if state["refused"]:
-        return REFUSED
-    if state["errors"] and state["errors"] >= budget.used:
-        return LISTINGS_FAILED
-    return LISTED
 
 
 # ── enrich ───────────────────────────────────────────────────────────────────
@@ -403,7 +326,7 @@ async def read_job_page(url: str, deps: Deps, take: Callable[[], bool]) -> JobPa
         return None
     # A careers page that redirected to an ATS: the ATS has the posting.
     ref = ats.detect(fetched.final_url)
-    posting = await deps.ats_fetch(ref) if ref is not None and take() else None
+    posting = await deps.ats_fetch(ref, more=take) if ref is not None and take() else None
     try:
         jobs = await asyncio.to_thread(job_postings, fetched.body, fetched.final_url)
     except Exception:
@@ -462,9 +385,10 @@ async def enrich_one(lead: dict, deps: Deps, budget: Budget) -> dict | None | _N
         return True
 
     for url in [u for u in urls if ats.detect(u) is not None][:LINKS_PER_KIND]:
+        ref = ats.detect(url)
         if not take():
             return NOT_TRIED if spent == 0 else None
-        posting = await deps.ats_fetch(ats.detect(url))
+        posting = await deps.ats_fetch(ref, more=take)
         if posting is not None and _is_the_job(lead, posting.title, posting.employer):
             update["comp"] = _apply_ats(update, posting, comp)
             return update

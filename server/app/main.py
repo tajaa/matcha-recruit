@@ -63,6 +63,11 @@ class _HealthAccessLogFilter(logging.Filter):
 
 logging.getLogger("uvicorn.access").addFilter(_HealthAccessLogFilter())
 
+# API keys some providers take in the query string, out of httpx's request lines.
+from .core import log_redaction  # noqa: E402
+
+log_redaction.install()
+
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse

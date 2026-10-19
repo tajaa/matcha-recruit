@@ -1,4 +1,4 @@
-"""Plan, Google Jobs listings and enrich, against a scripted provider, ATS and web."""
+"""Plan fallback, where a job is kept, and enrich, against a scripted ATS and web."""
 import json
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -7,7 +7,7 @@ import pytest
 
 from app.core.services.safe_fetch import FetchedResponse, UnsafeURL
 from app.matcha.services.matcha_work.agent_runtime import chain
-from app.matcha.services.matcha_work.job_search import ats, phases, providers
+from app.matcha.services.matcha_work.job_search import ats, contracts, phases
 from tests.agent_runtime.helpers import FakeConn, connection
 
 from ._fixtures import SEARCH, TOKEN, search_row
@@ -16,20 +16,42 @@ GH_URL = "https://boards.greenhouse.io/acme/jobs/123"
 
 
 def test_plan_from_criteria():
-    plan = phases.plan_from_criteria("COO roles", {"titles": ["COO", "Chief Operating Officer"],
-                                                   "locations": ["across the country", "Austin, TX", "Remote"]})
-    assert plan["queries"][:3] == [
-        {"q": "COO", "location": "United States"},
-        {"q": "COO Austin, TX", "location": None},
-        {"q": "COO remote", "location": "United States"},
-    ]
-    assert len(plan["queries"]) == 6
-    fallback = phases.plan_from_criteria("  COO   jobs paying equity ", {"remote": "remote_only"})
-    assert fallback["queries"] == [{"q": "COO jobs paying equity remote", "location": "United States"}]
-    many = phases.plan_from_criteria("x", {"titles": [f"T{i}" for i in range(5)], "locations": ["A", "B"]})
-    assert len(many["queries"]) == phases.MAX_QUERIES
-    dup = phases.plan_from_criteria("x", {"titles": ["COO", "coo"]})
-    assert len(dup["queries"]) == 1
+    """Titles to search, as they typed them (or the role their ask names): no
+    Google Jobs queries since 2026-10-18."""
+    plan = phases.plan_from_criteria("COO roles", {"titles": [" COO ", "Chief  Operating Officer", "coo", ""],
+                                                   "locations": ["Austin, TX", "Remote"]})
+    assert plan == {"titles": ["COO", "Chief Operating Officer"], "source": "criteria"}
+    # Every search quotes its titles, so an ask is never searched as a sentence.
+    assert phases.plan_from_criteria("  COO   jobs paying equity ", {})["titles"] == ["COO"]
+    many = phases.plan_from_criteria("x", {"titles": [f"T{i}" for i in range(20)]})
+    assert len(many["titles"]) == contracts.MAX_TITLES
+    assert phases.titles_in("not a list") == []
+
+
+@pytest.mark.parametrize("ask, title", [
+    ("Find me a senior product designer job in Austin that pays 150k", "senior product designer"),
+    ("I'm looking for remote COO roles at startups", "COO"),
+    ("I want a job as a dental hygienist in San Diego", "dental hygienist"),
+    ("Please find me a full-time Staff Software Engineer, backend", "Staff Software Engineer"),
+    ("Head of Growth for fintech", "Head of Growth"),
+    ("VP of Operations", "VP of Operations"),
+    ("nurse jobs near me", "nurse"),
+    ("Chief Executive Officer of a large global technology holding company", "Chief Executive Officer of a large"),
+    ("something in operations, maybe chief of staff", ""),
+    ("", ""),
+])
+def test_the_role_an_ask_names(ask, title):
+    assert phases.title_from_ask(ask) == title
+
+
+def test_every_typed_title_and_direction_is_searched():
+    criteria = {"titles": ["COO", "VP Operations", "Head of Ops"]}
+    plan = {"directions": [{"title": "Chief of Staff"}, {"title": "coo"}, "junk"]}
+    assert phases.must_search(criteria, plan) == 4  # "coo" is one they typed
+    assert phases.must_search({}, {}) == 0
+    assert phases.cover(["a", "b", "c"], ["x", "y"]) == [
+        ("a", "x"), ("b", "y"), ("c", "x"), ("a", "y"), ("b", "x"), ("c", "y")]
+    assert phases.cover([], ["x"]) == [] and phases.cover(["a"], []) == []
 
 
 @pytest.fixture
@@ -45,147 +67,27 @@ def guard():
     return phases.Guard(SEARCH, TOKEN)
 
 
-def posting(title, company, **over):
-    return providers.Posting(title=title, company=company, location=over.pop("location", "Austin, TX"), **over)
-
-
-class FakeProvider:
-    def __init__(self, pages):
-        self.pages = pages  # q -> list of (postings, next_token)
-        self.calls = []
-
-    async def search(self, q, location=None, *, page_token=None):
-        self.calls.append((q, location, page_token))
-        pages = self.pages.get(q) or [([], None)]
-        index = 0 if page_token is None else int(page_token)
-        result = pages[index]
-        if isinstance(result, Exception):
-            raise result
-        return result
-
-
-def discover_search(queries, **over):
-    fields = {"status": "discovering", "provider_calls": 0,
-              "plan": json.dumps({"queries": [{"q": q, "location": None} for q in queries]}), **over}
-    return search_row(**fields)
-
-
-@pytest.mark.asyncio
-async def test_listings_dedupe_filter_and_count_calls(conn):
-    provider = FakeProvider({
-        "COO": [([posting("COO", "Acme Inc.", salary_text="250K–300K a year",
-                          apply_links=[{"url": GH_URL, "source": "Greenhouse"}]),
-                  posting("COO", "Excluded Co")], "1"),
-                ([posting("COO", "ACME", location="Austin, Texas")], None)],
-        "Chief Operating Officer": [([posting("Chief Operating Officer", "Beta", remote=True)], None)],
-    })
-    conn.on("SELECT COUNT(*) FROM mw_job_leads", 0)
-    conn.on("INSERT INTO mw_job_leads", 2)
-    conn.on("RETURNING GREATEST(LEAST($2, $3 - cur.before), 0)", 6)
-    search = discover_search(["COO", "Chief Operating Officer"],
-                             criteria=json.dumps({"exclude_companies": ["excluded co"]}))
-    assert await phases.listings(search, phases.Deps(provider=lambda: provider), guard()) == phases.LISTED
-    assert len(provider.calls) == 3
-    # Reserved up front (2 queries x 3 pages), the 3 unused given back after.
-    [granted] = conn.ran("SET provider_calls = cur.before")
-    assert granted[2] == (SEARCH, 6, phases.MAX_PROVIDER_CALLS)
-    [refund] = conn.ran("SET provider_calls = GREATEST(provider_calls - $2, 0)")
-    assert refund[2] == (SEARCH, 3)
-    [insert] = conn.ran("INSERT INTO mw_job_leads")
-    records = json.loads(insert[2][2])
-    assert sorted(r["company"] for r in records) == ["Acme Inc.", "Beta"]
-    acme = next(r for r in records if r["company"] == "Acme Inc.")
-    assert acme["comp_status"] == "posted" and acme["comp"]["base"]["evidence"]["origin"] == "google_jobs"
-    assert acme["state_code"] == "TX" and insert[2][3] == TOKEN
-    # A Google Jobs lead: the default source, read later by enrich.
-    assert "source" not in acme and "enriched" not in acme
-    assert "COALESCE(r.source, 'google_jobs')" in insert[1] and "CASE WHEN r.enriched THEN NOW() END" in insert[1]
-
-
-@pytest.mark.asyncio
-async def test_listings_drop_the_same_posting_under_another_employer_name(conn):
-    title = "Senior Vice President and Chief Operating Officer"
-    provider = FakeProvider({"COO": [([posting(title, "Beth Israel Lahey Health", location="Burlington, MA"),
-                                       posting(title, "Lahey Clinic Hospital, Inc.", location="United States"),
-                                       posting(title, "Northwind Health", location="Austin, TX")], None)]})
-    conn.on("SELECT COUNT(*) FROM mw_job_leads", 0)
-    conn.on("RETURNING GREATEST(LEAST($2, $3 - cur.before), 0)", 3)
-    await phases.listings(discover_search(["COO"]), phases.Deps(provider=lambda: provider), guard())
-    records = json.loads(conn.ran("INSERT INTO mw_job_leads")[0][2][2])
-    assert sorted(r["company"] for r in records) == ["Beth Israel Lahey Health", "Northwind Health"]
-
-
-@pytest.mark.asyncio
-async def test_listings_respect_remote_preference_and_budget(conn):
-    provider = FakeProvider({"COO": [([posting("COO", "Acme"), posting("COO", "Remote Co", remote=True)], "1"),
-                                     ([posting("COO", "Later")], None)]})
-    conn.on("SELECT COUNT(*) FROM mw_job_leads", 1)
-    conn.on("RETURNING GREATEST(LEAST($2, $3 - cur.before), 0)", 1)  # one call left in the search's lifetime budget
-    search = discover_search(["COO"], criteria=json.dumps({"remote": "remote_only"}))
-    await phases.listings(search, phases.Deps(provider=lambda: provider), guard())
-    assert len(provider.calls) == 1
-    records = json.loads(conn.ran("INSERT INTO mw_job_leads")[0][2][2])
-    assert [r["company"] for r in records] == ["Remote Co"]
-    assert not phases.keep_posting(posting("COO", "Remote Co", remote=True), {"remote": "onsite_only"})
-
-
-def test_a_job_is_kept_only_in_the_places_named():
+def test_a_job_is_kept_only_in_the_places_named_and_the_way_they_asked():
     criteria = {"locations": ["Austin, TX"], "remote": "any"}
-    assert phases.keep_posting(posting("COO", "Acme", location="Round Rock, TX"), criteria)  # 17 miles
-    assert not phases.keep_posting(posting("COO", "Acme", location="Dallas, TX"), criteria)
-    assert phases.keep_posting(posting("COO", "Acme", location="Remote", remote=True), criteria)
-    assert not phases.keep_posting(posting("COO", "Acme", location="Remote", remote=True),
-                                   {**criteria, "remote": "onsite_only"})
+    assert phases.keep_job("Acme", None, criteria, "Round Rock, TX")  # 17 miles
+    assert not phases.keep_job("Acme", None, criteria, "Dallas, TX")
+    assert phases.keep_job("Acme", True, criteria, "Remote")
+    assert not phases.keep_job("Acme", True, {**criteria, "remote": "onsite_only"}, "Remote")
+    assert not phases.keep_job("Acme", False, {"remote": "remote_only"}, "Austin, TX")
+    assert not phases.keep_job("Excluded Co", True, {"exclude_companies": ["excluded co"]}, "Remote")
     # No places, or only nationwide ones: anywhere.
     assert phases.keep_job("Acme", False, {"locations": []}, "Dallas, TX")
     assert phases.keep_job("Acme", False, {"locations": ["United States"]}, "Dallas, TX")
 
 
 @pytest.mark.asyncio
-async def test_listings_never_stop_the_search(conn):
-    """No API, one that refused for good, or every query failing: each is
-    reported, and the web is searched next (`discovery.py`)."""
-    conn.on("RETURNING GREATEST(LEAST($2, $3 - cur.before), 0)", 3)
-    conn.on("SELECT COUNT(*) FROM mw_job_leads", 0)
-
-    async def run(provider):
-        return await phases.listings(discover_search(["COO"]), phases.Deps(provider=lambda: provider), guard())
-
-    assert await run(None) == phases.NO_LISTINGS
-    assert await run(FakeProvider({"COO": [providers.ProviderError("bad key", fatal=True)]})) == phases.REFUSED
-    assert await run(FakeProvider({"COO": [providers.ProviderError("503")]})) == phases.LISTINGS_FAILED
-    assert await run(FakeProvider({})) == phases.LISTED
-    # What other queries found before a refusal is kept.
-    mixed = FakeProvider({"COO": [([posting("COO", "Acme")], None)],
-                          "CEO": [providers.ProviderError("no searches left", fatal=True)]})
-    conn.on("INSERT INTO mw_job_leads", 1)
-    search = discover_search(["COO", "CEO"])
-    assert await phases.listings(search, phases.Deps(provider=lambda: mixed), guard()) == phases.REFUSED
-    assert [r["company"] for r in json.loads(conn.ran("INSERT INTO mw_job_leads")[-1][2][2])] == ["Acme"]
-
-    class Broken:
-        async def search(self, *_args, **_kwargs):
-            raise KeyError("a bug, not a refusal")
-
-    with pytest.raises(KeyError):
-        await run(Broken())
-
-
-@pytest.mark.asyncio
-async def test_listings_keep_what_they_found_before_the_apis_ran_out(conn, monkeypatch):
-    monkeypatch.setattr(phases, "QUERY_CONCURRENCY", 1)
-    spent = providers.ProviderError("no job listings API left", fatal=True)
-    provider = FakeProvider({"COO": [([posting("COO", "Acme"), posting("COO", "Beta")], None)], "CFO": [spent],
-                             "CEO": [([posting("CEO", "Never asked")], None)]})
-    conn.on("SELECT COUNT(*) FROM mw_job_leads", 0)
-    conn.on("RETURNING GREATEST(LEAST($2, $3 - cur.before), 0)", 9)
-    out = await phases.listings(discover_search(["COO", "CFO", "CEO"]), phases.Deps(provider=lambda: provider),
-                                guard())
-    assert out == phases.REFUSED
-    assert [c[0] for c in provider.calls] == ["COO", "CFO"]  # nothing asked after the refusal
-    records = json.loads(conn.ran("INSERT INTO mw_job_leads")[0][2][2])
-    assert sorted(r["company"] for r in records) == ["Acme", "Beta"]
-    assert conn.ran("SET provider_calls = GREATEST(provider_calls - $2, 0)")[0][2] == (SEARCH, 7)
+async def test_new_leads_are_written_under_the_token(conn):
+    conn.on("INSERT INTO mw_job_leads", 2)
+    search = search_row(status="discovering")
+    assert await phases.insert_leads(search, TOKEN, []) == 0
+    assert await phases.insert_leads(search, TOKEN, [{"dedupe_key": "a"}, {"dedupe_key": "b"}]) == 2
+    [write] = conn.ran("INSERT INTO mw_job_leads")
+    assert write[2][3] == TOKEN and "dispatch_token = $4" in write[1]
 
 
 def ats_posting(**over):
@@ -229,6 +131,33 @@ async def test_enrich_one_prefers_the_ats():
     assert budget.used == 1
 
 
+def workable_fetch(posting):
+    """`ats.fetch` for a Workable posting: pays for its form with `more()`."""
+    async def fetch(ref, *, more=None):
+        fetch.formless = more is not None and not more()
+        return posting
+
+    fetch.formless = False
+    return fetch
+
+
+@pytest.mark.asyncio
+async def test_enrich_one_pays_for_both_workable_calls():
+    url = "https://apply.workable.com/delta/j/9A1F916774/"
+    posting = ats_posting(ref=ats.AtsRef("workable", "delta", "9A1F916774"), url=url)
+    deps = phases.Deps(ats_fetch=workable_fetch(posting), page_fetch=AsyncMock())
+    budget = phases.Budget(left=5)
+    update = await phases.enrich_one(lead([url]), deps, budget)
+    assert update["source"] == "workable" and budget.used == 2
+    # One fetch left: read, without its form (nothing paid for and lost).
+    short = phases.Deps(ats_fetch=workable_fetch(posting), page_fetch=AsyncMock())
+    budget = phases.Budget(left=1)
+    assert (await phases.enrich_one(lead([url]), short, budget))["source"] == "workable"
+    assert budget.used == 1 and short.ats_fetch.formless
+    # None left: not tried, so the lead is read in a later batch.
+    assert await phases.enrich_one(lead([url]), short, phases.Budget(left=0)) is phases.NOT_TRIED
+
+
 @pytest.mark.asyncio
 async def test_enrich_one_reads_the_company_page():
     deps = phases.Deps(ats_fetch=AsyncMock(return_value=None), page_fetch=AsyncMock(return_value=page(JSONLD_PAGE)))
@@ -246,6 +175,27 @@ async def test_enrich_one_follows_a_careers_redirect_into_the_ats():
                        page_fetch=AsyncMock(return_value=page("<html></html>", final_url=GH_URL)))
     update = await phases.enrich_one(lead(["https://delta.test/careers/coo"]), deps, phases.Budget(left=5))
     assert update["source"] == "greenhouse"
+
+
+@pytest.mark.asyncio
+async def test_a_careers_redirect_into_workable_pays_for_both_calls():
+    url = "https://apply.workable.com/delta/j/9A1F916774/"
+    posting = ats_posting(ref=ats.AtsRef("workable", "delta", "9A1F916774"), url=url)
+    deps = phases.Deps(ats_fetch=workable_fetch(posting),
+                       page_fetch=AsyncMock(return_value=page("<html></html>", final_url=url)))
+    budget = phases.Budget(left=3)
+    update = await phases.enrich_one(lead(["https://delta.test/careers/coo"]), deps, budget)
+    assert update["source"] == "workable" and budget.used == 3
+    # The page paid for, one call left: Workable read without its form.
+    short = phases.Deps(ats_fetch=workable_fetch(posting),
+                        page_fetch=AsyncMock(return_value=page("<html></html>", final_url=url)))
+    read = await phases.read_job_page("https://delta.test/careers/coo", short, iter([True, False]).__next__)
+    assert read.posting is posting and short.ats_fetch.formless
+    # None left: not read through it.
+    none = phases.Deps(ats_fetch=AsyncMock(return_value=posting),
+                       page_fetch=AsyncMock(return_value=page("<html></html>", final_url=url)))
+    assert (await phases.read_job_page("https://delta.test/careers/coo", none, iter([False]).__next__)).posting is None
+    none.ats_fetch.assert_not_awaited()
 
 
 @pytest.mark.asyncio

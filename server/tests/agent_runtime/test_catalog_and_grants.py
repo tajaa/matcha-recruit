@@ -104,6 +104,28 @@ def test_a_grant_counts_only_at_the_current_consent_version():
     assert not grants.is_active(None, "email")
 
 
+def test_a_jobs_1_grant_still_reads_searches_but_cant_start_one():
+    """jobs-2 named Brave Search, which a new search sends its terms to. A
+    jobs-1 grant still covers the chat ability, which sends nothing there."""
+    old = {"enabled": True, "consent_version": "jobs-1"}
+    assert consent.current_version("jobs") == "jobs-2"
+    assert grants.is_active(old, "jobs") and not grants.is_current(old, "jobs")
+    now = {"enabled": True, "consent_version": "jobs-2"}
+    assert grants.is_active(now, "jobs") and grants.is_current(now, "jobs")
+    assert not grants.is_current({**now, "enabled": False}, "jobs") and not grants.is_current(None, "jobs")
+    assert not grants.is_active({"enabled": True, "consent_version": "jobs-0"}, "jobs")
+    assert not consent.accepts("jobs", None) and consent.accepts("no such ability", None)
+    # Only the abilities that say so: a stale email grant is still off.
+    assert not grants.is_active({"enabled": True, "consent_version": "email-openai-0"}, "email")
+
+
+@pytest.mark.asyncio
+async def test_a_new_agreement_is_to_the_current_text():
+    with pytest.raises(HTTPException) as exc:
+        await grants.enable(uuid4(), uuid4(), "jobs", consent_version="jobs-1")
+    assert exc.value.status_code == 409 and exc.value.detail["disclosure"]["version"] == "jobs-2"
+
+
 @pytest.mark.asyncio
 async def test_a_changed_disclosure_disables_until_reconsent():
     conn = FakeConn([("FROM mw_agent_ability_grants", [

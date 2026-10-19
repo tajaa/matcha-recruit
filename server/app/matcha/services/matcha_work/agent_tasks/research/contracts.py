@@ -24,13 +24,12 @@ Checks that matter:
 """
 from __future__ import annotations
 
-import json
 import re
 from datetime import date
 from typing import Any
 
 from app.matcha.services.matcha_work.agent_card import schema
-from app.matcha.services.matcha_work.agent_runtime import registry
+from app.matcha.services.matcha_work.agent_runtime import finish
 
 from . import fields as F
 from .kinds import SearchKind
@@ -66,48 +65,6 @@ SMALL_NUMBER = 10
 
 def _text(value: Any, limit: int) -> str:
     return " ".join(_CONTROL.sub(" ", str(value or "")).split())[:limit]
-
-
-def _finish(label: str, description: str, schema_: dict) -> registry.AgentTool:
-    return registry.AgentTool(
-        name="finish", effect="finish", description=description,
-        # The answer's fields are the tool's own: wrapped in one `result`
-        # object, Claude Haiku now and then sent that object as (broken) JSON text.
-        parameters=schema_,
-        step_kind="finish", describe=lambda _args: label,
-    )
-
-
-def _result(args: dict) -> dict:
-    """The answer: the finish call's own fields, or (as before they were
-    flattened) its `result` object."""
-    if not isinstance(args, dict):
-        raise ValueError("`result` must be an object")
-    result = args.get("result", args)
-    if isinstance(result, str):
-        # A model that sends the object as JSON text (Claude Haiku does, now
-        # and then, on a long summary): the same object when the text parses.
-        try:
-            result = json.loads(result)
-        except ValueError:
-            raise ValueError("`result` was text, and not valid JSON: send it as an object, "
-                             "its fields directly inside, not as a string") from None
-    if not isinstance(result, dict):
-        raise ValueError("`result` must be an object")
-    return {key: _unquoted(value) for key, value in result.items()}
-
-
-def _unquoted(value: Any) -> Any:
-    """A list or object a model sent as JSON text ("[{...}]"), as itself; any
-    other text as it is (no contract field's text starts that way)."""
-    if isinstance(value, str) and value.lstrip()[:1] in ("[", "{"):
-        try:
-            parsed = json.loads(value)
-        except ValueError:
-            return value
-        if isinstance(parsed, (list, dict)):
-            return parsed
-    return value
 
 
 # ── constraints and preferences ──────────────────────────────────────────────
@@ -299,12 +256,12 @@ PLAN_SCHEMA = {
     "required": ["title", "item_kind", "source", "queries", "fields", "constraints", "preferences",
                  "fit_weight", "prefer_sources", "summary"],
 }
-PLAN_FINISH = _finish("Planned the task", "Finish with the plan.", PLAN_SCHEMA)
+PLAN_FINISH = finish.tool("Planned the task", "Finish with the plan.", PLAN_SCHEMA)
 
 
 def normalize_plan(args: dict, *, brief: dict, today: date,
                    kind: SearchKind | None = None) -> tuple[dict, list[str]]:
-    result = _result(args)
+    result = finish.answer(args)
     warnings = []
     queries = []
     for q in result.get("queries") or []:
@@ -379,7 +336,7 @@ DISCOVER_SCHEMA = {
     },
     "required": ["candidates", "notes"],
 }
-DISCOVER_FINISH = _finish("Listed what it found", "Finish with the candidates you found.", DISCOVER_SCHEMA)
+DISCOVER_FINISH = finish.tool("Listed what it found", "Finish with the candidates you found.", DISCOVER_SCHEMA)
 
 
 def _host(url: str | None) -> str:
@@ -393,7 +350,7 @@ def normalize_candidates(
 ) -> tuple[list[dict], list[str]]:
     """Candidates as finding records. `pages`: url -> the text this run loaded
     from it; `images`: image url -> the page it was on."""
-    result = _result(args)
+    result = finish.answer(args)
     allowed = {schema.normalize_url(u): u for u in citable if schema.normalize_url(u)}
     page_text = {schema.normalize_url(u): text for u, text in pages.items() if schema.normalize_url(u)}
     kind = plan.get("item_kind") if plan.get("item_kind") in ITEM_KINDS else "other"
@@ -467,13 +424,13 @@ SCREEN_SCHEMA = {
     },
     "required": ["verdicts"],
 }
-SCREEN_FINISH = _finish("Screened the findings", "Finish with one verdict per finding shown.", SCREEN_SCHEMA)
+SCREEN_FINISH = finish.tool("Screened the findings", "Finish with one verdict per finding shown.", SCREEN_SCHEMA)
 SCREEN_MISSING_TOLERANCE = 0.2
 
 
 def normalize_screen(args: dict, batch: dict[str, str]) -> tuple[dict[str, dict], list[str]]:
     """`batch`: short id -> item id. Returns item id -> verdict."""
-    result = _result(args)
+    result = finish.answer(args)
     verdicts: dict[str, dict] = {}
     warnings = []
     for item in result.get("verdicts") or []:
@@ -516,7 +473,7 @@ SUMMARY_SCHEMA = {
     },
     "required": ["headline", "summary", "sections", "top"],
 }
-SUMMARY_FINISH = _finish("Summarized", "Finish with the summary.", SUMMARY_SCHEMA)
+SUMMARY_FINISH = finish.tool("Summarized", "Finish with the summary.", SUMMARY_SCHEMA)
 
 
 def unsupported_numbers(text: str, allowed: str) -> list[float]:
@@ -545,7 +502,7 @@ def normalize_summary(args: dict, *, batch: dict[str, str], item_texts: dict[str
     and title say; `context`: what the person asked (their limits, the
     counts). Every number must come from one of those. `titles`: short id ->
     the finding's name, for any short id the text uses."""
-    result = _result(args)
+    result = finish.answer(args)
     titles = titles or {}
     everything = " ".join([*item_texts.values(), context])
     warnings: list[str] = []
@@ -607,13 +564,13 @@ REFINE_SCHEMA = {
     },
     "required": ["constraints", "preferences", "fields_add", "queries", "search_again", "note"],
 }
-REFINE_FINISH = _finish("Read the change", "Finish with the changed plan.", REFINE_SCHEMA)
+REFINE_FINISH = finish.tool("Read the change", "Finish with the changed plan.", REFINE_SCHEMA)
 
 
 def normalize_refine(args: dict, *, plan: dict, brief: dict, today: date,
                      kind: SearchKind | None = None) -> tuple[dict, list[str]]:
     """The plan after the person's follow-up, plus `search_again` and `note`."""
-    result = _result(args)
+    result = finish.answer(args)
     constraints = [c for c in (clean_constraint(r, today=today) for r in result.get("constraints") or []) if c]
     # The person may change their own limit ("up to $4,000 now"), but one the
     # model simply left out of its new list stays.

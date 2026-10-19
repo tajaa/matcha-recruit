@@ -36,10 +36,19 @@ def clean_settings(ability_key: str, settings: dict | None) -> dict:
 
 
 def is_active(row: dict | None, ability_key: str) -> bool:
-    """A grant counts only while enabled and agreed to at the current version."""
+    """A grant counts only while enabled and agreed to at the current version
+    (or one that still covers the ability in chat: `consent.accepts`)."""
     if not row or not row.get("enabled"):
         return False
-    return row.get("consent_version") == consent.current_version(ability_key)
+    return consent.accepts(ability_key, row.get("consent_version"))
+
+
+def is_current(row: dict | None, ability_key: str) -> bool:
+    """Enabled and agreed to at the current version: what starting new work
+    (a job search) needs."""
+    if not row or not row.get("enabled"):
+        return False
+    return consent.accepts(ability_key, row.get("consent_version"), starting=True)
 
 
 async def load_grants(conn, user_id: UUID) -> dict[str, dict]:

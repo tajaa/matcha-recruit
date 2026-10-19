@@ -130,7 +130,7 @@ async def test_starting_a_job_search_task(monkeypatch):
     monkeypatch.setattr(search_service, "resume_on_file", AsyncMock(return_value={"filename": "cv.pdf"}))
     user = SimpleNamespace(id=USER, role="individual")
     body = AgentTaskCreate(request_id=uuid4(), playbook="job_search", directive="COO roles, pay matters most",
-                           title="COO roles", consent_version="jobs-1")
+                           title="COO roles", consent_version="jobs-2")
     brief = job_tasks.validate_brief({"titles": ["COO"], "remote": "Any", "base_floor": 200000,
                                       "use_resume": True})
     origin = (uuid4(), uuid4())
@@ -139,7 +139,7 @@ async def test_starting_a_job_search_task(monkeypatch):
     assert got_user is user and got_company == COMPANY and kwargs == {"origin": origin}
     assert create.request_id == body.request_id and create.ask == body.directive and create.title == "COO roles"
     assert create.criteria.titles == ["COO"] and create.criteria.base_floor == 200000
-    assert create.use_resume is True and create.consent_version == "jobs-1"
+    assert create.use_resume is True and create.consent_version == "jobs-2"
     assert service.task_for_search.await_args.args == (USER, SEARCH)
 
 

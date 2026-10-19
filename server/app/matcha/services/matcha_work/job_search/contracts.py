@@ -4,7 +4,7 @@ The model never writes to the database. Each phase ends with one `finish`
 call; its arguments go through a `normalize_*` here, and the orchestrator
 persists only what survives. A ValueError gets the model one repair.
 
-  plan       queries and what to rank on, from the ask (and résumé)
+  plan       the titles to search and what to rank on, from the ask (and résumé)
   discover   links to current postings found on the web (code reads each one)
   screen     relevant or not, and a 0-5 fit, for a batch of jobs by short id
   approach   per job: how to approach, drafts, answers to the real questions
@@ -23,14 +23,16 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from app.matcha.services.matcha_work.agent_runtime import registry
+from app.matcha.services.matcha_work.agent_runtime import finish
 
 from . import ats, normalize
 from .comp import verify_quote
 
-MAX_QUERIES = 8
+# Titles a plan searches for: what they typed, then kept directions, then the
+# plan's own (`phases.search_titles` says how many the searches take).
+MAX_TITLES = 10
 # Roles beyond the person's own title that their résumé supports, suggested
-# by the plan: at most this many, each searched with one query of its own.
+# by the plan: at most this many, each among the first titles searched.
 MAX_DIRECTIONS = 3
 APPROACH_CHANNELS = ("referral", "hiring_manager", "recruiter", "apply_portal", "search_firm")
 _EMAIL = re.compile(r"^[^@\s<>,;]+@[^@\s<>,;]+\.[^@\s<>,;]+$")
@@ -39,6 +41,17 @@ _CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
 def _text(value: Any, limit: int) -> str:
     return _CONTROL.sub("", str(value or "")).strip()[:limit]
+
+
+def titles_in(titles: Any) -> list[str]:
+    """Titles as a plan keeps them: trimmed, two letters or more, once each
+    (case aside), at most `MAX_TITLES`."""
+    out: dict[str, str] = {}
+    for title in titles if isinstance(titles, list) else []:
+        text = " ".join(_text(title, 400).split())[:80]
+        if len(text) >= 2:
+            out.setdefault(text.lower(), text)
+    return list(out.values())[:MAX_TITLES]
 
 
 def _texts(values: Any, *, items: int, limit: int) -> list[str]:
@@ -52,38 +65,16 @@ def _texts(values: Any, *, items: int, limit: int) -> list[str]:
     return out
 
 
-def _finish(name_hint: str, description: str, schema: dict) -> registry.AgentTool:
-    return registry.AgentTool(
-        name="finish",
-        effect="finish",
-        description=description,
-        parameters={"type": "object", "properties": {"result": schema}, "required": ["result"]},
-        step_kind="finish",
-        describe=lambda _args: name_hint,
-    )
-
-
-def _result(args: dict) -> dict:
-    result = args.get("result") if isinstance(args, dict) else None
-    if not isinstance(result, dict):
-        raise ValueError("`result` must be an object")
-    return result
-
-
 # ── plan ─────────────────────────────────────────────────────────────────────
 
 PLAN_SCHEMA = {
     "type": "object",
     "properties": {
-        "queries": {
-            "type": "array", "maxItems": MAX_QUERIES,
-            "items": {"type": "object", "properties": {
-                "q": {"type": "string", "description": "Google Jobs query text, e.g. 'Chief Operating Officer Austin TX'"},
-                "location": {"type": ["string", "null"], "enum": ["United States", None],
-                             "description": "'United States' for a nationwide query, else null (put a city in q)"},
-            }, "required": ["q", "location"]},
+        "titles": {
+            "type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": MAX_TITLES,
+            "description": "Job titles to search for, as postings write them, most wanted first: "
+                           "theirs, then real synonyms at that level",
         },
-        "titles": {"type": "array", "items": {"type": "string"}, "maxItems": 10},
         "deal_breakers": {"type": "array", "items": {"type": "string"}, "maxItems": 10},
         "profile_summary": {"type": "string", "description": "Two or three sentences on who is looking, from the ask and résumé"},
         "directions": {
@@ -101,30 +92,19 @@ PLAN_SCHEMA = {
             "properties": {k: {"type": "number"} for k in ("base", "bonus", "equity", "fit")},
         },
     },
-    "required": ["queries", "titles", "deal_breakers", "profile_summary", "weights"],
+    "required": ["titles", "deal_breakers", "profile_summary", "weights"],
 }
-PLAN_FINISH = _finish("Planned the search", "Finish with the search plan.", PLAN_SCHEMA)
+PLAN_FINISH = finish.tool("Planned the search", "Finish with the search plan.", PLAN_SCHEMA)
 
 
 def normalize_plan(args: dict, _state=None) -> tuple[dict, list[str]]:
-    result = _result(args)
-    queries, seen = [], set()
-    for item in result.get("queries") or []:
-        if not isinstance(item, dict):
-            continue
-        q = " ".join(_text(item.get("q"), 160).split())
-        location = item.get("location")
-        location = "United States" if location == "United States" else None
-        key = (q.lower(), location)
-        if len(q) >= 2 and key not in seen:
-            seen.add(key)
-            queries.append({"q": q, "location": location})
-    if not queries:
-        raise ValueError("give at least one query")
+    result = finish.answer(args)
+    titles = titles_in(result.get("titles"))
+    if not titles:
+        raise ValueError("give at least one job title to search for")
     weights = result.get("weights") if isinstance(result.get("weights"), dict) else None
     plan = {
-        "queries": queries[:MAX_QUERIES],
-        "titles": _texts(result.get("titles"), items=10, limit=80),
+        "titles": titles,
         "deal_breakers": _texts(result.get("deal_breakers"), items=10, limit=160),
         "profile_summary": _text(result.get("profile_summary"), 800),
         "source": "model",
@@ -203,14 +183,14 @@ DISCOVER_SCHEMA = {
     },
     "required": ["postings"],
 }
-DISCOVER_FINISH = _finish("Found postings", "Finish with the postings you found.", DISCOVER_SCHEMA)
+DISCOVER_FINISH = finish.tool("Found postings", "Finish with the postings you found.", DISCOVER_SCHEMA)
 
 
 def normalize_postings(args: dict, *, citable: set[str]) -> tuple[dict, list[str]]:
     """The postings whose links this run's searches or page loads returned,
     once each. None at all is a fine answer (nothing current fits); some, and
     not one of them traceable, gets the model one repair."""
-    result = _result(args)
+    result = finish.answer(args)
     postings: list[dict] = []
     warnings: list[str] = []
     seen: set[str] = set()
@@ -254,13 +234,13 @@ SCREEN_SCHEMA = {
     },
     "required": ["verdicts"],
 }
-SCREEN_FINISH = _finish("Screened the jobs", "Finish with one verdict per job shown.", SCREEN_SCHEMA)
+SCREEN_FINISH = finish.tool("Screened the jobs", "Finish with one verdict per job shown.", SCREEN_SCHEMA)
 SCREEN_MISSING_TOLERANCE = 0.2
 
 
 def normalize_screen(args: dict, batch: dict[str, str]) -> tuple[dict[str, dict], list[str]]:
     """`batch`: short id -> lead id. Returns lead id -> verdict."""
-    result = _result(args)
+    result = finish.answer(args)
     verdicts: dict[str, dict] = {}
     warnings = []
     for item in result.get("verdicts") or []:
@@ -326,7 +306,7 @@ APPROACH_SCHEMA = {
     },
     "required": ["approaches"],
 }
-APPROACH_FINISH = _finish("Drafted approaches", "Finish with one approach per job shown.", APPROACH_SCHEMA)
+APPROACH_FINISH = finish.tool("Drafted approaches", "Finish with one approach per job shown.", APPROACH_SCHEMA)
 MAX_LIKELY_ANSWERS = 4
 
 
@@ -354,7 +334,7 @@ def normalize_approaches(
 ) -> tuple[dict[str, dict], list[str]]:
     """`batch`: short id -> lead id; `questions`: lead id -> its ATS questions;
     `citable`: links this run may cite; `pages`: url -> text fetched this run."""
-    result = _result(args)
+    result = finish.answer(args)
     out: dict[str, dict] = {}
     warnings: list[str] = []
     user_lower = (user_text or "").lower()

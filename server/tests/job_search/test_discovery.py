@@ -65,42 +65,40 @@ def claim(url, title="Chief People Officer", company="Acme", location="San Diego
 # ── the steps ────────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_google_jobs_first_then_the_web(conn, monkeypatch):
-    listings = AsyncMock(return_value=phases.REFUSED)
-    monkeypatch.setattr(phases, "listings", listings)
-    conn.on("SELECT COUNT(*) FROM mw_job_leads", 0)
-    out = await discovery.discover(search_row(status="discovering"), phases.Deps(), guard())
-    assert out.status == "discovering" and out.cursor == {"step": "boards", "listings": "refused"}
-    assert out.progress == {"note": "Searching employers' job boards…", "found": 0}
-
-    listings.return_value = phases.LISTED
-    conn.on("SELECT COUNT(*) FROM mw_job_leads", 12)
-    out = await discovery.discover(search_row(status="discovering"), phases.Deps(), guard())
-    assert out.progress["note"] == "Found 12 on Google Jobs. Searching employers' job boards…"
+async def test_a_search_starts_on_the_boards_with_no_google_jobs(conn, monkeypatch):
+    """Brave and Claude only since 2026-10-18: a new search, or one whose cursor
+    still says `listings` (in flight at the deploy), starts on the boards."""
+    find = AsyncMock(return_value=([], True))
+    monkeypatch.setattr(discovery.boards, "find", find)
+    assert not hasattr(phases, "listings") and not hasattr(phases.Deps(), "provider")
+    for cursor in ("{}", json.dumps({"step": "listings"})):
+        out = await discovery.discover(search_row(status="discovering", phase_cursor=cursor), phases.Deps(), guard())
+        assert out.status == "discovering" and out.cursor["step"] == "web" and out.cursor["boards_ok"] is True
+    assert find.await_count == 2
 
 
 @pytest.mark.asyncio
 async def test_the_boards_are_searched_by_code_then_read(conn, monkeypatch):
     find = AsyncMock(return_value=([claim(GH, title="", company="", location="")], True))
     monkeypatch.setattr(discovery.boards, "find", find)
-    out = await discovery.discover(places_search("boards", listings="refused"), phases.Deps(), guard())
+    out = await discovery.discover(places_search("boards"), phases.Deps(), guard())
     assert out.status == "discovering" and out.cursor["step"] == "read" and out.cursor["boards_ok"] is True
-    assert [p["url"] for p in out.cursor["postings"]] == [GH] and out.cursor["listings"] == "refused"
+    assert [p["url"] for p in out.cursor["postings"]] == [GH]
     assert out.progress["note"] == "Reading 1 postings on employers' job boards…"
     titles, criteria = find.await_args.args[1:3]
     assert titles[0] == "Chief People Officer" and criteria["locations"][0] == "Orange County, CA"
 
     # Nothing on the boards: on to the web.
     find.return_value = ([], False)
-    out = await discovery.discover(places_search("boards", listings="refused"), phases.Deps(), guard())
+    out = await discovery.discover(places_search("boards"), phases.Deps(), guard())
     assert out.cursor["step"] == "web" and out.cursor["boards_ok"] is False
 
     # Read: fewer than the target found, so the web next; enough, and it is skipped.
     conn.on("SELECT dedupe_key, title, company, source_url, apply_links FROM mw_job_leads", [])
-    out = await discovery.discover(at_step("read", listings="refused", boards_ok=True, postings=[]), phases.Deps(), guard())
+    out = await discovery.discover(at_step("read", boards_ok=True, postings=[]), phases.Deps(), guard())
     assert out.cursor["step"] == "web"
     conn.on("SELECT COUNT(*) FROM mw_job_leads", 30)
-    out = await discovery.discover(at_step("read", listings="refused", boards_ok=True, web_added=30, postings=[]),
+    out = await discovery.discover(at_step("read", boards_ok=True, web_added=30, postings=[]),
                                    phases.Deps(), guard())
     assert out.status == "screening"
 
@@ -110,9 +108,9 @@ async def test_boards_that_answered_count_as_searched(conn, monkeypatch):
     monkeypatch.setattr(discovery, "run_model_phase", AsyncMock(side_effect=runner.AgentRunError("down")))
     conn.on("SELECT COUNT(*) FROM mw_job_leads", 0)
     with pytest.raises(PhaseFailed, match="No postings matched"):
-        await discovery.discover(at_step("web", listings="refused", boards_ok=True), phases.Deps(), guard())
+        await discovery.discover(at_step("web", boards_ok=True), phases.Deps(), guard())
     with pytest.raises(PhaseFailed, match="aren't available right now"):
-        await discovery.discover(at_step("web", listings="refused", boards_ok=False), phases.Deps(), guard())
+        await discovery.discover(at_step("web", boards_ok=False), phases.Deps(), guard())
 
 
 @pytest.mark.asyncio
@@ -125,13 +123,13 @@ async def test_a_web_run_hands_back_only_links_it_saw(conn):
         ]}}), output=[searched('"Chief People Officer" site:jobs.lever.co', [GH, LEVER, PAGE])]),
     ])
     deps = phases.Deps(client=lambda _model: client)
-    search = at_step("web", listings="refused")
+    search = at_step("web")
     search["use_resume"] = True
     out = await discovery.discover(search, deps, guard())
 
     assert out.status == "discovering" and out.cursor["step"] == "read"
     assert [p["url"] for p in out.cursor["postings"]] == [GH, LEVER, PAGE]  # not the invented one, once each
-    assert out.cursor["web_runs"] == 1 and out.cursor["web_ok"] is True and out.cursor["listings"] == "refused"
+    assert out.cursor["web_runs"] == 1 and out.cursor["web_ok"] is True
     assert out.progress["note"] == "Reading 3 postings…"
     # The ask, settings, titles and searches go out, and what was already found; never the résumé.
     sent = json.dumps(client.calls[0]["input"], ensure_ascii=False)
@@ -153,19 +151,19 @@ async def test_when_the_web_run_fails_or_finds_nothing(conn, monkeypatch):
     conn.on("SELECT COUNT(*) FROM mw_job_leads", 0)
     # No source could be searched: unavailable, and free.
     with pytest.raises(PhaseFailed, match="aren't available right now") as failed:
-        await discovery.discover(at_step("web", listings="refused"), phases.Deps(), guard())
+        await discovery.discover(at_step("web"), phases.Deps(), guard())
     assert "allowance" in str(failed.value)
-    # Google Jobs ran and found nothing: no match, not unavailable.
-    with pytest.raises(PhaseFailed, match="No postings matched"):
+    # A cursor from before 2026-10-18 saying Google Jobs ran no longer counts as searched.
+    with pytest.raises(PhaseFailed, match="aren't available right now"):
         await discovery.discover(at_step("web", listings="ok"), phases.Deps(), guard())
     # The web run worked and found nothing.
     model.side_effect = None
     model.return_value = runner.RunOutcome(kind="result", result={"postings": []})
     with pytest.raises(PhaseFailed, match="No postings matched"):
-        await discovery.discover(at_step("web", listings="none"), phases.Deps(), guard())
-    # Some jobs from Google Jobs and nothing new on the web: on to screening.
+        await discovery.discover(at_step("web"), phases.Deps(), guard())
+    # Some jobs from the boards and nothing new on the web: on to screening.
     conn.on("SELECT COUNT(*) FROM mw_job_leads", 9)
-    out = await discovery.discover(at_step("web", listings="ok"), phases.Deps(), guard())
+    out = await discovery.discover(at_step("web", boards_ok=True), phases.Deps(), guard())
     assert out.status == "screening" and out.cursor == {} and out.progress["found"] == 9
 
 
@@ -174,11 +172,11 @@ async def test_the_web_is_searched_at_most_twice_and_never_past_the_cap(conn, mo
     model = AsyncMock()
     monkeypatch.setattr(discovery, "run_model_phase", model)
     conn.on("SELECT COUNT(*) FROM mw_job_leads", 31)
-    out = await discovery.discover(at_step("web", listings="none", web_runs=2, web_ok=True), phases.Deps(), guard())
+    out = await discovery.discover(at_step("web", web_runs=2, web_ok=True), phases.Deps(), guard())
     assert out.status == "screening"
     conn.on("SELECT title, company FROM mw_job_leads",
             [{"title": f"T{i}", "company": "C"} for i in range(phases.MAX_LEADS)])
-    out = await discovery.discover(at_step("web", listings="ok"), phases.Deps(), guard())
+    out = await discovery.discover(at_step("web"), phases.Deps(), guard())
     assert out.status == "screening"
     model.assert_not_awaited()
 
@@ -196,22 +194,24 @@ async def test_each_web_run_gets_its_share_of_the_searches(conn, monkeypatch):
     monkeypatch.setattr(discovery, "run_model_phase", model)
     conn.on("SELECT COUNT(*) FROM mw_job_leads", 0)
     # The first run found nothing, and searches are left: search again.
-    out = await discovery.discover(places_search("web", listings="refused"), phases.Deps(), guard())
+    out = await discovery.discover(places_search("web"), phases.Deps(), guard())
     assert out.status == "discovering" and out.cursor["step"] == "web" and out.cursor["web_runs"] == 1
     assert out.progress["note"] == "Searching the web for more…"
     first = model.await_args.kwargs["user_text"]
     assert '"Chief People Officer" "Orange County, CA" job' in first
-    assert '"VP People" site:apply.workable.com' not in first
+    assert '"VP People" "Los Angeles, CA" job' in first  # every title and place, first
+    assert '"VP People" site:jobs.smartrecruiters.com' not in first
     with pytest.raises(PhaseFailed, match="No postings matched"):
-        await discovery.discover(places_search("web", listings="refused", web_runs=1, web_ok=True),
+        await discovery.discover(places_search("web", web_runs=1, web_ok=True),
                                  phases.Deps(), guard())
     second = model.await_args.kwargs["user_text"]
-    assert '"VP People" site:apply.workable.com' in second
+    assert '"VP People" site:jobs.smartrecruiters.com' in second
+    assert '"Chief People Officer" "San Diego, CA" job' in second
     assert '"Chief People Officer" "Orange County, CA" job' not in second
 
     # After reading: a second run while searches are left, even when this one added nothing.
     conn.on("SELECT dedupe_key, title, company, source_url, apply_links FROM mw_job_leads", [])
-    out = await discovery.discover(places_search("read", listings="none", web_runs=1, web_ok=True, postings=[]),
+    out = await discovery.discover(places_search("read", web_runs=1, web_ok=True, postings=[]),
                                    phases.Deps(), guard())
     assert out.status == "discovering" and out.cursor["step"] == "web"
 
@@ -220,11 +220,16 @@ def test_web_searches():
     """Greenhouse, Lever and Ashby are code's (`boards.py`): a web run looks
     in each place, then on the other boards."""
     titles = ["Chief People Officer", "CHRO", "VP People", "Head of People"]
-    three = discovery.web_searches(titles, {"locations": ["Orange County, CA", "San Diego, CA", "Los Angeles, CA"]})
-    assert three[:3] == ['"Chief People Officer" "Orange County, CA" job', '"Chief People Officer" "San Diego, CA" job',
-                         '"Chief People Officer" "Los Angeles, CA" job']
-    assert three[9] == '"Chief People Officer" site:apply.workable.com'
+    places = {"locations": ["Orange County, CA", "San Diego, CA", "Los Angeles, CA"]}
+    three = discovery.web_searches(titles, places)
+    # Each title and each place first (`phases.cover`), then the other boards, then the other pairs.
+    assert three[:3] == ['"Chief People Officer" "Orange County, CA" job', '"CHRO" "San Diego, CA" job',
+                         '"VP People" "Los Angeles, CA" job']
+    assert three[3] == '"Chief People Officer" site:apply.workable.com'
+    assert three[9] == '"Chief People Officer" "San Diego, CA" job'
     assert len(three) == discovery.MAX_SEARCHES and not any("Head of People" in q for q in three)
+    # A fourth typed title (or kept direction) is searched too.
+    assert any("Head of People" in q for q in discovery.web_searches(titles, places, must=4)[:4])
     assert not any(board in q for q in three for board in ("lever.co", "greenhouse.io", "ashbyhq.com"))
     assert discovery.web_searches(["COO"], {"locations": ["Austin, TX"]}) == [
         '"COO" "Austin, TX" job', '"COO" "Austin, TX" site:apply.workable.com',
@@ -258,7 +263,7 @@ DELTA_JOB = {"@type": "JobPosting", "title": "Chief People Officer", "hiringOrga
              "description": "<p>Lead people.</p>", "validThrough": "2999-01-01"}
 
 
-async def ats_fetch(ref):
+async def ats_fetch(ref, more=None):
     return {
         "4001": ats_found(ref, GH, company="Acme", description="The base salary is $250,000 - $300,000 per year.",
                           findings=[{"component": "base", "status": "posted", "min": 250000, "max": 300000,
@@ -290,7 +295,7 @@ async def test_reading_keeps_live_new_postings_as_read_leads(conn):
     postings = [claim(GH), claim(LEVER, company="Brightpath Health"), claim(NORTHWIND, company="Someone Else"),
                 claim(GONE), claim(EXCLUDED), claim(TWIN, title="COO", company="Beta Inc"),
                 claim(PAGE, company="Delta"), claim(EXPIRED, company="Delta"), claim(KNOWN), claim(LINKEDIN)]
-    search = at_step("read", listings="none", web_runs=1, web_ok=True, postings=postings)
+    search = at_step("read", web_runs=1, web_ok=True, postings=postings)
     search["criteria"] = json.dumps({"exclude_companies": ["excluded co"]})
     deps = phases.Deps(ats_find=NO_BOARD, ats_fetch=AsyncMock(side_effect=ats_fetch), page_fetch=AsyncMock(side_effect=page_fetch))
     out = await discovery.discover(search, deps, guard())
@@ -340,7 +345,7 @@ async def test_reading_keeps_only_related_titles_in_the_places_named(conn):
         "6": ("Head of HR", "", False),                            # no location
     }
 
-    async def fetch(ref):
+    async def fetch(ref, more=None):
         title, location, remote = jobs[ref.job_id]
         return ats_found(ref, f"https://job-boards.greenhouse.io/co{ref.job_id}/jobs/{ref.job_id}", title=title,
                          company=f"Co {ref.job_id}", location=location, remote=remote)
@@ -373,7 +378,7 @@ async def test_a_read_that_breaks_skips_that_posting(conn):
     conn.on(GRANT, lambda _id, want, _limit: want)
     conn.on("INSERT INTO mw_job_leads", 1)
 
-    async def flaky(ref):
+    async def flaky(ref, more=None):
         if ref.board == "brightpath":
             raise KeyError("a bug")
         return await ats_fetch(ref)
@@ -411,6 +416,39 @@ async def test_read_posting_edges():
     assert await discovery.read_posting(claim(PAGE), broken, lambda: True, today=today) is None
     bare = phases.Deps(ats_find=NO_BOARD, ats_fetch=AsyncMock(), page_fetch=AsyncMock(return_value=fetched("<html>hi</html>", PAGE)))
     assert await discovery.read_posting(claim(PAGE), bare, lambda: True, today=today) is None
+
+
+@pytest.mark.asyncio
+async def test_a_workable_posting_is_read_from_workable():
+    """The web run's Workable links were dropped before Workable could be read
+    (prod, 2026-10-17): now it is an ATS like the others, its form a second
+    fetch paid as it is asked (`ats.fetch(more=...)`)."""
+    today = date(2026, 10, 18)
+    url = "https://apply.workable.com/delta-health/j/B688C603EB/"
+    found = ats_found(ats.detect(url), url, location="San Diego, California, United States",
+                      questions=[{"key": "QA_1", "label": "Why us?", "kind": "open"}])
+    deps = phases.Deps(ats_find=NO_BOARD, ats_fetch=AsyncMock(return_value=found), page_fetch=AsyncMock())
+    record = await discovery.read_posting(claim(url, company="Delta Health"), deps, lambda: True, today=today)
+    assert record["source"] == "workable" and record["company"] == "Delta Health"
+    assert record["apply_links"] == [{"url": url, "source": "Workable"}]
+    assert record["ats"]["provider"] == "workable" and record["ats"]["questions"][0]["key"] == "QA_1"
+    deps.page_fetch.assert_not_awaited()
+    # The form is paid with `more`, from the same budget.
+    assert deps.ats_fetch.await_args.kwargs["more"]() is True
+    # One fetch left: the posting, read without its form; none: not read.
+    asked = []
+
+    async def formless(ref, more=None):
+        asked.append(more())
+        return found
+
+    one_left = phases.Deps(ats_find=NO_BOARD, ats_fetch=formless, page_fetch=AsyncMock())
+    left = iter([True, False])
+    assert (await discovery.read_posting(claim(url), one_left, lambda: next(left), today=today))["source"] == "workable"
+    assert asked == [False]
+    none_left = phases.Deps(ats_find=NO_BOARD, ats_fetch=AsyncMock(return_value=found), page_fetch=AsyncMock())
+    assert await discovery.read_posting(claim(url), none_left, lambda: False, today=today) is None
+    none_left.ats_fetch.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -455,7 +493,7 @@ async def test_reads_still_loading_at_the_deadline_are_dropped(conn, monkeypatch
     conn.on("INSERT INTO mw_job_leads", 1)
     monkeypatch.setattr(discovery, "READ_SECONDS", 0.05)
 
-    async def slow(ref):
+    async def slow(ref, more=None):
         if ref.board == "brightpath":
             await asyncio.sleep(5)
         return await ats_fetch(ref)

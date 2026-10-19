@@ -35,14 +35,14 @@ def test_a_direction_needs_its_evidence_in_the_resume_and_a_new_title():
 
 def test_the_plan_contract_shapes_directions():
     plan, _ = contracts.normalize_plan({"result": {
-        "queries": [{"q": "Full stack engineer SF", "location": None}], "titles": ["Full stack engineer"],
+        "titles": ["Full stack engineer"],
         "deal_breakers": [], "profile_summary": "x", "weights": None,
         "directions": [SOLUTIONS, {"title": " ", "why": "x", "evidence": "y"}, "junk",
                        {**MANAGER, "why": "w" * 400}, INVENTED, {**SOLUTIONS, "title": "Fourth"}],
     }})
     assert [d["title"] for d in plan["directions"]] == ["Solutions Architect", "Engineering Manager", "Product Manager"]
     assert len(plan["directions"][1]["why"]) == 300
-    plain, _ = contracts.normalize_plan({"result": {"queries": [{"q": "COO", "location": None}], "titles": [],
+    plain, _ = contracts.normalize_plan({"result": {"titles": ["COO"],
                                                     "deal_breakers": [], "profile_summary": "", "weights": None}})
     assert "directions" not in plain
 
@@ -94,8 +94,7 @@ def _plan_finish(directions):
     from tests.agent_runtime.helpers import FakeClient
     from app.matcha.services.matcha_work.job_search import phases
 
-    result = {"queries": [{"q": f"Full stack engineer SF {i}", "location": None} for i in range(8)],
-              "titles": ["Full stack engineer", "Software Engineer", "Platform Engineer"], "deal_breakers": [],
+    result = {"titles": ["Full stack engineer", "Software Engineer", "Platform Engineer"], "deal_breakers": [],
               "profile_summary": "An engineer", "weights": None, "directions": directions}
     client = FakeClient([response(call("finish", {"result": result}))])
     return phases.Deps(client=lambda _model: client, fetch_page=AsyncMock())
@@ -111,32 +110,51 @@ async def test_the_plan_searches_the_directions_its_resume_supports(conn, monkey
     await model_phases.plan(search, _plan_finish([SOLUTIONS, INVENTED, MANAGER]), phases.Guard(SEARCH, search["dispatch_token"]))
     plan = json.loads(conn.ran("SET plan = $3::jsonb")[0][2][2])
     assert [d["title"] for d in plan["directions"]] == ["Solutions Architect", "Engineering Manager"]
-    queries = [q["q"] for q in plan["queries"]]
-    assert len(queries) == 8 and queries[-2:] == ["Solutions Architect San Francisco, CA",
-                                                  "Engineering Manager San Francisco, CA"]
-    # Among the first titles, which the board and web searches take.
-    assert plan["titles"][:4] == ["Full stack engineer", "Software Engineer", "Solutions Architect", "Engineering Manager"]
+    # Right after the typed title: every search takes both (`phases.must_search`).
+    assert plan["titles"] == ["Full stack engineer", "Solutions Architect", "Engineering Manager",
+                              "Software Engineer", "Platform Engineer"]
+    assert phases.must_search(json.loads(search["criteria"]), plan) == 3
+    assert "queries" not in plan
 
 
 @pytest.mark.asyncio
-async def test_a_direction_the_plan_already_searches_gets_no_second_query(conn, monkeypatch):
+async def test_typed_titles_come_before_directions(conn, monkeypatch):
+    """Directions placed third pushed typed titles past the searches' cap."""
+    from app.matcha.services.matcha_work.job_search import phases
+
+    monkeypatch.setattr(model_phases, "load_resume_for_model", AsyncMock(return_value=RESUME))
+    typed = ["Full stack engineer", "Backend Engineer", "API Engineer", "Platform Lead", "Staff Engineer",
+             "Principal Engineer", "Tech Lead", "Software Architect"]
+    search = search_row(status="planning", use_resume=True, criteria=json.dumps({"titles": typed}))
+    await model_phases.plan(search, _plan_finish([SOLUTIONS, MANAGER]), phases.Guard(SEARCH, search["dispatch_token"]))
+    plan = json.loads(conn.ran("SET plan = $3::jsonb")[0][2][2])
+    assert plan["titles"][:8] == typed and plan["titles"][8:] == ["Solutions Architect", "Engineering Manager"]
+    # Only the directions the plan still lists (it keeps ten titles).
+    nine = search_row(status="planning", use_resume=True, criteria=json.dumps({"titles": [*typed, "Cloud Lead"]}))
+    conn.calls.clear()
+    await model_phases.plan(nine, _plan_finish([SOLUTIONS, MANAGER]), phases.Guard(SEARCH, nine["dispatch_token"]))
+    plan = json.loads(conn.ran("SET plan = $3::jsonb")[0][2][2])
+    assert plan["titles"][-1] == "Solutions Architect" and [d["title"] for d in plan["directions"]] == ["Solutions Architect"]
+
+
+@pytest.mark.asyncio
+async def test_a_direction_the_plan_already_lists_is_searched_once(conn, monkeypatch):
     from tests.agent_runtime.helpers import FakeClient
     from app.matcha.services.matcha_work.job_search import phases
 
     monkeypatch.setattr(model_phases, "load_resume_for_model", AsyncMock(return_value=RESUME))
-    result = {"queries": [{"q": "Full stack engineer San Francisco CA", "location": None},
-                          {"q": "Solutions Architect San Francisco CA", "location": None}],
-              "titles": ["Full stack engineer"], "deal_breakers": [], "profile_summary": "x", "weights": None,
-              "directions": [SOLUTIONS, MANAGER]}
-    client = FakeClient([response(call("finish", {"result": result}))])
+    # A model that put a direction among the titles too: it is the person's own
+    # title then (check_directions keeps only roles beyond them), searched once.
+    result = {"titles": ["Full stack engineer", "Solutions Architect"], "deal_breakers": [], "profile_summary": "x",
+              "weights": None, "directions": [SOLUTIONS, MANAGER]}
+    client = FakeClient([response(call("finish", result))])
     search = search_row(status="planning", use_resume=True,
-                        criteria=json.dumps({"titles": ["Full stack engineer"], "locations": ["San Francisco, CA"]}))
+                        criteria=json.dumps({"titles": ["full stack engineer"], "locations": ["San Francisco, CA"]}))
     await model_phases.plan(search, phases.Deps(client=lambda _m: client, fetch_page=AsyncMock()),
                             phases.Guard(SEARCH, search["dispatch_token"]))
-    queries = [q["q"] for q in json.loads(conn.ran("SET plan = $3::jsonb")[0][2][2])["queries"]]
-    # Solutions Architect was planned already; only the manager gets a query of its own.
-    assert queries == ["Full stack engineer San Francisco CA", "Solutions Architect San Francisco CA",
-                       "Full stack engineer San Francisco, CA", "Engineering Manager San Francisco, CA"]
+    plan = json.loads(conn.ran("SET plan = $3::jsonb")[0][2][2])
+    assert plan["titles"] == ["full stack engineer", "Engineering Manager", "Solutions Architect"]
+    assert [d["title"] for d in plan["directions"]] == ["Engineering Manager"]
 
 
 @pytest.mark.asyncio

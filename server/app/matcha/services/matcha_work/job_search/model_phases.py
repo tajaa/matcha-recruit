@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from typing import Any
 from uuid import UUID
 
@@ -25,6 +24,7 @@ from app.matcha.services.matcha_work.agent_runtime.context import RunLimits
 
 from . import contracts, prompts, ranking
 from .agent_phase import SearchProgress, run_model_phase
+from .contracts import titles_in
 from .phases import Deps, PhaseOutcome, plan_from_criteria
 from .service import load_resume_for_model, resting_status
 
@@ -74,14 +74,11 @@ async def plan(search: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
     except runner.AgentRunError:
         logger.info("job search plan fell back to criteria search=%s", search["id"])
         planned = fallback
-    # What they typed always counts: their titles and places are never dropped.
-    if criteria.get("titles") or criteria.get("locations"):
-        seen = {(q["q"].lower(), q["location"]) for q in planned["queries"]}
-        for query in fallback["queries"]:
-            if (query["q"].lower(), query["location"]) not in seen:
-                planned["queries"].append(query)
-        planned["queries"] = planned["queries"][:contracts.MAX_QUERIES]
-    _add_directions(planned, search, criteria, resume)
+    # What they typed always counts, first: every search takes each typed
+    # title and each kept direction (`phases.must_search`).
+    planned["titles"] = titles_in([*(criteria.get("titles") or []), *(planned.get("titles") or [])]) \
+        or fallback["titles"]
+    _add_directions(planned, criteria, resume)
     weights = planned.pop("weights", None)
     async with connection_or_direct() as conn:
         await conn.execute(
@@ -92,40 +89,28 @@ async def plan(search: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
             search["id"], guard.token, json.dumps(planned),
             json.dumps(ranking.clean_weights(weights)) if weights else None,
         )
-    return PhaseOutcome(
-        status="discovering", cursor={},
-        progress={"note": f"Searching {len(planned['queries'])} ways…", "queries": len(planned["queries"])},
-    )
+    titles = planned["titles"]
+    shown = ", ".join(titles[:3]) + (f" and {len(titles) - 3} more" if len(titles) > 3 else "")
+    note = f"Searching employers' job boards for {shown[:160]}…" if titles else "Searching the web…"
+    return PhaseOutcome(status="discovering", cursor={}, progress={"note": note, "titles": len(titles)})
 
 
-def _query_words(text: str) -> str:
-    """A query as words only, for comparing: "San Francisco, CA" is "san francisco ca"."""
-    return " ".join(re.findall(r"[a-z0-9+#]+", text.lower()))
-
-
-def _add_directions(planned: dict, search: dict, criteria: dict, resume: str | None) -> None:
-    """Keep the directions the résumé supports and make sure each is looked
-    for: one query of its own (in their places) and a place among the first
-    titles, which code's board and web searches take."""
+def _add_directions(planned: dict, criteria: dict, resume: str | None) -> None:
+    """Keep the directions the résumé supports, listed right after the titles
+    they typed: the searches take every one of both (`phases.must_search`),
+    then the plan's own titles while there is room."""
     own = [*(criteria.get("titles") or []), *(planned.get("titles") or [])]
     directions = contracts.check_directions(planned.pop("directions", []), resume, own)
     if not directions:
         return
-    planned["directions"] = directions
-    # A direction the plan already searches needs no query of its own.
-    planned_text = [_query_words(q["q"]) for q in planned["queries"]]
-    extra = []
-    for direction in directions:
-        if any(_query_words(direction["title"]) in text for text in planned_text):
-            continue
-        queries = plan_from_criteria(search.get("ask") or "", {**criteria, "titles": [direction["title"]]})["queries"]
-        if queries:
-            extra.append(queries[0])
-    keep = planned["queries"][:contracts.MAX_QUERIES - len(extra)]
-    seen = {(_query_words(q["q"]), q["location"]) for q in keep}
-    planned["queries"] = keep + [q for q in extra if (_query_words(q["q"]), q["location"]) not in seen]
-    titles = planned.get("titles") or list(criteria.get("titles") or [])
-    planned["titles"] = (titles[:2] + [d["title"] for d in directions] + titles[2:])[:10]
+    titles = planned.get("titles") or []
+    typed = len(titles_in(criteria.get("titles")))
+    planned["titles"] = titles_in(titles[:typed] + [d["title"] for d in directions] + titles[typed:])
+    # Only the directions the plan still lists (it keeps `MAX_TITLES`).
+    listed = {t.lower() for t in planned["titles"]}
+    planned["directions"] = [d for d in directions if d["title"].lower() in listed]
+    if not planned["directions"]:
+        planned.pop("directions")
 
 
 # ── screen ───────────────────────────────────────────────────────────────────
@@ -317,7 +302,29 @@ async def approach(search: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
         return PhaseOutcome(status="approaching",
                             cursor={"approach_queue": rest, **({"after": after} if after else {})},
                             progress={"note": f"Drafted approaches; {len(rest)} jobs to go…"})
-    return _finished(search, "Done: ranked, with approaches drafted.")
+    if resting_status(search) == "cancelled":
+        return _finished(search, "")
+    return _finished(search, await _drafted_note(search))
+
+
+async def _drafted_note(search: dict) -> str:
+    """What the last note says, from the jobs as they now are: on prod a search
+    whose every draft had failed still said "approaches drafted" (2026-10-17)."""
+    async with connection_or_direct() as conn:
+        row = await conn.fetchrow(
+            """SELECT COUNT(*) FILTER (WHERE approach_status = 'done') AS done,
+                      COUNT(*) FILTER (WHERE approach_status = 'failed') AS failed
+               FROM mw_job_leads WHERE search_id = $1""",
+            search["id"],
+        )
+    done, failed = (int(row["done"] or 0), int(row["failed"] or 0)) if row else (0, 0)
+    if not done and not failed:
+        return "Done: ranked."
+    if not failed:
+        return "Done: ranked, with approaches drafted."
+    if not done:
+        return "Done: ranked. The approaches couldn't be drafted; Redraft a job to try again."
+    return f"Done: ranked, with {done} of {done + failed} approaches drafted; Redraft the others to try again."
 
 
 def approach_queue_for_top(rows: list[Any]) -> list[str]:

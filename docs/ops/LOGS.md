@@ -105,6 +105,15 @@ Level conventions in app code:
 seconds by the docker healthcheck and the deploy gate, and it drowned
 everything else.
 
+Secret query parameters are blanked in request-URL log lines
+(`server/app/core/log_redaction.py`): httpx logs every request at `INFO` with
+its full URL, and SearchAPI, SerpApi and Google take their key in the query
+string. Until 2026-10-18 the worker log printed the SearchAPI key on every job
+search. The API (`app/main.py`) and the Celery workers (`celery_app.py`)
+install the filter on `httpx` and `urllib3.connectionpool`; a client that logs
+URLs on another logger needs adding to `log_redaction.LOGGERS`. A key that
+reached a log before that is in old container logs, so rotate it.
+
 ## Error alerting
 
 `server/app/core/services/error_notifier.py` emails `error_alert_email`

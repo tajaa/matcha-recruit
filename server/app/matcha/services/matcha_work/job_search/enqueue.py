@@ -55,7 +55,7 @@ async def consent_granted(user_id: UUID) -> bool:
     from app.matcha.services.matcha_work.agent_runtime import grants
 
     rows = await grants.list_rows(user_id)
-    return grants.is_active(rows.get(ABILITY_KEY), ABILITY_KEY)
+    return grants.is_current(rows.get(ABILITY_KEY), ABILITY_KEY)
 
 
 async def preflight(user, company_id: UUID, *, consent_version: str | None = None) -> str | None:

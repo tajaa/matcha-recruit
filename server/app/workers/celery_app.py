@@ -6,10 +6,16 @@ from celery import Celery
 from celery.signals import worker_ready, task_failure, worker_process_init
 from dotenv import load_dotenv
 
+from app.core import log_redaction
+
 # Load environment variables for worker process
 load_dotenv()
 
 logger = logging.getLogger(__name__)
+
+# API keys some providers take in the query string (SearchAPI's `api_key`),
+# out of httpx's request lines: every job search used to print one.
+log_redaction.install()
 
 # Get Redis URL from environment
 redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")

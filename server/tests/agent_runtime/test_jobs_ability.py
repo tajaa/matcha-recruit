@@ -46,7 +46,7 @@ def run(monkeypatch):
 
 def test_shape():
     ability = jobs.build()
-    assert ability.private_only and ability.consent_version == consent.current_version("jobs") == "jobs-1"
+    assert ability.private_only and ability.consent_version == consent.current_version("jobs") == "jobs-2"
     assert {t.effect for t in ability.tools} == {"read", "draft"}
     assert all(t.step_kind in ("read", "draft") for t in ability.tools)
     assert [t.name for t in ability.tools if t.untrusted_output] == ["read_job_search", "read_job_lead"]

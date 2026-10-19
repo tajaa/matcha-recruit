@@ -523,11 +523,11 @@ widgets are not read yet.
 - The model never writes: phases store what the contracts let through, under
   the chain's token.
 - **A research finish tool's arguments are the answer's own fields**, not one
-  `result` object (`contracts._finish`). Wrapped, Claude Haiku sent the
-  object as JSON text now and then, sometimes broken, and every summary of
-  the run fell back to the ranking's. `_result` still reads `{"result": ...}`
-  and an object or list sent as JSON text (`_unquoted`); a summary gets two
-  repairs.
+  `result` object (`agent_runtime/finish.tool`, shared with job search).
+  Wrapped, Claude Haiku sent the object as JSON text now and then, sometimes
+  broken, and every summary of the run fell back to the ranking's.
+  `finish.answer` still reads `{"result": ...}` and an object or list sent as
+  JSON text (`finish.unquoted`); a summary gets two repairs.
 
 ## The Mac app
 

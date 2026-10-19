@@ -571,7 +571,7 @@ async def resume_on_file(user_id: UUID) -> dict | None:
 
 async def load_resume_for_model(user_id: UUID) -> str | None:
     """The person's saved résumé as text for a model, or None. Only read when
-    the search was started with "use my résumé" (covered by `jobs-1`)."""
+    the search was started with "use my résumé" (covered by the `jobs` consent)."""
     async with connection_or_direct() as conn:
         row = await conn.fetchrow(
             "SELECT raw_text, parsed_data FROM user_resumes WHERE user_id = $1", user_id,
