@@ -496,6 +496,16 @@ widgets are not read yet.
   then the ranking-only summary. Its top picks are always five (or every
   finding shown): the model's, then the ranking's best it left out
   (`fill_top`).
+- **Google Places is capped a month** (`providers.monthly_limit`,
+  `GOOGLE_PLACES_MONTHLY_CALLS`, default 800; dev-remote.sh sets 200): Google
+  gives 1,000 Enterprise Text Search calls free a month, and a dev session on
+  2026-10-18 made 267 in an hour ($9.56 at list price) re-running the same
+  three tasks. The count is the usage ledger's (`ai_usage_log`, this UTC month,
+  so each database counts its own) plus this process's calls since, read at
+  most every 30 s. Past it, a call raises a fatal `ProviderError` without
+  being made: the round goes on with the web search, `locate` falls back to
+  the Census geocoder, and `find_places` returns its error. A count that
+  can't be read lets the call go.
 - **Budgets per round** (`Budgets`): 30 provider calls (Google Maps
   searches; Google Places pages by token, so page n of a search is n calls:
   `providers.calls_per_search`), 160 page loads (a building may cost

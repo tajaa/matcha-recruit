@@ -16,6 +16,16 @@ async def _no_sleep(_s):
     return None
 
 
+@pytest.fixture(autouse=True)
+def _under_the_monthly_limit(monkeypatch):
+    """Every Places call here is under the month's limit, and never counts
+    the month's calls from a database (the limit has its own tests below)."""
+    async def none_yet(**_kw):
+        return 0
+
+    monkeypatch.setattr(P, "calls_this_month", none_yet)
+
+
 GOOGLE_PRODUCT = "https://www.google.com/search?ibp=oshop&q=organic lip balm&prds=catalogid:1,productid:2"
 
 
@@ -204,3 +214,78 @@ async def test_google_places_search_pages_walks_the_tokens_once():
     assert len(items) == 3 and [b.get("pageToken") for b in bodies] == [None, "page-2", "page-3"]
     bodies.clear()
     assert len(await _places(handler).search_pages("places", "x", pages=P.MAX_PAGES + 2)) == 3 and len(bodies) == 3
+
+
+def test_the_monthly_limit_is_googles_free_calls_split(monkeypatch):
+    monkeypatch.delenv("GOOGLE_PLACES_MONTHLY_CALLS", raising=False)
+    assert P.monthly_limit() == P.DEFAULT_MONTHLY_CALLS == 800
+    for raw, limit in (("200", 200), ("0", 0), ("-5", 0), ("lots", 800), ("", 800)):
+        monkeypatch.setenv("GOOGLE_PLACES_MONTHLY_CALLS", raw)
+        assert P.monthly_limit() == limit
+
+
+@pytest.mark.asyncio
+async def test_past_the_monthly_limit_google_is_not_asked(monkeypatch):
+    """A dev session made 267 Places calls in an hour (2026-10-18): past the
+    month's limit, the call isn't made, and the task goes on with the web."""
+    asked = []
+
+    async def used(**_kw):
+        return 200
+
+    monkeypatch.setattr(P, "calls_this_month", used)
+    monkeypatch.setenv("GOOGLE_PLACES_MONTHLY_CALLS", "200")
+    places = _places(lambda request: asked.append(request) or httpx.Response(200, json=PLACES))
+    with pytest.raises(P.ProviderError, match="this month's 200 calls") as exc:
+        await places.search("places", "apartments")
+    assert exc.value.fatal and asked == []
+    monkeypatch.setenv("GOOGLE_PLACES_MONTHLY_CALLS", "201")
+    assert len(await places.search("places", "apartments")) == 2 and len(asked) == 1
+
+
+@pytest.mark.asyncio
+async def test_this_months_calls_are_the_ledgers_count_plus_the_calls_since(monkeypatch):
+    from app import database
+    from tests.agent_runtime.helpers import FakeConn, connection
+
+    monkeypatch.undo()  # the real counter, not the fixture's
+    conn = FakeConn().on("provider = 'google_places' AND status", 41)
+    monkeypatch.setattr(database, "connection_or_direct", connection(conn))
+    monkeypatch.setattr(P, "_COUNT", {"at": None, "month": None, "count": 0, "since": 0})
+    now = {"t": 100.0}
+    monkeypatch.setattr(P, "_clock", lambda: now["t"])
+
+    def counts():
+        return conn.ran("provider = 'google_places' AND status")
+
+    assert await P.calls_this_month() == 41
+    [(_, query, _)] = counts()
+    assert "provider = 'google_places'" in query and "status = 'ok'" in query and "date_trunc('month'" in query
+    # A call made since is counted on, and the ledger isn't read again for COUNT_SECONDS.
+    now["t"] = 110.0
+    await _places(lambda request: httpx.Response(200, json={})).search("places", "x")
+    assert P._COUNT["since"] == 1 and await P.calls_this_month() == 42 and len(counts()) == 1
+    # Past COUNT_SECONDS: read again, and the ledger has it now.
+    conn.on("provider = 'google_places' AND status", 42)
+    now["t"] = 100.0 + P.COUNT_SECONDS + 1
+    assert await P.calls_this_month() == 42 and len(counts()) == 2 and P._COUNT["since"] == 0
+
+
+@pytest.mark.asyncio
+async def test_a_count_that_cant_be_read_lets_the_call_go(monkeypatch, caplog):
+    from contextlib import asynccontextmanager
+
+    from app import database
+
+    monkeypatch.undo()
+
+    @asynccontextmanager
+    async def down():
+        raise OSError("db down")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(database, "connection_or_direct", down)
+    monkeypatch.setattr(P, "_COUNT", {"at": None, "month": None, "count": 0, "since": 0})
+    with caplog.at_level("WARNING"):
+        assert await P.calls_this_month() == 0
+    assert "couldn't be counted" in caplog.text

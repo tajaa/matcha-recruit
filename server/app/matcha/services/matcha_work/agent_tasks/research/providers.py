@@ -18,6 +18,14 @@ leaves the server. Every call counts against the round's provider budget
 Google Shopping (through SearchAPI, else SerpApi) and the SERP APIs' Google
 Maps were taken out on 2026-10-18: Espresso's agents use Brave, Claude and
 Google's own APIs, no search API.
+
+Google gives 1,000 Enterprise Text Search calls free a month. Past
+`monthly_limit()` calls this month (the usage ledger's own count, so per
+database: dev's and prod's are apart), Google Places is out until the month
+ends: a call raises a fatal `ProviderError` without being made, and a task
+goes on with the web search. Prod's default is 800; dev-remote.sh sets 200, so
+testing can't spend prod's share of the free calls (a dev session on
+2026-10-18 made 267 in an hour, $9.56 at list price).
 """
 from __future__ import annotations
 
@@ -25,6 +33,7 @@ import asyncio
 import logging
 import math
 import re
+import time
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, Callable
@@ -42,6 +51,11 @@ from .geo import point_of
 logger = logging.getLogger(__name__)
 
 MAX_RESULTS = 20
+# Google Places calls a month (`GOOGLE_PLACES_MONTHLY_CALLS`), dev and prod
+# together inside Google's 1,000 free a month.
+DEFAULT_MONTHLY_CALLS = 800
+# How long a count of this month's calls is trusted before it's read again.
+COUNT_SECONDS = 30.0
 
 
 @dataclass
@@ -186,9 +200,14 @@ class GooglePlaces:
         self._today = today
 
     async def _post(self, body: dict, mask: str) -> dict:
+        limit = monthly_limit()
+        if await calls_this_month() >= limit:
+            raise ProviderError(f"{self.name} has used this month's {limit} calls (GOOGLE_PLACES_MONTHLY_CALLS)",
+                                fatal=True)
         headers = {"X-Goog-Api-Key": self._key, "X-Goog-FieldMask": mask}
         # The mask sets the SKU Google bills (ai_usage.API_PRICING).
         sku = "text_search_pro" if mask == LOCATE_MASK else "text_search_enterprise"
+        _COUNT["since"] += 1  # counted before the call: one that left may be billed
         return await search_apis.answer(self.name, lambda client: client.post(PLACES_URL, json=body, headers=headers),
                                         transport=self._transport, sleep=self._sleep, sku=sku)
 
@@ -279,6 +298,48 @@ def calls_per_search(provider: Any, page: int) -> int:
     """Paid calls one search for `page` makes. Google's Places API pages by
     token, so its page n is n calls (none past MAX_PAGES)."""
     return page if page <= MAX_PAGES else 0
+
+
+def monthly_limit() -> int:
+    """`GOOGLE_PLACES_MONTHLY_CALLS`, else `DEFAULT_MONTHLY_CALLS`; 0 turns Google Places off."""
+    import os
+
+    try:
+        return max(0, int(os.getenv("GOOGLE_PLACES_MONTHLY_CALLS") or DEFAULT_MONTHLY_CALLS))
+    except ValueError:
+        return DEFAULT_MONTHLY_CALLS
+
+
+# This process's last count of the month's calls, and the calls it made since.
+_COUNT: dict[str, Any] = {"at": None, "month": None, "count": 0, "since": 0}
+_clock: Callable[[], float] = time.monotonic
+
+
+async def calls_this_month() -> int:
+    """Google Places calls this UTC month: the usage ledger's count (read at
+    most every `COUNT_SECONDS`), plus the ones this process made since. A
+    count that can't be read lets the call go (the ledger is telemetry), and
+    says so."""
+    from datetime import datetime, timezone
+
+    from app.database import connection_or_direct
+
+    now = _clock()
+    month = datetime.now(timezone.utc).strftime("%Y-%m")
+    if _COUNT["at"] is not None and _COUNT["month"] == month and now - _COUNT["at"] < COUNT_SECONDS:
+        return _COUNT["count"] + _COUNT["since"]
+    try:
+        async with connection_or_direct() as conn:
+            count = await conn.fetchval(
+                """SELECT COUNT(*) FROM ai_usage_log
+                   WHERE provider = 'google_places' AND status = 'ok'
+                     AND created_at >= date_trunc('month', NOW() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'""",
+            )
+    except Exception:
+        logger.warning("google places: this month's calls couldn't be counted", exc_info=True)
+        return _COUNT["count"] + _COUNT["since"] if _COUNT["month"] == month else 0
+    _COUNT.update(at=now, month=month, count=int(count or 0), since=0)
+    return _COUNT["count"]
 
 
 def _google_key() -> str | None:
