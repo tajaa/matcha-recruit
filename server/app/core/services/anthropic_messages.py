@@ -28,6 +28,7 @@ import json
 import logging
 import re
 import time
+import weakref
 from types import SimpleNamespace
 from typing import Any, Optional
 
@@ -55,6 +56,13 @@ _JSON_INSTRUCTION = (
 )
 
 _client: Optional[anthropic.AsyncAnthropic] = None
+# The event loop `_client` was made on (None outside one). A client's
+# connections belong to the loop that opened them, and each Celery task runs its
+# own `asyncio.run()` loop: shared, every task's first request failed on a
+# connection from the last task's closed loop and was retried (7 of 8 model runs
+# in a dev job search, 2026-10-19). So one client per loop, as workers have no
+# DB pool; the API's one loop keeps one client.
+_client_loop: Optional[weakref.ref] = None
 
 
 def anthropic_configured() -> bool:
@@ -65,13 +73,20 @@ def anthropic_configured() -> bool:
 
 
 def get_async_client() -> anthropic.AsyncAnthropic:
-    """Module-cached async client. Raises when no key is configured."""
-    global _client
-    if _client is None:
+    """The async client for the running event loop, made once per loop.
+    Raises when no key is configured."""
+    global _client, _client_loop
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:  # not in a loop: reuse whatever there is
+        loop = None
+    stale = loop is not None and (_client_loop is None or _client_loop() is not loop)
+    if _client is None or stale:
         api_key = get_settings().anthropic_api_key
         if not api_key:
             raise RuntimeError("ANTHROPIC_API_KEY is required for Claude")
         _client = anthropic.AsyncAnthropic(api_key=api_key)
+        _client_loop = weakref.ref(loop) if loop is not None else None
     return _client
 
 

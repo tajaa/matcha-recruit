@@ -44,6 +44,7 @@ import asyncio
 import html
 import logging
 import re
+from collections import Counter
 from datetime import date, datetime, timezone
 
 from app.database import connection_or_direct, decode_jsonb
@@ -63,8 +64,8 @@ logger = logging.getLogger(__name__)
 BOARDS, WEB, READ = "boards", "web", "read"
 WEB_RUNS = 2
 WEB_TARGET = 30
-WEB_LIMITS = RunLimits(max_model_calls=8, wall_seconds=300.0, max_hosted_per_response=4,
-                       max_hosted_per_run=16)
+WEB_LIMITS = RunLimits(max_model_calls=8, wall_seconds=300.0,
+                       max_hosted_per_response=prompts.SEARCHES_PER_TURN, max_hosted_per_run=16)
 READ_CONCURRENCY = 6
 # A page, the ATS it may redirect into, and a look at the employer's board.
 READS_PER_POSTING = 4
@@ -213,33 +214,62 @@ def web_searches(titles: list[str], criteria: dict, must: int = 0) -> list[str]:
 
 
 async def _read(search: dict, deps: Deps, guard: chain.Guard, cursor: dict) -> PhaseOutcome:
-    added = await read_postings(search, deps, guard, cursor.get("postings") or [])
+    tally: Counter = Counter()
+    added = await read_postings(search, deps, guard, cursor.get("postings") or [], tally)
     web_added = int(cursor.get("web_added") or 0) + added
     cursor = {**cursor, "postings": [], "web_added": web_added}
     runs = int(cursor.get("web_runs") or 0)
+    reads = add_reads(search, "web" if runs else "boards", tally)
     if runs < WEB_RUNS and web_added < WEB_TARGET and (added or searches_for(search, runs)):
         total = await phases.lead_count(search["id"])
-        return PhaseOutcome(status="discovering", cursor={**cursor, "step": WEB},
-                            progress={"note": f"Found {total} jobs so far; looking for more…", "found": total})
-    return await _finish(search, cursor)
+        return PhaseOutcome(status="discovering", cursor={**cursor, "step": WEB}, progress={
+            "note": f"Found {total} jobs so far; looking for more…", "found": total, "reads": reads,
+        })
+    return await _finish(search, cursor, reads=reads)
 
 
-async def _finish(search: dict, cursor: dict) -> PhaseOutcome:
+async def _finish(search: dict, cursor: dict, *, reads: dict | None = None) -> PhaseOutcome:
     total = await phases.lead_count(search["id"])
     if total == 0:
         if not (cursor.get("web_ok") or cursor.get("boards_ok")):
             raise PhaseFailed(UNAVAILABLE)
         raise PhaseFailed(NO_MATCH)
-    return PhaseOutcome(status=NEXT, cursor={},
-                        progress={"note": f"Found {total} jobs. Reading the postings for pay…", "found": total})
+    progress = {"note": f"Found {total} jobs. Reading the postings for pay…", "found": total}
+    return PhaseOutcome(status=NEXT, cursor={}, progress={**progress, **({"reads": reads} if reads else {})})
+
+
+# What became of each posting the read step was handed, by key: `links` handed
+# over; `known` already a lead's; `aggregator` (LinkedIn and the like, never
+# read); `unread` closed, expired, unreadable or past the read budget; `late`
+# still loading at `READ_SECONDS`; `title` unrelated; `elsewhere` outside their
+# places, the wrong side of remote, or an employer they excluded; `duplicate`
+# the same job as a lead; `full` past `MAX_LEADS`; `kept` saved as a lead.
+# On 2026-10-19 a dev search read 160 board links and kept 21, and nothing said
+# why the other 139 went.
+READ_OUTCOMES = ("links", "known", "aggregator", "unread", "late", "title", "elsewhere",
+                 "duplicate", "full", "kept")
+
+
+def add_reads(search: dict, source: str, tally: Counter) -> dict:
+    """The search's `progress.reads` with this read added under `source`
+    (`boards`, or `web` for the web runs' postings), and a log line."""
+    reads = dict((decode_jsonb(search.get("progress"), {}) or {}).get("reads") or {})
+    so_far = Counter({key: int(n) for key, n in (reads.get(source) or {}).items() if key in READ_OUTCOMES})
+    so_far.update(tally)
+    logger.info("job search read search=%s source=%s %s", search["id"], source,
+                " ".join(f"{key}={tally[key]}" for key in READ_OUTCOMES if tally[key]))
+    return {**reads, source: {key: so_far[key] for key in READ_OUTCOMES if so_far[key]}}
 
 
 # ── reading what the boards and the web run found ────────────────────────────
 
-async def read_postings(search: dict, deps: Deps, guard: chain.Guard, postings: list[dict]) -> int:
+async def read_postings(search: dict, deps: Deps, guard: chain.Guard, postings: list[dict],
+                        tally: Counter | None = None) -> int:
     """Read each posting the boards or a web run found and save the live,
     new ones with a related title, where the person wants them, as leads.
-    Returns how many were added."""
+    Returns how many were added; `tally` counts what became of each
+    (`READ_OUTCOMES`)."""
+    tally = Counter() if tally is None else tally
     titles, criteria = _titles_and_criteria(search)
     async with connection_or_direct() as conn:
         rows = await conn.fetch(
@@ -250,9 +280,18 @@ async def read_postings(search: dict, deps: Deps, guard: chain.Guard, postings: 
     for row in rows:
         known.update(link.get("url") for link in decode_jsonb(row["apply_links"], []) or [] if isinstance(link, dict))
     room = MAX_LEADS - len(rows)
-    todo = [p for p in postings if isinstance(p, dict) and isinstance(p.get("url"), str)
-            and p["url"] not in known and not phases.aggregator(p["url"])]
+    links = [p for p in postings if isinstance(p, dict) and isinstance(p.get("url"), str)]
+    tally["links"] += len(links)
+    todo = []
+    for posting in links:
+        if posting["url"] in known:
+            tally["known"] += 1
+        elif phases.aggregator(posting["url"]):
+            tally["aggregator"] += 1
+        else:
+            todo.append(posting)
     if room <= 0 or not todo:
+        tally["full"] += len(todo)
         return 0
     # A board posting is an API read or two (`ats.most_reads`; unused ones are
     # given back); a page may take a few (`read_posting`).
@@ -278,21 +317,31 @@ async def read_postings(search: dict, deps: Deps, guard: chain.Guard, postings: 
     if late:
         await asyncio.gather(*late, return_exceptions=True)
         logger.info("job search dropped %d postings still loading at the deadline search=%s", len(late), search["id"])
+    tally["late"] += len(late)
     records = [task.result() for task in tasks if task in done]
     await phases.refund(search["id"], "fetch_calls", budget.left)
     kept = [(row["dedupe_key"], row["title"], row["company"]) for row in rows]
     new = []
     for record in records:
-        if record is None or not normalize.related_title(record["title"], titles):
+        if record is None:
+            tally["unread"] += 1
+            continue
+        if not normalize.related_title(record["title"], titles):
+            tally["title"] += 1
             continue
         if not phases.keep_job(record["company"], record["remote"], criteria, record["location"]):
+            tally["elsewhere"] += 1
             continue
         if any(record["dedupe_key"] == key or normalize.same_posting(record["title"], record["company"], title, company)
                for key, title, company in kept):
+            tally["duplicate"] += 1
             continue
         kept.append((record["dedupe_key"], record["title"], record["company"]))
         new.append(record)
-    return await phases.insert_leads(search, guard.token, new[:room])
+    tally["full"] += max(0, len(new) - room)
+    added = await phases.insert_leads(search, guard.token, new[:room])
+    tally["kept"] += added
+    return added
 
 
 async def read_posting(posting: dict, deps: Deps, take, *, today: date) -> dict | None:
