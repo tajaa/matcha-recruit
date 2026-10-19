@@ -30,7 +30,8 @@ no source is `web`.
 | Piece | File | What it owns |
 |---|---|---|
 | Discovery | `discovery.py` | The `discovering` phase in three steps: code's Brave searches of Greenhouse, Lever and Ashby (`boards.py`), a model web search for postings elsewhere, then reading each one (ATS API or JSON-LD) into an already-read lead |
-| Boards | `boards.py` | Code's board searches: Brave (`Deps.web_search`, 20 results each) for each title on each board host and in each place named, ≤24 a search, 1 a second; every Greenhouse/Lever/Ashby job link in the answers goes to the read step. No model chooses |
+| Boards | `boards.py` | Code's board searches: Brave (`Deps.web_search`, 20 results each) for each title on each board host and in each place named, ≤24 a search, 1 a second; every Greenhouse/Lever/Ashby job link in the answers goes to the read step, after the stored postings that fit. No model chooses |
+| Stored postings | `postings.py` | Every board posting read, kept (`mw_job_postings`): reused when read live in the last 12 h, skipped when its board said closed in the last 14 days, and `matching` a later search's titles and places. Board searches Brave was sent (`mw_job_board_searches`): the same one within a day asks for its next page. Fails soft |
 | Places | `places.py` (pure) + `data/us_places.tsv.gz` | Whether a job is in a place the person named (`fits`): its location text split into places, put on the map with the US Census gazetteer (offline, built by `server/scripts/build_job_places.py`), kept within 50 miles of one of theirs, or remote when they'd take it |
 | ATS | `ats.py` | Greenhouse / Lever / Ashby / Workable detection from apply links, their public APIs, application questions (Greenhouse's, and Workable's public form); `fetch(ref, more=take)`: one call the caller pays for first, and Workable's form a second paid with `more()` (asked only for a published posting); `most_reads(ref)`, what to reserve; `NAMES`, each ATS by name; `find_on_board`, the employer's own Greenhouse, Lever or Ashby board found by name |
 | Pay | `comp.py` (pure) | Text scanning, structured mappers, `combine`, claim checks (`verify_quote`, `numbers_supported`) |
@@ -49,7 +50,8 @@ no source is `web`.
 REST: `routes/matcha_work/job_search.py` (`/matcha-work/job-searches`).
 Worker: `workers/tasks/job_search.py`. Migrations: `mwjobs01`
 (`mw_job_searches`, `mw_job_leads`, run kind `job_search`), `mwjobs03`
-(`source = 'workable'` allowed).
+(`source = 'workable'` allowed), `mwjobs04` (`mw_job_postings`,
+`mw_job_board_searches`).
 
 ## Invariants
 
@@ -103,6 +105,27 @@ Worker: `workers/tasks/job_search.py`. Migrations: `mwjobs01`
   `same_employer` compares whole names, never one word of a longer one
   (Delta Air Lines' "delta" board is not Delta Dental's). Tests:
   `tests/job_search/test_normalize.py`. Level is the screen's to judge.
+- **A posting is read once, and kept.** Every Greenhouse, Lever, Ashby or
+  Workable posting a search or `find_jobs` reads is stored in
+  `mw_job_postings` (`postings.py`): live with the lead record as read, or
+  closed only when its ATS said so (`ats.read`: a 404 or 410, an Ashby board
+  without it, an unpublished Workable job; a timeout or a 5xx says nothing).
+  A posting read live in the last `LIVE_HOURS` (12) is used as read, with no
+  fetch; one closed in the last `CLOSED_DAYS` (14) isn't read; an older one
+  is read again on its own board (`Stored.read_url`). `Store.matching` gives a
+  search the live postings earlier searches read (within 7 days) that it
+  would keep (`related_title`, `keep_job`), ahead of Brave's links. And
+  `mw_job_board_searches` remembers each board search Brave was sent: the
+  same query within `SEARCH_HOURS` (24, from its first page) asks for its
+  next page (pages 0 to 4), and one read to its end isn't sent. A page is
+  recorded only once its postings are read (the full search's read step,
+  from `phase_cursor.searched`; `find_jobs` when every link is settled), so a
+  task killed before then sends the same page again. Both tables are shared
+  public data: no user, company, criteria or résumé on them. Every statement
+  fails soft (`Store`): no table or no database reads as nothing stored. On
+  2026-10-19 a chat follow-up ("any others?") re-sent its first answer's
+  searches word for word and re-read the same 119 postings to find one new
+  job. Tests: `tests/job_search/test_postings.py`.
 - **No pay figure without evidence.** Every base/bonus/equity value carries
   `evidence {quote, origin, url}`. From text, the quote is a slice of the text
   it came from; from a structured field (Lever `salaryRange`, Greenhouse pay
@@ -326,9 +349,9 @@ in Tasks → Résumé (`/tasks?view=resume`, `components/resume/ResumePane.tsx`)
 
 A quick look at open roles in chat is `agent_runtime/abilities/job_listings.py`
 (`find_jobs`): this package's Brave board searches (`boards.board_searches`),
-reader (`discovery.read_posting`) and place filter, run in one tool call with
-no search row, no model phases and nothing saved (see the agent runtime's
-CLAUDE.md, "Places and job listings").
+reader (`discovery.read_posting`), place filter and stored postings
+(`postings.py`), run in one tool call with no search row and no model phases
+(see the agent runtime's CLAUDE.md, "Job listings").
 
 `agent_runtime/abilities/jobs.py` (`private_only`, `jobs-2`): list and read
 searches and jobs, keep the person's status and notes (`update_job_lead`),
