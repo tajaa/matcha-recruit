@@ -127,8 +127,8 @@ async def test_consent_is_asked_once(gates, monkeypatch):
     monkeypatch.setattr(grants, "is_active", lambda row, key: bool(row))
     enable = AsyncMock(return_value={})
     monkeypatch.setattr(grants, "enable", enable)
-    await enqueue.preflight(CLIENT, COMPANY, replace(RESEARCH, consent="jobs"), consent_version="jobs-1")
-    assert enable.await_args.kwargs == {"consent_version": "jobs-1"}
+    await enqueue.preflight(CLIENT, COMPANY, replace(RESEARCH, consent="jobs"), consent_version="jobs-2")
+    assert enable.await_args.kwargs == {"consent_version": "jobs-2"}
     monkeypatch.setattr(grants, "list_rows", AsyncMock(return_value={"jobs": {"ok": 1}}))
     await enqueue.preflight(CLIENT, COMPANY, replace(RESEARCH, consent="jobs"))
     assert enable.await_count == 1

@@ -46,8 +46,7 @@ def finish(result):
 
 @pytest.mark.asyncio
 async def test_run_model_phase_audits_and_charges(conn):
-    d, client = deps(finish({"queries": [{"q": "COO", "location": "United States"}], "titles": [],
-                             "deal_breakers": [], "profile_summary": "", "weights": None}))
+    d, client = deps(finish({"titles": ["COO"], "deal_breakers": [], "profile_summary": "", "weights": None}))
     out = await model_phases.plan(search_row(status="planning", model="gpt-5.6-luna"), d, guard())
     assert out.status == "discovering"
     [insert] = conn.ran("INSERT INTO mw_project_agent_runs")
@@ -101,15 +100,18 @@ async def test_progress_notes_are_throttled():
 
 @pytest.mark.asyncio
 async def test_plan_keeps_what_they_typed_and_applies_weights(conn):
-    d, _ = deps(finish({"queries": [{"q": "President and COO", "location": "United States"}],
-                        "titles": ["COO"], "deal_breakers": [], "profile_summary": "Operator",
+    d, _ = deps(finish({"titles": ["President and COO", "coo"], "deal_breakers": [], "profile_summary": "Operator",
                         "weights": {"base": 1, "bonus": 1, "equity": 1, "fit": 0.2}}))
-    search = search_row(status="planning", criteria=json.dumps({"titles": ["COO"], "locations": ["Austin, TX"]}))
-    await model_phases.plan(search, d, guard())
+    search = search_row(status="planning", criteria=json.dumps({"titles": ["COO", "Chief of Staff"],
+                                                                "locations": ["Austin, TX"]}))
+    out = await model_phases.plan(search, d, guard())
     [write] = conn.ran("SET plan = $3::jsonb")
     plan = json.loads(write[2][2])
-    assert [q["q"] for q in plan["queries"]] == ["President and COO", "COO Austin, TX"]
+    # What they typed first: the board and web searches take the first titles.
+    assert plan["titles"] == ["COO", "Chief of Staff", "President and COO"]
     assert json.loads(write[2][3]) == {"base": 1.0, "bonus": 1.0, "equity": 1.0, "fit": 0.2}
+    assert out.progress == {"note": "Searching employers' job boards for COO, Chief of Staff, President and COO…",
+                            "titles": 3}
 
 
 @pytest.mark.asyncio
@@ -118,7 +120,7 @@ async def test_plan_falls_back_to_the_criteria(conn):
     out = await model_phases.plan(search_row(status="planning", criteria=json.dumps({"titles": ["COO"]})), d, guard())
     assert out.status == "discovering"
     plan = json.loads(conn.ran("SET plan = $3::jsonb")[0][2][2])
-    assert plan["source"] == "criteria" and conn.ran("SET plan = $3::jsonb")[0][2][3] is None
+    assert plan == {"titles": ["COO"], "source": "criteria"} and conn.ran("SET plan = $3::jsonb")[0][2][3] is None
 
 
 def lead_row(i, **over):

@@ -1,11 +1,15 @@
 """The deterministic parts of one job search. Each runs inside one worker task.
 
-  listings  Google Jobs, page by page, deduped into leads (no model), when a
-            listings API is set up: the first step of `discovery.discover`
   enrich    each lead's ATS API or the company's posting page: full text, pay
             with evidence, application questions; then the ranking (no model).
             A posting is the lead's only when its title and employer match:
-            Google lists other employers' jobs among a posting's apply links
+            Google Jobs, which searches used to start from, listed other
+            employers' jobs among a posting's apply links
+
+Postings come from Brave and Claude only (`discovery.py`): code's Brave
+searches of the ATS boards and a Claude run's web search. The Google Jobs step
+(SearchAPI, else SerpApi) was taken out on 2026-10-18; leads it found before
+then keep `source = 'google_jobs'` and read as they did.
 
 `plan_from_criteria` is the plan when the model plan fails. The model phases
 (plan, the web search in discover, screen, approach) are in `model_phases.py`
@@ -14,7 +18,7 @@ and `discovery.py`; the order is in `orchestrator.PHASES`.
 Every write checks the search's dispatch token (`Guard`), so a cancelled
 search, or a chain a reconcile replaced, stops writing at the next check.
 
-Paid calls (Google Jobs, Brave's board searches, page and ATS fetches) are reserved on the search row
+Paid calls (Brave's board searches, page and ATS fetches) are reserved on the search row
 BEFORE they are made (`grant`), and only what went unused is given back
 (`refund`). A task killed mid-phase gives nothing back, so its retry works
 from what is left and can never spend a second budget.
@@ -38,19 +42,17 @@ from app.matcha.services.matcha_work.agent_card.page_extract import job_postings
 from app.matcha.services.matcha_work.agent_runtime import chain
 from app.matcha.services.matcha_work.agent_runtime.chain import Budget, PhaseOutcome
 
-from . import ats, normalize, places, providers, ranking
+from . import ats, normalize, places, ranking
 from . import comp as comp_mod
 from .service import fit_floor, rerank
 
 logger = logging.getLogger(__name__)
 
-MAX_QUERIES = 8
-PAGES_PER_QUERY = 3
-QUERY_CONCURRENCY = 3
 # Per search, across retries: a retried discover never buys a second budget.
-# Google Jobs takes at most MAX_QUERIES * PAGES_PER_QUERY (24), Brave's board
-# searches at most `boards.MAX_SEARCHES` (24).
-MAX_PROVIDER_CALLS = 48
+# Brave's board searches take at most `boards.MAX_SEARCHES` (24).
+MAX_PROVIDER_CALLS = 24
+# Titles a plan hands the searches; board and web searches take the first few.
+MAX_TITLES = 10
 MAX_LEADS = 120
 ENRICH_BATCH = 24
 ENRICH_CONCURRENCY = 4
@@ -93,7 +95,6 @@ async def _default_web_search(query: str, count: int) -> list[dict]:
 
 @dataclass
 class Deps:
-    provider: Callable[[], Any] = providers.choose_provider
     ats_fetch: Callable[..., Awaitable[Any]] = ats.fetch
     ats_find: Callable[..., Awaitable[Any]] = ats.find_on_board
     page_fetch: Callable[..., Awaitable[Any]] = fetch_public
@@ -134,69 +135,24 @@ class Guard(chain.Guard):
 
 # ── plan ─────────────────────────────────────────────────────────────────────
 
-def plan_from_criteria(ask: str, criteria: dict) -> dict:
-    """Search queries straight from what the person entered.
+def titles_in(titles: Any) -> list[str]:
+    """Titles as a plan keeps them: trimmed, once each (case aside), at most `MAX_TITLES`."""
+    out: dict[str, str] = {}
+    for title in titles if isinstance(titles, list) else []:
+        text = " ".join(str(title or "").split())[:80]
+        if text:
+            out.setdefault(text.lower(), text)
+    return list(out.values())[:MAX_TITLES]
 
-    Google Jobs' `location` parameter only takes Google's own place names, so
-    a city goes into the query text and only the country goes in `location`.
-    """
-    titles = [t for t in (criteria.get("titles") or []) if t] or [" ".join(ask.split())[:100]]
-    locations = [loc for loc in (criteria.get("locations") or []) if loc] or ["United States"]
-    remote_only = criteria.get("remote") == "remote_only"
-    queries = []
-    for title in titles:
-        for location in locations:
-            key = location.strip().lower()
-            if key in NATIONWIDE:
-                q, loc = title, "United States"
-            elif key == "remote":
-                q, loc = f"{title} remote", "United States"
-            else:
-                q, loc = f"{title} {location}", None
-            if remote_only and "remote" not in q.lower():
-                q = f"{q} remote"
-            queries.append({"q": q[:160], "location": loc})
-    seen, unique = set(), []
-    for query in queries:
-        key = (query["q"].lower(), query["location"])
-        if key not in seen:
-            seen.add(key)
-            unique.append(query)
-    return {"queries": unique[:MAX_QUERIES], "source": "criteria"}
+
+def plan_from_criteria(ask: str, criteria: dict) -> dict:
+    """The titles to search, straight from what the person entered (or their
+    ask, when they entered none): the plan when the model plan fails."""
+    titles = titles_in(criteria.get("titles")) or titles_in([" ".join(ask.split())[:100]])
+    return {"titles": titles, "source": "criteria"}
 
 
 # ── discover ─────────────────────────────────────────────────────────────────
-
-def lead_record(posting: providers.Posting) -> dict:
-    """One discovered posting as a `mw_job_leads` insert row."""
-    url = posting.share_url or (posting.apply_links[0]["url"] if posting.apply_links else None)
-    findings = []
-    if posting.salary_text:
-        findings += comp_mod.scan_base(posting.salary_text, origin="google_jobs", url=url, known_pay=True)
-    findings += comp_mod.scan_text(posting.description, origin="google_jobs", url=url)
-    comp = comp_mod.combine(findings)
-    lo, hi, currency = comp_mod.annual_range(comp)
-    return {
-        "dedupe_key": normalize.dedupe_key(posting.company, posting.title, posting.location),
-        "title": posting.title,
-        "company": posting.company,
-        "location": posting.location,
-        "state_code": normalize.state_of(posting.location),
-        "remote": posting.remote,
-        "schedule_type": posting.schedule_type,
-        "posted_text": posting.posted_text,
-        "provider_job_id": posting.provider_job_id,
-        "source_url": url,
-        "apply_links": posting.apply_links,
-        "description": posting.description,
-        "highlights": posting.highlights,
-        "comp": comp,
-        "comp_status": comp_mod.comp_status(comp),
-        "comp_annual_min": lo,
-        "comp_annual_max": hi,
-        "comp_currency": currency,
-    }
-
 
 def keep_job(company: str, remote: bool | None, criteria: dict, location: str = "") -> bool:
     """Not an employer they excluded, remote the way they asked, and in a
@@ -212,15 +168,10 @@ def keep_job(company: str, remote: bool | None, criteria: dict, location: str = 
     return places.fits(location, remote, criteria)
 
 
-def keep_posting(posting: providers.Posting, criteria: dict) -> bool:
-    return keep_job(posting.company, posting.remote, criteria, posting.location)
-
-
 async def insert_leads(search: dict, token: UUID, records: list[dict]) -> int:
     """New leads, under the chain's token; a lead already found is kept as it
-    was. A record's `source` defaults to Google Jobs; one discovery already
-    read from its own posting (`enriched`) carries its `ats` and is not read
-    again by enrich."""
+    was. One discovery already read from its own posting (`enriched`)
+    carries its `ats` and is not read again by enrich."""
     if not records:
         return 0
     async with connection_or_direct() as conn:
@@ -259,76 +210,6 @@ async def lead_count(search_id: UUID) -> int:
         return int(await conn.fetchval(
             "SELECT COUNT(*) FROM mw_job_leads WHERE search_id = $1", search_id,
         ) or 0)
-
-
-# How the Google Jobs step went (`listings`).
-LISTED = "ok"            # it ran (it may have found nothing)
-NO_LISTINGS = "none"     # no listings API is set up
-REFUSED = "refused"      # every API refused for good: a refused key, no searches left
-LISTINGS_FAILED = "failed"  # every query failed, for now
-
-
-async def listings(search: dict, deps: Deps, guard: chain.Guard) -> str:
-    """Google Jobs, when a listings API is set up: up to 3 pages per query, 3
-    queries at a time, deduped and saved as leads. Returns how it went
-    (`LISTED`, `NO_LISTINGS`, `REFUSED`, `LISTINGS_FAILED`); none of those
-    stops the search, since the web is searched next (`discovery.py`)."""
-    provider = deps.provider()
-    if provider is None:
-        return NO_LISTINGS
-    criteria = decode_jsonb(search.get("criteria"), {}) or {}
-    queries = ((decode_jsonb(search.get("plan"), {}) or {}).get("queries") or [])[:MAX_QUERIES]
-    room = max(0, MAX_LEADS - await lead_count(search["id"]))
-    budget = Budget(left=await grant(search["id"], "provider_calls",
-                                     len(queries) * PAGES_PER_QUERY, MAX_PROVIDER_CALLS))
-    state = {"errors": 0, "refused": False}
-    records: dict[str, dict] = {}
-    gate = asyncio.Semaphore(QUERY_CONCURRENCY)
-
-    async def run_query(query: dict) -> None:
-        token = None
-        for _page in range(PAGES_PER_QUERY):
-            async with gate:
-                # Checked once it's this query's turn: others may have refused meanwhile.
-                if state["refused"] or len(records) >= room or not budget.take():
-                    return
-                try:
-                    postings, token = await provider.search(
-                        query["q"], query.get("location"), page_token=token,
-                    )
-                except providers.ProviderError as exc:
-                    if exc.fatal:
-                        # Every listings API refused for good (the provider logged it):
-                        # nothing more is asked, and what was found is kept.
-                        state["refused"] = True
-                        return
-                    state["errors"] += 1
-                    logger.info("job search query failed search=%s: %s", search["id"], exc)
-                    return
-            for posting in postings:
-                if keep_posting(posting, criteria):
-                    record = lead_record(posting)
-                    if record["dedupe_key"] in records or any(
-                        normalize.same_posting(record["title"], record["company"], r["title"], r["company"])
-                        for r in records.values()
-                    ):
-                        continue
-                    records[record["dedupe_key"]] = record
-            if not token:
-                return
-
-    await guard.note("Searching Google Jobs…")
-    results = await asyncio.gather(*(run_query(q) for q in queries), return_exceptions=True)
-    await refund(search["id"], "provider_calls", budget.left)
-    for result in results:
-        if isinstance(result, BaseException):
-            raise result
-    await insert_leads(search, guard.token, list(records.values())[:room])
-    if state["refused"]:
-        return REFUSED
-    if state["errors"] and state["errors"] >= budget.used:
-        return LISTINGS_FAILED
-    return LISTED
 
 
 # ── enrich ───────────────────────────────────────────────────────────────────

@@ -1,30 +1,34 @@
-"""find_jobs and the job_postings block: live postings, read at the employer. No network."""
+"""find_jobs and the job_postings block: Brave's board searches, every posting
+read on its board. No network."""
+import asyncio
+
 import pytest
 
+from app.matcha.services.matcha_work import brave_search
 from app.matcha.services.matcha_work.agent_runtime import catalog, result
 from app.matcha.services.matcha_work.agent_runtime.abilities import job_listings as J
 from app.matcha.services.matcha_work.agent_runtime.context import RunLimits, RunState
-from app.matcha.services.matcha_work.job_search.providers import Posting
-from app.matcha.services.matcha_work.search_apis import ProviderError
+from app.matcha.services.matcha_work.job_search import boards, normalize
 
 from .helpers import context
 
+FIGMA = "https://job-boards.greenhouse.io/figma/jobs/123"
+ACME = "https://jobs.lever.co/acme/0b9c3b6e-1111-4222-8333-944445555666"
+FARAWAY = "https://jobs.ashbyhq.com/faraway/1f2e3d4c-aaaa-4bbb-8ccc-0123456789ab"
+GONE = "https://job-boards.greenhouse.io/oldco/jobs/9"
+ACCOUNTANT = "https://job-boards.greenhouse.io/figma/jobs/777"
+LINKEDIN = "https://www.linkedin.com/jobs/view/1"
+LA = {"title": "senior product designer", "location": "Los Angeles, CA"}
 
-def posting(title, company, location, *, salary=None, links=None):
-    return Posting(title=title, company=company, location=location, via="via LinkedIn", salary_text=salary,
-                   posted_text="3 days ago", apply_links=links or [], share_url="https://www.google.com/jobs/x")
+
+def record(url, title, company, location, *, remote=None, source="greenhouse", comp=None):
+    """A posting as `discovery.read_posting` reads it from its board."""
+    return {"dedupe_key": normalize.dedupe_key(company, title, location), "title": title, "company": company,
+            "location": location, "remote": remote, "source": source, "source_url": url, "comp": comp or {}}
 
 
-class Provider:
-    def __init__(self, *pages):
-        self.pages, self.asked = list(pages), []
-
-    async def search(self, q, location=None, *, page_token=None):
-        self.asked.append((q, location, page_token))
-        page = self.pages.pop(0)
-        if isinstance(page, Exception):
-            raise page
-        return page
+PAY = {"base": {"status": "posted", "annual_min": 180000, "annual_max": 220000, "currency": "USD",
+                "evidence": {"quote": "$180,000 - $220,000 USD", "origin": "ats_api"}}}
 
 
 def state():
@@ -32,269 +36,222 @@ def state():
 
 
 @pytest.fixture
-def wired(monkeypatch):
-    read = {}
+def web(monkeypatch):
+    """Brave: every search answers with `web.results` (or raises `web.error`)."""
+    class Web:
+        results: list[dict] = []
+        asked: list[str] = []
+        error: Exception | None = None
 
-    async def verify(lead):
-        return read.get(lead["company"])
+    async def search(query, count):
+        Web.asked.append(query)
+        assert count == boards.RESULTS
+        if Web.error is not None:
+            raise Web.error
+        return Web.results
 
-    monkeypatch.setattr(J, "_verify", verify)
-    return read
+    Web.asked = []
+    monkeypatch.setattr(J, "_web_search", search)
+    return Web
 
 
-async def find(st, provider, monkeypatch, **args):
-    monkeypatch.setattr(J, "_provider", lambda: provider)
+@pytest.fixture
+def boards_read(monkeypatch):
+    """The board APIs: url -> record (absent: no longer posted)."""
+    posted: dict[str, dict] = {}
+    reads: list[str] = []
+
+    async def read(url):
+        reads.append(url)
+        return posted.get(url)
+
+    monkeypatch.setattr(J, "_read", read)
+    posted["reads"] = reads  # type: ignore[assignment]
+    return posted
+
+
+def links(*urls):
+    return [{"url": u, "title": "t"} for u in urls]
+
+
+async def find(st, **args):
     return await J.FIND_JOBS.handler(context(), st, args, 120)
 
 
-def test_job_listings_needs_a_listings_key_and_nothing_switched_on(monkeypatch):
+def test_find_jobs_needs_brave_and_nothing_switched_on(monkeypatch):
     ability = J.build()
     assert ability.consent_version is None and not ability.private_only
-    monkeypatch.setattr(J, "_provider", lambda: object())
+    monkeypatch.setattr(brave_search, "available", lambda: True)
     assert catalog.availability(ability, catalog.Situation(private=False)).available
-    monkeypatch.setattr(J, "_provider", lambda: None)
+    monkeypatch.setattr(brave_search, "available", lambda: False)
     assert not catalog.availability(ability, catalog.Situation(private=True)).available
 
 
+def test_ready_is_brave_answering(monkeypatch):
+    monkeypatch.setattr(brave_search, "available", lambda: True)
+    assert J._ready() is True
+
+    def broken():
+        raise RuntimeError("settings not loaded")
+
+    monkeypatch.setattr(brave_search, "available", broken)
+    assert J._ready() is False
+
+
 @pytest.mark.asyncio
-async def test_find_jobs_keeps_jobs_near_the_place_and_reads_them_at_the_employer(monkeypatch, wired):
-    wired["Figma"] = {
-        "source": "greenhouse", "source_url": "https://job-boards.greenhouse.io/figma/jobs/123",
-        "comp": {"base": {"status": "posted", "annual_min": 180000, "annual_max": 220000, "currency": "USD",
-                          "evidence": {"quote": "$180,000 - $220,000 USD", "origin": "ats_api"}}},
-    }
-    provider = Provider(([
-        posting("Senior Product Designer", "Figma", "Los Angeles, CA",
-                links=[{"url": "https://www.linkedin.com/jobs/1", "source": "LinkedIn"}]),
-        posting("Senior Product Designer", "Acme", "Santa Monica, CA",
-                links=[{"url": "https://www.linkedin.com/jobs/2", "source": "LinkedIn"},
-                       {"url": "https://acme.test/careers/9", "source": "Acme"}]),
-        posting("Senior Product Designer", "Faraway", "New York, NY"),
-    ], None))
+async def test_find_jobs_searches_the_boards_and_keeps_live_jobs_near_the_place(web, boards_read):
+    """No Google Jobs (taken out 2026-10-18): Brave's board searches, each
+    posting read on its board, kept for a related title in the place named."""
+    web.results = links(FIGMA, ACME, FARAWAY, GONE, ACCOUNTANT, LINKEDIN)
+    boards_read[FIGMA] = record(FIGMA, "Senior Product Designer", "Figma", "Los Angeles, CA", comp=PAY)
+    boards_read[ACME] = record(ACME, "Senior Product Designer", "Acme", "Santa Monica, CA", source="lever")
+    boards_read[FARAWAY] = record(FARAWAY, "Senior Product Designer", "Faraway", "New York, NY", source="ashby")
+    boards_read[ACCOUNTANT] = record(ACCOUNTANT, "Staff Accountant", "Figma", "Los Angeles, CA")
     st = state()
-    out = await find(st, provider, monkeypatch, title="senior product designer", location="Los Angeles, CA")
-    assert provider.asked == [("senior product designer Los Angeles, CA", None, None)]
-    assert out.payload["new_jobs"] == 2 and out.payload["left_out_elsewhere"] == 1
-    assert out.payload["live_at_employer"] == 1 and out.payload["live_on_a_board"] == 0
+    out = await find(st, **LA)
+    criteria = {"titles": ["senior product designer"], "locations": ["Los Angeles, CA"], "remote": None}
+    assert web.asked == boards.board_searches(["senior product designer"], criteria) and len(web.asked) == 8
+    assert st.sessions[J.KEY].searches == 8
+    # Each board posting read once, however many searches returned it; LinkedIn isn't a board.
+    assert sorted(boards_read["reads"]) == sorted([FIGMA, ACME, FARAWAY, GONE, ACCOUNTANT])
+    assert {k: out.payload[k] for k in ("new_jobs", "board_postings_found", "still_posted", "no_longer_posted",
+                                        "other_roles", "left_out_elsewhere", "already_found")} == {
+        "new_jobs": 2, "board_postings_found": 5, "still_posted": 4, "no_longer_posted": 1,
+        "other_roles": 1, "left_out_elsewhere": 1, "already_found": 0}
     figma, acme = out.payload["jobs"]
-    assert figma.startswith("J1 | Senior Product Designer | Figma | Los Angeles, CA")
-    assert "$180K–$220K" in figma and '"$180,000 - $220,000 USD"' in figma and "live at the employer (Greenhouse)" in figma
-    assert figma.endswith("https://job-boards.greenhouse.io/figma/jobs/123")
-    # Not read at the employer: said so, and its link is the employer's own, not LinkedIn.
-    assert "listed on Google Jobs only" in acme and "Pay not posted" in acme and acme.endswith("https://acme.test/careers/9")
-    assert "https://job-boards.greenhouse.io/figma/jobs/123" in out.provenance
-    assert "https://acme.test/careers/9" in out.provenance
+    assert figma == ('J1 | Senior Product Designer | Figma | Los Angeles, CA | $180K–$220K ("$180,000 - $220,000 USD")'
+                     f" | live at the employer (Greenhouse) | {FIGMA}")
+    assert "Pay not posted" in acme and "live at the employer (Lever)" in acme and acme.endswith(ACME)
+    assert out.provenance == frozenset({FIGMA, ACME})
+    assert out.audit == {"title": "senior product designer", "location": "Los Angeles, CA", "searches": 8,
+                         "links": 5, "read": 5, "posted": 4, "kept": 2}
+    assert "note" not in out.payload and "not_read" not in out.payload
 
 
 @pytest.mark.asyncio
-async def test_a_job_found_twice_is_kept_once_and_remote_means_remote(monkeypatch, wired):
+async def test_a_job_found_twice_is_kept_once_and_remote_means_remote(web, boards_read):
+    remote_url, office_url = (f"https://jobs.lever.co/{c}/0b9c3b6e-1111-4222-8333-94444555566{n}"
+                              for c, n in (("remoteco", 1), ("officeco", 2)))
+    boards_read[remote_url] = record(remote_url, "Staff Engineer", "Remoteco", "Anywhere", remote=True, source="lever")
+    boards_read[office_url] = record(office_url, "Staff Engineer", "Officeco", "Chicago, IL", remote=False,
+                                     source="lever")
+    web.results = links(remote_url, office_url)
     st = state()
-    remote = posting("Staff Engineer", "Remoteco", "Anywhere")
-    remote.remote = True
-    office = posting("Staff Engineer", "Officeco", "Chicago, IL")
-    office.remote = False
-    out = await find(st, Provider(([remote, office], None)), monkeypatch, title="staff engineer", location="Remote")
+    out = await find(st, title="staff engineer", location="Remote")
     assert out.payload["new_jobs"] == 1 and out.payload["jobs"][0].startswith("J1 | Staff Engineer | Remoteco")
-    again = await find(st, Provider(([remote], None)), monkeypatch, title="staff engineer", location="Remote")
-    assert again.payload["new_jobs"] == 0 and again.payload["already_found"] == 1
+    # Asked again: what this run read isn't read again.
+    again = await find(st, title="staff engineer", location="Remote")
+    assert again.payload["new_jobs"] == 0 and again.payload["already_found"] == 2
+    assert again.payload["note"] == "Every posting found was already found in this run."
+    assert len(boards_read["reads"]) == 2
+    # The same job on another board (Greenhouse here, Lever before) is the same job.
+    copy = "https://job-boards.greenhouse.io/remoteco/jobs/55"
+    boards_read[copy] = record(copy, "Staff Engineer", "Remoteco", "Remote", remote=True)
+    web.results = links(copy)
+    third = await find(st, title="staff engineer", location="Remote")
+    assert third.payload["new_jobs"] == 0 and third.payload["already_found"] == 1
+    assert third.payload["note"] == "Every posting still up was already found in this run."
 
 
 @pytest.mark.asyncio
-async def test_listings_down_is_a_tool_error_the_model_can_route_around(monkeypatch, wired):
-    out = await find(state(), Provider(ProviderError("SerpApi answered 500")), monkeypatch, title="nurse")
-    assert "web_search" in out.payload["error"]
+async def test_brave_down_is_a_tool_error_and_one_failed_search_is_skipped(web, boards_read, monkeypatch):
+    web.error = brave_search.Unavailable("no searches left", out=True)
+    out = await find(state(), **LA)
+    assert out.status == "error" and "Brave search isn't answering" in out.payload["error"]
+    assert len(web.asked) == 1, "out: no more searches"
+    # One search failing (not out) is skipped; the others still count.
+    calls = []
+
+    async def flaky(query, count):
+        calls.append(query)
+        if len(calls) == 1:
+            raise brave_search.Unavailable("503")
+        return links(FIGMA)
+
+    monkeypatch.setattr(J, "_web_search", flaky)
+    boards_read[FIGMA] = record(FIGMA, "Senior Product Designer", "Figma", "Los Angeles, CA")
+    out = await find(state(), **LA)
+    assert len(calls) == 8 and out.payload["new_jobs"] == 1 and out.audit["searches"] == 7
 
 
 @pytest.mark.asyncio
-async def test_the_block_puts_jobs_read_at_the_employer_first(monkeypatch, wired):
-    wired["Beta"] = {"source": "lever", "source_url": "https://jobs.lever.co/beta/abc", "comp": {}}
+async def test_searches_stop_at_the_runs_budget(web, boards_read):
     st = state()
-    await find(st, Provider(([posting("Designer", "Alpha", "Austin, TX"), posting("Designer", "Beta", "Austin, TX"),
-                              posting("Designer", "Gamma", "Austin, TX")], None)),
-               monkeypatch, title="designer", location="Austin, TX")
-    block, _ = J.gate_block("job_postings", {"job_ids": []}, st)
-    assert [j["company"] for j in block["jobs"]] == ["Beta", "Alpha", "Gamma"]
-    assert block["jobs"][0]["verified"] is True and block["jobs"][0]["apply_url"] == "https://jobs.lever.co/beta/abc"
-    picked, warnings = J.gate_block("job_postings", {"job_ids": ["j3", "J9"]}, st)
-    assert [j["id"] for j in picked["jobs"]] == ["J3"] and warnings
-    out, _ = result.normalize({"headline": "3 designer jobs", "summary": "Three."}, st, [J.build()])
-    assert [b["type"] for b in out["blocks"]] == ["job_postings"]
+    st.sessions[J.KEY].searches = J.MAX_SEARCHES - 2
+    await find(st, **LA)
+    assert len(web.asked) == 2 and st.sessions[J.KEY].searches == J.MAX_SEARCHES
+    spent = await find(st, **LA)
+    assert spent.label == "Job search budget exhausted" and len(web.asked) == 2
+    missing = await find(state(), title="  ")
+    assert missing.status == "error" and "Say which role" in missing.payload["error"]
 
 
 @pytest.mark.asyncio
-async def test_a_posting_read_on_a_job_board_is_said_to_be_on_that_board(monkeypatch, wired):
-    # builtin.com carries the posting's JobPosting data, but it isn't Plug's site.
-    wired["Plug Technologies"] = {"source": "web", "source_url": "https://builtin.com/job/staff-product-designer/1",
-                                  "comp": {}}
-    wired["Disney"] = {"source": "web", "source_url": "https://jobs.disneycareers.com/job/glendale/designer/1",
-                       "comp": {}}
-    st = state()
-    out = await find(st, Provider(([
-        posting("Product Designer", "Plug Technologies", "Los Angeles, CA",
-                links=[{"url": "https://builtin.com/job/staff-product-designer/1", "source": "Built In"},
-                       {"url": "https://jobs.ashbyhq.com/plug/0b1c2d3e-0000-4000-8000-000000000001", "source": "Ashby"}]),
-        posting("Product Designer", "Disney", "Glendale, CA"),
-        posting("Product Designer", "Nominal", "Los Angeles, CA",
-                links=[{"url": "https://www.jobleads.com/us/job/1", "source": "JobLeads"},
-                       {"url": "https://nominal.io/careers/designer", "source": "Nominal"}]),
-    ], None)), monkeypatch, title="product designer", location="Los Angeles, CA")
-    plug, disney, nominal = out.payload["jobs"]
-    assert "live on builtin.com, a job board" in plug
-    # Where to apply: the employer's own ATS over the board it was read on.
-    assert plug.endswith("https://jobs.ashbyhq.com/plug/0b1c2d3e-0000-4000-8000-000000000001")
-    assert "live at the employer (jobs.disneycareers.com)" in disney
-    # Not read anywhere: the employer's own careers page over another board.
-    assert "listed on Google Jobs only" in nominal and nominal.endswith("https://nominal.io/careers/designer")
-    block, _ = J.gate_block("job_postings", {"job_ids": []}, st)
-    assert [j["company"] for j in block["jobs"]] == ["Disney", "Plug Technologies", "Nominal"]
-    assert block["jobs"][1]["verified"] and not block["jobs"][1]["at_employer"]
-    assert block["jobs"][1]["read_on"] == "builtin.com"
+async def test_searching_stops_when_it_runs_long(web, boards_read, monkeypatch):
+    monkeypatch.setattr(J, "SEARCH_SECONDS", -1.0)
+    await find(state(), **LA)
+    assert len(web.asked) == 1, "the first search always runs"
 
 
 @pytest.mark.asyncio
-async def test_a_posting_read_on_a_board_is_looked_up_on_the_employers_own_board(monkeypatch):
-    from types import SimpleNamespace
-
-    from app.matcha.services.matcha_work.job_search import ats, phases
-
-    async def enrich(lead, deps, budget):
-        return {"source": "web", "source_url": "https://builtin.com/job/1", "description": "board text", "comp": {}}
-
-    found = {}
-
-    async def find(company, title, *, take):
-        assert take()
-        return found.get(company)
-
-    monkeypatch.setattr(phases, "enrich_one", enrich)
-    monkeypatch.setattr(phases, "Deps", lambda: SimpleNamespace(ats_find=find))
-    lead = {"title": "Product Designer", "company": "Otter", "apply_links": []}
-    # Not on any of its boards: the board read stands.
-    assert (await J._verify(lead))["source_url"] == "https://builtin.com/job/1"
-    found["Otter"] = ats.AtsPosting(ref=ats.AtsRef("greenhouse", "otter", "123"),
-                                    url="https://job-boards.greenhouse.io/otter/jobs/123",
-                                    title="Product Designer", company="Otter")
-    upgraded = await J._verify(lead)
-    assert upgraded["source"] == "greenhouse" and upgraded["source_url"] == "https://job-boards.greenhouse.io/otter/jobs/123"
-    # Another job on the employer's board is not this one.
-    found["Otter"] = ats.AtsPosting(ref=ats.AtsRef("greenhouse", "otter", "9"), url="https://job-boards.greenhouse.io/otter/jobs/9",
-                                    title="Staff Accountant", company="Otter")
-    assert (await J._verify(lead))["source"] == "web"
-
-
-@pytest.mark.parametrize("url, company, theirs", [
-    ("https://careers.bostonscientific.com/job/1", "Boston Scientific", True),
-    ("https://bostonscientific.wd5.myworkdayjobs.com/x", "Boston Scientific Corporation", True),
-    ("https://jobs.disneycareers.com/job/glendale/1", "The Walt Disney Company", True),
-    ("https://www.metacareers.com/jobs/1", "Meta", True),
-    ("https://jobs.netflix.com/jobs/1", "Netflix", True),
-    ("https://otter.ai/careers", "Otter.ai", True),
-    ("https://www.bmw.com/careers", "BMW", True),
-    ("https://amazon.jobs/en/jobs/1", "Amazon", True),
-    ("https://careers.tesco.co.uk/1", "Tesco PLC", True),
-    # A word of the name inside a board's host is not the employer's site.
-    ("https://www.builtinboston.com/job/1", "Boston Scientific", False),
-    ("https://builtin.com/job/1", "Plug Technologies", False),
-    ("https://www.jobilize.com/job/1", "Disney", False),
-    ("https://boston.craigslist.org/jobs/1", "Boston Scientific", False),
-    ("", "Boston Scientific", False),
-    ("https://careers.example.com/1", "Confidential", False),
-])
-def test_a_host_is_the_employers_when_a_label_is_its_name(url, company, theirs):
-    assert J.employer_host(url, company) is theirs
-
-
-@pytest.mark.asyncio
-async def test_a_slow_read_costs_its_check_not_the_list(monkeypatch):
-    import asyncio
-
+async def test_a_slow_read_is_stopped_and_tried_again_later(web, monkeypatch):
     stopped = []
 
-    async def verify(lead):
+    async def slow(url):
         try:
             await asyncio.sleep(30)
         except asyncio.CancelledError:
-            stopped.append(lead["company"])
+            stopped.append(url)
             raise
 
-    monkeypatch.setattr(J, "_verify", verify)
-    monkeypatch.setattr(J, "VERIFY_MARGIN", 0.0)
-    monkeypatch.setattr(J, "_provider", lambda: Provider(([
-        posting("Product Designer", "Acme", "Los Angeles, CA"),
-        posting("Product Designer", "Brightline", "Los Angeles, CA"),
-    ], None)))
+    monkeypatch.setattr(J, "_read", slow)
+    monkeypatch.setattr(J, "READ_MARGIN", 0.0)
+    web.results = links(FIGMA, ACME)
     st = state()
     # 0.2 s left in the run: the reads get that, then are stopped.
-    out = await J.FIND_JOBS.handler(context(), st, {"title": "product designer", "location": "Los Angeles, CA"}, 0.2)
-    assert out.payload["new_jobs"] == 2 and out.payload["live_at_employer"] == 0
-    assert all("listed on Google Jobs only" in line for line in out.payload["jobs"])
+    out = await J.FIND_JOBS.handler(context(), st, LA, 0.2)
+    assert out.payload["new_jobs"] == 0 and out.payload["not_read_in_time"] == 2
+    assert out.payload["note"] == "The postings found couldn't be read in time. Try again."
     await asyncio.sleep(0)  # the reads called off get their cancellation
-    assert sorted(stopped) == ["Acme", "Brightline"]
+    assert sorted(stopped) == sorted([FIGMA, ACME])
+    assert not st.sessions[J.KEY].read, "not read: a later call tries them again"
+    # No time at all: nothing is started.
+    none_left = await J.FIND_JOBS.handler(context(), state(), LA, 0.0)
+    assert none_left.payload["not_read_in_time"] == 2
 
 
 @pytest.mark.asyncio
-async def test_a_job_is_in_the_run_before_it_is_read(monkeypatch):
-    # Called off mid-read (the runner's timeout), the jobs listed are kept, and
-    # a second search can't count them as new.
-    import asyncio
+async def test_a_read_that_breaks_counts_as_not_posted(web, monkeypatch):
+    async def broken(url):
+        raise RuntimeError("bad json")
 
-    reading = asyncio.Event()
-
-    async def verify(lead):
-        reading.set()
-        await asyncio.sleep(30)
-
-    monkeypatch.setattr(J, "_verify", verify)
-    monkeypatch.setattr(J, "_provider", lambda: Provider(
-        ([posting("Product Designer", "Acme", "Los Angeles, CA")], None),
-        ([posting("Product Designer", "Acme", "Los Angeles, CA")], None),
-    ))
-    st = state()
-    first = asyncio.ensure_future(J.FIND_JOBS.handler(context(), st, {"title": "product designer",
-                                                                      "location": "Los Angeles, CA"}, 120))
-    await reading.wait()
-    first.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await first
-    assert list(st.sessions[J.KEY].jobs) == ["J1"] and not st.sessions[J.KEY].jobs["J1"]["verified"]
-    again = await J.FIND_JOBS.handler(context(), st, {"title": "product designer", "location": "Los Angeles, CA",
-                                                      "pages": 1}, 0.0)
-    assert again.payload["new_jobs"] == 0 and again.payload["already_found"] == 1
+    monkeypatch.setattr(J, "_read", broken)
+    web.results = links(FIGMA)
+    out = await find(state(), **LA)
+    assert out.payload["no_longer_posted"] == 1
+    assert out.payload["note"].startswith("None of the job-board postings found is still posted")
 
 
 @pytest.mark.asyncio
-async def test_listing_pages_stop_at_the_runs_budget(monkeypatch, wired):
-    provider = Provider(([posting("Product Designer", "Acme", "Los Angeles, CA")], "next"),
-                        ([posting("Product Designer", "Brightline", "Los Angeles, CA")], "next"))
-    st = state()
-    st.sessions[J.KEY].paid = J.MAX_PAID - 1
-    await find(st, provider, monkeypatch, title="product designer", location="Los Angeles, CA", pages=2)
-    assert len(provider.asked) == 1 and st.sessions[J.KEY].paid == J.MAX_PAID
+async def test_more_links_than_a_call_reads(web, boards_read, monkeypatch):
+    monkeypatch.setattr(J, "READS", 2)
+    web.results = links(FIGMA, ACME, FARAWAY)
+    out = await find(state(), **LA)
+    assert len(boards_read["reads"]) == 2 and out.payload["not_read"].startswith("1 more board postings")
 
 
 def studios(first, last):
-    return [posting("Product Designer", f"Studio{n:02d}", "Los Angeles, CA") for n in range(first, last + 1)]
+    urls = [f"https://job-boards.greenhouse.io/studio{n:02d}/jobs/{n}" for n in range(first, last + 1)]
+    return urls, {u: record(u, "Product Designer", f"Studio{n:02d}", "Los Angeles, CA")
+                  for n, u in zip(range(first, last + 1), urls)}
 
 
 @pytest.mark.asyncio
-async def test_a_call_reads_three_pages_unless_asked_for_fewer(monkeypatch, wired):
-    # One page kept about 5 in LA once the place filter and board copies were out.
+async def test_a_long_list_reaches_the_model_inside_the_output_budget(web, boards_read):
+    urls, posted = studios(1, 30)
+    boards_read.update(posted)
+    web.results = links(*urls)
     st = state()
-    provider = Provider((studios(1, 10), "t2"), (studios(11, 20), "t3"), (studios(21, 30), None))
-    out = await find(st, provider, monkeypatch, title="product designer", location="Los Angeles, CA")
-    q = "product designer Los Angeles, CA"
-    assert provider.asked == [(q, None, None), (q, None, "t2"), (q, None, "t3")]
-    assert out.payload["new_jobs"] == 30 and st.sessions[J.KEY].paid == 3
-    lookup = Provider((studios(31, 40), "t2"))
-    await find(st, lookup, monkeypatch, title="product designer", location="Los Angeles, CA", pages=1)
-    assert len(lookup.asked) == 1 and st.sessions[J.KEY].paid == 4
-
-
-@pytest.mark.asyncio
-async def test_a_long_list_reaches_the_model_inside_the_output_budget(monkeypatch, wired):
-    st = state()
-    monkeypatch.setattr(J, "_provider", lambda: Provider((studios(1, 10), "t2"), (studios(11, 20), "t3"),
-                                                         (studios(21, 30), None)))
     ctx = context(limits=RunLimits(max_tool_output_chars=4000))
     out = await J.FIND_JOBS.handler(ctx, st, {"title": "product designer", "location": "Los Angeles, CA"}, 120)
     shown = out.payload["jobs"]
@@ -304,17 +261,50 @@ async def test_a_long_list_reaches_the_model_inside_the_output_budget(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_a_search_that_only_finds_repeats_says_so(monkeypatch, wired):
+async def test_the_block_is_rebuilt_from_the_run(web, boards_read):
+    urls, posted = studios(1, 3)
+    boards_read.update(posted)
+    web.results = links(*urls)
     st = state()
-    await find(st, Provider((studios(1, 2), None)), monkeypatch, title="product designer", location="Los Angeles, CA")
-    again = await find(st, Provider((studios(1, 2), None)), monkeypatch, title="product designer",
-                       location="Los Angeles, CA")
-    assert again.payload["new_jobs"] == 0 and again.payload["already_found"] == 2
-    assert again.payload["note"] == "Every posting found was already found in this run."
-    far = [posting("Product Designer", "Faraway", "New York, NY")]
-    mixed = await find(st, Provider((studios(1, 1) + far, None)), monkeypatch, title="product designer",
-                       location="Los Angeles, CA")
-    assert mixed.payload["note"] == "Every posting found was outside the place asked for or already found in this run."
-    outside = await find(state(), Provider((far, None)), monkeypatch, title="product designer",
-                         location="Los Angeles, CA")
-    assert outside.payload["note"] == "Every posting found was outside the place asked for."
+    await find(st, title="product designer", location="Los Angeles, CA")
+    block, _ = J.gate_block("job_postings", {"job_ids": []}, st)
+    assert [j["company"] for j in block["jobs"]] == ["Studio01", "Studio02", "Studio03"]
+    first = block["jobs"][0]
+    assert first["verified"] is True and first["at_employer"] is True and first["read_on"] == "Greenhouse"
+    assert first["apply_url"] == urls[0] and "via" not in first and "posted" not in first
+    picked, warnings = J.gate_block("job_postings", {"job_ids": ["j3", "J9"]}, st)
+    assert [j["id"] for j in picked["jobs"]] == ["J3"] and warnings
+    out, _ = result.normalize({"headline": "3 designer jobs", "summary": "Three."}, st, [J.build()])
+    assert [b["type"] for b in out["blocks"]] == ["job_postings"]
+
+
+def test_a_row_read_off_an_ats_names_where(monkeypatch):
+    row = J.job_row(record("https://www.careers.example.com/1", "Designer", "Ex", "LA", source="web"))
+    assert row["at_employer"] is False and row["read_on"] == "careers.example.com"
+    assert J.model_line("J1", row).endswith("live on careers.example.com | https://www.careers.example.com/1")
+    assert J.model_line("J2", {**row, "location": "", "remote": True, "apply_url": None}).split(" | ")[3] == "Remote"
+
+
+@pytest.mark.parametrize("args, note", [
+    ((0, 0, 0, 0, 0, 0, 0), "No Greenhouse, Lever or Ashby postings turned up"),
+    ((3, 0, 3, 0, 2, 1, 0), "Every posting still up was another kind of role or outside the place asked for."),
+    ((1, 0, 1, 0, 0, 0, 0), "Nothing new turned up."),
+])
+def test_empty_notes(args, note):
+    assert J._empty_note(*args).startswith(note)
+
+
+@pytest.mark.asyncio
+async def test_a_board_link_is_read_through_the_job_searchs_reader(monkeypatch):
+    from app.matcha.services.matcha_work.job_search import discovery
+
+    seen = {}
+
+    async def read_posting(posting, deps, take, *, today):
+        seen.update(posting=posting, fetches=sum(1 for _ in iter(take, False)), today=today)
+        return {"title": "x"}
+
+    monkeypatch.setattr(discovery, "read_posting", read_posting)
+    assert await J._read(FIGMA) == {"title": "x"}
+    assert seen["posting"] == {"url": FIGMA, "title": "", "company": "", "location": ""}
+    assert seen["fetches"] == J.READ_FETCHES

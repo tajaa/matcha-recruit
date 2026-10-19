@@ -26,7 +26,7 @@ async def test_routes_pass_the_caller(monkeypatch):
 
     listed = await routes.list_job_searches(USER)
     assert listed["usage"] == {"limit": 4} and listed["available"] is True
-    assert listed["consent"]["granted"] is False and listed["consent"]["disclosure"]["version"] == "jobs-1"
+    assert listed["consent"]["granted"] is False and listed["consent"]["disclosure"]["version"] == "jobs-2"
     routes.service.list_searches.assert_awaited_once_with(USER.id, CID)
 
     body = JobSearchCreate(request_id=uuid4(), ask="COO roles across the US")

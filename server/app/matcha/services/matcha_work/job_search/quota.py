@@ -1,7 +1,7 @@
 """Job searches, counted in searches: a view of the shared monthly task
 allowance (`agent_tasks/allowance.py`), where a whole search costs five units.
 
-A search costs real money (Google Jobs calls, page loads, model runs), so the
+A search costs real money (Brave searches, page loads, model runs), so the
 allowance counts whole searches, not re-ranks or redrafts. Only a search the
 system failed is free. A cancelled search counts, and so does a deleted one:
 deleting leaves a blanked row behind for exactly this reason.

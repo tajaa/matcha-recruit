@@ -11,20 +11,19 @@ BATCH = {"J1": "lead-1", "J2": "lead-2"}
 
 def test_plan():
     plan, _ = contracts.normalize_plan({"result": {
-        "queries": [{"q": " Chief  Operating Officer ", "location": "United States"},
-                    {"q": "chief operating officer", "location": "United States"},
-                    {"q": "COO Denver", "location": "Denver, Colorado"}, {"q": "x"}, "junk"],
-        "titles": ["COO", "", "Chief Operating Officer"], "deal_breakers": ["no relocation"],
+        "titles": ["COO", "", " Chief  Operating Officer ", "coo", "x", 7],
+        "deal_breakers": ["no relocation"],
         "profile_summary": "Operator.\x07", "weights": {"base": 0.9, "bonus": "high", "equity": 0.7},
+        # A plan from before 2026-10-18 had Google Jobs queries: ignored.
+        "queries": [{"q": "COO Denver", "location": None}],
     }})
-    assert plan["queries"] == [{"q": "Chief Operating Officer", "location": "United States"},
-                               {"q": "COO Denver", "location": None}]
     assert plan["titles"] == ["COO", "Chief Operating Officer"] and plan["profile_summary"] == "Operator."
     assert plan["weights"] == {"base": 0.9, "equity": 0.7} and plan["source"] == "model"
-    for bad in ({}, {"result": "x"}, {"result": {"queries": []}}):
+    assert "queries" not in plan and "queries" not in contracts.PLAN_SCHEMA["properties"]
+    for bad in ({}, {"result": "x"}, {"result": {"titles": []}}, {"titles": ["x", ""]}):
         with pytest.raises(ValueError):
             contracts.normalize_plan(bad)
-    assert "weights" not in contracts.normalize_plan({"result": {"queries": [{"q": "COO"}], "weights": None}})[0]
+    assert "weights" not in contracts.normalize_plan({"result": {"titles": ["COO"], "weights": None}})[0]
 
 
 def test_discover_keeps_links_the_run_saw():
@@ -142,15 +141,15 @@ def test_approach_email_and_likely_answers():
 def test_the_answer_comes_flat_wrapped_or_as_json_text():
     """Claude Haiku sent the wrapped `result` as JSON text, and the run failed
     (prod, 2026-10-15..18): every shape a model may send is the same answer."""
-    plan = {"queries": [{"q": "COO", "location": None}], "titles": ["COO"], "deal_breakers": [],
+    plan = {"titles": ["COO", "Chief Operating Officer"], "deal_breakers": [],
             "profile_summary": "Operator.", "weights": None}
     expected = contracts.normalize_plan({"result": plan})
     assert contracts.normalize_plan(plan) == expected
     assert contracts.normalize_plan({"result": json.dumps(plan)}) == expected
     # A list the model quoted inside the object, read as the list it is.
-    assert contracts.normalize_plan({**plan, "queries": json.dumps(plan["queries"])}) == expected
+    assert contracts.normalize_plan({**plan, "titles": json.dumps(plan["titles"])}) == expected
     # The finish tool asks for the fields themselves, not a wrapper.
-    assert "queries" in contracts.PLAN_FINISH.parameters["properties"]
+    assert "titles" in contracts.PLAN_FINISH.parameters["properties"]
     assert "result" not in contracts.APPROACH_FINISH.parameters["properties"]
     with pytest.raises(ValueError, match="not valid JSON"):
         contracts.normalize_plan({"result": "{queries: [COO]"})

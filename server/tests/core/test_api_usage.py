@@ -66,7 +66,7 @@ def test_a_transport_module_is_not_the_feature():
     for module in ("app.matcha.services.matcha_work.search_apis",
                    "app.matcha.services.matcha_work.brave_search"):
         assert _call_feature_label_from(module) == "unknown"
-    assert _call_feature_label_from("app.matcha.services.matcha_work.job_search.providers") == "matcha.job_search"
+    assert _call_feature_label_from("app.matcha.services.matcha_work.job_search.boards") == "matcha.job_search"
 
 
 @pytest.mark.asyncio

@@ -81,7 +81,7 @@ def test_views_show_fields_known_values_and_consent():
     assert [f["key"] for f in form["fields"]] == ["location", "nice_to_haves", "avoid"]
     assert form["fields"][1]["optional"] is True and form["units"] == 3 and form["submit_label"] == "Start"
     assert {k["key"]: k["shown"] for k in form["known"]} == {"budget_max": "$3,500", "must_haves": "dogs"}
-    assert form["consent"]["version"] == "jobs-1"
+    assert form["consent"]["version"] == "jobs-2"
     text = intake.form_text(payload)
     assert text.startswith("Where should I look?") and "Where; Nice to have (optional)" in text
     assert intake._shown(F("a", "boolean"), True) == "Yes" and intake._shown(F("a", "text"), "x") == "x"

@@ -144,7 +144,7 @@ async def test_abilities_say_what_stands_in_the_way(wired, monkeypatch):
     # The person's job searches: private, behind its own disclosure, never acting outward.
     jobs = by_key["jobs"]
     assert jobs["private_only"] and not jobs["acts"] and not jobs["enabled"]
-    assert jobs["disclosure"]["version"] == "jobs-1"
+    assert jobs["disclosure"]["version"] == "jobs-2"
     # Read-only, no consent; listed as not set up until the browser worker exists.
     shots = by_key["screenshots"]
     assert shots["always_on"] and not shots["acts"] and not shots["private_only"]

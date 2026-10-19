@@ -1,10 +1,8 @@
-"""The `discovering` phase: postings from Google Jobs, employers' own boards and the web.
+"""The `discovering` phase: postings from employers' own boards and the web,
+found with Brave and Claude only.
 
-Four steps, each its own worker task (the step is `phase_cursor.step`):
+Three steps, each its own worker task (the step is `phase_cursor.step`):
 
-  listings  Google Jobs, when a listings API is set up (`phases.listings`).
-            No API, or one with no searches left, is not fatal: the boards
-            and the web are searched either way.
   boards    code's own Brave searches for each title on Greenhouse, Lever and
             Ashby, and in each place the person named (`boards.find`). Every
             board job link in the answers waits in the cursor to be read. No
@@ -32,8 +30,13 @@ left. Only the ask, what the person set and the planned titles go to the web
 run (`prompts.discover_turn`), never their résumé.
 
 A search with no jobs at the end fails, which is free: `UNAVAILABLE` when no
-source could be searched (no listings API, or it refused or failed, and the
-board searches and the web run failed too), else "No postings matched".
+source could be searched (the board searches and the web runs all failed),
+else "No postings matched".
+
+Searches used to start with Google Jobs (SearchAPI, else SerpApi). That step
+was taken out on 2026-10-18: a search runs on Brave and Claude alone. A search
+whose cursor still says `listings` (in flight at the deploy) starts at the
+boards.
 """
 from __future__ import annotations
 
@@ -57,7 +60,7 @@ from .phases import MAX_LEADS, Deps
 
 logger = logging.getLogger(__name__)
 
-LISTINGS, BOARDS, WEB, READ = "listings", "boards", "web", "read"
+BOARDS, WEB, READ = "boards", "web", "read"
 WEB_RUNS = 2
 WEB_TARGET = 30
 WEB_LIMITS = RunLimits(max_model_calls=8, wall_seconds=300.0, max_hosted_per_response=4,
@@ -89,14 +92,8 @@ _ATS_NAMES = {"greenhouse": "Greenhouse", "lever": "Lever", "ashby": "Ashby", "w
 
 async def discover(search: dict, deps: Deps, guard: chain.Guard) -> PhaseOutcome:
     cursor = decode_jsonb(search.get("phase_cursor"), {}) or {}
-    step = cursor.get("step") or LISTINGS
-    if step == LISTINGS:
-        how = await phases.listings(search, deps, guard)
-        found = await phases.lead_count(search["id"])
-        note = (f"Found {found} on Google Jobs. " if found else "") + "Searching employers' job boards…"
-        return PhaseOutcome(status="discovering", cursor={"step": BOARDS, "listings": how},
-                            progress={"note": note, "found": found})
-    if step == BOARDS:
+    step = cursor.get("step") or BOARDS
+    if step in (BOARDS, "listings"):
         return await _search_boards(search, deps, guard, cursor)
     if step == WEB:
         return await _search_web(search, deps, guard, cursor)
@@ -218,8 +215,7 @@ async def _read(search: dict, deps: Deps, guard: chain.Guard, cursor: dict) -> P
 async def _finish(search: dict, cursor: dict) -> PhaseOutcome:
     total = await phases.lead_count(search["id"])
     if total == 0:
-        searched = cursor.get("web_ok") or cursor.get("boards_ok") or cursor.get("listings") == phases.LISTED
-        if not searched:
+        if not (cursor.get("web_ok") or cursor.get("boards_ok")):
             raise PhaseFailed(UNAVAILABLE)
         raise PhaseFailed(NO_MATCH)
     return PhaseOutcome(status=NEXT, cursor={},

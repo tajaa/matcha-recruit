@@ -675,7 +675,8 @@ migration direction is automatically applied by this change.
 
 Two read-only look-ups for lists a web search answers badly. No consent and
 not private-only (only the query leaves the server, as with `web_search`);
-each is offered only when the server has a provider key (`env_ready`).
+each is offered only when the server can search (`env_ready`: a places
+provider key, or Brave answering for jobs).
 
 - **`find_places`**: businesses in an area from Google Maps, through research
   tasks' provider (`agent_tasks/research/providers.choose_provider("places")`:
@@ -687,31 +688,26 @@ each is offered only when the server has a provider key (`env_ready`).
   Places are kept once per run (Google's place id, else name + address)
   under short ids (P1…); the model gets one compact line each, fitted to the
   output budget, and every one stays in the session.
-- **`find_jobs`**: open postings, from Google Jobs (`job_search.providers`)
-  for one title and place (queries built by `phases.plan_from_criteria`),
-  3 pages of about 10 unless the model asks for fewer (one page kept about 5
-  once the place filter and board copies were out), kept only where wanted
-  (`phases.keep_posting` → `places.fits`), deduped,
-  then the top 20 read (`phases.enrich_one` with 4 fetches each, 6 at once,
-  at most 40 s and never past the tool's own deadline less 5 s; reads still
-  going then are stopped). Every posting kept is in the session, unread,
-  before any read starts, so a read cut short costs its check, not the list.
-  Read = `verified` (still up at that link, pay from the posting); otherwise
-  "listed on Google Jobs only". `at_employer` only for an ATS or the
-  employer's own host (`employer_host`: a host label is the name run
-  together, or the site's own domain is a distinctive word of it once
-  "careers"/"jobs" is taken off; builtinboston.com is not Boston Scientific):
-  a posting first read on a board
-  (builtin.com, jobilize.com) is looked up on the employer's own board
-  (`ats.find_on_board`, 6 fetches) and read there when it is the same job;
-  otherwise it is said to be live on that board (live check, 2026-10-17: 9
-  LA product-designer jobs, 5 read, 4 of them on boards until this step). Pay is
-  `ranking.comp_line` over evidence, never the model's. 4 calls, 12 listing
-  pages a run. The model gets one line a job fitted to the output budget
-  (`places.fit_lines`); every one stays in the session. The deep, ranked
-  search with drafts is still a job search task.
+- **`find_jobs`**: open postings on employers' own job boards, on Brave alone
+  (no search API: its Google Jobs source, SearchAPI else SerpApi, was taken
+  out on 2026-10-18). One title and place makes up to 8 Brave searches
+  (`boards.board_searches`: the title on Greenhouse, Lever and Ashby, in the
+  place and anywhere; 24 a run, about 3 calls with a place, past 25 s a call
+  stops searching). Every board job link in the answers (`ats.detect`) not
+  read earlier in the run is read from its board's API
+  (`discovery.read_posting`, 2 fetches, 8 at once, up to 80 links, at most
+  40 s and never past the tool's own deadline less 5 s; reads still going
+  then are stopped and tried again by a later call). A job no longer posted
+  is dropped (about 4 in 5 of Brave's board links, 2026-10-17), and so is one
+  with an unrelated title (`normalize.related_title`) or outside the place
+  (`phases.keep_job` → `places.fits`); the same job on two boards is kept
+  once (`same_posting`). So every job shown is `verified` and `at_employer`,
+  with the posting's own title, place and pay (`ranking.comp_line` over
+  evidence, never the model's). The model gets one line a job fitted to the
+  output budget (`places.fit_lines`); every one stays in the session. The
+  deep, ranked search with the web and drafts is still a job search task.
 - **Blocks are rebuilt by id.** `places` (all a run can find, 360) and
-  `job_postings` (all a run can find, 120; read-at-employer first) come from the session, never
+  `job_postings` (all a run can find, 120, in found order) come from the session, never
   the model's text; empty ids mean everything found, and `leave_out_ids` drops
   a few places (a model that listed 190 kept ids took 38 s to finish). A run
   that left the block out gets it (`auto_blocks`) when it found 3 or more:

@@ -5,13 +5,13 @@ import json
 from typing import Any
 
 PLAN = """You plan a job search for one person. Turn what they asked for (and their résumé, if \
-given) into Google Jobs queries and into what matters to them.
+given) into the job titles to search for and into what matters to them. Code searches employers' \
+job boards and the web for each title in the places they named.
 
-- Queries: up to 8, each a job title plus, when they named places, the place in the query text \
-("Chief Operating Officer Denver"). Use location "United States" for a nationwide query and null \
-otherwise. Cover the title's real synonyms at that level (COO: Chief Operating Officer, COO, \
-President & COO, VP Operations only if they would take it). Do not invent places.
-- Titles: the titles you searched. Deal-breakers: only what they said they won't accept.
+- Titles: up to 10, as job postings write them, most wanted first: the titles they asked for, \
+then the title's real synonyms at that level (COO: Chief Operating Officer, COO, President & COO, \
+VP Operations only if they would take it). The first four are searched most. No places in titles.
+- Deal-breakers: only what they said they won't accept.
 - Weights: from what they said matters (e.g. "mostly salary, bonus and equity" => base high, \
 bonus and equity high, fit lower). null if they said nothing about it.
 - Profile summary: who they are professionally, in their own facts. Never invent experience.
@@ -24,7 +24,8 @@ Platform Engineer", not "Platform Engineer AI"); why, in a sentence or \
 two to them ("You've been the technical lead on 20+ enterprise customer calls…"); and evidence, \
 words copied exactly from their résumé that show it. A direction whose evidence isn't in the \
 résumé word for word is dropped. Don't suggest their own titles, a lower level, or a change their \
-résumé doesn't support. Put one query in queries for each direction.
+résumé doesn't support. A direction's title goes in directions only, not in titles: code searches \
+it among the first.
 Call finish once."""
 
 DISCOVER = """You find current job openings for one person, on the pages employers post them \

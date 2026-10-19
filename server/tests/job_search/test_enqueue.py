@@ -88,15 +88,15 @@ async def test_consent_is_asked_for_once_then_granted(gates):
         await enqueue.preflight(CLIENT, COMPANY)
     assert exc.value.status_code == 409
     gates.enable.side_effect = None
-    await enqueue.preflight(CLIENT, COMPANY, consent_version="jobs-1")
+    await enqueue.preflight(CLIENT, COMPANY, consent_version="jobs-2")
     assert gates.enable.await_args.args == (USER, COMPANY, "jobs")
-    assert gates.enable.await_args.kwargs == {"consent_version": "jobs-1"}
+    assert gates.enable.await_args.kwargs == {"consent_version": "jobs-2"}
 
 
 @pytest.mark.asyncio
 async def test_admins_skip_plan_and_budget_but_not_consent(gates):
     gates.consent.return_value = False
-    assert await enqueue.preflight(ADMIN, COMPANY, consent_version="jobs-1") is None
+    assert await enqueue.preflight(ADMIN, COMPANY, consent_version="jobs-2") is None
     gates.plan.assert_not_awaited()
     gates.budget.assert_not_awaited()
     gates.enable.assert_awaited_once()
@@ -214,7 +214,7 @@ async def test_quota_counts_everything_but_failed(monkeypatch):
 @pytest.mark.asyncio
 async def test_consent_granted_reads_the_grant(monkeypatch):
     monkeypatch.setattr(grants, "list_rows", AsyncMock(return_value={
-        "jobs": {"enabled": True, "consent_version": "jobs-1"}}))
+        "jobs": {"enabled": True, "consent_version": "jobs-2"}}))
     assert await enqueue.consent_granted(USER) is True
     monkeypatch.setattr(grants, "list_rows", AsyncMock(return_value={
         "jobs": {"enabled": True, "consent_version": "jobs-0"}}))

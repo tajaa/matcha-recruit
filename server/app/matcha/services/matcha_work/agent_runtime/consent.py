@@ -30,12 +30,14 @@ DISCLOSURES: dict[str, Disclosure] = {
         ),
     ),
     "jobs": Disclosure(
-        version="jobs-1",
+        # jobs-2 (2026-10-18): search terms go to Brave Search, not Google Jobs.
+        version="jobs-2",
         title="Let Espresso run job searches for you",
         body=(
-            "A job search sends your search terms and locations to Google Jobs (through our "
-            "listings provider) and reads public job boards like Greenhouse, Lever and Ashby. "
-            "Your résumé and your name are never sent to them.",
+            "A job search sends the job titles and places you're searching for to Brave Search, "
+            "to find postings on employers' job boards and the web, and reads those postings on "
+            "the boards themselves (like Greenhouse, Lever, Ashby and Workable). Your résumé and "
+            "your name are never sent to them.",
             "To rank the jobs and draft how to approach each one, what you asked for, and your "
             "résumé if you choose to use it, are sent to Espresso's AI model provider with "
             "storage turned off.",

@@ -4,7 +4,7 @@ The model never writes to the database. Each phase ends with one `finish`
 call; its arguments go through a `normalize_*` here, and the orchestrator
 persists only what survives. A ValueError gets the model one repair.
 
-  plan       queries and what to rank on, from the ask (and résumé)
+  plan       the titles to search and what to rank on, from the ask (and résumé)
   discover   links to current postings found on the web (code reads each one)
   screen     relevant or not, and a 0-5 fit, for a batch of jobs by short id
   approach   per job: how to approach, drafts, answers to the real questions
@@ -29,9 +29,10 @@ from app.matcha.services.matcha_work.agent_runtime import registry
 from . import ats, normalize
 from .comp import verify_quote
 
-MAX_QUERIES = 8
+# Titles a plan searches for (board and web searches take the first few).
+MAX_TITLES = 10
 # Roles beyond the person's own title that their résumé supports, suggested
-# by the plan: at most this many, each searched with one query of its own.
+# by the plan: at most this many, each among the first titles searched.
 MAX_DIRECTIONS = 3
 APPROACH_CHANNELS = ("referral", "hiring_manager", "recruiter", "apply_portal", "search_firm")
 _EMAIL = re.compile(r"^[^@\s<>,;]+@[^@\s<>,;]+\.[^@\s<>,;]+$")
@@ -105,15 +106,11 @@ def _unquoted(value: Any) -> Any:
 PLAN_SCHEMA = {
     "type": "object",
     "properties": {
-        "queries": {
-            "type": "array", "maxItems": MAX_QUERIES,
-            "items": {"type": "object", "properties": {
-                "q": {"type": "string", "description": "Google Jobs query text, e.g. 'Chief Operating Officer Austin TX'"},
-                "location": {"type": ["string", "null"], "enum": ["United States", None],
-                             "description": "'United States' for a nationwide query, else null (put a city in q)"},
-            }, "required": ["q", "location"]},
+        "titles": {
+            "type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": MAX_TITLES,
+            "description": "Job titles to search for, as postings write them, most wanted first: "
+                           "theirs, then real synonyms at that level",
         },
-        "titles": {"type": "array", "items": {"type": "string"}, "maxItems": 10},
         "deal_breakers": {"type": "array", "items": {"type": "string"}, "maxItems": 10},
         "profile_summary": {"type": "string", "description": "Two or three sentences on who is looking, from the ask and résumé"},
         "directions": {
@@ -131,30 +128,23 @@ PLAN_SCHEMA = {
             "properties": {k: {"type": "number"} for k in ("base", "bonus", "equity", "fit")},
         },
     },
-    "required": ["queries", "titles", "deal_breakers", "profile_summary", "weights"],
+    "required": ["titles", "deal_breakers", "profile_summary", "weights"],
 }
 PLAN_FINISH = _finish("Planned the search", "Finish with the search plan.", PLAN_SCHEMA)
 
 
 def normalize_plan(args: dict, _state=None) -> tuple[dict, list[str]]:
     result = _result(args)
-    queries, seen = [], set()
-    for item in result.get("queries") or []:
-        if not isinstance(item, dict):
-            continue
-        q = " ".join(_text(item.get("q"), 160).split())
-        location = item.get("location")
-        location = "United States" if location == "United States" else None
-        key = (q.lower(), location)
-        if len(q) >= 2 and key not in seen:
-            seen.add(key)
-            queries.append({"q": q, "location": location})
-    if not queries:
-        raise ValueError("give at least one query")
+    titles: dict[str, str] = {}
+    for title in _texts(result.get("titles"), items=MAX_TITLES, limit=80):
+        title = " ".join(title.split())
+        if len(title) >= 2:
+            titles.setdefault(title.lower(), title)
+    if not titles:
+        raise ValueError("give at least one job title to search for")
     weights = result.get("weights") if isinstance(result.get("weights"), dict) else None
     plan = {
-        "queries": queries[:MAX_QUERIES],
-        "titles": _texts(result.get("titles"), items=10, limit=80),
+        "titles": list(titles.values()),
         "deal_breakers": _texts(result.get("deal_breakers"), items=10, limit=160),
         "profile_summary": _text(result.get("profile_summary"), 800),
         "source": "model",

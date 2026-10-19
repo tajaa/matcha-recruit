@@ -1,5 +1,7 @@
-"""The paid search APIs job search and research tasks share: SearchAPI.io,
-SerpApi and Google's Places API.
+"""The paid search APIs research tasks use: SearchAPI.io, SerpApi and Google's
+Places API, and the request rules Brave's web search (`brave_search.py`)
+follows too. Job search uses none of the first two: since 2026-10-18 it runs
+on Brave and Claude alone.
 
 `answer` makes one request under the rules both follow:
 - 401 or 403: the key was refused. `fatal`: asking again can't help.
