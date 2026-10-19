@@ -28,15 +28,19 @@ résumé doesn't support. A direction's title goes in directions only, not in ti
 it among the first.
 Call finish once."""
 
-DISCOVER = """You find current job openings for one person, on the pages employers post them \
+# The web run's searches in one turn (`discovery.WEB_LIMITS`). The prompt said
+# "one at a time"; a run on dev (2026-10-19) sent 7 at once, and 3 were refused.
+SEARCHES_PER_TURN = 4
+
+DISCOVER = f"""You find current job openings for one person, on the pages employers post them \
 to. You only find postings: nothing is applied for.
 
 - Greenhouse, Lever and Ashby have already been searched, so look further: each title in each \
 place, employers' own careers pages, other applicant tracking boards (Workable, \
 SmartRecruiters and the like) and, for senior roles, search firms' posted searches. A careers \
 page or a search firm counts only when the posting is on the page itself.
-- Run every search you're given, one at a time, then your own. Keep searching until you have \
-about 20 postings or new searches stop turning up new ones: one empty search is not a reason \
+- Run every search you're given, then your own, at most {SEARCHES_PER_TURN} in one turn: more \
+are refused. Keep searching until you have about 20 postings or new searches stop turning up new ones: one empty search is not a reason \
 to stop.
 - Code reads every posting you give for where it is and whether it is still open, so give one \
 even when the result doesn't say where it is. Leave out one the result shows is clearly \

@@ -4,6 +4,7 @@ one-shot call, and the admin endpoint that sets it. No network, no database.
     cd server && ./venv/bin/python -m pytest tests/core/test_anthropic_messages.py -q
 """
 
+import asyncio
 import json
 import time
 from contextlib import asynccontextmanager
@@ -272,6 +273,23 @@ def test_client_needs_a_key_and_is_cached(monkeypatch):
     first = anthropic_messages.get_async_client()
     assert isinstance(first, anthropic.AsyncAnthropic)
     assert anthropic_messages.get_async_client() is first
+
+
+def test_each_event_loop_gets_its_own_client(monkeypatch):
+    """Every Celery task runs its own `asyncio.run()` loop. One shared client
+    sent each task's first request down a connection from the last task's
+    closed loop, and the SDK retried it (dev, 2026-10-19)."""
+    monkeypatch.setattr(anthropic_messages, "get_settings", _settings("sk-test"))
+
+    async def twice():
+        return anthropic_messages.get_async_client(), anthropic_messages.get_async_client()
+
+    first, again = asyncio.run(twice())
+    assert first is again  # one per loop
+    second, _ = asyncio.run(twice())
+    assert second is not first  # a new loop, a new client
+    outside = anthropic_messages.get_async_client()
+    assert outside is second  # outside any loop, the last one stands
 
 
 # --- Admin endpoint -------------------------------------------------------------

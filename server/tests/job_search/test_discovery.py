@@ -1,5 +1,6 @@
 """Discovery: Google Jobs when it's there, then the web, read posting by posting."""
 import json
+from collections import Counter
 from datetime import date
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -303,7 +304,10 @@ async def test_reading_keeps_live_new_postings_as_read_leads(conn):
     # Added jobs, one run so far: look once more.
     assert out.status == "discovering" and out.cursor["step"] == "web"
     assert out.cursor["web_added"] == 4 and out.cursor["postings"] == []
-    assert out.progress == {"note": "Found 5 jobs so far; looking for more…", "found": 5}
+    # What became of each of the ten, for the next search to be tuned by.
+    assert out.progress == {"note": "Found 5 jobs so far; looking for more…", "found": 5, "reads": {"web": {
+        "links": 10, "known": 1, "aggregator": 1, "unread": 2, "title": 1, "elsewhere": 1, "kept": 4,
+    }}}
     # A known link and an aggregator are never read; one API read reserved
     # for each of the six board links, four for each of the two pages.
     assert conn.ran("SET fetch_calls = cur.before")[0][2] == (SEARCH, 6 + 2 * discovery.READS_PER_POSTING,
@@ -525,3 +529,27 @@ def test_small_helpers():
     assert discovery._expired({"valid_through": "soon"}, date(2026, 10, 16)) is False
     assert discovery._expired({"valid_through": "2026-10-15T23:59:00Z"}, date(2026, 10, 16)) is True
     assert discovery._expired({}, date(2026, 10, 16)) is False
+
+
+@pytest.mark.asyncio
+async def test_each_read_says_what_became_of_its_postings(conn):
+    """A dev search read 160 board links, kept 21 and said nothing about the
+    other 139 (2026-10-19). Each read counts what became of each posting, and
+    adds it to the search's earlier reads under where they came from."""
+    conn.on("SELECT dedupe_key, title, company, source_url, apply_links FROM mw_job_leads", [
+        {"dedupe_key": "beta|chief operating officer|austin", "title": "Chief Operating Officer",
+         "company": "Beta", "source_url": None, "apply_links": "[]"},
+    ])
+    conn.on(GRANT, lambda _id, want, _limit: want)
+    deps = phases.Deps(ats_find=NO_BOARD, ats_fetch=AsyncMock(side_effect=ats_fetch),
+                       page_fetch=AsyncMock(side_effect=page_fetch))
+    tally = Counter()
+    twin = claim(TWIN, title="COO", company="Beta Inc")  # reads back as Beta's Chief Operating Officer
+    assert await discovery.read_postings(search_row(), deps, guard(), [twin], tally) == 0
+    assert +tally == Counter(links=1, duplicate=1)
+
+    search = search_row(progress=json.dumps({"note": "x", "reads": {"boards": {"links": 5, "kept": 2}}}))
+    assert discovery.add_reads(search, "boards", Counter(links=3, unread=1, kept=1)) == {
+        "boards": {"links": 8, "unread": 1, "kept": 3}}
+    assert discovery.add_reads(search, "web", Counter(links=2, kept=0)) == {
+        "boards": {"links": 5, "kept": 2}, "web": {"links": 2}}
