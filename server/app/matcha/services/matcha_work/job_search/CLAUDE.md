@@ -30,7 +30,7 @@ no source is `web`.
 | Piece | File | What it owns |
 |---|---|---|
 | Discovery | `discovery.py` | The `discovering` phase in three steps: code's Brave searches of Greenhouse, Lever and Ashby (`boards.py`), a model web search for postings elsewhere, then reading each one (ATS API or JSON-LD) into an already-read lead |
-| Boards | `boards.py` | Code's board searches: Brave (`Deps.web_search`, 20 results each) for each title on each board host and in each place named, ≤24 a search, 1 a second; every Greenhouse/Lever/Ashby job link in the answers goes to the read step, after the stored postings that fit. No model chooses |
+| Boards | `boards.py` | Code's board searches: Brave (`Deps.web_search`, 20 results each) for each title on each board host and in each place named (a whole state by its name and its job hubs, `STATE_HUBS`), ≤24 a search, 1 a second; every Greenhouse/Lever/Ashby job link in the answers goes to the read step, after the stored postings that fit. No model chooses |
 | Stored postings | `postings.py` | Every board posting read, kept (`mw_job_postings`): reused when read live in the last 12 h, skipped when its board said closed in the last 14 days, and `matching` a later search's titles and places. Board searches Brave was sent (`mw_job_board_searches`): the same one within a day asks for its next page. Fails soft |
 | Places | `places.py` (pure) + `data/us_places.tsv.gz` | Whether a job is in a place the person named (`fits`): its location text split into places, put on the map with the US Census gazetteer (offline, built by `server/scripts/build_job_places.py`), kept within 50 miles of one of theirs, or remote when they'd take it |
 | ATS | `ats.py` | Greenhouse / Lever / Ashby / Workable detection from apply links, their public APIs, application questions (Greenhouse's, and Workable's public form); `fetch(ref, more=take)`: one call the caller pays for first, and Workable's form a second paid with `more()` (asked only for a published posting); `most_reads(ref)`, what to reserve; `NAMES`, each ATS by name; `find_on_board`, the employer's own Greenhouse, Lever or Ashby board found by name |
@@ -91,7 +91,12 @@ Worker: `workers/tasks/job_search.py`. Migrations: `mwjobs01`
   alone ("Canada") keeps the jobs its postings place there (`Target.country`);
   nationwide phrases ("US only", "Open to relocation") name no place; regions
   ("Midwest", "East Coast") are measured from their biggest city (`ALIASES`);
-  "not remote" is not remote. Tests: `tests/job_search/test_places.py`.
+  "not remote" is not remote. A whole state keeps a job anywhere in it, and
+  its board searches name the state and its job hubs
+  (`boards.search_places`, `STATE_HUBS`: California is also Los Angeles, San
+  Francisco and San Diego), since most postings write "Los Angeles, CA" and
+  never the state. Until 2026-10-19 a state got no board search in it at all:
+  "California" was searched nationwide and filtered afterwards. Tests: `tests/job_search/test_places.py`.
 - **A board or web posting is kept only for a related title.** A board search
   for "Chief People Officer" turns up any job that names it somewhere, so a
   posting read from the boards or the web is kept only when its title shares
