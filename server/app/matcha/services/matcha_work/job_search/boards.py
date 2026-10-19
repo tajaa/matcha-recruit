@@ -74,6 +74,10 @@ async def find(search: dict, titles: list[str], criteria: dict, deps: Deps,
     if not searches:
         return [], False
     granted = await phases.grant(search["id"], "provider_calls", len(searches), phases.MAX_PROVIDER_CALLS)
+    if granted <= 0:
+        # The budget went on earlier passes, which did search: not a source
+        # that couldn't be reached (that would end the search as unavailable).
+        return [], True
     links: dict[tuple, dict] = {}
     answered = 0
     used = 0
@@ -96,6 +100,8 @@ async def find(search: dict, titles: list[str], criteria: dict, deps: Deps,
                 links.setdefault((ref.provider, ref.board.lower(), ref.job_id.lower()),
                                  {"url": result["url"], "title": "", "company": "", "location": ""})
         if i % 4 == 3:
+            if not await guard.current():
+                break  # cancelled or replaced: its searches stop here
             await guard.note(f"Searched employers' job boards ({i + 1} of {len(searches)})…")
     await phases.refund(search["id"], "provider_calls", granted - used)
     return list(links.values()), answered > 0

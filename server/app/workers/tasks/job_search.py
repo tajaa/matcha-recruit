@@ -1,9 +1,10 @@
 """Espresso job search: one phase per task (`job_search/orchestrator.py`)."""
 
-import asyncio
 from uuid import UUID
 
 from app.workers.celery_app import celery_app
+
+from ..utils import run_with_chat_fanout
 
 
 @celery_app.task(
@@ -14,7 +15,9 @@ from app.workers.celery_app import celery_app
 def run_job_search_phase(search_id, token):
     from app.matcha.services.matcha_work.job_search import orchestrator
 
-    asyncio.run(orchestrator.run_phase(UUID(search_id), UUID(token)))
+    # A phase that ends the search posts its card and bell through the socket
+    # fan-out, which needs the worker's own Redis client (`run_with_chat_fanout`).
+    run_with_chat_fanout(orchestrator.run_phase(UUID(search_id), UUID(token)))
 
 
 @celery_app.task(
@@ -25,4 +28,4 @@ def run_job_search_phase(search_id, token):
 def reconcile_job_searches():
     from app.matcha.services.matcha_work.job_search import orchestrator
 
-    asyncio.run(orchestrator.reconcile())
+    run_with_chat_fanout(orchestrator.reconcile())

@@ -27,11 +27,15 @@ def conn(monkeypatch):
 
 
 class Guard:
-    def __init__(self):
+    def __init__(self, current=True):
         self.notes = []
+        self._current = current
 
     async def note(self, text, **_counts):
         self.notes.append(text)
+
+    async def current(self):
+        return self._current
 
 
 def test_board_searches():
@@ -115,7 +119,8 @@ async def test_find_with_no_budget_or_no_answers(conn):
     conn.on(GRANT, 0)
     web_search = AsyncMock(return_value=[{"url": GH}])
     links, worked = await boards.find(search_row(), ["COO"], {}, phases.Deps(web_search=web_search), Guard())
-    assert (links, worked) == ([], False)
+    # A spent budget (earlier passes searched) is not a source that was down.
+    assert (links, worked) == ([], True)
     web_search.assert_not_awaited()
 
     conn.on(GRANT, lambda _id, want, _limit: want)
@@ -123,6 +128,19 @@ async def test_find_with_no_budget_or_no_answers(conn):
     assert await boards.find(search_row(), ["COO"], {}, phases.Deps(web_search=web_search), Guard()) == ([], False)
     assert web_search.await_count == 1
     assert await boards.find(search_row(), [], {}, phases.Deps(web_search=web_search), Guard()) == ([], False)
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_search_stops_spending_its_searches(conn):
+    """The guard is checked every few searches: a cancelled or replaced
+    search stops, and what it did not use goes back."""
+    conn.on(GRANT, lambda _id, want, _limit: want)
+    web_search = AsyncMock(return_value=[{"url": LEVER}])
+    links, worked = await boards.find(search_row(), ["COO", "Chief Operating Officer", "Head of Operations"], {},
+                                      phases.Deps(web_search=web_search), Guard(current=False))
+    assert worked and [link["url"] for link in links] == [LEVER]
+    assert web_search.await_count == 4  # the check comes after the fourth
+    assert conn.ran(REFUND)[0][2] == (SEARCH, 12 - 4)
 
 
 @pytest.mark.asyncio

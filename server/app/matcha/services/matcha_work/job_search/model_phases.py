@@ -238,10 +238,13 @@ async def approach(search: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
                FROM mw_job_leads WHERE search_id = $1 AND id = ANY($2::uuid[])""",
             search["id"], [UUID(i) for i in take],
         )
+        # Under the token: a cancel just before this write has already
+        # released the queue, and a `drafting` written after it would stay.
         await conn.execute(
             """UPDATE mw_job_leads SET approach_status = 'drafting', updated_at = NOW()
-               WHERE search_id = $1 AND id = ANY($2::uuid[])""",
-            search["id"], [row["id"] for row in rows],
+               WHERE search_id = $1 AND id = ANY($2::uuid[])
+                 AND EXISTS (SELECT 1 FROM mw_job_searches WHERE id = $1 AND dispatch_token = $3)""",
+            search["id"], [row["id"] for row in rows], guard.token,
         )
     batch = {f"J{i + 1}": str(row["id"]) for i, row in enumerate(rows)}
     questions = {

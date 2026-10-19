@@ -145,6 +145,17 @@ async def test_a_web_run_hands_back_only_links_it_saw(conn):
     assert not conn.ran("fetch_calls")
 
 
+def test_the_search_ability_is_built_for_each_run(monkeypatch):
+    """`web.search_tool` picks Brave or the hosted search for a run starting
+    now; a module-level ability froze that choice for the process."""
+    from app.matcha.services.matcha_work.agent_runtime.abilities import web
+
+    picks = []
+    monkeypatch.setattr(web, "search_tool", lambda **kw: picks.append(kw) or web.hosted_search_tool())
+    assert discovery.search_only().key == "web" and discovery.search_only().key == "web"
+    assert len(picks) == 2 and not hasattr(discovery, "SEARCH_ONLY")
+
+
 @pytest.mark.asyncio
 async def test_when_the_web_run_fails_or_finds_nothing(conn, monkeypatch):
     model = AsyncMock(side_effect=runner.AgentRunError("nothing usable"))

@@ -191,6 +191,10 @@ async def test_approach_drafts_a_batch_and_queues_the_rest(conn, monkeypatch):
     drafted = [json.loads(a) if a else None for a in write[2][3]]
     assert drafted[0]["contacts"][0]["name"] == "Dana Ruiz" and drafted[0]["answers"][0]["question_key"] == "q1"
     assert drafted[1] is None  # J2 got nothing: marked failed, can be redrafted
+    # `drafting` is written under the token: after a cancel released the queue,
+    # a late write would otherwise leave the job drafting for good.
+    [(_m, drafting, args)] = conn.ran("SET approach_status = 'drafting'")
+    assert "dispatch_token = $3" in drafting and args[2] == TOKEN
 
     out = await model_phases.approach(search_row(status="approaching", phase_cursor="{}"), d, guard())
     assert out.status == "done"

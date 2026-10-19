@@ -1,9 +1,10 @@
 """Espresso Tasks: one phase per task (`services/matcha_work/agent_tasks/orchestrator.py`)."""
 
-import asyncio
 from uuid import UUID
 
 from app.workers.celery_app import celery_app
+
+from ..utils import run_with_chat_fanout
 
 
 @celery_app.task(
@@ -14,7 +15,9 @@ from app.workers.celery_app import celery_app
 def run_agent_task_phase(task_id, token):
     from app.matcha.services.matcha_work.agent_tasks import orchestrator
 
-    asyncio.run(orchestrator.run_phase(UUID(task_id), UUID(token)))
+    # A phase that ends the task posts its card and bell through the socket
+    # fan-out, which needs the worker's own Redis client (`run_with_chat_fanout`).
+    run_with_chat_fanout(orchestrator.run_phase(UUID(task_id), UUID(token)))
 
 
 @celery_app.task(
@@ -25,4 +28,4 @@ def run_agent_task_phase(task_id, token):
 def reconcile_agent_tasks():
     from app.matcha.services.matcha_work.agent_tasks import orchestrator
 
-    asyncio.run(orchestrator.reconcile())
+    run_with_chat_fanout(orchestrator.reconcile())

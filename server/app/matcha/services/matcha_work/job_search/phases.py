@@ -511,7 +511,10 @@ async def enrich(search: dict, deps: Deps, guard: chain.Guard) -> PhaseOutcome:
     widening = isinstance(cursor, dict) and bool(cursor.get("widen"))
     ranked = {"found": counts["total"], "posted_pay": counts["posted"], "matches": matches,
               "fit_floor": floor, "ranked": True}
-    async with connection_or_direct() as conn:
+    # One transaction, and the queue write checks the token too: a cancel
+    # landing between the floor write and the queue write used to leave jobs
+    # `queued` after `release_drafts` had run, shown as drafting for good.
+    async with connection_or_direct() as conn, conn.transaction():
         # The floor goes on the row first: the re-rank reads it from there.
         fresh = await conn.fetchrow(
             """UPDATE mw_job_searches SET progress = progress || $2::jsonb
@@ -529,8 +532,9 @@ async def enrich(search: dict, deps: Deps, guard: chain.Guard) -> PhaseOutcome:
                     WHERE id IN (SELECT id FROM mw_job_leads
                                  WHERE search_id = $1 AND rank_band < {ranking.BELOW_FLOOR_BAND}
                                  ORDER BY rank LIMIT {APPROACH_TOP})
+                      AND EXISTS (SELECT 1 FROM mw_job_searches s WHERE s.id = $1 AND s.dispatch_token = $2)
                     RETURNING id, rank""",
-                search["id"],
+                search["id"], guard.token,
             )
     if widening:
         # Back to where it was (`after`), with no drafts queued.

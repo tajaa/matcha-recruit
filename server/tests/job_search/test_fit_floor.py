@@ -117,6 +117,7 @@ async def test_widen_puts_the_search_back_to_read_its_3_of_5_jobs(svc, status):
     assert json.loads(update[2][2]) == {"after": status, "widen": True}
     assert json.loads(update[2][3])["fit_floor"] == ranking.WIDER_FIT_FLOOR
     assert "redrafts" not in update[1]  # free
+    assert "error = NULL" in update[1]  # an earlier "stopped early" doesn't outlive a clean run
 
 
 @pytest.mark.asyncio
