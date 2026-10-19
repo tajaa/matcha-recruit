@@ -90,10 +90,10 @@ async def _default_fetch_page(url: str) -> tuple[dict, set[str]]:
     return await fetch_page_tool(url)
 
 
-async def _default_web_search(query: str, count: int) -> list[dict]:
+async def _default_web_search(query: str, count: int, offset: int = 0) -> list[dict]:
     from app.matcha.services.matcha_work import brave_search
 
-    return await brave_search.search(query, count=count)
+    return await brave_search.search(query, count=count, offset=offset)
 
 
 @dataclass
@@ -104,8 +104,8 @@ class Deps:
     # Model phases: the model client for a model id, and the model's fetch_page.
     client: Callable[[str], Any] = _default_client
     fetch_page: Callable[[str], Awaitable[tuple[dict, set[str]]]] = _default_fetch_page
-    # Code's own web search (Brave), for the board searches: (query, count) -> results.
-    web_search: Callable[[str, int], Awaitable[list[dict]]] = _default_web_search
+    # Code's own web search (Brave), for the board searches: (query, count, offset=page) -> results.
+    web_search: Callable[..., Awaitable[list[dict]]] = _default_web_search
 
 
 # The paid-call counters on the search row: `grant` and `refund` touch nothing else.

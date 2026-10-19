@@ -90,6 +90,18 @@ class AtsRef:
     def view(self) -> dict:
         return {"provider": self.provider, "board": self.board, "job_id": self.job_id, "eu": self.eu}
 
+    def board_url(self) -> str:
+        """The posting's page on its board, which `detect` reads back as
+        this ref (a Greenhouse posting's own `absolute_url` may be the
+        employer's careers site)."""
+        if self.provider == "greenhouse":
+            return f"https://job-boards.greenhouse.io/{self.board}/jobs/{self.job_id}"
+        if self.provider == "lever":
+            return f"https://jobs{'.eu' if self.eu else ''}.lever.co/{self.board}/{self.job_id}"
+        if self.provider == "workable":
+            return f"https://apply.workable.com/{self.board}/j/{self.job_id}/"
+        return f"https://jobs.ashbyhq.com/{self.board}/{self.job_id}"
+
 
 @dataclass
 class AtsPosting:
@@ -349,23 +361,69 @@ def parse_workable(ref: AtsRef, data: dict, form: Any = None) -> AtsPosting | No
 FetchFn = Callable[..., Awaitable[FetchedResponse]]
 
 
-async def _json(url: str, what: str, fetch_fn: FetchFn) -> Any:
-    """A public ATS API's JSON answer; None when it is missing or unreadable."""
+async def _answer(url: str, what: str, fetch_fn: FetchFn) -> tuple[Any, bool]:
+    """A public ATS API's JSON answer, and whether the ATS answered for sure:
+    its JSON, or a 404 or 410 (it has no such posting). A timeout, a refusal,
+    a server error or a cut-off body is no answer either way."""
     try:
         response = await fetch_fn(url, max_bytes=MAX_BYTES, accept="application/json",
                                   total_timeout=TOTAL_TIMEOUT)
     except (UnsafeURL, TimeoutError, OSError) as exc:
         logger.info("ats fetch failed %s: %s", what, type(exc).__name__)
-        return None
+        return None, False
     except Exception:
         logger.warning("ats fetch failed %s", what, exc_info=True)
-        return None
+        return None, False
+    if response.status in (404, 410):
+        return None, True
     if response.status != 200 or response.truncated:
-        return None
+        return None, False
     try:
-        return json.loads(response.body)
+        return json.loads(response.body), True
     except ValueError:
-        return None
+        return None, False
+
+
+async def _json(url: str, what: str, fetch_fn: FetchFn) -> Any:
+    """A public ATS API's JSON answer; None when it is missing or unreadable."""
+    return (await _answer(url, what, fetch_fn))[0]
+
+
+@dataclass(frozen=True)
+class AtsRead:
+    """One posting read from its ATS. `closed` only when the ATS itself said
+    so: it answered without the job (a 404, an Ashby board without it, a
+    Workable job no longer published). A read that got no answer is neither."""
+    posting: AtsPosting | None
+    closed: bool = False
+
+
+async def read(ref: AtsRef, *, more: Callable[[], bool] | None = None,
+               fetch_fn: FetchFn = fetch_public) -> AtsRead:
+    """The posting from its ATS's public API, as `fetch` reads it, and
+    whether the ATS said it is closed."""
+    data, answered = await _answer(ref.api_url(), f"{ref.provider} {ref.board}", fetch_fn)
+    if not isinstance(data, dict):
+        return AtsRead(None, closed=answered and data is None)
+    posting: AtsPosting | None
+    if ref.provider == "greenhouse":
+        posting = parse_greenhouse(ref, data)
+    elif ref.provider == "lever":
+        posting = parse_lever(ref, data)
+    elif ref.provider == "workable":
+        if not workable_published(data):
+            return AtsRead(None, closed=True)
+        form = None
+        if more is None or more():
+            # The form is keyed by the shortcode alone; Workable's are global.
+            form = await _json(f"https://apply.workable.com/api/v1/jobs/{ref.job_id}/form",
+                               f"workable form {ref.board}", fetch_fn)
+        posting = parse_workable(ref, data, form)
+    else:
+        posting = parse_ashby(ref, data)
+        if posting is None and not isinstance(data.get("jobs"), list):
+            return AtsRead(None)  # not a board's list of jobs: no answer about this one
+    return AtsRead(posting, closed=posting is None or not posting.title)
 
 
 async def fetch(ref: AtsRef, *, more: Callable[[], bool] | None = None,
@@ -375,23 +433,7 @@ async def fetch(ref: AtsRef, *, more: Callable[[], bool] | None = None,
     application questions are a second, paid with `more()` when it is given:
     asked only for a posting still published, and left out when `more()`
     refuses."""
-    data = await _json(ref.api_url(), f"{ref.provider} {ref.board}", fetch_fn)
-    if not isinstance(data, dict):
-        return None
-    if ref.provider == "greenhouse":
-        return parse_greenhouse(ref, data)
-    if ref.provider == "lever":
-        return parse_lever(ref, data)
-    if ref.provider == "workable":
-        if not workable_published(data):
-            return None
-        form = None
-        if more is None or more():
-            # The form is keyed by the shortcode alone; Workable's are global.
-            form = await _json(f"https://apply.workable.com/api/v1/jobs/{ref.job_id}/form",
-                               f"workable form {ref.board}", fetch_fn)
-        return parse_workable(ref, data, form)
-    return parse_ashby(ref, data)
+    return (await read(ref, more=more, fetch_fn=fetch_fn)).posting
 
 
 # ── the employer's own board ─────────────────────────────────────────────────
