@@ -4,7 +4,7 @@ import { AlertTriangle, CheckCircle2, ChevronDown, ExternalLink, Link2, Loader2,
 import type { JobApproach, JobLeadDetail } from '../../api/matchaWork/jobSearch'
 import {
   GMAIL_DRAFTS_URL, channelLabel, compParts, evidenceLabel, fitText, hostOf, isDrafting, isIrrelevant, partLine, placeholders,
-  questionText, tidyPosting, usableApproach, webUrl,
+  questionText, tidyPosting, unansweredReason, usableApproach, webUrl,
 } from './jobSearchLogic'
 
 /**
@@ -384,7 +384,14 @@ function ApproachBody({ approach }: { approach: JobApproach }) {
       {!!approach.unanswered?.length && (
         <div className="space-y-1">
           <Subheading>Answer these yourself</Subheading>
-          {approach.unanswered.map((q, i) => <p key={`${q.key ?? i}`} className="text-[11px] text-w-dim">• {questionText(q)}</p>)}
+          {approach.unanswered.map((q, i) => {
+            const why = unansweredReason(q.kind)
+            return (
+              <p key={`${q.question_key ?? q.key ?? i}`} className="text-[11px] text-w-dim">
+                • {questionText(q)}{why && <span className="text-w-faint"> ({why})</span>}
+              </p>
+            )
+          })}
         </div>
       )}
       {approach.cover_letter && <DraftBox title="Cover letter" text={approach.cover_letter} copyText={approach.cover_letter} />}

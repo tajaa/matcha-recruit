@@ -6,7 +6,7 @@ import type { JobLeadDetail, JobSearchDetail } from '../../api/matchaWork/jobSea
 
 const mock = vi.hoisted(() => ({
   get: vi.fn(), status: vi.fn(), lead: vi.fn(), update: vi.fn(), redraft: vi.fn(), rerank: vi.fn(),
-  email: vi.fn(),
+  email: vi.fn(), cancel: vi.fn(), widen: vi.fn(),
 }))
 vi.mock('../../api/matchaWork/jobSearch', () => ({
   getJobSearch: mock.get,
@@ -16,8 +16,8 @@ vi.mock('../../api/matchaWork/jobSearch', () => ({
   redraftJobApproach: mock.redraft,
   rerankJobSearch: mock.rerank,
   draftJobEmail: mock.email,
-  widenJobSearch: vi.fn(),
-  cancelJobSearch: vi.fn(),
+  widenJobSearch: mock.widen,
+  cancelJobSearch: mock.cancel,
 }))
 
 const job = (over: Partial<JobLeadDetail> = {}): JobLeadDetail => ({
@@ -211,6 +211,67 @@ describe('useJobSearch inside Tasks', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(5_000) })
     expect(mock.status).toHaveBeenCalledTimes(1)
     expect(result.current.detail?.status).toBe('done')
+  })
+
+  it('stops polling a search that is gone, and says so', async () => {
+    vi.useFakeTimers()
+    mock.get.mockResolvedValueOnce(search({ status: 'discovering' }))
+    mock.status.mockRejectedValue(new ApiError('Job search not found.', 404, {}))
+    const { result } = renderHook(() => useJobSearch('s1', null))
+    await act(async () => {})
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000) })
+    expect(result.current.detail).toBeNull()
+    expect(result.current.detailError).toMatch(/no longer available/)
+    await act(async () => { await vi.advanceTimersByTimeAsync(20_000) })
+    expect(mock.status).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps polling through a miss that is not a 404, and stops once the search is finished', async () => {
+    vi.useFakeTimers()
+    mock.get.mockResolvedValueOnce(search({ status: 'discovering' })).mockResolvedValue(search())
+    mock.status.mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValue({ id: 's1', status: 'done', fingerprint: 'f2', lead_count: 1 })
+    const { result } = renderHook(() => useJobSearch('s1', null))
+    await act(async () => {})
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000) })
+    expect(result.current.detail?.status).toBe('discovering')
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000) })
+    expect(result.current.detail?.status).toBe('done')
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000) })
+    expect(mock.status).toHaveBeenCalledTimes(2)  // nothing live and nothing drafting
+  })
+
+  it('polls a finished search while one of its jobs is drafting', async () => {
+    vi.useFakeTimers()
+    mock.get.mockResolvedValue(search({ leads: [job({ approach_status: 'drafting' })] }))
+    mock.status.mockResolvedValue({ id: 's1', status: 'done', fingerprint: 'f1', lead_count: 1 })
+    renderHook(() => useJobSearch('s1', null))
+    await act(async () => {})
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+    expect(mock.status).toHaveBeenCalledTimes(2)
+  })
+
+  it('re-reads the open job after Cancel, so it no longer says drafting', async () => {
+    mock.get.mockResolvedValue(search({ status: 'approaching', leads: [job({ approach_status: 'drafting' })] }))
+    mock.lead.mockResolvedValueOnce(job({ approach_status: 'drafting' }))
+    const { result } = await opened('l1')
+    expect(result.current.lead?.approach_status).toBe('drafting')
+    mock.cancel.mockResolvedValue(search({ status: 'cancelled', leads: [job({ approach_status: 'failed' })] }))
+    mock.lead.mockResolvedValueOnce(job({ approach_status: 'failed' }))
+    await act(async () => { await result.current.cancel() })
+    expect(mock.cancel).toHaveBeenCalledWith('s1')
+    expect(result.current.detail?.status).toBe('cancelled')
+    expect(result.current.lead?.approach_status).toBe('failed')
+  })
+
+  it('reads the search again after a 409, so a search that moved on elsewhere shows it', async () => {
+    mock.get.mockResolvedValueOnce(search())
+    const { result } = await opened(null)
+    mock.widen.mockRejectedValueOnce(new ApiError('This search is still running.', 409, {}))
+    mock.get.mockResolvedValueOnce(search({ status: 'enriching', fingerprint: 'f2' }))
+    await act(async () => { await result.current.widen() })
+    expect(result.current.error).toBe('This search is still running.')
+    expect(result.current.detail?.status).toBe('enriching')  // live again: the poll resumes
   })
 
   it('guards retained mutation callbacks while the owning task is deleting, then allows recovery', async () => {

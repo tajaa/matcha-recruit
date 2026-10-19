@@ -54,3 +54,18 @@ describe('NewJobSearchModal résumé', () => {
     expect((screen.getByRole('checkbox', { name: /Use my résumé/ }) as HTMLInputElement).checked).toBe(true)
   })
 })
+
+describe('NewJobSearchModal title', () => {
+  it("cuts the search's title to what the server takes", async () => {
+    mock.get.mockResolvedValue(null)
+    const onCreate = vi.fn().mockResolvedValue({ id: 's1' })
+    render(<NewJobSearchModal list={list} onCreate={onCreate} onCreated={vi.fn()} onClose={vi.fn()} />)
+    await act(async () => {})
+    fireEvent.change(screen.getByLabelText('What are you looking for?'), { target: { value: 'COO roles' } })
+    const titles = screen.getByLabelText(/Titles/i)
+    fireEvent.change(titles, { target: { value: 'x'.repeat(78) + ' ' + 'y'.repeat(60) } })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Start search' })) })
+    expect(onCreate).toHaveBeenCalledOnce()
+    expect(onCreate.mock.calls[0][0].title.length).toBeLessThanOrEqual(120)
+  })
+})

@@ -92,6 +92,8 @@ describe('progress', () => {
       lead({ user_state: 'dismissed', approach_status: 'done', email_draft_id: 'd3' }),
     ])
     expect(p).toEqual({ drafted: 1, saved: 1, emailsWaiting: 1, emailsSent: 1, applied: 1 })
+    // A weaker match drafted on request isn't on the Drafted tab by default, so isn't counted.
+    expect(searchProgress([lead({ approach_status: 'done', rank_band: BELOW_FLOOR_BAND })]).drafted).toBe(0)
     expect(progressLine(p)).toBe('1 saved · 1 email in drafts · 1 sent · 1 applied')
     expect(progressLine({ drafted: 3, saved: 0, emailsWaiting: 0, emailsSent: 0, applied: 0 })).toBeNull()
   })
@@ -179,6 +181,8 @@ describe('links and errors', () => {
 
   it('starts a new request only after a clear refusal', () => {
     expect(retryIsNewRequest(new ApiError('no', 422, null))).toBe(true)
+    expect(retryIsNewRequest(new ApiError('running', 409, null))).toBe(true)
+    expect(retryIsNewRequest(new ApiError('limit', 429, null))).toBe(true)
     expect(retryIsNewRequest(new ApiError('down', 503, null))).toBe(true)
     expect(retryIsNewRequest(new ApiError('gateway', 504, null))).toBe(false)
     expect(retryIsNewRequest(new TypeError('Failed to fetch'))).toBe(false)

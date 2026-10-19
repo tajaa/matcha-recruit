@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { ApiError } from '../../../api/client'
 import {
   cancelJobSearch, draftJobEmail, getJobLead, getJobSearch, getJobSearchStatus, redraftJobApproach,
   rerankJobSearch, updateJobLead, widenJobSearch, type JobLeadDetail, type JobSearchDetail, type JobWeights,
@@ -7,6 +8,11 @@ import { errorCode, errorLead, errorText, needsPolling, statusChanged } from './
 
 /** How often a running search (or a job being drafted) checks its cheap status. */
 const POLL_MS = 5_000
+
+/** The search was deleted (from the Mac, the assistant) or isn't this person's:
+ *  asking again won't bring it back. */
+const isGone = (e: unknown) => e instanceof ApiError && (e.status === 404 || e.status === 403)
+const GONE = 'This job search is no longer available. It may have been deleted.'
 
 /**
  * A job-search task's state: the open search and its ranked jobs, and the open
@@ -142,8 +148,14 @@ export function useJobSearch(
         if (searchRef.current !== searchId || detailSeq.current !== asked || !statusChanged(current, status)) return
         await loadDetail(searchId)
         if (leadRef.current) await refreshLead(leadRef.current)
-      } catch {
-        // A missed poll is retried on the next tick.
+      } catch (e) {
+        // Gone for good: stop asking and say so. Anything else is retried on
+        // the next tick.
+        if (isGone(e) && searchRef.current === searchId) {
+          detailSeq.current += 1
+          setDetail(null)
+          setDetailFailure({ id: searchId, message: GONE })
+        }
       } finally {
         polling = false
       }
@@ -181,10 +193,18 @@ export function useJobSearch(
    *  then keep what the change returned. */
   const change = useCallback(async (search: string, request: () => Promise<JobSearchDetail>, lead: string | null = null) => {
     supersede(search, lead)
-    const updated = await request()
+    let updated: JobSearchDetail
+    try {
+      updated = await request()
+    } catch (e) {
+      // A 409 means the search moved on elsewhere (widened or redrafted from
+      // the Mac): read it again, so its status shows and polling resumes.
+      if (e instanceof ApiError && e.status === 409) void loadDetail(search)
+      throw e
+    }
     supersede(search, lead)
     apply(updated)
-  }, [supersede, apply])
+  }, [supersede, apply, loadDetail])
 
   /** Change a job: drop older reads of it, then show what the save returned. */
   const changeLead = useCallback(async (id: string, request: () => Promise<JobLeadDetail>) => {
@@ -237,8 +257,14 @@ export function useJobSearch(
   const cancel = useCallback(() => {
     const search = searchRef.current
     if (!search) return Promise.resolve()
-    return perform("Couldn't cancel this search.", () => change(search, () => cancelJobSearch(search)))
-  }, [perform, change])
+    const id = leadRef.current
+    return perform("Couldn't cancel this search.", async () => {
+      await change(search, () => cancelJobSearch(search))
+      // Cancel marks the jobs still waiting for a draft failed: the open one
+      // would otherwise keep saying it is drafting, with no poll to correct it.
+      if (id) await refreshLead(id)
+    })
+  }, [perform, change, refreshLead])
 
   /** The job as the server has it after a Draft email or Edit draft: in its
    *  pane, and in its row of the search. */

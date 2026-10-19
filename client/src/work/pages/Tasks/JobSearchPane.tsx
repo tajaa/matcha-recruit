@@ -10,6 +10,9 @@ import LeadPane from '../JobSearch/LeadPane'
 import JobSearchGuide from '../JobSearch/JobSearchGuide'
 import type { AssistantDraftState } from '../Assistant'
 
+/** How many times a missed status sync is tried before it waits for the next status change. */
+const SYNC_TRIES = 6
+
 function guideSeen(): boolean {
   try { return localStorage.getItem(JOB_SEARCH_GUIDE_SEEN_KEY) === '1' } catch { return true }
 }
@@ -41,15 +44,19 @@ export default function JobSearchPane({
 
   // The search owns polling. When its status moves, the task's row follows
   // (and a finished search is marked seen); a sync that misses is retried
-  // while this search remains open.
+  // while this search remains open, a few times: a task deleted elsewhere
+  // misses every time, and asking every 5 s for as long as the pane is open
+  // brings it back no sooner.
   const status = detail?.status
   useEffect(() => {
     if (!status) return
     let stopped = false
     let timer: number | undefined
+    let tries = 0
     const sync = async () => {
+      tries += 1
       const synced = await onChanged(status).catch(() => false)
-      if (!synced && !stopped) timer = window.setTimeout(() => void sync(), 5_000)
+      if (!synced && !stopped && tries < SYNC_TRIES) timer = window.setTimeout(() => void sync(), 5_000 * tries)
     }
     void sync()
     return () => { stopped = true; window.clearTimeout(timer) }

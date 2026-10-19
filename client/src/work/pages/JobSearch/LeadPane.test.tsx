@@ -75,3 +75,19 @@ describe('LeadPane', () => {
     expect(onEditDraft).not.toHaveBeenCalled()
   })
 })
+
+describe('LeadPane drafting controls', () => {
+  it('offers no Redraft on a search that cannot draft', () => {
+    pane({ lead: job(), canDraft: false })
+    expect(screen.queryByRole('button', { name: 'Redraft' })).toBeNull()
+  })
+
+  it('lists the questions left for the person, with why', () => {
+    pane({ lead: job({ approach: { summary: 'x', unanswered: [
+      { question_key: 'resume', question: 'Resume/CV', kind: 'file' },
+      { question_key: 'auth', question: 'Are you authorized to work in the US?', kind: 'authorization' },
+    ] } }) })
+    expect(screen.getByText(/Resume\/CV/).textContent).toContain('(a file to upload)')
+    expect(screen.getByText(/authorized to work/).textContent).toContain('(work authorization)')
+  })
+})

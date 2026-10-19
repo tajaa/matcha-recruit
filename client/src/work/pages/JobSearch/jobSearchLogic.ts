@@ -127,7 +127,8 @@ export function searchProgress(leads: JobLeadSummary[]): SearchProgress {
   const out: SearchProgress = { drafted: 0, saved: 0, emailsWaiting: 0, emailsSent: 0, applied: 0 }
   for (const lead of leads) {
     if (lead.user_state === 'dismissed') continue
-    if (hasApproach(lead) && !isIrrelevant(lead)) out.drafted += 1
+    // The jobs the Drafted tab shows by default: weaker matches are hidden there.
+    if (hasApproach(lead) && !isIrrelevant(lead) && !isBelowFloor(lead)) out.drafted += 1
     if (lead.user_state === 'saved') out.saved += 1
     if (lead.user_state === 'applied') out.applied += 1
     if (emailWaiting(lead)) out.emailsWaiting += 1
@@ -251,8 +252,18 @@ export function placeholders(text: string): string[] {
   return out
 }
 
-export const questionText = (q: { label?: string | null; question?: string | null; key?: string | null }) =>
-  q.label || q.question || q.key || ''
+export const questionText = (q: { label?: string | null; question?: string | null; key?: string | null;
+  question_key?: string | null }) => q.label || q.question || q.key || q.question_key || ''
+
+/** Why Espresso left a question for the person: what kind of question it is. */
+export function unansweredReason(kind: string | null | undefined): string | null {
+  switch (kind) {
+    case 'file': return 'a file to upload'
+    case 'authorization': return 'work authorization'
+    case 'demographic': return 'a voluntary demographic question'
+    default: return null
+  }
+}
 
 /** A posting's text as it reads best: each line trimmed (pages indent with
  *  spaces and non-breaking spaces), runs of spaces collapsed, and at most one
