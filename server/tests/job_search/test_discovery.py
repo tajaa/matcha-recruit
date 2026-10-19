@@ -145,6 +145,27 @@ async def test_a_web_run_hands_back_only_links_it_saw(conn):
     assert not conn.ran("fetch_calls")
 
 
+def test_a_read_posting_carries_only_its_own_location():
+    """A web run's claim about where a job is never decides `places.fits`."""
+    found = ats.AtsPosting(ref=ats.AtsRef("lever", "acme", "0f6b2a4e-1111-2222-3333-444455556666"), url=LEVER,
+                           title="COO", location="")
+    record = discovery._ats_record(found, claim(LEVER, location="San Diego, CA"))
+    assert record["location"] == "" and record["state_code"] is None
+    page = discovery._page_record({"title": "COO", "company": "Acme"}, PAGE, claim(PAGE, location="San Diego, CA"))
+    assert page["location"] == ""
+
+
+def test_the_search_ability_is_built_for_each_run(monkeypatch):
+    """`web.search_tool` picks Brave or the hosted search for a run starting
+    now; a module-level ability froze that choice for the process."""
+    from app.matcha.services.matcha_work.agent_runtime.abilities import web
+
+    picks = []
+    monkeypatch.setattr(web, "search_tool", lambda **kw: picks.append(kw) or web.hosted_search_tool())
+    assert discovery.search_only().key == "web" and discovery.search_only().key == "web"
+    assert len(picks) == 2 and not hasattr(discovery, "SEARCH_ONLY")
+
+
 @pytest.mark.asyncio
 async def test_when_the_web_run_fails_or_finds_nothing(conn, monkeypatch):
     model = AsyncMock(side_effect=runner.AgentRunError("nothing usable"))

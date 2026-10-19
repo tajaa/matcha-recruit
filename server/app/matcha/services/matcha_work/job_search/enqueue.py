@@ -179,9 +179,11 @@ async def redraft_approach(user, search_id: UUID, lead_id: UUID) -> dict:
     """Draft (or redraft) the approach for one job of a finished or cancelled search."""
     from app.core.services.redis_cache import check_rate_limit
 
-    from .service import get_search, requeue_approach
+    from .service import check_redraftable, get_search, requeue_approach
 
     if not _is_admin(user):
+        # A refusal (still running, cap reached) must not spend the hour's limit.
+        await check_redraftable(search_id, user.id)
         await check_rate_limit(str(user.id), "espresso_job_search_redraft", 10, 3600)
     _search, token = await requeue_approach(search_id, lead_id, user.id)
     try:

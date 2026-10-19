@@ -113,13 +113,33 @@ async def test_cancel_ranks_what_was_found(conn, monkeypatch):
     monkeypatch.setattr(service, "rerank", rerank)
     conn.on("FROM mw_job_searches s", search_row(status="cancelled"))
     conn.on("FOR UPDATE", search_row(status="enriching"))
-    conn.on("SET status = 'cancelled'", search_row(status="cancelled"))
+    conn.on("SET status = $2, dispatch_token = NULL", search_row(status="cancelled"))
     await service.cancel_search(SEARCH, USER)
-    assert conn.ran("SET status = 'cancelled'") and rerank.await_count == 1
+    [cancel] = conn.ran("SET status = $2, dispatch_token = NULL")
+    assert cancel[2][1] == "cancelled" and json.loads(cancel[2][2]) == {"note": "Cancelled."}
+    assert rerank.await_count == 1
     assert conn.ran("SET approach_status = 'failed'")
     conn.on("FOR UPDATE", search_row(status="done"))
     await service.cancel_search(SEARCH, USER)
-    assert len(conn.ran("SET status = 'cancelled'")) == 1
+    assert len(conn.ran("SET status = $2, dispatch_token = NULL")) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("after, note", [("done", "Stopped drafting."), ("cancelled", "Cancelled.")])
+async def test_cancelling_a_redraft_goes_back_to_where_the_search_was(conn, monkeypatch, after, note):
+    """A redraft or widen of a finished search is `approaching`/`enriching`
+    with `after` in its cursor; Cancel stops the draft, it doesn't turn a
+    finished search into a cancelled one."""
+    monkeypatch.setattr(service, "rerank", AsyncMock(return_value=2))
+    cursor = json.dumps({"approach_queue": [str(LEAD)], "after": after})
+    conn.on("FROM mw_job_searches s", search_row(status=after))
+    conn.on("FOR UPDATE", search_row(status="approaching", phase_cursor=cursor))
+    conn.on("SET status = $2, dispatch_token = NULL", search_row(status=after))
+    await service.cancel_search(SEARCH, USER)
+    [cancel] = conn.ran("SET status = $2, dispatch_token = NULL")
+    assert cancel[2][1] == after and json.loads(cancel[2][2]) == {"note": note}
+    assert "phase_cursor = '{}'::jsonb" in cancel[1]
+    assert conn.ran("SET approach_status = 'failed'")  # the queued job shows Redraft, not drafting
 
 
 @pytest.mark.asyncio
@@ -158,11 +178,17 @@ async def test_a_stale_search_that_found_jobs_ends_done(monkeypatch):
     conn = (FakeConn()
             .on("FOR UPDATE", [search_row(id=found, status="enriching"), search_row(id=empty, status="discovering")])
             .on("SELECT EXISTS (SELECT 1 FROM mw_job_leads", lambda search_id: search_id == found))
+    from app.matcha.services.matcha_work.agent_tasks import job_tasks
+
+    stopped = AsyncMock()
+    monkeypatch.setattr(job_tasks, "search_stopped", stopped)
     assert await service.end_stale(conn, USER) == 2
     ends = {call[2][0]: call[2][1] for call in conn.ran("error = COALESCE(error, 'Stopped:")}
     assert ends == {found: "done", empty: "failed"}
     assert rerank.await_count == 1
     assert "INTERVAL '2 hours'" in conn.ran("FOR UPDATE")[0][1]
+    # The same hooks a search ended by the chain gets: told once, Tasks row completed.
+    assert [c.args[1] for c in stopped.await_args_list] == [found, empty]
 
 
 @pytest.mark.asyncio

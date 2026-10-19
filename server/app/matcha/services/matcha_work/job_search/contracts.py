@@ -36,7 +36,12 @@ MAX_TITLES = 10
 MAX_DIRECTIONS = 3
 APPROACH_CHANNELS = ("referral", "hiring_manager", "recruiter", "apply_portal", "search_firm")
 _EMAIL = re.compile(r"^[^@\s<>,;]+@[^@\s<>,;]+\.[^@\s<>,;]+$")
+# Addresses in the person's own words: a typed address is itself, never a
+# suffix of one ("doe@acme.com" is not "jane.doe@acme.com").
+_EMAIL_IN = re.compile(r"[^@\s<>,;\"']+@[^@\s<>,;\"']+\.[^@\s<>,;\"'.]+")
 _CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+# Words a model sends for "no deal-breaker" when it doesn't send null.
+_NO_BREAKER = {"", "none", "null", "nil", "n/a", "na", "no", "nothing", "-", "—", "false"}
 
 
 def _text(value: Any, limit: int) -> str:
@@ -194,24 +199,26 @@ def normalize_postings(args: dict, *, citable: set[str]) -> tuple[dict, list[str
     postings: list[dict] = []
     warnings: list[str] = []
     seen: set[str] = set()
-    given = 0
+    given = untraceable = 0
     for item in finish.items(result, "postings"):
         if not isinstance(item, dict):
             continue
         given += 1
         url = str(item.get("url") or "").strip()
-        title = _text(item.get("title"), 200)
         if url not in citable or not url.startswith(("https://", "http://")):
+            untraceable += 1
             warnings.append(f"Dropped {url[:80]!r}: not a link this run's searches or page loads returned")
             continue
-        if url in seen or not title:
+        if url in seen:
             continue
         seen.add(url)
-        postings.append({"url": url, "title": title, "company": _text(item.get("company"), 200),
-                         "location": _text(item.get("location"), 200)})
+        # A posting with no title is still read: code takes the title from the
+        # posting itself, and the ATS has it whatever the model left out.
+        postings.append({"url": url, "title": _text(item.get("title"), 200),
+                         "company": _text(item.get("company"), 200), "location": _text(item.get("location"), 200)})
         if len(postings) >= MAX_POSTINGS:
             break
-    if given and not postings:
+    if given and untraceable == given:
         raise ValueError("give each posting's url exactly as a search or page load in this run returned it")
     return {"postings": postings}, warnings
 
@@ -253,7 +260,9 @@ def normalize_screen(args: dict, batch: dict[str, str]) -> tuple[dict[str, dict]
             continue
         fit = item.get("fit")
         fit = max(0, min(5, int(fit))) if isinstance(fit, (int, float)) and not isinstance(fit, bool) else None
-        breaker = _text(item.get("deal_breaker"), 160) or None
+        breaker = _text(item.get("deal_breaker"), 160)
+        # "None", "N/A" and the like are no deal-breaker, whatever the schema asked for.
+        breaker = None if breaker.strip(" .").lower() in _NO_BREAKER else breaker
         relevant = bool(item.get("relevant")) and breaker is None
         verdicts[lead_id] = {
             "relevant": relevant,
@@ -311,11 +320,27 @@ MAX_LIKELY_ANSWERS = 4
 
 
 def _name_on_page(name: str, page_text: str) -> bool:
+    """The name as a phrase on the page, or each of its words as a whole
+    word: "John Smith" is not on a page naming Johnathan Doe and Sarah
+    Smithers."""
     words = [w for w in re.split(r"\s+", name.strip()) if len(w) > 1]
     if not words:
         return False
-    hay = page_text.casefold()
-    return all(w.casefold() in hay for w in words)
+    hay = " ".join(page_text.split()).casefold()
+    if " ".join(words).casefold() in hay:
+        return True
+    return all(re.search(rf"(?<![\w'’]){re.escape(w.casefold())}(?![\w'’])", hay) for w in words)
+
+
+def _field(item: dict, key: str, short: str):
+    """An approach's list or object field, read as itself when it was sent as
+    JSON text; refused (one repair) when it is text that isn't JSON. Haiku
+    sends nested fields as text now and then; iterated as characters, an
+    approach was stored `done` with no contacts, no answers and no outreach."""
+    value = finish.unquoted(item.get(key))
+    if isinstance(value, str) and value.strip():
+        raise ValueError(f"`{key}` of {short} came as text: send it as JSON (a list or an object), not a string")
+    return value
 
 
 def _answerable(question: dict) -> bool:
@@ -337,15 +362,16 @@ def normalize_approaches(
     result = finish.answer(args)
     out: dict[str, dict] = {}
     warnings: list[str] = []
-    user_lower = (user_text or "").lower()
+    typed_addresses = {m.lower() for m in _EMAIL_IN.findall(user_text or "")}
     for item in finish.items(result, "approaches"):
         if not isinstance(item, dict):
             continue
-        lead_id = batch.get(str(item.get("id") or "").strip().upper())
+        short = str(item.get("id") or "").strip().upper()
+        lead_id = batch.get(short)
         if lead_id is None or lead_id in out:
             continue
         contacts = []
-        for contact in item.get("contacts") or []:
+        for contact in _field(item, "contacts", short) or []:
             if not isinstance(contact, dict):
                 continue
             name = _text(contact.get("name"), 120)
@@ -355,14 +381,15 @@ def normalize_approaches(
                 contacts.append({"name": name, "role": _text(contact.get("role"), 120), "source_url": url})
             elif name:
                 warnings.append(f"Dropped contact {name[:40]!r}: not named on a page loaded in this run")
-        outreach = item.get("outreach") if isinstance(item.get("outreach"), dict) else {}
+        outreach = _field(item, "outreach", short)
+        outreach = outreach if isinstance(outreach, dict) else {}
         to_email = str(outreach.get("to_email") or "").strip().lower() or None
-        if to_email and not (_EMAIL.match(to_email) and (to_email in observed_emails or to_email in user_lower)):
+        if to_email and not (_EMAIL.match(to_email) and (to_email in observed_emails or to_email in typed_addresses)):
             warnings.append(f"Dropped address {to_email[:60]!r}: not printed on a page loaded in this run")
             to_email = None
         posting_questions = {q["key"]: q for q in questions.get(lead_id, []) if isinstance(q, dict) and q.get("key")}
         answers, likely = [], 0
-        for answer in item.get("answers") or []:
+        for answer in _field(item, "answers", short) or []:
             if not isinstance(answer, dict):
                 continue
             text = _text(answer.get("answer"), 3000)
@@ -384,7 +411,7 @@ def normalize_approaches(
             likely += 1
             answers.append({"question_key": None, "question": label, "answer": text, "likely": True})
         sources = []
-        for url in item.get("sources") or []:
+        for url in _field(item, "sources", short) or []:
             url = str(url or "").strip()
             if url in citable and url not in sources:
                 sources.append(url)
@@ -392,9 +419,9 @@ def normalize_approaches(
         out[lead_id] = {
             "summary": _text(item.get("summary"), 600),
             "channel": channel,
-            "steps": _texts(item.get("steps"), items=6, limit=300),
-            "talking_points": _texts(item.get("talking_points"), items=6, limit=300),
-            "negotiation": _texts(item.get("negotiation"), items=4, limit=300),
+            "steps": _texts(_field(item, "steps", short), items=6, limit=300),
+            "talking_points": _texts(_field(item, "talking_points", short), items=6, limit=300),
+            "negotiation": _texts(_field(item, "negotiation", short), items=4, limit=300),
             "contacts": contacts,
             "outreach": {"to_email": to_email, "subject": _text(outreach.get("subject"), 200),
                          "body": _text(outreach.get("body"), 4000)},

@@ -19,23 +19,30 @@ conservative:
 """
 from __future__ import annotations
 
+import math
 import re
 from typing import Any
 
 PERIOD_FACTORS = {"year": 1, "month": 12, "week": 52, "day": 260, "hour": 2080}
-_SYMBOLS = {"$": "USD", "£": "GBP", "€": "EUR"}
-_CODES = ("USD", "CAD", "EUR", "GBP", "AUD")
+# A prefixed dollar is its country's: "CA$150,000" is not US pay.
+_SYMBOLS = {"$": "USD", "£": "GBP", "€": "EUR", "US$": "USD", "CA$": "CAD", "C$": "CAD", "A$": "AUD",
+            "AU$": "AUD", "NZ$": "NZD", "S$": "SGD", "HK$": "HKD"}
+_CODES = ("USD", "CAD", "EUR", "GBP", "AUD", "CHF", "NZD", "SGD", "HKD")
 MIN_ANNUAL = 15_000
 MAX_ANNUAL = 3_000_000
 MAX_QUOTE = 300
 
-_CUR = r"(?:[$£€]|(?:USD|CAD|EUR|GBP|AUD)\s?)"
-_NUM = r"\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?"
+_CODE = r"(?:USD|CAD|EUR|GBP|AUD|CHF|NZD|SGD|HKD)"
+_CUR = rf"(?:(?:US|CA|AU|NZ|HK|C|A|S)?\$|£|€|{_CODE}\s?)"
+# Thousands with commas, or with dots as Europe writes them ("150.000"); no
+# currency has three decimals, so three digits after a dot are thousands.
+_NUM = r"\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d{1,3}(?:\.\d{3})+(?!\d)|\d+(?:\.\d+)?"
 _SUF = r"[kKmM](?![a-zA-Z])"
 
 
 def _amt(p: str) -> str:
-    return rf"(?P<{p}cur>{_CUR})?(?P<{p}num>{_NUM})\s?(?P<{p}suf>{_SUF})?"
+    # The currency before the number, or its code after it ("220,000 USD").
+    return rf"(?P<{p}cur>{_CUR})?(?P<{p}num>{_NUM})\s?(?P<{p}suf>{_SUF})?(?P<{p}code>\s?{_CODE}\b)?"
 
 
 _PERIOD = (
@@ -43,7 +50,13 @@ _PERIOD = (
     r"(?P<period>year|yr|annum|annually|annual|month|mo|week|wk|day|hour|hr|hourly)\b"
 )
 _RANGE_RE = re.compile(
-    _amt("a") + r"\s*(?:-|–|—|to)\s*" + _amt("b") + rf"(?:{_PERIOD})?",
+    _amt("a") + r"\s*(?:-|–|—|to|and)\s*" + _amt("b") + rf"(?:{_PERIOD})?",
+)
+# A period said before the amount: "Hourly pay: $28 - $34", "Annual salary of $150K".
+_PERIOD_BEFORE = re.compile(
+    r"\b(?P<word>hourly|per hour|an hour|hr|annual|annually|yearly|per year|per annum|monthly|per month|"
+    r"weekly|per week|daily)\b[^$£€\d]{0,30}$",
+    re.I,
 )
 _SINGLE_RE = re.compile(
     r"(?<![\d.,])" + _amt("a") + rf"(?:{_PERIOD})?",
@@ -56,9 +69,14 @@ _PERIOD_WORDS = {
 _PAY_WORDS = re.compile(
     r"\b(salary|salaries|base|pay|compensation|comp|wage|wages|ote|earn|earnings|range)\b", re.I,
 )
+# Counts of things, money that isn't pay: "a user base of 200K members", "120K
+# square feet", "$300K marketing spend" (with "base", "range" or "pay" nearby).
 _NOT_PAY = re.compile(
     r"\b(budget|revenue|revenues|arr|funding|funded|raised|series\s+[a-f]|valuation|aum|"
-    r"assets under|portfolio|p&l|sales of|deal size|market cap|savings|ebitda|investment)\b",
+    r"assets under|portfolio|p&l|sales of|deal size|market cap|savings|ebitda|investment|"
+    r"users?|members|employees|customers|subscribers|followers|downloads|headcount|people|"
+    r"square\s+f(?:ee|oo)t|sq\.?\s?ft\.?|sqft|spend|spending|visitors|patients|students|residents|"
+    r"locations|stores|units|miles|team of)\b",
     re.I,
 )
 # "20%", "20–30%", "20% to 30%", "0.5%-1.0%".
@@ -89,9 +107,11 @@ _CLAUSE_BREAK = re.compile(
 )
 _RETIREMENT = re.compile(r"(?:401|403|457)\s?\(?[kKbB]\)?")
 _SIGNING = re.compile(r"\b(sign(ing)?[- ]on|signing)\b", re.I)
+# "options" and "shares" alone are not equity ("10% off insurance options").
 _EQUITY_WORD = re.compile(
-    r"\bequity\b|\bstock options?\b|\boptions\b|\bRSUs?\b|\brestricted stock\b|\bprofits? interests?\b"
-    r"|\bownership\b|\bshares\b",
+    r"\bequity\b|\b(?:stock|equity|company|share|incentive) options?\b|\boption (?:grants?|pool)\b"
+    r"|\bRSUs?\b|\brestricted stock\b|\bprofits? interests?\b|\bownership\b"
+    r"|\b(?:equity|company|founder|founding) shares\b",
     re.I,
 )
 _EQUITY_MENTION = re.compile(
@@ -120,6 +140,8 @@ def _amount(match: re.Match, p: str) -> tuple[float | None, str | None, bool]:
     raw = match.group(f"{p}num")
     if raw is None:
         return None, None, False
+    if re.fullmatch(r"\d{1,3}(?:\.\d{3})+", raw):
+        raw = raw.replace(".", "")  # "150.000": thousands, as Europe writes them
     try:
         value = float(raw.replace(",", ""))
     except ValueError:
@@ -131,8 +153,8 @@ def _amount(match: re.Match, p: str) -> tuple[float | None, str | None, bool]:
         return None, None, False  # "401k" is a retirement plan, not $401,000
     if suffix == "k":
         value *= 1_000
-    cur = (match.group(f"{p}cur") or "").strip()
-    currency = _SYMBOLS.get(cur) or (cur.upper() if cur.upper() in _CODES else None)
+    cur = (match.group(f"{p}cur") or match.groupdict().get(f"{p}code") or "").strip().upper()
+    currency = _SYMBOLS.get(cur) or (cur if cur in _CODES else None)
     return value, currency, bool(suffix)
 
 
@@ -170,7 +192,24 @@ def quote_around(text: str, start: int, end: int, limit: int = MAX_QUOTE) -> str
 
 def _period(match: re.Match) -> str | None:
     word = (match.groupdict().get("period") or "").lower()
-    return _PERIOD_WORDS.get(word)
+    return _PERIOD_WORDS.get(word) or _period_before(match.string, match.start())
+
+
+def _period_before(text: str, start: int) -> str | None:
+    """The period a label before the amount gives ("Hourly Pay: $28 - $34")."""
+    found = _PERIOD_BEFORE.search(text[max(0, start - 60):start])
+    if found is None:
+        return None
+    word = found.group("word").lower()
+    if "hour" in word or word == "hr":
+        return "hour"
+    if "ann" in word or "year" in word:
+        return "year"
+    if "month" in word:
+        return "month"
+    if "week" in word:
+        return "week"
+    return "day"
 
 
 def _base_finding(text: str, match: re.Match, lo: float, hi: float, currency: str | None,
@@ -260,10 +299,10 @@ def scan_base(text: str, *, origin: str, url: str | None = None,
 
 
 def _pct_tied(text: str, word: re.Pattern, *, max_pct: float,
-              gap: int = 30) -> list[tuple[re.Match, float, float, str]]:
+              gap: int = 30) -> list[tuple[re.Match, float, float, str, re.Match]]:
     """Percentages in the same clause as `word`: (match, lo, hi, the text
-    between them). "Bonus target of 40%" and "a 30% target bonus" are tied;
-    "a 401(k) match of 4% and an annual bonus" is not."""
+    between them, the word). "Bonus target of 40%" and "a 30% target bonus"
+    are tied; "a 401(k) match of 4% and an annual bonus" is not."""
     out = []
     for match in _PCT_RE.finditer(text):
         lo = float(match.group("lo") or match.group("one"))
@@ -279,19 +318,29 @@ def _pct_tied(text: str, word: re.Pattern, *, max_pct: float,
             if found.start() < match.end() and found.end() > match.start():
                 continue  # overlapping: not a word next to the number
             if len(between) <= gap and not _CLAUSE_BREAK.search(between):
-                out.append((match, lo, hi, between))
+                out.append((match, lo, hi, between, found))
                 break
     return out
+
+
+def _nice_to_have(text: str, word: re.Match) -> bool:
+    """Whether this "bonus" is itself a nice-to-have ("is a bonus", "bonus
+    points"), not merely near one."""
+    start = max(0, word.start() - 25)
+    return any(start + m.start() <= word.start() and start + m.end() >= word.end()
+               for m in _NOT_BONUS.finditer(text[start: word.end() + 10]))
 
 
 def scan_bonus(text: str, *, origin: str, url: str | None = None) -> list[dict]:
     if not text:
         return []
     found = []
-    for match, lo, hi, _between in _pct_tied(text, _BONUS_WORD, max_pct=100):
-        around = _window(text, match.start(), match.end(), 45)
-        if _NOT_BONUS.search(around):
+    for match, lo, hi, _between, word in _pct_tied(text, _BONUS_WORD, max_pct=100):
+        # Judged on the word the figure is tied to: "SaaS is a bonus" in the
+        # sentence before doesn't make "Annual bonus target of 20%" a nice-to-have.
+        if _nice_to_have(text, word):
             continue
+        around = _window(text, match.start(), match.end(), 45)
         found.append({
             "component": "bonus", "status": "posted",
             "kind": "signing" if _SIGNING.search(around) else "annual",
@@ -323,7 +372,7 @@ def scan_equity(text: str, *, origin: str, url: str | None = None) -> list[dict]
     if not text:
         return []
     found = []
-    for match, lo, hi, _between in _pct_tied(text, _EQUITY_WORD, max_pct=20):
+    for match, lo, hi, _between, _word in _pct_tied(text, _EQUITY_WORD, max_pct=20):
         around = text[max(0, match.start() - 35): match.end() + 35]
         offset = max(0, match.start() - 35)
         word = _EQUITY_WORD.search(around)
@@ -363,14 +412,16 @@ def scan_text(text: str, *, origin: str, url: str | None = None) -> list[dict]:
 def _num(value: Any) -> float | None:
     if isinstance(value, bool):
         return None
+    number = None
     if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, str):
+        number = float(value)
+    elif isinstance(value, str):
         try:
-            return float(value.replace(",", "").strip())
+            number = float(value.replace(",", "").strip())
         except ValueError:
             return None
-    return None
+    # "NaN" or "Infinity" in a structured field would raise at round().
+    return number if number is not None and math.isfinite(number) else None
 
 
 def period_of(unit: Any) -> str | None:

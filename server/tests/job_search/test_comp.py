@@ -16,9 +16,24 @@ def bases(text, **kw):
     ("Base salary: $275,000.", [(275_000, 275_000, "year")]),
     ("The salary is 150-200K per year", [(150_000, 200_000, "year")]),
     ("$12,500 per month", [(12_500, 12_500, "month")]),
+    # A period said before the amount, a range joined by "and", a code after the number.
+    ("Hourly Pay: $28 - $34", [(28, 34, "hour")]),
+    ("Annual salary of $150K", [(150_000, 150_000, "year")]),
+    ("Salary between $150,000 and $180,000", [(150_000, 180_000, "year")]),
+    ("180,000 - 220,000 USD annually", [(180_000, 220_000, "year")]),
+    ("Salary: 150.000 - 180.000 EUR", [(150_000, 180_000, "year")]),
 ])
 def test_base_pay_is_read(text, expected):
     assert bases(text) == expected
+
+
+def test_a_prefixed_dollar_is_its_countrys():
+    """Currencies are never compared, so "CA$" must not read as USD."""
+    [found] = comp.scan_base("CA$150,000 - CA$180,000 per year", origin="page")
+    assert (found["currency"], found["min"], found["max"]) == ("CAD", 150_000, 180_000)
+    assert comp.scan_base("Salary: 150.000 - 180.000 EUR", origin="page")[0]["currency"] == "EUR"
+    assert comp.scan_base("Base pay A$120,000", origin="page")[0]["currency"] == "AUD"
+    assert comp.scan_base("Base pay 95,000 CHF", origin="page")[0]["currency"] == "CHF"
 
 
 @pytest.mark.parametrize("text", [
@@ -35,6 +50,12 @@ def test_base_pay_is_read(text, expected):
     "Competitive salary and 401k with match.",
     "Salary competitive; 403(b) and 457(b) plans.",
     "Base pay plus a 401K match.",
+    # Counts of things next to "base", "range" or "pay".
+    "We serve a user base of 200K members.",
+    "200K users and a wide range of products. Competitive pay.",
+    "$300K marketing spend to manage, with a competitive salary.",
+    "120K square feet of space; pay is competitive.",
+    "50K employees across our base of operations.",
 ])
 def test_company_figures_are_never_pay(text):
     assert bases(text) == []
@@ -53,6 +74,8 @@ def test_a_known_pay_field_needs_no_pay_word():
     ("a bonus of 15% to 25%", ("posted", 15, 25)),
     ("401(k) match of 4% and an annual bonus.", ("mentioned", None, None)),
     ("We offer 15% off at the store and a performance bonus.", ("mentioned", None, None)),
+    # A nice-to-have "bonus" in the sentence before doesn't hide the real one.
+    ("Experience with SaaS is a bonus. Annual bonus target of 20%.", ("posted", 20, 20)),
 ])
 def test_a_percentage_is_a_bonus_only_in_its_clause(text, expected):
     [bonus] = comp.scan_bonus(text, origin="page")
@@ -93,6 +116,8 @@ def test_bonus_and_equity_percentages_and_mentions():
     "Bonus points for Spanish.",
     "Reports to the CEO; 15% travel.",
     "Pay equity analysis experience required.",
+    "Employees get 10% off insurance options.",
+    "Choose from 3 health plan options and 5% off shares of our products.",
 ])
 def test_things_that_only_look_like_bonus_or_equity(text):
     assert comp.scan_bonus(text, origin="page") == []
@@ -108,6 +133,9 @@ def test_structured_sources():
     assert (jsonld["annual_min"], jsonld["annual_max"], jsonld["evidence"]["origin"]) == (200_000, 260_000, "jsonld")
     assert comp.from_jsonld({"currency": "USD", "value": 55, "unitText": "HOUR"}, url=None)[0]["annual_min"] == 114_400
     assert comp.from_jsonld("not a dict", url=None) == []
+    # A structured field that isn't a number is no pay, not a crash.
+    assert comp.from_jsonld({"currency": "USD", "value": float("nan"), "unitText": "YEAR"}, url=None) == []
+    assert comp.from_jsonld({"currency": "USD", "value": "Infinity", "unitText": "YEAR"}, url=None) == []
 
     lever = comp.from_lever(
         {"salaryRange": {"min": 180000, "max": 220000, "currency": "USD", "interval": "per-year-salary"},

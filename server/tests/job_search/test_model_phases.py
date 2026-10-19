@@ -152,6 +152,32 @@ async def test_screen_writes_verdicts_and_moves_on(conn):
 
 
 @pytest.mark.asyncio
+async def test_a_job_the_model_skipped_is_screened_once_more(conn):
+    """The contract lets a few verdicts go missing; those jobs stay pending
+    for the next batch instead of counting as matches, and are kept in with
+    no fit only when skipped a second time."""
+    rows = [lead_row(i) for i in range(1, 6)]
+    conn.on("screen_status = 'pending'\n                ORDER BY", rows)
+    conn.on("COUNT(*) FROM mw_job_leads WHERE search_id = $1 AND screen_status = 'pending'", 1)
+    # J5 is missing: one of five is within what the contract lets go.
+    verdicts = {"verdicts": [
+        {"id": f"J{i}", "relevant": i != 2, "fit": 4, "reasons": [], "deal_breaker": None} for i in range(1, 5)]}
+    out = await model_phases.screen(search_row(status="screening"), deps(finish(verdicts))[0], guard())
+    assert out.status == "screening" and out.cursor == {"rescreen": [str(UUID(int=5))]}
+    [write] = conn.ran("SET screen_status = CASE")
+    assert write[2][2] == [UUID(int=i) for i in range(1, 5)]  # J5 is not written: it stays pending
+    # Skipped again, it is kept in (relevant, unrated), as a failed batch's jobs are.
+    conn.calls.clear()
+    again = search_row(status="screening", phase_cursor=json.dumps({"rescreen": [str(UUID(int=5))]}))
+    conn.on("COUNT(*) FROM mw_job_leads WHERE search_id = $1 AND screen_status = 'pending'", 0)
+    out = await model_phases.screen(again, deps(finish(verdicts))[0], guard())
+    assert out.status == "enriching" and out.cursor == {}
+    [write] = conn.ran("SET screen_status = CASE")
+    assert write[2][2] == [UUID(int=i) for i in range(1, 6)] and write[2][3] == [True, False, True, True, True]
+    assert write[2][4][-1] is None
+
+
+@pytest.mark.asyncio
 async def test_screen_with_nothing_pending(conn):
     out = await model_phases.screen(search_row(status="screening"), deps()[0], guard())
     assert out.status == "enriching"
@@ -191,6 +217,10 @@ async def test_approach_drafts_a_batch_and_queues_the_rest(conn, monkeypatch):
     drafted = [json.loads(a) if a else None for a in write[2][3]]
     assert drafted[0]["contacts"][0]["name"] == "Dana Ruiz" and drafted[0]["answers"][0]["question_key"] == "q1"
     assert drafted[1] is None  # J2 got nothing: marked failed, can be redrafted
+    # `drafting` is written under the token: after a cancel released the queue,
+    # a late write would otherwise leave the job drafting for good.
+    [(_m, drafting, args)] = conn.ran("SET approach_status = 'drafting'")
+    assert "dispatch_token = $3" in drafting and args[2] == TOKEN
 
     out = await model_phases.approach(search_row(status="approaching", phase_cursor="{}"), d, guard())
     assert out.status == "done"

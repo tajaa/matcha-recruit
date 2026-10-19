@@ -99,7 +99,7 @@ export default function NewJobSearchModal({ list, loadError, onRetry, onCreate, 
     const criteriaTitles = splitList(titles).slice(0, 8)
     const body: JobSearchCreate = {
       request_id: requestId.current,
-      title: criteriaTitles[0] ?? '',
+      title: (criteriaTitles[0] ?? '').slice(0, 120),  // the server takes 120
       ask: ask.trim(),
       criteria: {
         titles: criteriaTitles,

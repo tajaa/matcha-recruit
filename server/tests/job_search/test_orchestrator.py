@@ -210,13 +210,20 @@ def test_worker_tasks_run_the_orchestrator(monkeypatch):
     from app.workers.celery_app import celery_app
     from app.workers.tasks import job_search as tasks
 
+    import asyncio
+
     run_phase, reconcile = AsyncMock(), AsyncMock(return_value={})
     monkeypatch.setattr(orchestrator, "run_phase", run_phase)
     monkeypatch.setattr(orchestrator, "reconcile", reconcile)
+    # Ending a search posts its card and bell through the socket fan-out, which
+    # needs the worker's own Redis client: `run_with_chat_fanout`, not `asyncio.run`.
+    fanout = []
+    monkeypatch.setattr(tasks, "run_with_chat_fanout", lambda coro: fanout.append(1) or asyncio.run(coro))
     tasks.run_job_search_phase(str(SEARCH), str(TOKEN))
     run_phase.assert_awaited_once_with(SEARCH, TOKEN)
     tasks.reconcile_job_searches()
     reconcile.assert_awaited_once()
+    assert len(fanout) == 2
     assert "app.workers.tasks.job_search" in celery_app.conf.include
     # Under Celery's soft limit, with the phase's own 420s budget inside it.
     assert tasks.run_job_search_phase.soft_time_limit > orchestrator.PHASE_SECONDS

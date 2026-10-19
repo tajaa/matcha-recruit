@@ -284,6 +284,22 @@ def _one_line(text: str | None, limit: int) -> str:
 
 
 _DRAFT_GONE = "That draft isn't in your Gmail drafts any more: it was sent or deleted there."
+_RECONNECT = "Gmail needs to be connected again in Email."
+
+
+def _gmail_failure(exc: Exception) -> JobSearchError:
+    """What the person is told when Gmail refused or failed, instead of a 500:
+    a revoked or expired connection (a 401/403, or Google refusing the token
+    refresh) is "connect Gmail again", anything else a 502."""
+    import httpx
+
+    if isinstance(exc, ValueError):  # the stored token is incomplete: reconnect
+        return JobSearchError(_RECONNECT, 409, {"code": "email_not_connected", "message": _RECONNECT})
+    status = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
+    host = exc.request.url.host if isinstance(exc, httpx.HTTPStatusError) else ""
+    if status in (401, 403) or (status is not None and host == "oauth2.googleapis.com"):
+        return JobSearchError(_RECONNECT, 409, {"code": "email_not_connected", "message": _RECONNECT})
+    return JobSearchError("Gmail didn't answer. Try Draft email again in a moment.", 502)
 
 
 async def draft_email(search_id: UUID, lead_id: UUID, user_id: UUID, *, existing_only: bool = False) -> dict:
@@ -325,9 +341,12 @@ async def draft_email(search_id: UUID, lead_id: UUID, user_id: UUID, *, existing
                     "created": False, "lead": lead_detail(lead)}
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code not in (400, 404):
-                raise
+                # Not "gone": never a reason to make a second draft.
+                raise _gmail_failure(exc) from exc
         except ValueError:
             pass  # a stored id Gmail would refuse: make a new draft
+        except httpx.HTTPError as exc:
+            raise _gmail_failure(exc) from exc
     if existing_only:
         if waiting:
             async with connection_or_direct() as conn:
@@ -346,7 +365,10 @@ async def draft_email(search_id: UUID, lead_id: UUID, user_id: UUID, *, existing
     to = to if _ADDRESS.fullmatch(to) else ""  # the hiring contact, when the approach found one
     subject = _one_line(outreach.get("subject"), 200) or _one_line(
         f"{lead['title'] or 'The role'} at {lead['company'] or 'your company'}", 200)
-    created = await gmail.create_draft(to=to, subject=subject, body=body)
+    try:
+        created = await gmail.create_draft(to=to, subject=subject, body=body)
+    except (httpx.HTTPError, ValueError) as exc:
+        raise _gmail_failure(exc) from exc
     async with connection_or_direct() as conn:
         lead = await conn.fetchrow(
             """UPDATE mw_job_leads
@@ -408,13 +430,18 @@ async def cancel_search(search_id: UUID, user_id: UUID) -> dict:
     async with connection_or_direct() as conn, conn.transaction():
         search = await owned_search(conn, search_id, user_id, lock=True)
         if search["status"] in LIVE:
+            # A redraft or widen of a finished search goes back to where it
+            # was (`phase_cursor.after`), as the chain does when it ends one;
+            # only a first-pass search becomes `cancelled`.
+            after = resting_status(search, any_after=True)
             search = await conn.fetchrow(
                 """UPDATE mw_job_searches
-                   SET status = 'cancelled', dispatch_token = NULL, lease_until = NULL,
-                       progress = progress || '{"note": "Cancelled."}'::jsonb,
+                   SET status = $2, dispatch_token = NULL, lease_until = NULL, phase_cursor = '{}'::jsonb,
+                       progress = progress || $3::jsonb,
                        completed_at = NOW(), updated_at = NOW()
                    WHERE id = $1 RETURNING *""",
-                search_id,
+                search_id, after or "cancelled",
+                json.dumps({"note": "Stopped drafting." if after == "done" else "Cancelled."}),
             )
             # What was found so far stays useful, ranked.
             await rerank(conn, search)
@@ -480,14 +507,23 @@ async def end_stale(conn, user_id: UUID) -> int:
             row["id"], ended,
         )
         await release_drafts(conn, row["id"])
+        # The same hooks a search ended by the chain gets: the person is told
+        # once and the row in Tasks is completed (best effort, idempotent).
+        from ..agent_tasks import job_tasks
+
+        await job_tasks.search_stopped(conn, row["id"])
     return len(rows)
 
 
-def resting_status(search: dict) -> str | None:
+def resting_status(search: dict, *, any_after: bool = False) -> str | None:
     """`cancelled` while a cancelled search drafts a requested approach (the
-    status it goes back to whatever happens), else None."""
+    status it goes back to whatever happens), else None. With `any_after`,
+    the status a redraft or widen returns to, `done` included."""
     cursor = decode_jsonb(search.get("phase_cursor"), {}) or {}
-    return "cancelled" if isinstance(cursor, dict) and cursor.get("after") == "cancelled" else None
+    after = cursor.get("after") if isinstance(cursor, dict) else None
+    if after == "cancelled" or (any_after and after in REDRAFTABLE):
+        return after
+    return None
 
 
 async def find_by_request(user_id: UUID, request_id: UUID) -> dict | None:
@@ -616,7 +652,7 @@ async def widen(search_id: UUID, user_id: UUID):
             search = await conn.fetchrow(
                 """UPDATE mw_job_searches
                    SET status = 'enriching', dispatch_token = $2, lease_until = NULL, attempts = 0,
-                       phase_cursor = $3::jsonb, completed_at = NULL,
+                       phase_cursor = $3::jsonb, completed_at = NULL, error = NULL,
                        progress = progress || $4::jsonb, updated_at = NOW()
                    WHERE id = $1 RETURNING *""",
                 search_id, token,
@@ -631,6 +667,23 @@ async def widen(search_id: UUID, user_id: UUID):
     return search, token
 
 
+def _refuse_unless_redraftable(search) -> None:
+    if search["status"] in LIVE:
+        raise JobSearchError("This search is still running. Try again when it finishes.", 409)
+    if search["status"] not in REDRAFTABLE:
+        raise JobSearchError("Only a finished or cancelled search can draft more approaches.", 409)
+    if int(search["redrafts"] or 0) >= MAX_REDRAFTS:
+        raise JobSearchError("This search has used its redrafts.", 429)
+
+
+async def check_redraftable(search_id: UUID, user_id: UUID) -> None:
+    """The refusals `requeue_approach` would give, read-only: checked before
+    the redraft rate limit is spent, so ten refused clicks don't lock the
+    person out of redrafting for an hour."""
+    async with connection_or_direct() as conn:
+        _refuse_unless_redraftable(await owned_search(conn, search_id, user_id))
+
+
 async def requeue_approach(search_id: UUID, lead_id: UUID, user_id: UUID):
     """Put a finished search back into `approaching` for one job.
 
@@ -640,12 +693,7 @@ async def requeue_approach(search_id: UUID, lead_id: UUID, user_id: UUID):
     token = uuid4()
     async with connection_or_direct() as conn, conn.transaction():
         search = await owned_search(conn, search_id, user_id, lock=True)
-        if search["status"] in LIVE:
-            raise JobSearchError("This search is still running. Try again when it finishes.", 409)
-        if search["status"] not in REDRAFTABLE:
-            raise JobSearchError("Only a finished or cancelled search can draft more approaches.", 409)
-        if int(search["redrafts"] or 0) >= MAX_REDRAFTS:
-            raise JobSearchError("This search has used its redrafts.", 429)
+        _refuse_unless_redraftable(search)
         lead = await conn.fetchrow(
             "SELECT id, approach_status FROM mw_job_leads WHERE id = $1 AND search_id = $2 FOR UPDATE",
             lead_id, search_id,
@@ -662,7 +710,7 @@ async def requeue_approach(search_id: UUID, lead_id: UUID, user_id: UUID):
             search = await conn.fetchrow(
                 """UPDATE mw_job_searches
                    SET status = 'approaching', dispatch_token = $2, lease_until = NULL, attempts = 0,
-                       phase_cursor = $3::jsonb, redrafts = redrafts + 1, completed_at = NULL,
+                       phase_cursor = $3::jsonb, redrafts = redrafts + 1, completed_at = NULL, error = NULL,
                        progress = progress || '{"note": "Drafting the approach…"}'::jsonb,
                        updated_at = NOW()
                    WHERE id = $1 RETURNING *""",

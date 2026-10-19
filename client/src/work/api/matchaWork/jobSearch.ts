@@ -127,10 +127,15 @@ export interface JobCompPart {
   evidence?: JobEvidence | null
 }
 
+/** A question left for the person to answer (`approach.unanswered`): the
+ *  server sends `question_key`, `question` and `kind` (file, authorization,
+ *  demographic). `key`/`label` are a posting question's own shape. */
 export interface JobQuestion {
   key?: string | null
   label?: string | null
   question?: string | null
+  question_key?: string | null
+  kind?: string | null
 }
 
 export interface JobApproach {
@@ -187,7 +192,7 @@ export interface JobSearchCreate {
 }
 
 export interface JobEmailDraftResult {
-  draft_id: string
+  draft_id: string | null
   to: string
   subject: string
   created: boolean

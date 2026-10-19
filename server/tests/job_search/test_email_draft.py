@@ -71,10 +71,12 @@ async def test_asking_again_returns_the_draft_while_it_is_in_gmail(conn, gmail):
     # A stored id Gmail would refuse outright: a new one too.
     gmail.get_draft.side_effect = ValueError("Invalid draft id")
     assert (await service.draft_email(SEARCH, LEAD, USER))["created"] is True
-    # Any other Gmail failure is not a reason to duplicate the draft.
+    # Any other Gmail failure is not a reason to duplicate the draft, and is
+    # said, not a 500.
     gmail.get_draft.side_effect = _missing(500)
-    with pytest.raises(httpx.HTTPStatusError):
+    with pytest.raises(service.JobSearchError) as exc:
         await service.draft_email(SEARCH, LEAD, USER)
+    assert exc.value.code == 502
     # Once sent, asking again starts a new draft.
     gmail.get_draft.reset_mock()
     gmail.get_draft.side_effect = None
@@ -172,3 +174,25 @@ async def test_the_route_passes_the_caller(monkeypatch):
     assert drafted.await_args.kwargs == {"existing_only": False}
     await routes.draft_job_email(SEARCH, LEAD, routes.EmailDraftRequest(existing_only=True), caller)
     assert drafted.await_args.kwargs == {"existing_only": True}
+
+
+@pytest.mark.asyncio
+async def test_a_revoked_or_broken_gmail_connection_says_connect_again(conn, gmail):
+    """A 401/403, or Google refusing the token refresh, is "connect Gmail
+    again" (409 email_not_connected), never a 500; another failure is a 502."""
+    conn.on("FROM mw_job_leads WHERE id = $1", _lead())
+    for failure in (_missing(401), _missing(403), ValueError("Incomplete Gmail token")):
+        gmail.create_draft.side_effect = failure
+        with pytest.raises(service.JobSearchError) as exc:
+            await service.draft_email(SEARCH, LEAD, USER)
+        assert exc.value.code == 409 and exc.value.detail["code"] == "email_not_connected"
+    request = httpx.Request("POST", "https://oauth2.googleapis.com/token")
+    gmail.create_draft.side_effect = httpx.HTTPStatusError(
+        "invalid_grant", request=request, response=httpx.Response(400, request=request))
+    with pytest.raises(service.JobSearchError) as exc:
+        await service.draft_email(SEARCH, LEAD, USER)
+    assert exc.value.detail["code"] == "email_not_connected"
+    gmail.create_draft.side_effect = httpx.ConnectError("down")
+    with pytest.raises(service.JobSearchError) as exc:
+        await service.draft_email(SEARCH, LEAD, USER)
+    assert exc.value.code == 502

@@ -96,10 +96,17 @@ async def test_nudge_and_reconcile(monkeypatch):
 def test_worker_tasks_run_the_orchestrator(monkeypatch):
     from app.workers.tasks import agent_tasks as worker
 
+    import asyncio
+
     run, rec = AsyncMock(), AsyncMock()
     monkeypatch.setattr(orchestrator, "run_phase", run)
     monkeypatch.setattr(orchestrator, "reconcile", rec)
+    # Ending a task posts its card and bell through the socket fan-out, which
+    # needs the worker's own Redis client: `run_with_chat_fanout`, not `asyncio.run`.
+    fanout = []
+    monkeypatch.setattr(worker, "run_with_chat_fanout", lambda coro: fanout.append(1) or asyncio.run(coro))
     worker.run_agent_task_phase.run(str(TASK), str(TOKEN))
     run.assert_awaited_once_with(TASK, TOKEN)
     worker.reconcile_agent_tasks.run()
     rec.assert_awaited_once()
+    assert len(fanout) == 2

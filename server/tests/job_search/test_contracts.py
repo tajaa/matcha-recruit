@@ -37,9 +37,17 @@ def test_discover_keeps_links_the_run_saw():
         {"url": "https://boards.greenhouse.io/b/jobs/2", "title": "", "company": "B", "location": ""},
         "junk",
     ]}}, citable=seen)
+    # A posting with no title is still read (the ATS has the title); the invented
+    # and the ftp links go, the repeat is kept once.
     assert out == {"postings": [{"url": "https://jobs.lever.co/a/1", "title": "Chief People Officer",
-                                 "company": "A", "location": "SD"}]}
+                                 "company": "A", "location": "SD"},
+                                {"url": "https://boards.greenhouse.io/b/jobs/2", "title": "", "company": "B",
+                                 "location": ""}]}
     assert len(warnings) == 2 and "invented.test" in warnings[0]
+    # One traceable posting among untraceable ones is an answer, not a repair.
+    out, _ = contracts.normalize_postings({"result": {"postings": [
+        {"url": "https://x.test/1", "title": "T"}, {"url": "https://jobs.lever.co/a/1", "title": "T"}]}}, citable=seen)
+    assert len(out["postings"]) == 1
     # Nothing current is a fine answer; only untraceable links get a repair.
     assert contracts.normalize_postings({"result": {"postings": []}}, citable=seen) == ({"postings": []}, [])
     with pytest.raises(ValueError, match="exactly as a search"):
@@ -68,6 +76,11 @@ def test_screen():
         {"id": "J1", "relevant": False, "fit": True, "reasons": ["Wrong function"], "deal_breaker": None}]}},
         {"J1": "lead-1"})
     assert one["lead-1"] == {"relevant": False, "fit": None, "reasons": ["Wrong function"], "reason": "Wrong function"}
+    # "None" and "N/A" as text are no deal-breaker.
+    for word in ("None", "none", "N/A", "null", "No."):
+        kept, _ = contracts.normalize_screen({"result": {"verdicts": [
+            {"id": "J1", "relevant": True, "fit": 4, "reasons": [], "deal_breaker": word}]}}, {"J1": "lead-1"})
+        assert kept["lead-1"]["relevant"] is True and kept["lead-1"]["reason"] == "", word
 
 
 PAGE = "https://acme.test/about/leadership"
@@ -119,11 +132,48 @@ def test_approach_keeps_only_what_the_run_can_vouch_for():
     assert len([w for w in warnings if "contact" in w]) == 2
 
 
+def test_a_contact_is_named_on_the_page_as_a_name():
+    page = "Our team: Johnathan Doe (CEO) and Sarah Smithers (CFO). Reach Dana Ruiz, COO."
+    out, warnings = contracts.normalize_approaches(
+        {"result": {"approaches": [approach(contacts=[
+            {"name": "John Smith", "role": "CEO", "source_url": PAGE},  # fragments of two names
+            {"name": "Dana Ruiz", "role": "COO", "source_url": PAGE},
+            {"name": "Ruiz, Dana", "role": "COO", "source_url": PAGE},  # the words, whole, out of order
+        ])]}}, batch=BATCH, questions=QUESTIONS, citable={PAGE}, pages={PAGE: page},
+        observed_emails=set(), user_text="")
+    assert [c["name"] for c in out["lead-1"]["contacts"]] == ["Dana Ruiz", "Ruiz, Dana"]
+    assert any("John Smith" in w for w in warnings)
+
+
+def test_nested_fields_sent_as_json_text_are_read_or_refused():
+    text_fields = approach(
+        contacts=f'[{{"name": "Dana Ruiz", "role": "CEO", "source_url": "{PAGE}"}}]',
+        outreach='{"to_email": null, "subject": "COO", "body": "Hi Dana"}',
+        answers='[{"question_key": "q_why", "question": "Why?", "answer": "Because."}]',
+        steps='["Apply", "Email"]', sources=f'["{PAGE}"]',
+    )
+    out, _ = run(text_fields)
+    drafted = out["lead-1"]
+    assert drafted["contacts"][0]["name"] == "Dana Ruiz" and drafted["outreach"]["body"] == "Hi Dana"
+    assert [a["question_key"] for a in drafted["answers"]] == ["q_why"] and drafted["steps"] == ["Apply", "Email"]
+    assert drafted["sources"] == [PAGE]
+    # Text that isn't JSON is refused by field, for the one repair: iterated as
+    # characters it used to store an approach with nothing in it.
+    with pytest.raises(ValueError, match="`outreach` of J1 came as text"):
+        run(approach(outreach="Dear Dana, ..."))
+    with pytest.raises(ValueError, match="`contacts` of J1 came as text"):
+        run(approach(contacts="Dana Ruiz (CEO)"))
+
+
 def test_approach_email_and_likely_answers():
     out, warnings = run(approach(), emails=frozenset())
     assert out["lead-1"]["outreach"]["to_email"] is None and any("address" in w for w in warnings)
     typed, _ = run(approach(), emails=frozenset(), user_text="write to dana@acme.test please")
     assert typed["lead-1"]["outreach"]["to_email"] == "dana@acme.test"
+    # A typed address is itself: a suffix of one isn't printed anywhere.
+    suffix, _ = run(approach(outreach={"to_email": "doe@acme.test", "subject": "s", "body": "b"}), emails=frozenset(),
+                    user_text="write to jane.doe@acme.test please")
+    assert suffix["lead-1"]["outreach"]["to_email"] is None
     # No known questions: up to four likely ones, never authorization or demographics.
     likely, _ = run(approach(id="J2", channel="smoke signals", answers=[
         {"question_key": None, "question": f"Q{i}?", "answer": "A"} for i in range(6)
