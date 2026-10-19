@@ -37,18 +37,34 @@ class Guard:
 def test_board_searches():
     titles = ["Chief People Officer", "CHRO", "VP People", "Head of People", "Fifth Title"]
     wide = boards.board_searches(titles, {})
-    assert wide[:4] == [f'"Chief People Officer" site:{host}' for host in boards.HOSTS]
+    # Host by host: every title on the first host before any on the second.
+    assert wide[:4] == [f'"{title}" site:job-boards.greenhouse.io' for title in titles[:4]]
     assert len(wide) == 16 and not any("Fifth Title" in q for q in wide)
-    # With places: a local search, then a wide one, in turn, up to the cap.
+    # A fifth typed title (or kept direction) is searched too.
+    assert len(boards.board_searches(titles, {}, must=5)) == 20
+    # With places: a local search, then a wide one, in turn, up to the cap;
+    # each place is reached before a title repeats (`phases.cover`).
     local = boards.board_searches(titles, {"locations": ["San Diego, CA", "Remote", "Orange County, CA"]})
     assert local[:4] == ['"Chief People Officer" "San Diego" site:job-boards.greenhouse.io',
                          '"Chief People Officer" site:job-boards.greenhouse.io',
-                         '"Chief People Officer" "San Diego" site:boards.greenhouse.io',
-                         '"Chief People Officer" site:boards.greenhouse.io']
+                         '"CHRO" "Orange County" site:job-boards.greenhouse.io',
+                         '"CHRO" site:job-boards.greenhouse.io']
     assert len(local) == boards.MAX_SEARCHES and len(set(local)) == len(local)
     assert any('"Orange County"' in q for q in local) and not any('"Remote"' in q for q in local)
     assert boards.board_searches(["COO"], {"remote": "remote_only"})[0] == '"COO" remote site:job-boards.greenhouse.io'
     assert boards.board_searches([], {"locations": ["Austin, TX"]}) == []
+
+
+def test_a_capped_list_still_searches_every_typed_title_and_place():
+    """When the Google Jobs step went (2026-10-18), so did its query per typed
+    title and place: eight typed titles and six places are each searched."""
+    typed = [f"Title {n}" for n in range(1, 9)]
+    towns = ["Austin, TX", "Dallas, TX", "Houston, TX", "Denver, CO", "Phoenix, AZ", "Seattle, WA"]
+    searches = boards.board_searches([*typed, "Model One", "Model Two"], {"titles": typed, "locations": towns},
+                                     must=len(typed))
+    assert len(searches) == boards.MAX_SEARCHES
+    assert all(any(f'"{t}"' in q for q in searches) for t in typed)
+    assert all(any(f'"{town.split(",")[0]}"' in q for q in searches) for town in towns)
 
 
 @pytest.mark.asyncio

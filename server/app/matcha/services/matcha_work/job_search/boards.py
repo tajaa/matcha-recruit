@@ -30,9 +30,11 @@ from .phases import Deps
 logger = logging.getLogger(__name__)
 
 HOSTS = ("job-boards.greenhouse.io", "boards.greenhouse.io", "jobs.lever.co", "jobs.ashbyhq.com")
+# Titles searched: at least TITLES, and every one the person typed and every
+# kept direction (`phases.must_search`). Places: all they can name (6).
 TITLES = 4
 LOCAL_TITLES = 2
-PLACES = 5
+PLACES = 6
 MAX_SEARCHES = 24
 RESULTS = 20
 # Brave's free plan answers one request a second.
@@ -45,16 +47,18 @@ def _city(text: str) -> str:
     return str(text or "").split(",")[0].strip()
 
 
-def board_searches(titles: list[str], criteria: dict) -> list[str]:
+def board_searches(titles: list[str], criteria: dict, must: int = 0) -> list[str]:
     """The searches for one search's boards: each title on each host, and
-    each of the first titles in each place on each host, taken in turn so a
-    search with places gets both before the cap."""
-    titles = [t for t in titles if t][:TITLES]
+    the first titles in each place on each host, taken in turn so a search
+    with places gets both before the cap. Host by host, and title by place
+    (`phases.cover`), so even a capped list searches every title (the first
+    `must` at least) and every place."""
+    titles = [t for t in titles if t][:max(TITLES, must)]
     remote = " remote" if criteria.get("remote") == "remote_only" else ""
     spots = [_city(t.label) for t in places.targets(criteria) if t.points or t.name][:PLACES]
-    wide = [f'"{title}"{remote} site:{host}' for title in titles for host in HOSTS]
-    local = [f'"{title}" "{spot}" site:{host}' for spot in spots for title in titles[:LOCAL_TITLES]
-             for host in HOSTS]
+    wide = [f'"{title}"{remote} site:{host}' for host in HOSTS for title in titles]
+    local = [f'"{title}" "{spot}" site:{host}' for host in HOSTS
+             for title, spot in phases.cover(titles[:LOCAL_TITLES], spots)]
     turns = []
     for i in range(max(len(wide), len(local))):
         turns += [s for s in (local[i] if i < len(local) else None, wide[i] if i < len(wide) else None) if s]
@@ -62,11 +66,11 @@ def board_searches(titles: list[str], criteria: dict) -> list[str]:
 
 
 async def find(search: dict, titles: list[str], criteria: dict, deps: Deps,
-               guard: chain.Guard) -> tuple[list[dict], bool]:
+               guard: chain.Guard, *, must: int = 0) -> tuple[list[dict], bool]:
     """The board postings Brave's answers link to, once each, for the read
     step: `([{url, title, company, location}], whether any search answered)`.
     Each search is reserved on the search's `provider_calls` first."""
-    searches = board_searches(titles, criteria)
+    searches = board_searches(titles, criteria, must)
     if not searches:
         return [], False
     granted = await phases.grant(search["id"], "provider_calls", len(searches), phases.MAX_PROVIDER_CALLS)

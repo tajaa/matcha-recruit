@@ -4,6 +4,14 @@ An ability that moves a person's data somewhere it did not go before carries a
 disclosure with a version. The grant stores the version they agreed to. Change
 the text in a way that matters and bump the version: every stored grant then
 stops matching and the ability reads as off until they agree again.
+
+`reading_covers` names earlier versions that still cover what the ability
+does in chat with what is already there, when only starting new work changed.
+jobs-2 named Brave Search, which a new job search sends its terms to; jobs-1
+didn't. Reading, ranking and noting a person's existing searches sends nothing
+to Brave, and jobs-1 disclosed the model provider those go to. So a jobs-1
+grant keeps the chat ability on (`grants.is_active`), and a new search still
+asks for jobs-2 (`grants.is_current`).
 """
 from __future__ import annotations
 
@@ -15,6 +23,9 @@ class Disclosure:
     version: str
     title: str
     body: tuple[str, ...]
+    # Earlier versions whose grants still cover working with what is already
+    # there, but not starting new work (see the module's docstring).
+    reading_covers: tuple[str, ...] = ()
 
 
 DISCLOSURES: dict[str, Disclosure] = {
@@ -32,6 +43,7 @@ DISCLOSURES: dict[str, Disclosure] = {
     "jobs": Disclosure(
         # jobs-2 (2026-10-18): search terms go to Brave Search, not Google Jobs.
         version="jobs-2",
+        reading_covers=("jobs-1",),
         title="Let Espresso run job searches for you",
         body=(
             "A job search sends the job titles and places you're searching for to Brave Search, "
@@ -120,6 +132,18 @@ DISCLOSURES: dict[str, Disclosure] = {
 def current_version(ability_key: str) -> str | None:
     disclosure = DISCLOSURES.get(ability_key)
     return disclosure.version if disclosure else None
+
+
+def accepts(ability_key: str, version: str | None, *, starting: bool = False) -> bool:
+    """Whether agreeing to `version` covers the ability: the current version,
+    or (for working with what is already there, not `starting` new work) an
+    earlier one it `reading_covers`."""
+    disclosure = DISCLOSURES.get(ability_key)
+    if disclosure is None:
+        return True
+    if version == disclosure.version:
+        return True
+    return not starting and version is not None and version in disclosure.reading_covers
 
 
 def disclosure_view(ability_key: str) -> dict | None:

@@ -18,6 +18,7 @@ There is one loop in this package and no other: do not add a second.
 | Loop | `runner.py` | Budgets, dispatch by name, forced finish, one repair, the commit pipeline |
 | Policy | `policy.py` | `evaluate_commit`: allow / confirm / deny. Pure: no I/O, no clock, no model |
 | Result | `result.py` | `agent_result.v2` (headline, summary, typed blocks); reads v1 as v2 |
+| Phase finish | `finish.py` | A model phase's flat `finish` tool and reading its answer (`tool`, `answer`, `unquoted`), for job search's and research tasks' contracts |
 | Catalog | `catalog.py` | Every ability, and `abilities_for`: the only filter on what a run gets |
 | Abilities | `abilities/*.py` | `web`, `places`, `job_listings`, `screenshots`, `shopping`, `files`, `flights`, `email`, `calendar`, `reservations`, `purchase`, `domains`, `sales`, `jobs`, `tasks` |
 | Files | `inputs.py` | Files the person gives Espresso: private storage, extracted text, what a run sees |
@@ -27,7 +28,7 @@ There is one loop in this package and no other: do not add a second.
 | The run | `assistant.py` | Builds the context, runs the loop, posts what came of it |
 | Questions | `prompts.py`, `ask.py` | `ask_user`, `confirm_action` and `ask_form` (a task's details, `../agent_tasks/intake.py`), in `mw_agent_card_prompts` |
 | Progress | `chat_progress.py` | One progress message per run + `agent_run_progress` events |
-| Grants | `grants.py`, `consent.py` | Which abilities a person switched on, and what they agreed to |
+| Grants | `grants.py`, `consent.py` | Which abilities a person switched on, and what they agreed to. `is_active` (chat) also takes a version the current one `reading_covers`; `is_current` (starting new work, a job search) takes only the current version |
 | Conversation | `conversation.py` | The private conversation (`channel_scope='assistant'`) |
 | Chains | `chain.py`, `phase_run.py` | Long jobs as a chain of short worker tasks (`ChainSpec`), and a chain's model phase as a run (`RunOwner`). See "Chains" |
 

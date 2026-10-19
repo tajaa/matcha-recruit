@@ -32,6 +32,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 from uuid import UUID
@@ -44,15 +45,17 @@ from app.matcha.services.matcha_work.agent_runtime.chain import Budget, PhaseOut
 
 from . import ats, normalize, places, ranking
 from . import comp as comp_mod
+from .contracts import titles_in
 from .service import fit_floor, rerank
 
 logger = logging.getLogger(__name__)
 
 # Per search, across retries: a retried discover never buys a second budget.
-# Brave's board searches take at most `boards.MAX_SEARCHES` (24).
-MAX_PROVIDER_CALLS = 24
-# Titles a plan hands the searches; board and web searches take the first few.
-MAX_TITLES = 10
+# Brave's board searches take at most `boards.MAX_SEARCHES` (24) a pass. The
+# room for two passes is kept: a boards step re-claimed after a worker restart
+# runs again, and a search begun before 2026-10-18 had spent calls on Google
+# Jobs, which would otherwise leave its boards step with none.
+MAX_PROVIDER_CALLS = 48
 MAX_LEADS = 120
 ENRICH_BATCH = 24
 ENRICH_CONCURRENCY = 4
@@ -135,21 +138,60 @@ class Guard(chain.Guard):
 
 # ── plan ─────────────────────────────────────────────────────────────────────
 
-def titles_in(titles: Any) -> list[str]:
-    """Titles as a plan keeps them: trimmed, once each (case aside), at most `MAX_TITLES`."""
-    out: dict[str, str] = {}
-    for title in titles if isinstance(titles, list) else []:
-        text = " ".join(str(title or "").split())[:80]
-        if text:
-            out.setdefault(text.lower(), text)
-    return list(out.values())[:MAX_TITLES]
+# The role in an ask, for a search with no typed title whose model plan
+# failed: every search quotes its titles as an exact phrase, so the whole
+# sentence would find nothing.
+_ASK_OPENING = re.compile(
+    r"^(?:(?:please|hi|hey)\W+)*(?:i\s*(?:'|\u2019)?m\s+|i\s+am\s+)?"
+    r"(?:(?:looking|searching|hunting)\s+for|(?:i\s+)?(?:want|need)|find(?:\s+me)?|"
+    r"search\s+for|help\s+me\s+find|get\s+me)\s+", re.I)
+_ASK_FILLER = re.compile(
+    r"^(?:an?|the|some|new|remote|hybrid|on-?site|full[- ]time|part[- ]time|contract|"
+    r"(?:jobs?|roles?|positions?|work)\s+as(?:\s+an?)?)\s+", re.I)
+_ASK_END = re.compile(
+    r"\s+(?:jobs?|roles?|positions?|openings?|opportunities|in|at|near|around|for|with|that|"
+    r"which|who|where|paying|making|remote(?:ly)?|hybrid)\b|[,.;:!?()]", re.I)
+ASK_TITLE_WORDS = 6
+# Not a role: a search with none is left to the web run's own searches.
+_NOT_A_ROLE = {"something", "anything", "work", "job", "role", "position", "career", "opportunity"}
+
+
+def title_from_ask(ask: str) -> str:
+    """The role an ask names ("find me a senior product designer job in
+    Austin" -> "senior product designer"), at most `ASK_TITLE_WORDS` words;
+    empty when it names none."""
+    text = _ASK_OPENING.sub("", " ".join(str(ask or "").split()))
+    while (stripped := _ASK_FILLER.sub("", text)) != text:
+        text = stripped
+    end = _ASK_END.search(text)
+    title = " ".join((text[:end.start()] if end else text).split()[:ASK_TITLE_WORDS])
+    return "" if title.lower() in _NOT_A_ROLE else title
 
 
 def plan_from_criteria(ask: str, criteria: dict) -> dict:
-    """The titles to search, straight from what the person entered (or their
-    ask, when they entered none): the plan when the model plan fails."""
-    titles = titles_in(criteria.get("titles")) or titles_in([" ".join(ask.split())[:100]])
+    """The titles to search, straight from what the person entered (or the
+    role their ask names, when they entered none): the plan when the model
+    plan fails."""
+    titles = titles_in(criteria.get("titles")) or titles_in([title_from_ask(ask)])
     return {"titles": titles, "source": "criteria"}
+
+
+def must_search(criteria: dict, plan: dict) -> int:
+    """How many of the plan's first titles every code-written search takes:
+    each one the person typed and each direction kept, which the plan lists
+    first (`model_phases.plan`), however few titles a search usually takes."""
+    directions = [d.get("title") for d in plan.get("directions") or [] if isinstance(d, dict)]
+    return len(titles_in([*(criteria.get("titles") or []), *directions]))
+
+
+def cover(firsts: list, seconds: list) -> list[tuple]:
+    """Every (first, second) pair, ordered so each of both lists is reached
+    before any pair repeats one: a capped list of searches still has every
+    title and every place in it."""
+    if not firsts or not seconds:
+        return []
+    reach = [(firsts[i % len(firsts)], seconds[i % len(seconds)]) for i in range(max(len(firsts), len(seconds)))]
+    return list(dict.fromkeys([*reach, *((f, s) for f in firsts for s in seconds)]))
 
 
 # ── discover ─────────────────────────────────────────────────────────────────
@@ -183,7 +225,7 @@ async def insert_leads(search: dict, token: UUID, records: list[dict]) -> int:
                         apply_links, ats, description, highlights, comp, comp_status,
                         comp_annual_min, comp_annual_max, comp_currency, enriched_at)
                    SELECT $1, $2, r.dedupe_key, r.title, r.company, r.location, r.state_code,
-                          r.remote, r.schedule_type, r.posted_text, COALESCE(r.source, 'google_jobs'),
+                          r.remote, r.schedule_type, r.posted_text, COALESCE(r.source, 'web'),
                           r.provider_job_id, r.source_url, r.apply_links, COALESCE(r.ats, '{}'::jsonb),
                           r.description, r.highlights, r.comp, r.comp_status, r.comp_annual_min,
                           r.comp_annual_max, r.comp_currency,
@@ -284,8 +326,7 @@ async def read_job_page(url: str, deps: Deps, take: Callable[[], bool]) -> JobPa
         return None
     # A careers page that redirected to an ATS: the ATS has the posting.
     ref = ats.detect(fetched.final_url)
-    paid = ref is not None and all(take() for _ in range(ats.reads(ref)))
-    posting = await deps.ats_fetch(ref) if paid else None
+    posting = await deps.ats_fetch(ref, more=take) if ref is not None and take() else None
     try:
         jobs = await asyncio.to_thread(job_postings, fetched.body, fetched.final_url)
     except Exception:
@@ -345,9 +386,9 @@ async def enrich_one(lead: dict, deps: Deps, budget: Budget) -> dict | None | _N
 
     for url in [u for u in urls if ats.detect(u) is not None][:LINKS_PER_KIND]:
         ref = ats.detect(url)
-        if not all(take() for _ in range(ats.reads(ref))):
+        if not take():
             return NOT_TRIED if spent == 0 else None
-        posting = await deps.ats_fetch(ref)
+        posting = await deps.ats_fetch(ref, more=take)
         if posting is not None and _is_the_job(lead, posting.title, posting.employer):
             update["comp"] = _apply_ats(update, posting, comp)
             return update

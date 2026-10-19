@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+from app.matcha.services.matcha_work.agent_runtime import finish
 from app.matcha.services.matcha_work.job_search import contracts
 
 BATCH = {"J1": "lead-1", "J2": "lead-2"}
@@ -157,6 +158,9 @@ def test_the_answer_comes_flat_wrapped_or_as_json_text():
         with pytest.raises(ValueError, match="must be an object"):
             contracts.normalize_plan(bad)
     # Text that only looks like JSON stays the text it is.
-    assert contracts._unquoted("[not json") == "[not json"
-    assert contracts._unquoted('"quoted"') == '"quoted"'
-    assert contracts._unquoted("[1]") == [1] and contracts._unquoted("7") == "7"
+    assert finish.unquoted("[not json") == "[not json"
+    assert finish.unquoted('"quoted"') == '"quoted"'
+    assert finish.unquoted("[1]") == [1] and finish.unquoted("7") == "7"
+    # Titles are cleaned the way a typed one is (`titles_in`): one letter isn't one.
+    out, _ = contracts.normalize_plan({**plan, "titles": ["C", " COO ", "coo", "Chief\x00 of Staff"]})
+    assert out["titles"] == ["COO", "Chief of Staff"]

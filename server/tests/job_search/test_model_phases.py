@@ -211,6 +211,7 @@ async def test_a_cancelled_search_goes_back_to_cancelled_after_its_draft(conn):
     last = json.dumps({"approach_queue": ids[2:], "after": "cancelled"})
     out = await model_phases.approach(search_row(status="approaching", phase_cursor=last), failing(), guard())
     assert out.status == "cancelled" and out.cursor == {}
+    assert not conn.ran("COUNT(*) FILTER (WHERE approach_status = 'done')")  # no note to count for
     empty = json.dumps({"approach_queue": [], "after": "cancelled"})
     assert (await model_phases.approach(search_row(phase_cursor=empty), failing(), guard())).status == "cancelled"
     done = json.dumps({"approach_queue": [], "after": "done"})
@@ -234,7 +235,8 @@ async def test_the_last_note_counts_the_drafts(conn):
     empty = search_row(status="approaching", phase_cursor=json.dumps({"approach_queue": [str(UUID(int=1))]}))
     d, _ = deps(*[response(text="?")] * 10)
     for counts, note in (
-        (None, "Done: ranked, with approaches drafted."),
+        (None, "Done: ranked."),
+        ({"done": 0, "failed": 0}, "Done: ranked."),  # the queued jobs were gone: nothing drafted
         ({"done": 8, "failed": 0}, "Done: ranked, with approaches drafted."),
         ({"done": 5, "failed": 3}, "Done: ranked, with 5 of 8 approaches drafted; Redraft the others to try again."),
     ):

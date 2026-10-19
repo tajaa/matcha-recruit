@@ -7,7 +7,7 @@ import pytest
 
 from app.core.services.safe_fetch import FetchedResponse, UnsafeURL
 from app.matcha.services.matcha_work.agent_runtime import chain
-from app.matcha.services.matcha_work.job_search import ats, phases
+from app.matcha.services.matcha_work.job_search import ats, contracts, phases
 from tests.agent_runtime.helpers import FakeConn, connection
 
 from ._fixtures import SEARCH, TOKEN, search_row
@@ -16,14 +16,42 @@ GH_URL = "https://boards.greenhouse.io/acme/jobs/123"
 
 
 def test_plan_from_criteria():
-    """Titles to search, as they typed them (or their ask): no Google Jobs queries since 2026-10-18."""
+    """Titles to search, as they typed them (or the role their ask names): no
+    Google Jobs queries since 2026-10-18."""
     plan = phases.plan_from_criteria("COO roles", {"titles": [" COO ", "Chief  Operating Officer", "coo", ""],
                                                    "locations": ["Austin, TX", "Remote"]})
     assert plan == {"titles": ["COO", "Chief Operating Officer"], "source": "criteria"}
-    assert phases.plan_from_criteria("  COO   jobs paying equity ", {})["titles"] == ["COO jobs paying equity"]
+    # Every search quotes its titles, so an ask is never searched as a sentence.
+    assert phases.plan_from_criteria("  COO   jobs paying equity ", {})["titles"] == ["COO"]
     many = phases.plan_from_criteria("x", {"titles": [f"T{i}" for i in range(20)]})
-    assert len(many["titles"]) == phases.MAX_TITLES
+    assert len(many["titles"]) == contracts.MAX_TITLES
     assert phases.titles_in("not a list") == []
+
+
+@pytest.mark.parametrize("ask, title", [
+    ("Find me a senior product designer job in Austin that pays 150k", "senior product designer"),
+    ("I'm looking for remote COO roles at startups", "COO"),
+    ("I want a job as a dental hygienist in San Diego", "dental hygienist"),
+    ("Please find me a full-time Staff Software Engineer, backend", "Staff Software Engineer"),
+    ("Head of Growth for fintech", "Head of Growth"),
+    ("VP of Operations", "VP of Operations"),
+    ("nurse jobs near me", "nurse"),
+    ("Chief Executive Officer of a large global technology holding company", "Chief Executive Officer of a large"),
+    ("something in operations, maybe chief of staff", ""),
+    ("", ""),
+])
+def test_the_role_an_ask_names(ask, title):
+    assert phases.title_from_ask(ask) == title
+
+
+def test_every_typed_title_and_direction_is_searched():
+    criteria = {"titles": ["COO", "VP Operations", "Head of Ops"]}
+    plan = {"directions": [{"title": "Chief of Staff"}, {"title": "coo"}, "junk"]}
+    assert phases.must_search(criteria, plan) == 4  # "coo" is one they typed
+    assert phases.must_search({}, {}) == 0
+    assert phases.cover(["a", "b", "c"], ["x", "y"]) == [
+        ("a", "x"), ("b", "y"), ("c", "x"), ("a", "y"), ("b", "x"), ("c", "y")]
+    assert phases.cover([], ["x"]) == [] and phases.cover(["a"], []) == []
 
 
 @pytest.fixture
@@ -103,18 +131,31 @@ async def test_enrich_one_prefers_the_ats():
     assert budget.used == 1
 
 
+def workable_fetch(posting):
+    """`ats.fetch` for a Workable posting: pays for its form with `more()`."""
+    async def fetch(ref, *, more=None):
+        fetch.formless = more is not None and not more()
+        return posting
+
+    fetch.formless = False
+    return fetch
+
+
 @pytest.mark.asyncio
 async def test_enrich_one_pays_for_both_workable_calls():
     url = "https://apply.workable.com/delta/j/9A1F916774/"
     posting = ats_posting(ref=ats.AtsRef("workable", "delta", "9A1F916774"), url=url)
-    deps = phases.Deps(ats_fetch=AsyncMock(return_value=posting), page_fetch=AsyncMock())
+    deps = phases.Deps(ats_fetch=workable_fetch(posting), page_fetch=AsyncMock())
     budget = phases.Budget(left=5)
     update = await phases.enrich_one(lead([url]), deps, budget)
     assert update["source"] == "workable" and budget.used == 2
-    # One fetch left is not enough to read it.
-    short = phases.Deps(ats_fetch=AsyncMock(return_value=posting), page_fetch=AsyncMock())
-    assert await phases.enrich_one(lead([url]), short, phases.Budget(left=1)) is None
-    short.ats_fetch.assert_not_awaited()
+    # One fetch left: read, without its form (nothing paid for and lost).
+    short = phases.Deps(ats_fetch=workable_fetch(posting), page_fetch=AsyncMock())
+    budget = phases.Budget(left=1)
+    assert (await phases.enrich_one(lead([url]), short, budget))["source"] == "workable"
+    assert budget.used == 1 and short.ats_fetch.formless
+    # None left: not tried, so the lead is read in a later batch.
+    assert await phases.enrich_one(lead([url]), short, phases.Budget(left=0)) is phases.NOT_TRIED
 
 
 @pytest.mark.asyncio
@@ -140,16 +181,21 @@ async def test_enrich_one_follows_a_careers_redirect_into_the_ats():
 async def test_a_careers_redirect_into_workable_pays_for_both_calls():
     url = "https://apply.workable.com/delta/j/9A1F916774/"
     posting = ats_posting(ref=ats.AtsRef("workable", "delta", "9A1F916774"), url=url)
-    deps = phases.Deps(ats_fetch=AsyncMock(return_value=posting),
+    deps = phases.Deps(ats_fetch=workable_fetch(posting),
                        page_fetch=AsyncMock(return_value=page("<html></html>", final_url=url)))
     budget = phases.Budget(left=3)
     update = await phases.enrich_one(lead(["https://delta.test/careers/coo"]), deps, budget)
     assert update["source"] == "workable" and budget.used == 3
-    # The page, and no room left for Workable's two calls: not read through it.
-    short = phases.Deps(ats_fetch=AsyncMock(return_value=posting),
+    # The page paid for, one call left: Workable read without its form.
+    short = phases.Deps(ats_fetch=workable_fetch(posting),
                         page_fetch=AsyncMock(return_value=page("<html></html>", final_url=url)))
-    assert (await phases.read_job_page("https://delta.test/careers/coo", short, iter([True, False]).__next__)).posting is None
-    short.ats_fetch.assert_not_awaited()
+    read = await phases.read_job_page("https://delta.test/careers/coo", short, iter([True, False]).__next__)
+    assert read.posting is posting and short.ats_fetch.formless
+    # None left: not read through it.
+    none = phases.Deps(ats_fetch=AsyncMock(return_value=posting),
+                       page_fetch=AsyncMock(return_value=page("<html></html>", final_url=url)))
+    assert (await phases.read_job_page("https://delta.test/careers/coo", none, iter([False]).__next__)).posting is None
+    none.ats_fetch.assert_not_awaited()
 
 
 @pytest.mark.asyncio

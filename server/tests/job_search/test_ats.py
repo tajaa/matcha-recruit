@@ -49,8 +49,9 @@ def test_api_urls_are_fixed_hosts():
     assert ats.AtsRef("ashby", "g", ASHBY_ID).api_url().startswith("https://api.ashbyhq.com/posting-api/job-board/g?")
     assert ats.AtsRef("workable", "delta", "9A1F916774").api_url() == (
         "https://apply.workable.com/api/v2/accounts/delta/jobs/9A1F916774")
-    assert ats.reads(ats.AtsRef("workable", "delta", "9A1F916774")) == 2
-    assert ats.reads(ats.AtsRef("greenhouse", "acme", "1")) == 1
+    assert ats.most_reads(ats.AtsRef("workable", "delta", "9A1F916774")) == 2
+    assert ats.most_reads(ats.AtsRef("greenhouse", "acme", "1")) == 1
+    assert ats.NAMES["workable"] == "Workable" and set(ats.NAMES) == {"greenhouse", "lever", "ashby", "workable"}
 
 
 GREENHOUSE = {
@@ -355,8 +356,11 @@ async def test_workable_postings_gone_closed_or_without_a_form():
     gone = by_url({})
     assert await ats.fetch(WORKABLE_REF, fetch_fn=gone) is None
     assert gone.await_count == 1
-    closed = by_url({WORKABLE_JOB_URL: response({**WORKABLE, "state": "closed"})})
-    assert await ats.fetch(WORKABLE_REF, fetch_fn=closed) is None
+    closed = by_url({WORKABLE_JOB_URL: response({**WORKABLE, "state": "closed"}),
+                     WORKABLE_FORM_URL: response(WORKABLE_FORM)})
+    paid = []
+    assert await ats.fetch(WORKABLE_REF, more=lambda: paid.append(1) or True, fetch_fn=closed) is None
+    assert closed.await_count == 1 and paid == []  # closed: its form isn't asked for, or paid for
     # No form: the posting, without questions; remote, said either way.
     remote = {**WORKABLE, "workplace": "remote", "locations": [], "salary_from": None, "salary_to": None,
               "location": {"city": None, "region": None, "country": "United States"}, "benefits": ""}
@@ -366,6 +370,19 @@ async def test_workable_postings_gone_closed_or_without_a_form():
     flagged = ats.parse_workable(WORKABLE_REF, {**WORKABLE, "remote": True, "workplace": "on_site"})
     assert flagged.remote is True
     assert ats.parse_workable(WORKABLE_REF, {"title": "COO"}).title == "COO"  # no state: published
+
+
+@pytest.mark.asyncio
+async def test_workable_pays_for_its_form_as_it_asks():
+    both = {WORKABLE_JOB_URL: response(WORKABLE), WORKABLE_FORM_URL: response(WORKABLE_FORM)}
+    paid = []
+    fetch = by_url(both)
+    posting = await ats.fetch(WORKABLE_REF, more=lambda: paid.append(1) or True, fetch_fn=fetch)
+    assert paid == [1] and fetch.await_count == 2 and posting.questions
+    # No call left for the form: the posting, without its questions.
+    fetch = by_url(both)
+    posting = await ats.fetch(WORKABLE_REF, more=lambda: False, fetch_fn=fetch)
+    assert fetch.await_count == 1 and posting.title == "Senior Product Manager" and posting.questions == []
 
 
 def test_workable_questions_are_capped():

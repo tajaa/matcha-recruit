@@ -35,6 +35,8 @@ MAX_BYTES = 3_000_000
 TOTAL_TIMEOUT = 15.0
 MAX_DESCRIPTION = 20_000
 MAX_QUESTIONS = 40
+# Each ATS by name, for a job read on it ("Read on Lever").
+NAMES = {"greenhouse": "Greenhouse", "lever": "Lever", "ashby": "Ashby", "workable": "Workable"}
 
 _TOKEN = r"[A-Za-z0-9][A-Za-z0-9_.-]{0,79}"
 _UUID = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
@@ -104,12 +106,6 @@ class AtsPosting:
     @property
     def employer(self) -> str:
         return self.company or self.ref.board
-
-
-def reads(ref: AtsRef) -> int:
-    """The fetches `fetch` makes for this posting: Workable's application
-    questions are a second call."""
-    return 2 if ref.provider == "workable" else 1
 
 
 def detect(url: str | None) -> AtsRef | None:
@@ -315,9 +311,20 @@ def _workable_place(place: Any) -> str:
     return ", ".join(p for p in parts if p)
 
 
+def most_reads(ref: AtsRef) -> int:
+    """At most the calls `fetch` makes for this posting (Workable's
+    application questions are a second): what to reserve, not what it costs."""
+    return 2 if ref.provider == "workable" else 1
+
+
+def workable_published(data: dict) -> bool:
+    """Not closed or archived."""
+    return data.get("state") in (None, "published")
+
+
 def parse_workable(ref: AtsRef, data: dict, form: Any = None) -> AtsPosting | None:
     """None for a posting no longer published (closed, archived)."""
-    if data.get("state") not in (None, "published"):
+    if not workable_published(data):
         return None
     url = f"https://apply.workable.com/{ref.board}/j/{ref.job_id}/"
     places = [_workable_place(p) for p in data.get("locations") or []]
@@ -361,9 +368,13 @@ async def _json(url: str, what: str, fetch_fn: FetchFn) -> Any:
         return None
 
 
-async def fetch(ref: AtsRef, *, fetch_fn: FetchFn = fetch_public) -> AtsPosting | None:
+async def fetch(ref: AtsRef, *, more: Callable[[], bool] | None = None,
+                fetch_fn: FetchFn = fetch_public) -> AtsPosting | None:
     """The posting from its ATS's public API; None when it is gone or
-    unreadable. `reads(ref)` calls: pay for them first."""
+    unreadable. One call, which the caller pays for first. Workable's
+    application questions are a second, paid with `more()` when it is given:
+    asked only for a posting still published, and left out when `more()`
+    refuses."""
     data = await _json(ref.api_url(), f"{ref.provider} {ref.board}", fetch_fn)
     if not isinstance(data, dict):
         return None
@@ -372,9 +383,13 @@ async def fetch(ref: AtsRef, *, fetch_fn: FetchFn = fetch_public) -> AtsPosting 
     if ref.provider == "lever":
         return parse_lever(ref, data)
     if ref.provider == "workable":
-        # The form is keyed by the shortcode alone; Workable's are global.
-        form = await _json(f"https://apply.workable.com/api/v1/jobs/{ref.job_id}/form",
-                           f"workable form {ref.board}", fetch_fn)
+        if not workable_published(data):
+            return None
+        form = None
+        if more is None or more():
+            # The form is keyed by the shortcode alone; Workable's are global.
+            form = await _json(f"https://apply.workable.com/api/v1/jobs/{ref.job_id}/form",
+                               f"workable form {ref.board}", fetch_fn)
         return parse_workable(ref, data, form)
     return parse_ashby(ref, data)
 
