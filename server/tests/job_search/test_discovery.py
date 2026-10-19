@@ -199,12 +199,14 @@ async def test_each_web_run_gets_its_share_of_the_searches(conn, monkeypatch):
     assert out.progress["note"] == "Searching the web for more…"
     first = model.await_args.kwargs["user_text"]
     assert '"Chief People Officer" "Orange County, CA" job' in first
-    assert '"VP People" site:apply.workable.com' not in first
+    assert '"VP People" "Los Angeles, CA" job' in first  # every title and place, first
+    assert '"VP People" site:jobs.smartrecruiters.com' not in first
     with pytest.raises(PhaseFailed, match="No postings matched"):
         await discovery.discover(places_search("web", web_runs=1, web_ok=True),
                                  phases.Deps(), guard())
     second = model.await_args.kwargs["user_text"]
-    assert '"VP People" site:apply.workable.com' in second
+    assert '"VP People" site:jobs.smartrecruiters.com' in second
+    assert '"Chief People Officer" "San Diego, CA" job' in second
     assert '"Chief People Officer" "Orange County, CA" job' not in second
 
     # After reading: a second run while searches are left, even when this one added nothing.
@@ -218,11 +220,16 @@ def test_web_searches():
     """Greenhouse, Lever and Ashby are code's (`boards.py`): a web run looks
     in each place, then on the other boards."""
     titles = ["Chief People Officer", "CHRO", "VP People", "Head of People"]
-    three = discovery.web_searches(titles, {"locations": ["Orange County, CA", "San Diego, CA", "Los Angeles, CA"]})
-    assert three[:3] == ['"Chief People Officer" "Orange County, CA" job', '"Chief People Officer" "San Diego, CA" job',
-                         '"Chief People Officer" "Los Angeles, CA" job']
-    assert three[9] == '"Chief People Officer" site:apply.workable.com'
+    places = {"locations": ["Orange County, CA", "San Diego, CA", "Los Angeles, CA"]}
+    three = discovery.web_searches(titles, places)
+    # Each title and each place first (`phases.cover`), then the other boards, then the other pairs.
+    assert three[:3] == ['"Chief People Officer" "Orange County, CA" job', '"CHRO" "San Diego, CA" job',
+                         '"VP People" "Los Angeles, CA" job']
+    assert three[3] == '"Chief People Officer" site:apply.workable.com'
+    assert three[9] == '"Chief People Officer" "San Diego, CA" job'
     assert len(three) == discovery.MAX_SEARCHES and not any("Head of People" in q for q in three)
+    # A fourth typed title (or kept direction) is searched too.
+    assert any("Head of People" in q for q in discovery.web_searches(titles, places, must=4)[:4])
     assert not any(board in q for q in three for board in ("lever.co", "greenhouse.io", "ashbyhq.com"))
     assert discovery.web_searches(["COO"], {"locations": ["Austin, TX"]}) == [
         '"COO" "Austin, TX" job', '"COO" "Austin, TX" site:apply.workable.com',
@@ -256,7 +263,7 @@ DELTA_JOB = {"@type": "JobPosting", "title": "Chief People Officer", "hiringOrga
              "description": "<p>Lead people.</p>", "validThrough": "2999-01-01"}
 
 
-async def ats_fetch(ref):
+async def ats_fetch(ref, more=None):
     return {
         "4001": ats_found(ref, GH, company="Acme", description="The base salary is $250,000 - $300,000 per year.",
                           findings=[{"component": "base", "status": "posted", "min": 250000, "max": 300000,
@@ -338,7 +345,7 @@ async def test_reading_keeps_only_related_titles_in_the_places_named(conn):
         "6": ("Head of HR", "", False),                            # no location
     }
 
-    async def fetch(ref):
+    async def fetch(ref, more=None):
         title, location, remote = jobs[ref.job_id]
         return ats_found(ref, f"https://job-boards.greenhouse.io/co{ref.job_id}/jobs/{ref.job_id}", title=title,
                          company=f"Co {ref.job_id}", location=location, remote=remote)
@@ -371,7 +378,7 @@ async def test_a_read_that_breaks_skips_that_posting(conn):
     conn.on(GRANT, lambda _id, want, _limit: want)
     conn.on("INSERT INTO mw_job_leads", 1)
 
-    async def flaky(ref):
+    async def flaky(ref, more=None):
         if ref.board == "brightpath":
             raise KeyError("a bug")
         return await ats_fetch(ref)
@@ -414,7 +421,8 @@ async def test_read_posting_edges():
 @pytest.mark.asyncio
 async def test_a_workable_posting_is_read_from_workable():
     """The web run's Workable links were dropped before Workable could be read
-    (prod, 2026-10-17): now it is an ATS like the others, at two fetches."""
+    (prod, 2026-10-17): now it is an ATS like the others, its form a second
+    fetch paid as it is asked (`ats.fetch(more=...)`)."""
     today = date(2026, 10, 18)
     url = "https://apply.workable.com/delta-health/j/B688C603EB/"
     found = ats_found(ats.detect(url), url, location="San Diego, California, United States",
@@ -425,11 +433,22 @@ async def test_a_workable_posting_is_read_from_workable():
     assert record["apply_links"] == [{"url": url, "source": "Workable"}]
     assert record["ats"]["provider"] == "workable" and record["ats"]["questions"][0]["key"] == "QA_1"
     deps.page_fetch.assert_not_awaited()
-    # Its two fetches, or not read at all.
-    one_left = phases.Deps(ats_find=NO_BOARD, ats_fetch=AsyncMock(return_value=found), page_fetch=AsyncMock())
+    # The form is paid with `more`, from the same budget.
+    assert deps.ats_fetch.await_args.kwargs["more"]() is True
+    # One fetch left: the posting, read without its form; none: not read.
+    asked = []
+
+    async def formless(ref, more=None):
+        asked.append(more())
+        return found
+
+    one_left = phases.Deps(ats_find=NO_BOARD, ats_fetch=formless, page_fetch=AsyncMock())
     left = iter([True, False])
-    assert await discovery.read_posting(claim(url), one_left, lambda: next(left), today=today) is None
-    one_left.ats_fetch.assert_not_awaited()
+    assert (await discovery.read_posting(claim(url), one_left, lambda: next(left), today=today))["source"] == "workable"
+    assert asked == [False]
+    none_left = phases.Deps(ats_find=NO_BOARD, ats_fetch=AsyncMock(return_value=found), page_fetch=AsyncMock())
+    assert await discovery.read_posting(claim(url), none_left, lambda: False, today=today) is None
+    none_left.ats_fetch.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -474,7 +493,7 @@ async def test_reads_still_loading_at_the_deadline_are_dropped(conn, monkeypatch
     conn.on("INSERT INTO mw_job_leads", 1)
     monkeypatch.setattr(discovery, "READ_SECONDS", 0.05)
 
-    async def slow(ref):
+    async def slow(ref, more=None):
         if ref.board == "brightpath":
             await asyncio.sleep(5)
         return await ats_fetch(ref)

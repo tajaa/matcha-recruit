@@ -24,7 +24,8 @@ from app.matcha.services.matcha_work.agent_runtime.context import RunLimits
 
 from . import contracts, prompts, ranking
 from .agent_phase import SearchProgress, run_model_phase
-from .phases import Deps, PhaseOutcome, plan_from_criteria, titles_in
+from .contracts import titles_in
+from .phases import Deps, PhaseOutcome, plan_from_criteria
 from .service import load_resume_for_model, resting_status
 
 logger = logging.getLogger(__name__)
@@ -73,7 +74,8 @@ async def plan(search: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
     except runner.AgentRunError:
         logger.info("job search plan fell back to criteria search=%s", search["id"])
         planned = fallback
-    # What they typed always counts, first: board and web searches take the first titles.
+    # What they typed always counts, first: every search takes each typed
+    # title and each kept direction (`phases.must_search`).
     planned["titles"] = titles_in([*(criteria.get("titles") or []), *(planned.get("titles") or [])]) \
         or fallback["titles"]
     _add_directions(planned, criteria, resume)
@@ -89,22 +91,26 @@ async def plan(search: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
         )
     titles = planned["titles"]
     shown = ", ".join(titles[:3]) + (f" and {len(titles) - 3} more" if len(titles) > 3 else "")
-    return PhaseOutcome(
-        status="discovering", cursor={},
-        progress={"note": f"Searching employers' job boards for {shown[:160]}…", "titles": len(titles)},
-    )
+    note = f"Searching employers' job boards for {shown[:160]}…" if titles else "Searching the web…"
+    return PhaseOutcome(status="discovering", cursor={}, progress={"note": note, "titles": len(titles)})
 
 
 def _add_directions(planned: dict, criteria: dict, resume: str | None) -> None:
-    """Keep the directions the résumé supports and give each a place among
-    the first titles, which code's board and web searches take."""
+    """Keep the directions the résumé supports, listed right after the titles
+    they typed: the searches take every one of both (`phases.must_search`),
+    then the plan's own titles while there is room."""
     own = [*(criteria.get("titles") or []), *(planned.get("titles") or [])]
     directions = contracts.check_directions(planned.pop("directions", []), resume, own)
     if not directions:
         return
-    planned["directions"] = directions
     titles = planned.get("titles") or []
-    planned["titles"] = titles_in(titles[:2] + [d["title"] for d in directions] + titles[2:])
+    typed = len(titles_in(criteria.get("titles")))
+    planned["titles"] = titles_in(titles[:typed] + [d["title"] for d in directions] + titles[typed:])
+    # Only the directions the plan still lists (it keeps `MAX_TITLES`).
+    listed = {t.lower() for t in planned["titles"]}
+    planned["directions"] = [d for d in directions if d["title"].lower() in listed]
+    if not planned["directions"]:
+        planned.pop("directions")
 
 
 # ── screen ───────────────────────────────────────────────────────────────────
@@ -296,6 +302,8 @@ async def approach(search: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
         return PhaseOutcome(status="approaching",
                             cursor={"approach_queue": rest, **({"after": after} if after else {})},
                             progress={"note": f"Drafted approaches; {len(rest)} jobs to go…"})
+    if resting_status(search) == "cancelled":
+        return _finished(search, "")
     return _finished(search, await _drafted_note(search))
 
 
@@ -310,6 +318,8 @@ async def _drafted_note(search: dict) -> str:
             search["id"],
         )
     done, failed = (int(row["done"] or 0), int(row["failed"] or 0)) if row else (0, 0)
+    if not done and not failed:
+        return "Done: ranked."
     if not failed:
         return "Done: ranked, with approaches drafted."
     if not done:

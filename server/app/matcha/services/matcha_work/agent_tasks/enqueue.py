@@ -116,7 +116,7 @@ async def _consent(user, company_id: UUID, playbook: Playbook, consent_version: 
     from app.matcha.services.matcha_work.agent_runtime import grants
 
     rows = await grants.list_rows(user.id)
-    if not grants.is_active(rows.get(playbook.consent), playbook.consent):
+    if not grants.is_current(rows.get(playbook.consent), playbook.consent):
         # Raises 409 consent_required (with the disclosure) unless they just agreed.
         await grants.enable(user.id, company_id, playbook.consent, consent_version=consent_version)
 

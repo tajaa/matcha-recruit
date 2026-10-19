@@ -10,7 +10,7 @@ import pytest
 from app.core.models.auth import CurrentUser
 from app.core.services.safe_fetch import FetchedResponse, UnsafeURL
 from app.matcha.services.matcha_work.agent_card.page_extract import extract_page
-from app.matcha.services.matcha_work.agent_runtime import chain
+from app.matcha.services.matcha_work.agent_runtime import chain, finish
 from app.matcha.services.matcha_work.agent_runtime.chain import Budget, Guard
 from app.matcha.services.matcha_work.agent_tasks import actions, orchestrator, playbooks
 from app.matcha.services.matcha_work.agent_tasks.actions import apply
@@ -710,8 +710,8 @@ def test_a_result_sent_as_json_text_is_read():
     out, _ = contracts.normalize_summary({**answer, "sections": json.dumps(sections), "summary": "[not json"},
                                          batch={}, item_texts={}, citable=set())
     assert out["sections"][0]["heading"] == "South" and out["summary"] == "[not json"
-    assert contracts._unquoted('"just text"') == '"just text"' and contracts._unquoted("[1, 2]") == [1, 2]
-    assert contracts._unquoted("{1}") == "{1}" and contracts._unquoted(" 7") == " 7"
+    assert finish.unquoted('"just text"') == '"just text"' and finish.unquoted("[1, 2]") == [1, 2]
+    assert finish.unquoted("{1}") == "{1}" and finish.unquoted(" 7") == " 7"
     with pytest.raises(ValueError, match="not as a string"):
         contracts.normalize_summary({"result": '{"headline": "x", "sections": [{"a": "b"]}'}, batch={},
                                     item_texts={}, citable=set())

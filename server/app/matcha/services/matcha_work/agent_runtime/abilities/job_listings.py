@@ -66,7 +66,6 @@ READ_MARGIN = 5.0
 # Rows in the `job_postings` block (and its CSV): all a run can find.
 MAX_BLOCK = 120
 AUTO_BLOCK_AT = 3
-SOURCE_LABELS = {"greenhouse": "Greenhouse", "lever": "Lever", "ashby": "Ashby", "workable": "Workable"}
 
 
 @dataclass
@@ -107,8 +106,8 @@ async def _read(url: str) -> dict | None:
 
 def job_row(record: dict) -> dict:
     """One posting read on its board, as the run keeps it."""
+    from app.matcha.services.matcha_work.job_search import ats, normalize, ranking
     from app.matcha.services.matcha_work.job_search import comp as comp_mod
-    from app.matcha.services.matcha_work.job_search import normalize, ranking
 
     comp = record.get("comp") or {}
     base = comp.get("base") if isinstance(comp.get("base"), dict) else {}
@@ -125,8 +124,8 @@ def job_row(record: dict) -> dict:
         "pay_status": comp_mod.comp_status(comp),
         "pay_quote": quote,
         "verified": True,
-        "at_employer": source in SOURCE_LABELS,
-        "read_on": SOURCE_LABELS.get(source) or (host[4:] if host.startswith("www.") else host) or "the web",
+        "at_employer": source in ats.NAMES,
+        "read_on": ats.NAMES.get(source) or (host[4:] if host.startswith("www.") else host) or "the web",
         "source": source,
         "apply_url": url,
     }

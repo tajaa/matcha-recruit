@@ -20,16 +20,16 @@ Checks that matter:
 """
 from __future__ import annotations
 
-import json
 import re
 from typing import Any
 
-from app.matcha.services.matcha_work.agent_runtime import registry
+from app.matcha.services.matcha_work.agent_runtime import finish
 
 from . import ats, normalize
 from .comp import verify_quote
 
-# Titles a plan searches for (board and web searches take the first few).
+# Titles a plan searches for: what they typed, then kept directions, then the
+# plan's own (`phases.search_titles` says how many the searches take).
 MAX_TITLES = 10
 # Roles beyond the person's own title that their résumé supports, suggested
 # by the plan: at most this many, each among the first titles searched.
@@ -43,6 +43,17 @@ def _text(value: Any, limit: int) -> str:
     return _CONTROL.sub("", str(value or "")).strip()[:limit]
 
 
+def titles_in(titles: Any) -> list[str]:
+    """Titles as a plan keeps them: trimmed, two letters or more, once each
+    (case aside), at most `MAX_TITLES`."""
+    out: dict[str, str] = {}
+    for title in titles if isinstance(titles, list) else []:
+        text = " ".join(_text(title, 400).split())[:80]
+        if len(text) >= 2:
+            out.setdefault(text.lower(), text)
+    return list(out.values())[:MAX_TITLES]
+
+
 def _texts(values: Any, *, items: int, limit: int) -> list[str]:
     out = []
     for value in values if isinstance(values, list) else []:
@@ -52,53 +63,6 @@ def _texts(values: Any, *, items: int, limit: int) -> list[str]:
         if len(out) >= items:
             break
     return out
-
-
-def _finish(name_hint: str, description: str, schema: dict) -> registry.AgentTool:
-    return registry.AgentTool(
-        name="finish",
-        effect="finish",
-        description=description,
-        # The answer's fields are the tool's own. Wrapped in one `result`
-        # object, Claude Haiku sent that object as JSON text in 4 of 12 plan
-        # and approach runs on prod (2026-10-15..18), and each was refused
-        # twice and failed: a plan fell back to the typed titles, a batch of
-        # approaches was never drafted. Research tasks had the same fix.
-        parameters=schema,
-        step_kind="finish",
-        describe=lambda _args: name_hint,
-    )
-
-
-def _result(args: dict) -> dict:
-    """The answer: the finish call's own fields, or its `result` object (how
-    the tool was shaped before, and how a model may still send it), with any
-    object or list it sent as JSON text read as itself."""
-    if not isinstance(args, dict):
-        raise ValueError("`result` must be an object")
-    result = args.get("result", args)
-    if isinstance(result, str):
-        try:
-            result = json.loads(result)
-        except ValueError:
-            raise ValueError("The answer was text, and not valid JSON: send its fields directly, "
-                             "as an object, not as a string") from None
-    if not isinstance(result, dict):
-        raise ValueError("`result` must be an object")
-    return {key: _unquoted(value) for key, value in result.items()}
-
-
-def _unquoted(value: Any) -> Any:
-    """A list or object a model sent as JSON text ("[{...}]"), as itself; any
-    other text as it is (no contract field's text starts that way)."""
-    if isinstance(value, str) and value.lstrip()[:1] in ("[", "{"):
-        try:
-            parsed = json.loads(value)
-        except ValueError:
-            return value
-        if isinstance(parsed, (list, dict)):
-            return parsed
-    return value
 
 
 # ── plan ─────────────────────────────────────────────────────────────────────
@@ -130,21 +94,17 @@ PLAN_SCHEMA = {
     },
     "required": ["titles", "deal_breakers", "profile_summary", "weights"],
 }
-PLAN_FINISH = _finish("Planned the search", "Finish with the search plan.", PLAN_SCHEMA)
+PLAN_FINISH = finish.tool("Planned the search", "Finish with the search plan.", PLAN_SCHEMA)
 
 
 def normalize_plan(args: dict, _state=None) -> tuple[dict, list[str]]:
-    result = _result(args)
-    titles: dict[str, str] = {}
-    for title in _texts(result.get("titles"), items=MAX_TITLES, limit=80):
-        title = " ".join(title.split())
-        if len(title) >= 2:
-            titles.setdefault(title.lower(), title)
+    result = finish.answer(args)
+    titles = titles_in(result.get("titles"))
     if not titles:
         raise ValueError("give at least one job title to search for")
     weights = result.get("weights") if isinstance(result.get("weights"), dict) else None
     plan = {
-        "titles": list(titles.values()),
+        "titles": titles,
         "deal_breakers": _texts(result.get("deal_breakers"), items=10, limit=160),
         "profile_summary": _text(result.get("profile_summary"), 800),
         "source": "model",
@@ -223,14 +183,14 @@ DISCOVER_SCHEMA = {
     },
     "required": ["postings"],
 }
-DISCOVER_FINISH = _finish("Found postings", "Finish with the postings you found.", DISCOVER_SCHEMA)
+DISCOVER_FINISH = finish.tool("Found postings", "Finish with the postings you found.", DISCOVER_SCHEMA)
 
 
 def normalize_postings(args: dict, *, citable: set[str]) -> tuple[dict, list[str]]:
     """The postings whose links this run's searches or page loads returned,
     once each. None at all is a fine answer (nothing current fits); some, and
     not one of them traceable, gets the model one repair."""
-    result = _result(args)
+    result = finish.answer(args)
     postings: list[dict] = []
     warnings: list[str] = []
     seen: set[str] = set()
@@ -274,13 +234,13 @@ SCREEN_SCHEMA = {
     },
     "required": ["verdicts"],
 }
-SCREEN_FINISH = _finish("Screened the jobs", "Finish with one verdict per job shown.", SCREEN_SCHEMA)
+SCREEN_FINISH = finish.tool("Screened the jobs", "Finish with one verdict per job shown.", SCREEN_SCHEMA)
 SCREEN_MISSING_TOLERANCE = 0.2
 
 
 def normalize_screen(args: dict, batch: dict[str, str]) -> tuple[dict[str, dict], list[str]]:
     """`batch`: short id -> lead id. Returns lead id -> verdict."""
-    result = _result(args)
+    result = finish.answer(args)
     verdicts: dict[str, dict] = {}
     warnings = []
     for item in result.get("verdicts") or []:
@@ -346,7 +306,7 @@ APPROACH_SCHEMA = {
     },
     "required": ["approaches"],
 }
-APPROACH_FINISH = _finish("Drafted approaches", "Finish with one approach per job shown.", APPROACH_SCHEMA)
+APPROACH_FINISH = finish.tool("Drafted approaches", "Finish with one approach per job shown.", APPROACH_SCHEMA)
 MAX_LIKELY_ANSWERS = 4
 
 
@@ -374,7 +334,7 @@ def normalize_approaches(
 ) -> tuple[dict[str, dict], list[str]]:
     """`batch`: short id -> lead id; `questions`: lead id -> its ATS questions;
     `citable`: links this run may cite; `pages`: url -> text fetched this run."""
-    result = _result(args)
+    result = finish.answer(args)
     out: dict[str, dict] = {}
     warnings: list[str] = []
     user_lower = (user_text or "").lower()

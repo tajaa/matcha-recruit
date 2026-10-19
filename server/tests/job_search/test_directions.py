@@ -110,10 +110,31 @@ async def test_the_plan_searches_the_directions_its_resume_supports(conn, monkey
     await model_phases.plan(search, _plan_finish([SOLUTIONS, INVENTED, MANAGER]), phases.Guard(SEARCH, search["dispatch_token"]))
     plan = json.loads(conn.ran("SET plan = $3::jsonb")[0][2][2])
     assert [d["title"] for d in plan["directions"]] == ["Solutions Architect", "Engineering Manager"]
-    # Among the first titles, which the board and web searches take.
-    assert plan["titles"] == ["Full stack engineer", "Software Engineer", "Solutions Architect",
-                              "Engineering Manager", "Platform Engineer"]
+    # Right after the typed title: every search takes both (`phases.must_search`).
+    assert plan["titles"] == ["Full stack engineer", "Solutions Architect", "Engineering Manager",
+                              "Software Engineer", "Platform Engineer"]
+    assert phases.must_search(json.loads(search["criteria"]), plan) == 3
     assert "queries" not in plan
+
+
+@pytest.mark.asyncio
+async def test_typed_titles_come_before_directions(conn, monkeypatch):
+    """Directions placed third pushed typed titles past the searches' cap."""
+    from app.matcha.services.matcha_work.job_search import phases
+
+    monkeypatch.setattr(model_phases, "load_resume_for_model", AsyncMock(return_value=RESUME))
+    typed = ["Full stack engineer", "Backend Engineer", "API Engineer", "Platform Lead", "Staff Engineer",
+             "Principal Engineer", "Tech Lead", "Software Architect"]
+    search = search_row(status="planning", use_resume=True, criteria=json.dumps({"titles": typed}))
+    await model_phases.plan(search, _plan_finish([SOLUTIONS, MANAGER]), phases.Guard(SEARCH, search["dispatch_token"]))
+    plan = json.loads(conn.ran("SET plan = $3::jsonb")[0][2][2])
+    assert plan["titles"][:8] == typed and plan["titles"][8:] == ["Solutions Architect", "Engineering Manager"]
+    # Only the directions the plan still lists (it keeps ten titles).
+    nine = search_row(status="planning", use_resume=True, criteria=json.dumps({"titles": [*typed, "Cloud Lead"]}))
+    conn.calls.clear()
+    await model_phases.plan(nine, _plan_finish([SOLUTIONS, MANAGER]), phases.Guard(SEARCH, nine["dispatch_token"]))
+    plan = json.loads(conn.ran("SET plan = $3::jsonb")[0][2][2])
+    assert plan["titles"][-1] == "Solutions Architect" and [d["title"] for d in plan["directions"]] == ["Solutions Architect"]
 
 
 @pytest.mark.asyncio
@@ -132,7 +153,7 @@ async def test_a_direction_the_plan_already_lists_is_searched_once(conn, monkeyp
     await model_phases.plan(search, phases.Deps(client=lambda _m: client, fetch_page=AsyncMock()),
                             phases.Guard(SEARCH, search["dispatch_token"]))
     plan = json.loads(conn.ran("SET plan = $3::jsonb")[0][2][2])
-    assert plan["titles"] == ["full stack engineer", "Solutions Architect", "Engineering Manager"]
+    assert plan["titles"] == ["full stack engineer", "Engineering Manager", "Solutions Architect"]
     assert [d["title"] for d in plan["directions"]] == ["Engineering Manager"]
 
 
