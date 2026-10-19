@@ -230,6 +230,20 @@ async def test_enrich_one_prefers_the_ats():
 
 
 @pytest.mark.asyncio
+async def test_enrich_one_pays_for_both_workable_calls():
+    url = "https://apply.workable.com/delta/j/9A1F916774/"
+    posting = ats_posting(ref=ats.AtsRef("workable", "delta", "9A1F916774"), url=url)
+    deps = phases.Deps(ats_fetch=AsyncMock(return_value=posting), page_fetch=AsyncMock())
+    budget = phases.Budget(left=5)
+    update = await phases.enrich_one(lead([url]), deps, budget)
+    assert update["source"] == "workable" and budget.used == 2
+    # One fetch left is not enough to read it.
+    short = phases.Deps(ats_fetch=AsyncMock(return_value=posting), page_fetch=AsyncMock())
+    assert await phases.enrich_one(lead([url]), short, phases.Budget(left=1)) is None
+    short.ats_fetch.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_enrich_one_reads_the_company_page():
     deps = phases.Deps(ats_fetch=AsyncMock(return_value=None), page_fetch=AsyncMock(return_value=page(JSONLD_PAGE)))
     update = await phases.enrich_one(
@@ -246,6 +260,22 @@ async def test_enrich_one_follows_a_careers_redirect_into_the_ats():
                        page_fetch=AsyncMock(return_value=page("<html></html>", final_url=GH_URL)))
     update = await phases.enrich_one(lead(["https://delta.test/careers/coo"]), deps, phases.Budget(left=5))
     assert update["source"] == "greenhouse"
+
+
+@pytest.mark.asyncio
+async def test_a_careers_redirect_into_workable_pays_for_both_calls():
+    url = "https://apply.workable.com/delta/j/9A1F916774/"
+    posting = ats_posting(ref=ats.AtsRef("workable", "delta", "9A1F916774"), url=url)
+    deps = phases.Deps(ats_fetch=AsyncMock(return_value=posting),
+                       page_fetch=AsyncMock(return_value=page("<html></html>", final_url=url)))
+    budget = phases.Budget(left=3)
+    update = await phases.enrich_one(lead(["https://delta.test/careers/coo"]), deps, budget)
+    assert update["source"] == "workable" and budget.used == 3
+    # The page, and no room left for Workable's two calls: not read through it.
+    short = phases.Deps(ats_fetch=AsyncMock(return_value=posting),
+                        page_fetch=AsyncMock(return_value=page("<html></html>", final_url=url)))
+    assert (await phases.read_job_page("https://delta.test/careers/coo", short, iter([True, False]).__next__)).posting is None
+    short.ats_fetch.assert_not_awaited()
 
 
 @pytest.mark.asyncio

@@ -1,5 +1,7 @@
 """What the model phases may hand back: ids from the batch, vouched contacts and
 emails, answers only to the posting's open questions, links from this run."""
+import json
+
 import pytest
 
 from app.matcha.services.matcha_work.job_search import contracts
@@ -135,3 +137,27 @@ def test_approach_email_and_likely_answers():
     with pytest.raises(ValueError):
         contracts.normalize_approaches({"result": {}}, batch=BATCH, questions={}, citable=set(), pages={},
                                        observed_emails=set(), user_text="")
+
+
+def test_the_answer_comes_flat_wrapped_or_as_json_text():
+    """Claude Haiku sent the wrapped `result` as JSON text, and the run failed
+    (prod, 2026-10-15..18): every shape a model may send is the same answer."""
+    plan = {"queries": [{"q": "COO", "location": None}], "titles": ["COO"], "deal_breakers": [],
+            "profile_summary": "Operator.", "weights": None}
+    expected = contracts.normalize_plan({"result": plan})
+    assert contracts.normalize_plan(plan) == expected
+    assert contracts.normalize_plan({"result": json.dumps(plan)}) == expected
+    # A list the model quoted inside the object, read as the list it is.
+    assert contracts.normalize_plan({**plan, "queries": json.dumps(plan["queries"])}) == expected
+    # The finish tool asks for the fields themselves, not a wrapper.
+    assert "queries" in contracts.PLAN_FINISH.parameters["properties"]
+    assert "result" not in contracts.APPROACH_FINISH.parameters["properties"]
+    with pytest.raises(ValueError, match="not valid JSON"):
+        contracts.normalize_plan({"result": "{queries: [COO]"})
+    for bad in (["COO"], {"result": ["COO"]}, {"result": "[1, 2]"}):
+        with pytest.raises(ValueError, match="must be an object"):
+            contracts.normalize_plan(bad)
+    # Text that only looks like JSON stays the text it is.
+    assert contracts._unquoted("[not json") == "[not json"
+    assert contracts._unquoted('"quoted"') == '"quoted"'
+    assert contracts._unquoted("[1]") == [1] and contracts._unquoted("7") == "7"

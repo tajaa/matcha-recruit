@@ -317,7 +317,25 @@ async def approach(search: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
         return PhaseOutcome(status="approaching",
                             cursor={"approach_queue": rest, **({"after": after} if after else {})},
                             progress={"note": f"Drafted approaches; {len(rest)} jobs to go…"})
-    return _finished(search, "Done: ranked, with approaches drafted.")
+    return _finished(search, await _drafted_note(search))
+
+
+async def _drafted_note(search: dict) -> str:
+    """What the last note says, from the jobs as they now are: on prod a search
+    whose every draft had failed still said "approaches drafted" (2026-10-17)."""
+    async with connection_or_direct() as conn:
+        row = await conn.fetchrow(
+            """SELECT COUNT(*) FILTER (WHERE approach_status = 'done') AS done,
+                      COUNT(*) FILTER (WHERE approach_status = 'failed') AS failed
+               FROM mw_job_leads WHERE search_id = $1""",
+            search["id"],
+        )
+    done, failed = (int(row["done"] or 0), int(row["failed"] or 0)) if row else (0, 0)
+    if not failed:
+        return "Done: ranked, with approaches drafted."
+    if not done:
+        return "Done: ranked. The approaches couldn't be drafted; Redraft a job to try again."
+    return f"Done: ranked, with {done} of {done + failed} approaches drafted; Redraft the others to try again."
 
 
 def approach_queue_for_top(rows: list[Any]) -> list[str]:

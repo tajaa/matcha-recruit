@@ -455,6 +455,18 @@ def from_lever(posting: dict, *, url: str | None) -> list[dict]:
     return found
 
 
+def from_workable(job: dict, *, url: str | None) -> list[dict]:
+    """Workable's `salary_from` / `salary_to` / `salary_currency_iso_code` /
+    `salary_frequency`."""
+    lo, hi = job.get("salary_from"), job.get("salary_to")
+    if _num(lo) is None and _num(hi) is None:
+        return []
+    currency, unit = job.get("salary_currency_iso_code"), job.get("salary_frequency")
+    quote = f"salary: {_fmt(lo if lo is not None else hi)}–{_fmt(hi if hi is not None else lo)} {currency or ''} {unit or ''}"
+    finding = structured_base(lo, hi, currency, unit, quote=" ".join(quote.split()), origin="ats_api", url=url)
+    return [finding] if finding else []
+
+
 def from_greenhouse(pay_ranges: Any, *, url: str | None) -> list[dict]:
     found = []
     for item in pay_ranges if isinstance(pay_ranges, list) else []:

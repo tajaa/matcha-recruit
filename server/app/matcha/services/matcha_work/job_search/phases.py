@@ -403,7 +403,8 @@ async def read_job_page(url: str, deps: Deps, take: Callable[[], bool]) -> JobPa
         return None
     # A careers page that redirected to an ATS: the ATS has the posting.
     ref = ats.detect(fetched.final_url)
-    posting = await deps.ats_fetch(ref) if ref is not None and take() else None
+    paid = ref is not None and all(take() for _ in range(ats.reads(ref)))
+    posting = await deps.ats_fetch(ref) if paid else None
     try:
         jobs = await asyncio.to_thread(job_postings, fetched.body, fetched.final_url)
     except Exception:
@@ -462,9 +463,10 @@ async def enrich_one(lead: dict, deps: Deps, budget: Budget) -> dict | None | _N
         return True
 
     for url in [u for u in urls if ats.detect(u) is not None][:LINKS_PER_KIND]:
-        if not take():
+        ref = ats.detect(url)
+        if not all(take() for _ in range(ats.reads(ref))):
             return NOT_TRIED if spent == 0 else None
-        posting = await deps.ats_fetch(ats.detect(url))
+        posting = await deps.ats_fetch(ref)
         if posting is not None and _is_the_job(lead, posting.title, posting.employer):
             update["comp"] = _apply_ats(update, posting, comp)
             return update

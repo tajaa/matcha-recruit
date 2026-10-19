@@ -20,6 +20,7 @@ Checks that matter:
 """
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
@@ -57,17 +58,46 @@ def _finish(name_hint: str, description: str, schema: dict) -> registry.AgentToo
         name="finish",
         effect="finish",
         description=description,
-        parameters={"type": "object", "properties": {"result": schema}, "required": ["result"]},
+        # The answer's fields are the tool's own. Wrapped in one `result`
+        # object, Claude Haiku sent that object as JSON text in 4 of 12 plan
+        # and approach runs on prod (2026-10-15..18), and each was refused
+        # twice and failed: a plan fell back to the typed titles, a batch of
+        # approaches was never drafted. Research tasks had the same fix.
+        parameters=schema,
         step_kind="finish",
         describe=lambda _args: name_hint,
     )
 
 
 def _result(args: dict) -> dict:
-    result = args.get("result") if isinstance(args, dict) else None
+    """The answer: the finish call's own fields, or its `result` object (how
+    the tool was shaped before, and how a model may still send it), with any
+    object or list it sent as JSON text read as itself."""
+    if not isinstance(args, dict):
+        raise ValueError("`result` must be an object")
+    result = args.get("result", args)
+    if isinstance(result, str):
+        try:
+            result = json.loads(result)
+        except ValueError:
+            raise ValueError("The answer was text, and not valid JSON: send its fields directly, "
+                             "as an object, not as a string") from None
     if not isinstance(result, dict):
         raise ValueError("`result` must be an object")
-    return result
+    return {key: _unquoted(value) for key, value in result.items()}
+
+
+def _unquoted(value: Any) -> Any:
+    """A list or object a model sent as JSON text ("[{...}]"), as itself; any
+    other text as it is (no contract field's text starts that way)."""
+    if isinstance(value, str) and value.lstrip()[:1] in ("[", "{"):
+        try:
+            parsed = json.loads(value)
+        except ValueError:
+            return value
+        if isinstance(parsed, (list, dict)):
+            return parsed
+    return value
 
 
 # ── plan ─────────────────────────────────────────────────────────────────────

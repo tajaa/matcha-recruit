@@ -18,6 +18,8 @@ ASHBY_ID = "1f2e3d4c-aaaa-4bbb-8ccc-0123456789ab"
     (f"https://jobs.lever.co/beta/{LEVER_ID}/apply", ("lever", "beta", LEVER_ID, False)),
     (f"https://jobs.eu.lever.co/beta/{LEVER_ID.upper()}", ("lever", "beta", LEVER_ID, True)),
     (f"https://jobs.ashbyhq.com/gamma/{ASHBY_ID}/application", ("ashby", "gamma", ASHBY_ID, False)),
+    ("https://apply.workable.com/delta-health/j/B688C603EB/", ("workable", "delta-health", "B688C603EB", False)),
+    ("https://apply.workable.com/delta/j/9A1F916774/apply/?utm=x", ("workable", "delta", "9A1F916774", False)),
 ])
 def test_detects_postings(url, expected):
     ref = ats.detect(url)
@@ -31,6 +33,10 @@ def test_detects_postings(url, expected):
     "https://boards.greenhouse.io/embed/job_app?for=a/b&token=1",
     "https://jobs.lever.co/beta/not-a-uuid", f"https://jobs.lever.co/a/b/{LEVER_ID}",
     "https://jobs.ashbyhq.com/gamma", "http://user:pw@jobs.ashbyhq.com/gamma/" + ASHBY_ID,
+    "https://apply.workable.com/j/9A1F916774", "https://apply.workable.com/delta",
+    "https://apply.workable.com/api/j/9A1F916774", "https://apply.workable.com/delta/j/short",
+    "https://apply.workable.com/delta/j/9A1F916774/extra", "https://apply.workable.com.evil.test/delta/j/9A1F916774",
+    "https://apply.workable.com/../j/9A1F916774",
 ])
 def test_rejects_everything_else(url):
     assert ats.detect(url) is None
@@ -41,6 +47,10 @@ def test_api_urls_are_fixed_hosts():
         "https://boards-api.greenhouse.io/v1/boards/acme/jobs/1?questions=true")
     assert ats.AtsRef("lever", "b", LEVER_ID, eu=True).api_url() == f"https://api.eu.lever.co/v0/postings/b/{LEVER_ID}"
     assert ats.AtsRef("ashby", "g", ASHBY_ID).api_url().startswith("https://api.ashbyhq.com/posting-api/job-board/g?")
+    assert ats.AtsRef("workable", "delta", "9A1F916774").api_url() == (
+        "https://apply.workable.com/api/v2/accounts/delta/jobs/9A1F916774")
+    assert ats.reads(ats.AtsRef("workable", "delta", "9A1F916774")) == 2
+    assert ats.reads(ats.AtsRef("greenhouse", "acme", "1")) == 1
 
 
 GREENHOUSE = {
@@ -267,3 +277,98 @@ async def test_find_on_board_finds_nothing_politely():
     unpaid.assert_not_awaited()
     assert await ats.find_on_board("Confidential", "COO", take=taker(9), fetch_fn=unpaid) is None
     unpaid.assert_not_awaited()
+
+
+# Shaped like Workable's answers (2026-10-18), trimmed.
+WORKABLE = {
+    "id": 6151971, "shortcode": "9A1F916774", "title": "Senior Product Manager", "remote": False,
+    "location": {"city": "San Diego", "country": "United States", "countryCode": "US", "region": "California"},
+    "locations": [
+        {"city": "San Diego", "country": "United States", "countryCode": "US", "hidden": True, "region": "California"},
+        {"city": "San Jose", "country": "United States", "countryCode": "US", "hidden": True, "region": "California"},
+        {"city": "San Diego", "country": "United States", "countryCode": "US", "hidden": True, "region": "California"},
+    ],
+    "state": "published", "published": "2026-09-25T00:00:00.000Z", "workplace": "hybrid",
+    "salary_from": 165000, "salary_to": 194000, "salary_currency_iso_code": "USD", "salary_frequency": "year",
+    "description": "<h3>About Delta</h3><p>Design better trials.</p>",
+    "requirements": "<ul><li>5+ years of product management.</li></ul>",
+    "benefits": "<p>Equity will be a major component. Annual bonus target of 10%.</p>",
+}
+WORKABLE_FORM = [
+    {"name": "Personal information", "fields": [
+        {"id": "firstname", "label": "First name", "required": True, "type": "text"},
+        {"id": "headline", "label": "Headline", "required": False, "type": "text"},
+        {"id": "email", "label": "Email", "required": True, "type": "email"},
+    ]},
+    {"name": "Profile", "fields": [
+        {"id": "education", "label": "Education", "type": "group", "fields": [{"id": "school", "label": "School"}]},
+        {"id": "resume", "label": "Resume", "required": True, "type": "file"},
+    ]},
+    {"name": "Details", "fields": [
+        {"id": "cover_letter", "label": "Cover letter", "required": False, "type": "paragraph"},
+        {"id": "QA_1", "label": "Do you have 5+ years of product management experience?", "required": True,
+         "type": "boolean"},
+        {"id": "CA_2", "label": "Where did you hear about us?", "required": True, "type": "dropdown",
+         "singleOption": True, "options": [{"name": "1", "value": "LinkedIn"}, {"name": "2", "value": "A friend"}]},
+        {"id": "CA_3", "label": "Which tools have you used?", "type": "dropdown", "singleOption": False,
+         "options": [{"name": "1", "value": "Jira"}]},
+        {"id": "CA_4", "label": "Will you require sponsorship to work in the U.S.?", "required": True, "type": "text"},
+        {"id": "CA_5", "label": "Tell us about a product you shipped.", "type": "paragraph"},
+        {"label": "No id"}, "junk",
+    ]},
+    "junk",
+]
+WORKABLE_REF = ats.AtsRef("workable", "delta", "9A1F916774")
+WORKABLE_JOB_URL = "https://apply.workable.com/api/v2/accounts/delta/jobs/9A1F916774"
+WORKABLE_FORM_URL = "https://apply.workable.com/api/v1/jobs/9A1F916774/form"
+
+
+@pytest.mark.asyncio
+async def test_workable_reads_the_job_and_its_form():
+    fetch = by_url({WORKABLE_JOB_URL: response(WORKABLE), WORKABLE_FORM_URL: response(WORKABLE_FORM)})
+    posting = await ats.fetch(WORKABLE_REF, fetch_fn=fetch)
+    assert [c.args[0] for c in fetch.await_args_list] == [WORKABLE_JOB_URL, WORKABLE_FORM_URL]
+    assert posting.url == "https://apply.workable.com/delta/j/9A1F916774/"
+    assert posting.title == "Senior Product Manager" and posting.employer == "delta"
+    assert posting.location == "San Diego, California, United States; San Jose, California, United States"
+    assert posting.remote is None  # hybrid: not remote, and not said otherwise
+    assert "Design better trials." in posting.description and "5+ years" in posting.description
+    assert "Annual bonus target" in posting.description
+    base = next(f for f in posting.findings if f["component"] == "base")
+    assert (base["annual_min"], base["annual_max"], base["currency"]) == (165000, 194000, "USD")
+    assert base["evidence"] == {"quote": "salary: 165,000–194,000 USD year", "origin": "ats_api", "url": posting.url}
+    assert {f["component"] for f in posting.findings} >= {"base", "bonus"}
+    questions = {q["key"]: q for q in posting.questions}
+    assert list(questions) == ["firstname", "headline", "email", "resume", "cover_letter",
+                               "QA_1", "CA_2", "CA_3", "CA_4", "CA_5"]
+    assert {k for k, q in questions.items() if q["kind"] == "profile"} == {"firstname", "headline", "email", "cover_letter"}
+    assert questions["resume"]["kind"] == "file" and questions["CA_4"]["kind"] == "authorization"
+    assert questions["QA_1"] == {"key": "QA_1", "label": "Do you have 5+ years of product management experience?",
+                                 "required": True, "type": "select", "options": ["Yes", "No"], "kind": "open"}
+    assert questions["CA_2"]["type"] == "select" and questions["CA_2"]["options"] == ["LinkedIn", "A friend"]
+    assert questions["CA_3"]["type"] == "multi_select" and questions["CA_5"]["type"] == "textarea"
+
+
+@pytest.mark.asyncio
+async def test_workable_postings_gone_closed_or_without_a_form():
+    # Gone from Workable: one call, no form asked for.
+    gone = by_url({})
+    assert await ats.fetch(WORKABLE_REF, fetch_fn=gone) is None
+    assert gone.await_count == 1
+    closed = by_url({WORKABLE_JOB_URL: response({**WORKABLE, "state": "closed"})})
+    assert await ats.fetch(WORKABLE_REF, fetch_fn=closed) is None
+    # No form: the posting, without questions; remote, said either way.
+    remote = {**WORKABLE, "workplace": "remote", "locations": [], "salary_from": None, "salary_to": None,
+              "location": {"city": None, "region": None, "country": "United States"}, "benefits": ""}
+    posting = await ats.fetch(WORKABLE_REF, fetch_fn=by_url({WORKABLE_JOB_URL: response(remote)}))
+    assert posting.questions == [] and posting.remote is True and posting.location == "United States"
+    assert not any(f["component"] == "base" for f in posting.findings)
+    flagged = ats.parse_workable(WORKABLE_REF, {**WORKABLE, "remote": True, "workplace": "on_site"})
+    assert flagged.remote is True
+    assert ats.parse_workable(WORKABLE_REF, {"title": "COO"}).title == "COO"  # no state: published
+
+
+def test_workable_questions_are_capped():
+    many = [{"fields": [{"id": f"QA_{i}", "label": f"Question {i}?", "type": "text"} for i in range(60)]}]
+    assert len(ats.workable_questions(many)) == ats.MAX_QUESTIONS
+    assert ats.workable_questions(None) == [] and ats.workable_questions({"fields": []}) == []

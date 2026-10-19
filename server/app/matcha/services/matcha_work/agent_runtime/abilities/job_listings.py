@@ -69,7 +69,7 @@ VERIFY_MARGIN = 5.0
 # Rows in the `job_postings` block (and its CSV): all a run can find.
 MAX_BLOCK = MAX_PAID * 10
 AUTO_BLOCK_AT = 3
-SOURCE_LABELS = {"greenhouse": "Greenhouse", "lever": "Lever", "ashby": "Ashby"}
+SOURCE_LABELS = {"greenhouse": "Greenhouse", "lever": "Lever", "ashby": "Ashby", "workable": "Workable"}
 
 
 @dataclass

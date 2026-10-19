@@ -1,11 +1,12 @@
-"""Public applicant-tracking-system APIs: Greenhouse, Lever and Ashby.
+"""Public applicant-tracking-system APIs: Greenhouse, Lever, Ashby and Workable.
 
 A posting's apply link often points at one of these. Their public job-board
 APIs give the full description, structured pay (Lever `salaryRange`,
-Greenhouse pay ranges, Ashby salary/bonus/equity components) and, for
-Greenhouse, the application's actual questions. When no link leads to one,
-`find_on_board` looks for the job on the employer's own board, its name
-guessed from the employer's.
+Greenhouse pay ranges, Ashby salary/bonus/equity components, Workable's
+salary fields) and, for Greenhouse and Workable, the application's actual
+questions. When no link leads to one, `find_on_board` looks for the job on the
+employer's own Greenhouse, Lever or Ashby board, its name guessed from the
+employer's.
 
 The API URL is built from tokens matched out of the apply link (or the
 employer's name) by a strict pattern, on a fixed host, and fetched through
@@ -40,6 +41,9 @@ _UUID = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F
 _GREENHOUSE_PATH = re.compile(rf"^/(?P<board>{_TOKEN})/jobs/(?P<job>\d{{1,20}})/?$")
 _LEVER_PATH = re.compile(rf"^/(?P<board>{_TOKEN})/(?P<job>{_UUID})(?:/apply)?/?$")
 _ASHBY_PATH = re.compile(rf"^/(?P<board>{_TOKEN})/(?P<job>{_UUID})(?:/application)?/?$")
+# apply.workable.com/{account}/j/{shortcode}/: the shortcode alone (/j/{shortcode})
+# redirects to it, and a page read follows that redirect (`phases.read_job_page`).
+_WORKABLE_PATH = re.compile(rf"^/(?P<board>{_TOKEN})/j/(?P<job>[0-9A-Za-z]{{6,20}})(?:/apply)?/?$")
 _GH_HOSTS = {"boards.greenhouse.io", "job-boards.greenhouse.io"}
 _LEVER_HOSTS = {"jobs.lever.co": False, "jobs.eu.lever.co": True}
 
@@ -58,12 +62,14 @@ _DEMOGRAPHIC = re.compile(
 _PROFILE_KEYS = {
     "first_name", "last_name", "preferred_name", "email", "phone", "resume", "resume_text",
     "cover_letter", "cover_letter_text", "linkedin_profile", "website",
+    # Workable's standard fields
+    "firstname", "lastname", "headline", "address", "summary", "avatar",
 }
 
 
 @dataclass(frozen=True)
 class AtsRef:
-    provider: str  # greenhouse | lever | ashby
+    provider: str  # greenhouse | lever | ashby | workable
     board: str
     job_id: str
     eu: bool = False
@@ -75,6 +81,8 @@ class AtsRef:
         if self.provider == "lever":
             host = "api.eu.lever.co" if self.eu else "api.lever.co"
             return f"https://{host}/v0/postings/{self.board}/{self.job_id}"
+        if self.provider == "workable":
+            return f"https://apply.workable.com/api/v2/accounts/{self.board}/jobs/{self.job_id}"
         return f"https://api.ashbyhq.com/posting-api/job-board/{self.board}?includeCompensation=true"
 
     def view(self) -> dict:
@@ -96,6 +104,12 @@ class AtsPosting:
     @property
     def employer(self) -> str:
         return self.company or self.ref.board
+
+
+def reads(ref: AtsRef) -> int:
+    """The fetches `fetch` makes for this posting: Workable's application
+    questions are a second call."""
+    return 2 if ref.provider == "workable" else 1
 
 
 def detect(url: str | None) -> AtsRef | None:
@@ -130,6 +144,11 @@ def detect(url: str | None) -> AtsRef | None:
         match = _ASHBY_PATH.match(path)
         if match and ".." not in match.group("board"):
             return AtsRef("ashby", match.group("board"), match.group("job").lower())
+        return None
+    if host == "apply.workable.com":
+        match = _WORKABLE_PATH.match(path)
+        if match and ".." not in match.group("board") and match.group("board").lower() not in ("api", "j"):
+            return AtsRef("workable", match.group("board"), match.group("job"))
     return None
 
 
@@ -255,6 +274,71 @@ def parse_ashby(ref: AtsRef, data: dict) -> AtsPosting | None:
     return None
 
 
+_WORKABLE_TYPES = {"paragraph": "textarea", "file": "file", "boolean": "select", "dropdown": "select"}
+
+
+def workable_questions(raw: Any) -> list[dict]:
+    """The application form's fields, in Greenhouse's shape: the standard
+    profile fields, the employer's own questions. Groups (education,
+    experience) are the résumé's, not questions."""
+    out = []
+    for section in raw if isinstance(raw, list) else []:
+        for item in (section.get("fields") or []) if isinstance(section, dict) else []:
+            if not isinstance(item, dict) or item.get("type") == "group":
+                continue
+            key = normalize.clean_text(item.get("id"), 120)
+            label = normalize.clean_text(item.get("label"), 300)
+            if not key or not label:
+                continue
+            raw_type = str(item.get("type") or "")
+            options = ["Yes", "No"] if raw_type == "boolean" else [
+                normalize.clean_text(o.get("value"), 120)
+                for o in item.get("options") or [] if isinstance(o, dict) and o.get("value")
+            ][:40]
+            field_type = _WORKABLE_TYPES.get(raw_type) or ("select" if options else "text")
+            if raw_type == "dropdown" and item.get("singleOption") is False:
+                field_type = "multi_select"
+            out.append({
+                "key": key, "label": label, "required": bool(item.get("required")),
+                "type": field_type, "options": options,
+                "kind": _question_kind(key, label, field_type),
+            })
+            if len(out) >= MAX_QUESTIONS:
+                return out
+    return out
+
+
+def _workable_place(place: Any) -> str:
+    if not isinstance(place, dict):
+        return ""
+    parts = [normalize.clean_text(place.get(k), 80) for k in ("city", "region", "country")]
+    return ", ".join(p for p in parts if p)
+
+
+def parse_workable(ref: AtsRef, data: dict, form: Any = None) -> AtsPosting | None:
+    """None for a posting no longer published (closed, archived)."""
+    if data.get("state") not in (None, "published"):
+        return None
+    url = f"https://apply.workable.com/{ref.board}/j/{ref.job_id}/"
+    places = [_workable_place(p) for p in data.get("locations") or []]
+    location = "; ".join(dict.fromkeys(p for p in places if p)) or _workable_place(data.get("location"))
+    description = html_to_text("\n".join(
+        str(data.get(k) or "") for k in ("description", "requirements", "benefits")))
+    findings = comp_mod.from_workable(data, url=url)
+    findings.extend(f for f in comp_mod.scan_text(description, origin="ats_api", url=url)
+                    if f["component"] != "base" or not findings)
+    workplace = str(data.get("workplace") or "").lower()
+    return AtsPosting(
+        ref=ref, url=url,
+        title=normalize.clean_text(data.get("title"), 200),
+        location=normalize.clean_text(location, 200),
+        remote=True if data.get("remote") is True or workplace == "remote" else normalize.is_remote(location),
+        description=description,
+        findings=findings,
+        questions=workable_questions(form),
+    )
+
+
 FetchFn = Callable[..., Awaitable[FetchedResponse]]
 
 
@@ -278,7 +362,8 @@ async def _json(url: str, what: str, fetch_fn: FetchFn) -> Any:
 
 
 async def fetch(ref: AtsRef, *, fetch_fn: FetchFn = fetch_public) -> AtsPosting | None:
-    """The posting from its ATS's public API; None when it is gone or unreadable."""
+    """The posting from its ATS's public API; None when it is gone or
+    unreadable. `reads(ref)` calls: pay for them first."""
     data = await _json(ref.api_url(), f"{ref.provider} {ref.board}", fetch_fn)
     if not isinstance(data, dict):
         return None
@@ -286,6 +371,11 @@ async def fetch(ref: AtsRef, *, fetch_fn: FetchFn = fetch_public) -> AtsPosting 
         return parse_greenhouse(ref, data)
     if ref.provider == "lever":
         return parse_lever(ref, data)
+    if ref.provider == "workable":
+        # The form is keyed by the shortcode alone; Workable's are global.
+        form = await _json(f"https://apply.workable.com/api/v1/jobs/{ref.job_id}/form",
+                           f"workable form {ref.board}", fetch_fn)
+        return parse_workable(ref, data, form)
     return parse_ashby(ref, data)
 
 

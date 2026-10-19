@@ -13,8 +13,8 @@ Four steps, each its own worker task (the step is `phase_cursor.step`):
             posting anyway) looks further (careers pages, other boards,
             search firms) and hands back links. A link must be one the run's
             searches returned (`contracts.normalize_postings`).
-  read      code reads each link: an ATS posting through the ATS's public API
-            (`ats.fetch`), any other page through its JobPosting data, and a
+  read      code reads each link: an ATS posting (Greenhouse, Lever, Ashby,
+            Workable) through the ATS's public API (`ats.fetch`), any other page through its JobPosting data, and a
             careers page that can't be read through the employer's own
             Greenhouse, Lever or Ashby board (`ats.find_on_board`). A posting
             that is gone, expired or unreadable is dropped, so neither a stale
@@ -84,7 +84,7 @@ NEXT = "screening"
 UNAVAILABLE = ("Job listings aren't available right now, so the search stopped. "
                "It didn't count against your allowance. Please try again later.")
 NO_MATCH = "No postings matched. Try broader titles or more locations."
-_ATS_NAMES = {"greenhouse": "Greenhouse", "lever": "Lever", "ashby": "Ashby"}
+_ATS_NAMES = {"greenhouse": "Greenhouse", "lever": "Lever", "ashby": "Ashby", "workable": "Workable"}
 
 
 async def discover(search: dict, deps: Deps, guard: chain.Guard) -> PhaseOutcome:
@@ -246,8 +246,9 @@ async def read_postings(search: dict, deps: Deps, guard: chain.Guard, postings: 
             and p["url"] not in known and not phases.aggregator(p["url"])]
     if room <= 0 or not todo:
         return 0
-    # A board posting is one API read; a page may take a few (`read_posting`).
-    want = sum(1 if ats.detect(p["url"]) is not None else READS_PER_POSTING for p in todo)
+    # A board posting is an API read or two (`ats.reads`); a page may take a few (`read_posting`).
+    want = sum(ats.reads(ref) if (ref := ats.detect(p["url"])) is not None else READS_PER_POSTING
+               for p in todo)
     budget = Budget(left=await phases.grant(search["id"], "fetch_calls", want, phases.MAX_FETCHES))
     gate = asyncio.Semaphore(READ_CONCURRENCY)
     today = datetime.now(timezone.utc).date()
@@ -302,7 +303,7 @@ async def read_posting(posting: dict, deps: Deps, take, *, today: date) -> dict 
     url = posting["url"]
     ref = ats.detect(url)
     if ref is not None:
-        if not take_one():
+        if not all(take_one() for _ in range(ats.reads(ref))):
             return None
         found = await deps.ats_fetch(ref)  # gone from its own ATS: closed
         return _ats_record(found, posting) if found is not None and found.title else None

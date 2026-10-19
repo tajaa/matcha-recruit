@@ -414,6 +414,27 @@ async def test_read_posting_edges():
 
 
 @pytest.mark.asyncio
+async def test_a_workable_posting_is_read_from_workable():
+    """The web run's Workable links were dropped before Workable could be read
+    (prod, 2026-10-17): now it is an ATS like the others, at two fetches."""
+    today = date(2026, 10, 18)
+    url = "https://apply.workable.com/delta-health/j/B688C603EB/"
+    found = ats_found(ats.detect(url), url, location="San Diego, California, United States",
+                      questions=[{"key": "QA_1", "label": "Why us?", "kind": "open"}])
+    deps = phases.Deps(ats_find=NO_BOARD, ats_fetch=AsyncMock(return_value=found), page_fetch=AsyncMock())
+    record = await discovery.read_posting(claim(url, company="Delta Health"), deps, lambda: True, today=today)
+    assert record["source"] == "workable" and record["company"] == "Delta Health"
+    assert record["apply_links"] == [{"url": url, "source": "Workable"}]
+    assert record["ats"]["provider"] == "workable" and record["ats"]["questions"][0]["key"] == "QA_1"
+    deps.page_fetch.assert_not_awaited()
+    # Its two fetches, or not read at all.
+    one_left = phases.Deps(ats_find=NO_BOARD, ats_fetch=AsyncMock(return_value=found), page_fetch=AsyncMock())
+    left = iter([True, False])
+    assert await discovery.read_posting(claim(url), one_left, lambda: next(left), today=today) is None
+    one_left.ats_fetch.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_an_unreadable_careers_page_is_looked_up_on_the_employers_board():
     today = date(2026, 10, 16)
     challenge = FetchedResponse(url=PAGE, final_url=PAGE, status=202, content_type="text/html",

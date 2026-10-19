@@ -220,9 +220,24 @@ async def test_approach_failure_marks_the_batch_failed(conn):
     conn.on("source_url, comp, ats, description, pay_law_hint", [lead_row(1)])
     d, _ = deps(*[response(text="?")] * 10)
     search = search_row(status="approaching", phase_cursor=json.dumps({"approach_queue": [str(UUID(int=1))]}))
+    conn.on("COUNT(*) FILTER (WHERE approach_status = 'done')", {"done": 0, "failed": 1})
     out = await model_phases.approach(search, d, guard())
     assert out.status == "done"
     assert conn.ran("SET approach = COALESCE")[0][2][3] == [None]
+    assert out.progress["note"] == "Done: ranked. The approaches couldn't be drafted; Redraft a job to try again."
+
+
+@pytest.mark.asyncio
+async def test_the_last_note_counts_the_drafts(conn):
+    empty = search_row(status="approaching", phase_cursor=json.dumps({"approach_queue": [str(UUID(int=1))]}))
+    d, _ = deps(*[response(text="?")] * 10)
+    for counts, note in (
+        (None, "Done: ranked, with approaches drafted."),
+        ({"done": 8, "failed": 0}, "Done: ranked, with approaches drafted."),
+        ({"done": 5, "failed": 3}, "Done: ranked, with 5 of 8 approaches drafted; Redraft the others to try again."),
+    ):
+        conn.on("COUNT(*) FILTER (WHERE approach_status = 'done')", counts)
+        assert (await model_phases.approach(empty, d, guard())).progress["note"] == note
 
 
 @pytest.mark.asyncio
