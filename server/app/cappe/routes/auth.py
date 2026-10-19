@@ -4,11 +4,12 @@ Fully separate from matcha's /auth/* (which is hardwired to users+clients).
 Backed by `cappe_accounts`; issues Cappe-scoped tokens.
 """
 import asyncio
+import logging
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 import asyncpg
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Path, Request, status
 
 from ...config import get_settings
 from ...core.services.email import _is_reserved_test_domain
@@ -16,6 +17,7 @@ from ...core.services.redis_cache import check_rate_limit, client_ip
 from ...core.services.session_tokens import refresh_session_expired
 from ...database import get_connection
 from ..dependencies import require_cappe_account
+from ..services import signup_grants
 from ..services.commerce import check_recipient_send_ok
 from ..services.email import (
     send_cappe_account_exists_email,
@@ -30,6 +32,7 @@ from ..models.cappe import (
     CappeResendRequest,
     CappeResetPasswordRequest,
     CappeSignup,
+    CappeSignupGrantInfo,
     CappeSignupResponse,
     CappeTokenResponse,
     CappeVerifyRequest,
@@ -45,6 +48,8 @@ from ..services.auth import (
     make_reset_token,
     verify_password_async,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -101,8 +106,13 @@ async def signup(body: CappeSignup, request: Request, background: BackgroundTask
     # those, outside production only: there it would hand a signed-in, confirmed
     # account to anyone typing an @example.com address.
     auto_verify = _is_reserved_test_domain(email) and not get_settings().is_production
-    # An interval without a plan means nothing; default the other way round.
     intended_plan = body.intended_plan
+    grant_id = None
+    if body.grant_token:
+        grant_id = await _usable_grant_id(body.grant_token, email)
+        # The grant is the plan, so there is nothing to check out after confirming.
+        intended_plan = None
+    # An interval without a plan means nothing; default the other way round.
     intended_interval = (body.intended_interval or "month") if intended_plan else None
     token = None if auto_verify else uuid4()
 
@@ -112,11 +122,11 @@ async def signup(body: CappeSignup, request: Request, background: BackgroundTask
                 """INSERT INTO cappe_accounts
                        (email, password_hash, name, account_type,
                         email_verified_at, verification_token, verification_sent_at,
-                        intended_plan_code, intended_interval)
+                        intended_plan_code, intended_interval, signup_grant_id)
                    VALUES ($1, $2, $3, $4,
                         CASE WHEN $5 THEN NOW() ELSE NULL END, $6,
                         CASE WHEN $5 THEN NULL ELSE NOW() END,
-                        $7, $8)
+                        $7, $8, $9)
                    RETURNING id, email, name, plan, status, account_type""",
                 email,
                 password_hash,
@@ -128,9 +138,14 @@ async def signup(body: CappeSignup, request: Request, background: BackgroundTask
                 # so there is nothing to park.
                 None if auto_verify else intended_plan,
                 None if auto_verify else intended_interval,
+                grant_id,
             )
         except asyncpg.UniqueViolationError:
             row = None
+        if row is not None and auto_verify and grant_id is not None:
+            granted = await _redeem_grant(conn, row["id"])
+            if granted:
+                row = {**dict(row), "plan": granted["plan_code"]}
 
     if row is None:
         # Duplicate address: answer exactly as a fresh signup would, and tell
@@ -157,17 +172,20 @@ async def signup(body: CappeSignup, request: Request, background: BackgroundTask
                     # The plan intent IS refreshed: it only chooses which
                     # checkout page the owner is offered after confirming, and
                     # signing up again from a different pricing card is how
-                    # someone changes their mind.
+                    # someone changes their mind. So is a grant: it is given
+                    # only to whoever confirms, i.e. the inbox's owner.
                     await conn.execute(
                         "UPDATE cappe_accounts SET verification_token = $1, "
                         "verification_sent_at = NOW(), updated_at = NOW(), "
                         "intended_plan_code = COALESCE($3, intended_plan_code), "
-                        "intended_interval = COALESCE($4, intended_interval) "
+                        "intended_interval = COALESCE($4, intended_interval), "
+                        "signup_grant_id = COALESCE($5, signup_grant_id) "
                         "WHERE id = $2 AND email_verified_at IS NULL",
                         token,
                         existing["id"],
                         intended_plan,
                         intended_interval,
+                        grant_id,
                     )
                     background.add_task(
                         send_cappe_verification_email, existing["email"], existing["name"], str(token)
@@ -211,7 +229,7 @@ async def verify_email(body: CappeVerifyRequest, request: Request):
     async with get_connection() as conn:
         row = await conn.fetchrow(
             """SELECT id, email, name, plan, status, account_type, verification_sent_at,
-                      intended_plan_code, intended_interval
+                      intended_plan_code, intended_interval, signup_grant_id
                FROM cappe_accounts WHERE verification_token = $1""",
             token,
         )
@@ -244,16 +262,76 @@ async def verify_email(body: CappeVerifyRequest, request: Request):
             "updated_at = NOW() WHERE id = $1",
             row["id"],
         )
+        granted = None
+        if row["signup_grant_id"] is not None:
+            granted = await _redeem_grant(conn, row["id"])
 
     account = CappeAccount(
-        id=row["id"], email=row["email"], name=row["name"], plan=row["plan"],
+        id=row["id"], email=row["email"], name=row["name"],
+        plan=granted["plan_code"] if granted else row["plan"],
         status=row["status"], account_type=row["account_type"],
     )
+    if granted:
+        # Nothing is owed until the grant runs out: no checkout now.
+        return CappeVerifyResponse(
+            **_token_response(account).model_dump(),
+            granted_plan=granted["plan_code"],
+            granted_plan_name=granted["plan_name"],
+            granted_until=granted["until"],
+        )
     return CappeVerifyResponse(
         **_token_response(account).model_dump(),
         intended_plan=row["intended_plan_code"],
         intended_interval=row["intended_interval"],
     )
+
+
+@router.get("/auth/signup-grants/{token}", response_model=CappeSignupGrantInfo)
+async def signup_grant_info(
+    request: Request, token: str = Path(pattern=signup_grants.TOKEN_PATTERN),
+):
+    """What a signup-grant link offers, so the signup page can say "30 days of
+    Business, free" before anyone types anything. 404 with the reason when it
+    can no longer be used."""
+    await check_rate_limit(client_ip(request), "cappe_signup_grant", 30, 3600)
+    async with get_connection() as conn:
+        grant = await signup_grants.find(conn, token)
+    reason = signup_grants.unusable_reason(grant, now=datetime.now(timezone.utc))
+    if reason:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "grant_invalid", "message": reason},
+        )
+    return CappeSignupGrantInfo(
+        plan_code=grant["plan_code"], plan_name=grant["plan_name"], days=grant["days"],
+        email_locked=bool(grant["email"]),
+    )
+
+
+async def _usable_grant_id(token: str, email: str) -> UUID:
+    """The id of the grant behind a signup's link, or 400 with why it can't be
+    used. Refused rather than ignored: the person was promised a free plan,
+    and an account quietly made without one is a support ticket."""
+    async with get_connection() as conn:
+        grant = await signup_grants.find(conn, token)
+    reason = signup_grants.unusable_reason(grant, now=datetime.now(timezone.utc), email=email)
+    if reason:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "grant_invalid", "message": reason},
+        )
+    return grant["id"]
+
+
+async def _redeem_grant(conn, account_id: UUID):
+    """`signup_grants.redeem`, never raising. It runs after the account is
+    confirmed and the one-use link is spent, so an error here must not turn
+    into a failed sign-in; the admin can give the plan by hand."""
+    try:
+        return await signup_grants.redeem(conn, account_id=account_id)
+    except Exception:  # noqa: BLE001
+        logger.exception("cappe: could not give account %s its signup grant", account_id)
+        return None
 
 
 @router.post("/auth/resend-verification", status_code=status.HTTP_202_ACCEPTED)

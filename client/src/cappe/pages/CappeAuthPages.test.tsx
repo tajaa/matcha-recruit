@@ -165,3 +165,58 @@ describe('CappeSignup', () => {
     await waitFor(() => expect(screen.getByLabelText('Email')).toHaveValue('ownr@example.com'))
   })
 })
+
+describe('signup grant link', () => {
+  const TOKEN = 'g'.repeat(32)
+
+  function routeFetch(grant: { status: number; body: unknown }) {
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes('/auth/signup-grants/')) {
+        return { ok: grant.status < 400, status: grant.status, statusText: '', json: async () => grant.body }
+      }
+      return { ok: true, status: 201, statusText: '', json: async () => ({ verification_required: true, email: 'new@example.com' }) }
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    return fetchMock
+  }
+
+  function fill() {
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'new@example.com' } })
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'correct horse' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create account' }))
+  }
+
+  it('says what the link gives and sends it instead of a plan to pay for', async () => {
+    const fetchMock = routeFetch({ status: 200, body: { plan_code: 'business', plan_name: 'Business', days: 30, email_locked: false } })
+    at(`/cappe/website-setup?grant=${TOKEN}&plan=creator`, <CappeSignup />)
+
+    expect(await screen.findByText(/You've been given/)).toHaveTextContent('Business free for 30 days. No card needed')
+    expect(screen.queryByText(/You picked the/)).toBeNull()
+    fill()
+
+    await screen.findByRole('heading', { name: 'Confirm your email' })
+    const body = JSON.parse(fetchMock.mock.calls[1][1].body)
+    expect(body).toMatchObject({ grant_token: TOKEN })
+    expect(body).not.toHaveProperty('intended_plan')
+  })
+
+  it('explains a dead link and signs up without it', async () => {
+    const fetchMock = routeFetch({ status: 404, body: { detail: { code: 'grant_invalid', message: 'This invite link has already been used.' } } })
+    at(`/cappe/website-setup?grant=${TOKEN}`, <CappeSignup />)
+
+    expect(await screen.findByText(/already been used/)).toHaveTextContent('You can still create a free account.')
+    fill()
+
+    await screen.findByRole('heading', { name: 'Confirm your email' })
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).not.toHaveProperty('grant_token')
+  })
+
+  it('tells the person what they got when they confirm', async () => {
+    respond(200, {
+      access_token: 'a', refresh_token: 'r', expires_in: 900, account: { account_type: 'business' },
+      granted_plan: 'business', granted_plan_name: 'Business', granted_until: '2026-11-18T12:00:00Z',
+    })
+    at('/cappe/verify?token=abc', <CappeVerify />)
+    expect(await screen.findByText(/is yours free until/)).toHaveTextContent('Business is yours free until November 18, 2026')
+  })
+})

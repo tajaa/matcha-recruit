@@ -223,7 +223,7 @@ def _account_row(**over):
         "id": uuid.uuid4(), "email": "owner@example.com", "name": None, "plan": "free",
         "status": "active", "account_type": "business",
         "verification_sent_at": datetime.now(timezone.utc),
-        "intended_plan_code": None, "intended_interval": None,
+        "intended_plan_code": None, "intended_interval": None, "signup_grant_id": None,
     }
     row.update(over)
     return row

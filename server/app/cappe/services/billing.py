@@ -19,7 +19,7 @@ Two rules that are easy to get wrong and expensive to get wrong:
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 from uuid import UUID
 
@@ -805,6 +805,28 @@ class LiveSubscriptionExists(Exception):
     """Raised when a comp would collide with a paying subscription."""
 
 
+# Stripe Checkout refuses a trial ending less than 48 hours out; an hour over
+# that covers the time between making the session and Stripe checking it.
+_MIN_CHECKOUT_TRIAL = timedelta(hours=49)
+
+
+def comp_trial_end(subscription: Optional[dict], *, now: Optional[datetime] = None) -> Optional[datetime]:
+    """When a subscription bought during a comp should start billing: the day
+    the comp ends, so subscribing early never costs the free days left (a
+    signup grant's "30 days free" stays 30 days). None when there is no comp
+    with an end date, or it ends too soon for Stripe to accept as a trial;
+    billing then starts at checkout, as it always did.
+    """
+    if not subscription or subscription.get("source") != "comp":
+        return None
+    until = subscription.get("comped_until")
+    if until is None:
+        return None
+    if until - (now or datetime.now(timezone.utc)) < _MIN_CHECKOUT_TRIAL:
+        return None
+    return until
+
+
 async def grant_comp(conn, *, account_id: UUID, plan_code: str, until, reason: str) -> None:
     """Grant a plan with no Stripe subscription behind it.
 
@@ -818,27 +840,12 @@ async def grant_comp(conn, *, account_id: UUID, plan_code: str, until, reason: s
     subscription would strand it: the Stripe side keeps billing while our row
     says comp. Cancel the subscription first, deliberately.
     """
-    paying = await conn.fetchval(
-        """
-        SELECT stripe_subscription_id FROM cappe_subscriptions
-         WHERE account_id = $1 AND source = 'stripe'
-           AND status IN ('trialing','active','past_due','incomplete','unpaid','paused')
-         LIMIT 1
-        """,
-        account_id,
+    await _refuse_if_paying(
+        conn, account_id,
+        "This account has a live Stripe subscription. Cancel it before comping, "
+        "or the customer keeps being billed.",
     )
-    if paying:
-        raise LiveSubscriptionExists(
-            "This account has a live Stripe subscription. Cancel it before comping, "
-            "or the customer keeps being billed."
-        )
-
-    await conn.execute(
-        "UPDATE cappe_subscriptions SET status = 'canceled', canceled_at = NOW(), "
-        "updated_at = NOW() WHERE account_id = $1 AND source = 'comp' "
-        "AND status IN ('trialing','active','past_due','incomplete','unpaid','paused')",
-        account_id,
-    )
+    await _cancel_live_comps(conn, account_id)
     await conn.execute(
         """
         INSERT INTO cappe_subscriptions
@@ -849,6 +856,46 @@ async def grant_comp(conn, *, account_id: UUID, plan_code: str, until, reason: s
     )
     await _materialize_plan(conn, account_id, plan_code)
     invalidate_catalog_cache()
+
+
+async def end_comp(conn, *, account_id: UUID) -> None:
+    """Put an account back on the free plan, ending its live comp if it has one.
+
+    Also what an admin downgrade does for an account given a plan by hand
+    before comps existed: it has no subscription row, only `plan`. Refused
+    for a live Stripe subscription, as `grant_comp` is: Stripe would keep
+    billing for the plan we took away.
+    """
+    await _refuse_if_paying(
+        conn, account_id,
+        "This account has a live Stripe subscription. Cancel it in Stripe to "
+        "downgrade, or the customer keeps being billed.",
+    )
+    await _cancel_live_comps(conn, account_id)
+    await _materialize_plan(conn, account_id, FREE_PLAN_CODE)
+
+
+async def _refuse_if_paying(conn, account_id: UUID, message: str) -> None:
+    paying = await conn.fetchval(
+        """
+        SELECT stripe_subscription_id FROM cappe_subscriptions
+         WHERE account_id = $1 AND source = 'stripe'
+           AND status IN ('trialing','active','past_due','incomplete','unpaid','paused')
+         LIMIT 1
+        """,
+        account_id,
+    )
+    if paying:
+        raise LiveSubscriptionExists(message)
+
+
+async def _cancel_live_comps(conn, account_id: UUID) -> None:
+    await conn.execute(
+        "UPDATE cappe_subscriptions SET status = 'canceled', canceled_at = NOW(), "
+        "updated_at = NOW() WHERE account_id = $1 AND source = 'comp' "
+        "AND status IN ('trialing','active','past_due','incomplete','unpaid','paused')",
+        account_id,
+    )
 
 
 async def expire_lapsed_comps(conn) -> int:

@@ -91,6 +91,29 @@ DB safety rules, test-data email domain rules, and deploy rules are in root `CLA
 - **A failed attempt to take a card is an error, never a fallback to the unpaid flow**
   (`commerce.create_public_order` → `release_unpaid_order` + 502).
 
+## Admin plan changes and signup grants (2026-10, `routes/matcha_admin.py`)
+
+- **Matcha's `/admin/cappe` reaches Cappe through `/api/cappe/matcha-admin/*`**, gated at the mount
+  by core's `require_admin` (cappe → core is the allowed direction). It lives here, not in
+  `core/routes/admin/`, so plan changes go through `billing.grant_comp` / `end_comp` rather than a
+  copy in core. `/admin/*` on this router is the in-Cappe platform admin, a different auth realm.
+- **Every plan an admin gives is a comp, never a charge.** Free = `end_comp`; any other plan =
+  `grant_comp` with an optional `comped_until`. Both refuse (409) an account with a live Stripe
+  subscription: change those in Stripe.
+- **A signup grant (`cappe_signup_grants`, `zzzzcappe48`) is a link, `/cappe/signup?grant=<token>`.**
+  Signup records it on the account (`signup_grant_id`); confirming the email redeems it
+  (`services/signup_grants.redeem`: account row locked, then the grant row; capacity and revocation
+  judged then, link expiry judged at signup time) into a comp ending `days` later. A failed
+  redemption never fails the confirmation. `cappe_comp_expiry` must stay ON or a "30 days free"
+  grant never ends (`zzzzcappe48` turned it on).
+- **Subscribing during a comp with an end date bills from that date** (`billing.comp_trial_end` →
+  Stripe `trial_end`, no $1 intro), so paying early never costs the free days. A comp ending
+  within 49 h, or with no end date, bills at checkout as before.
+- **`models/billing.CappePlanCheckoutRequest` is not `models/shop.CappeCheckoutRequest`.** The
+  `models.cappe` shim star-imports every module, so one name in two modules resolves to the last
+  one imported; that sent the cart model to `/billing/checkout` and 422'd every plan purchase.
+  `test_no_two_model_modules_export_the_same_name` guards it.
+
 ## Shipping and currency (2026-10, `services/shipping.py`)
 
 - **A physical order's payment page takes an address only in the country it was priced for**

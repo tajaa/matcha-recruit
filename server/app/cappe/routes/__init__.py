@@ -7,6 +7,7 @@ templates, and public sub-routers are intentionally unauthenticated.
 """
 from fastapi import APIRouter, Depends
 
+from ...core.dependencies import require_admin
 from ..dependencies import require_cappe_platform_admin
 from ..services.push import flush_pushes
 
@@ -23,6 +24,7 @@ from .financials import router as financials_router
 from .domains import router as domains_router
 from .forms import router as forms_router
 from .locations import router as locations_router
+from .matcha_admin import router as matcha_admin_router
 from .merlin import router as merlin_router
 from .merlin_setup import router as merlin_setup_router
 from .messages import router as messages_router
@@ -69,6 +71,14 @@ cappe_router.include_router(billing_router)
 # accidentally ship ungated.
 cappe_router.include_router(
     admin_billing_router, dependencies=[Depends(require_cappe_platform_admin)]
+)
+
+# Matcha's own admin (hey-matcha.com/admin/cappe): plan changes and signup
+# grants. A matcha `require_admin` identity, not a Cappe one, so it has its own
+# prefix rather than sharing /admin/* with the in-Cappe staff surface above.
+# Gated at the mount for the same reason.
+cappe_router.include_router(
+    matcha_admin_router, prefix="/matcha-admin", dependencies=[Depends(require_admin)]
 )
 
 # Authenticated, per-site (each route gates on require_cappe_account + get_owned_site).

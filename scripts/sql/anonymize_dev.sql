@@ -326,6 +326,14 @@ BEGIN
         UPDATE cappe_promo_redemptions r SET customer_email = o.customer_email
           FROM cappe_orders o WHERE o.id = r.order_id AND r.customer_email IS NOT NULL;
     END IF;
+    -- Signup grants (zzzzcappe48): a live link's token works on prod, and a
+    -- locked grant names the person it was sent to. New tokens, scrubbed emails.
+    IF to_regclass('public.cappe_signup_grants') IS NOT NULL THEN
+        UPDATE cappe_signup_grants SET
+            token = replace(gen_random_uuid()::text, '-', ''),
+            email = CASE WHEN email IS NOT NULL THEN 'grant_' || replace(id::text,'-','') || '@example.com' END,
+            created_by_email = CASE WHEN created_by_email IS NOT NULL THEN 'admin@example.com' END;
+    END IF;
 END $$;
 
 COMMIT;

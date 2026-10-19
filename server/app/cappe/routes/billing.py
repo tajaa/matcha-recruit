@@ -17,7 +17,7 @@ from ..models.cappe import (
     CappeCancelRequest,
     CappeChangePlanRequest,
     CappeCatalog,
-    CappeCheckoutRequest,
+    CappePlanCheckoutRequest,
     CappeCheckoutResponse,
     CappePortalRequest,
     CappePortalResponse,
@@ -128,7 +128,7 @@ def _raise_if_change_pending(subscription) -> None:
 
 @router.post("/billing/checkout", response_model=CappeCheckoutResponse)
 async def start_checkout(
-    body: CappeCheckoutRequest, account: CappeAccount = Depends(require_cappe_account)
+    body: CappePlanCheckoutRequest, account: CappeAccount = Depends(require_cappe_account)
 ):
     """Subscribe to a plan. The $1 intro is applied by the SERVER when the
     account has never had a subscription — never on client request."""
@@ -168,7 +168,10 @@ async def start_checkout(
         intro_applied = False
         intro_price_id = None
         intro_days = None
-        if await billing_svc.intro_eligible(conn, account.id):
+        # A plan we gave free (an admin comp, a signup grant) keeps its free
+        # days: the subscription bills from the day it ends, with no intro.
+        trial_end = billing_svc.comp_trial_end(existing)
+        if trial_end is None and await billing_svc.intro_eligible(conn, account.id):
             intro = await billing_svc.resolve_price(
                 conn, body.plan_code, "once", role="intro"
             )
@@ -188,6 +191,7 @@ async def start_checkout(
             price_id=price["stripe_price_id"],
             intro_price_id=intro_price_id,
             trial_days=intro_days,
+            trial_end=trial_end,
             success_url=_billing_return_url(body.success_url),
             cancel_url=_billing_return_url(body.cancel_url),
             metadata={

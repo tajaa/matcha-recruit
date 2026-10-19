@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from datetime import datetime
 from typing import Any, Optional
 
 try:
@@ -791,8 +792,12 @@ class CappeStripe:
         metadata: dict[str, str],
         intro_price_id: Optional[str] = None,
         trial_days: Optional[int] = None,
+        trial_end: Optional[datetime] = None,
     ):
         """Subscription Checkout on OUR platform account.
+
+        `trial_end` is for an account bought during a free plan we gave it (a
+        comp): billing starts the day that ends. It replaces the intro offer.
 
         The $1-for-30-days intro is `trial_period_days` + the one-time $1 as
         `subscription_data.add_invoice_items`. It cannot be an extra entry in
@@ -809,7 +814,12 @@ class CappeStripe:
 
         def _create():
             sub_data: dict[str, Any] = {"metadata": metadata}
-            if trial_days and intro_price_id:
+            if trial_end is not None:
+                sub_data["trial_end"] = int(trial_end.timestamp())
+                sub_data["trial_settings"] = {
+                    "end_behavior": {"missing_payment_method": "cancel"}
+                }
+            elif trial_days and intro_price_id:
                 sub_data["trial_period_days"] = int(trial_days)
                 sub_data["add_invoice_items"] = [{"price": intro_price_id}]
                 # No card on file at trial end ⇒ cancel rather than silently

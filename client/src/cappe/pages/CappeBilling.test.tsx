@@ -225,6 +225,22 @@ describe('CappeBilling', () => {
     expect(api.post).toHaveBeenCalledWith('/billing/portal', { return_url: 'https://gummfit.example/cappe/billing' })
   })
 
+  it('lets a plan given free be kept by subscribing, billed from the day it ends', async () => {
+    serve(subscription({ source: 'comp', current_period_end: null, comped_until: '2026-11-18T12:00:00Z' }))
+    api.post.mockResolvedValue({ checkout_url: 'https://checkout.stripe.test/c/3' })
+    open()
+
+    expect(await screen.findByText(/Free from Gummfit until/)).toHaveTextContent('your card is first charged when the free time ends')
+    const card = screen.getByTestId('billing-plan-business')
+    expect(card).toHaveTextContent('Free until November 18, 2026, then billed')
+    // The $1 intro isn't offered on top of free days.
+    expect(card).not.toHaveTextContent('$1 for your first 30 days')
+    fireEvent.click(screen.getByRole('button', { name: 'Keep Business' }))
+
+    await waitFor(() => expect(assign).toHaveBeenCalledWith('https://checkout.stripe.test/c/3'))
+    expect(api.post.mock.calls[0][1]).toMatchObject({ plan_code: 'business', interval: 'month' })
+  })
+
   it('reports a billing page that cannot load', async () => {
     api.get.mockRejectedValue(new Error('Server error — try again in a moment.'))
     open()

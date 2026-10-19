@@ -9,6 +9,7 @@ requests is the only check that can actually fail.
 Run from server/:  ./venv/bin/python -m pytest tests/cappe/test_cappe_billing_routes.py -q
 """
 import os
+import pathlib
 import uuid
 
 import pytest
@@ -157,3 +158,38 @@ class TestBillingReturnUrl:
 
         own = f"{app_origin()}/cappe/billing?checkout=success"
         assert billing._billing_return_url(own) == own
+
+
+class TestPlanCheckoutBody:
+    def test_plan_checkout_validates_the_plan_body_not_the_cart_body(self, app, client):
+        """`/billing/checkout` once received the storefront's cart model
+        (same class name, shadowed through the models.cappe shim), so the
+        billing page's body 422'd for want of `items` and `customer_email`
+        and no plan could be bought. Past validation, the handler fails on
+        the missing database instead — anything but 422 is the pass."""
+        app.dependency_overrides[require_cappe_account] = lambda: _account(False)
+        try:
+            resp = client.post("/api/cappe/billing/checkout", json={
+                "plan_code": "business", "interval": "month",
+                "success_url": "https://gummfit.com/cappe/billing?checkout=success",
+                "cancel_url": "https://gummfit.com/cappe/billing?checkout=cancelled",
+            })
+        finally:
+            app.dependency_overrides.clear()
+        assert resp.status_code != 422, resp.text
+
+    def test_no_two_model_modules_export_the_same_name(self):
+        """The shim star-imports every module, so a repeated name silently
+        resolves to whichever module is imported last."""
+        import importlib
+
+        from app.cappe.models import cappe as shim
+
+        owners: dict[str, list[str]] = {}
+        for line in pathlib.Path(shim.__file__).read_text().splitlines():
+            if line.startswith("from .") and "import *" in line:
+                name = line.split()[1].lstrip(".")
+                module = importlib.import_module(f"app.cappe.models.{name}")
+                for exported in getattr(module, "__all__", []):
+                    owners.setdefault(exported, []).append(name)
+        assert {n: m for n, m in owners.items() if len(m) > 1} == {}
