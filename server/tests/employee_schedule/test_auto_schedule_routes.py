@@ -118,7 +118,7 @@ def test_run_now_passes_the_rule_mode(monkeypatch):
             return "UPDATE 1"
 
     conn = RunConn()
-    _wire(monkeypatch, conn, features={})
+    _wire(monkeypatch, conn, features={"schedule_autopilot": True})
     monkeypatch.setattr(auto_schedules, "resolve_week_start_weekday", AsyncMock(return_value=0))
     generate = AsyncMock(return_value={"status": "not_ready", "message": "Add a timezone."})
     monkeypatch.setattr(auto_schedules, "generate_review_suggestion", generate)
@@ -136,7 +136,7 @@ def test_run_now_is_a_manager_rebuild_not_a_refusal(monkeypatch):
     `generate_review_suggestion` promises manager clicks — the week's
     unapproved suggestion is replaced, not quoted back as 'already waiting'."""
     conn = _RunConn()
-    _wire(monkeypatch, conn, features={})
+    _wire(monkeypatch, conn, features={"schedule_autopilot": True})
     monkeypatch.setattr(auto_schedules, "resolve_week_start_weekday", AsyncMock(return_value=0))
     generate = AsyncMock(return_value={"status": "generated", "message": "ok"})
     monkeypatch.setattr(auto_schedules, "generate_review_suggestion", generate)
@@ -153,15 +153,17 @@ def test_run_now_is_a_manager_rebuild_not_a_refusal(monkeypatch):
 class _RunConn:
     def __init__(self):
         self.updates = []
+        self.queries = []
 
     async def execute(self, query, *args):
+        self.queries.append(query)
         self.updates.append(args)
         return "UPDATE 1"
 
 
 def _wire_run(monkeypatch, row):
     conn = _RunConn()
-    _wire(monkeypatch, conn, features={})
+    _wire(monkeypatch, conn, features={"schedule_autopilot": True})
     monkeypatch.setattr(auto_schedules, "_fetch_rule", AsyncMock(return_value=row))
     monkeypatch.setattr(auto_schedules, "resolve_week_start_weekday", AsyncMock(return_value=0))
     generate = AsyncMock(return_value={
@@ -362,3 +364,43 @@ def test_new_rule_version_has_no_lease_when_initial_publication_fails(monkeypatc
     # new version out of the dispatcher's recovery scan.
     assert result["last_completed_at"] == old_completion.isoformat()
     assert result["last_generation_run_id"] == str(old_generation)
+
+
+def test_run_now_on_an_autopilot_rule_needs_the_premium_flag(monkeypatch):
+    """The save route 403s an enabled Autopilot rule without the grant. Run now
+    used to let readiness refuse instead, filing the gate names under the
+    rule's "last result" as a planner outcome. Same gate, same status."""
+    conn, generate = _wire_run(monkeypatch, _rule_row())
+    monkeypatch.setattr(
+        auto_schedules, "get_company_features",
+        AsyncMock(return_value={"huume": True, "matcha_work": True}),
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        _run(auto_schedules.run_auto_schedule_now(LOCATION, current_user=_manager()))
+
+    assert exc.value.status_code == 403
+    generate.assert_not_awaited()
+    assert conn.updates == []
+
+
+@pytest.mark.parametrize("leased", ["queued", "running", "retrying"])
+def test_run_now_leaves_a_leased_occurrence_alone(monkeypatch, leased):
+    """A scheduled occurrence in flight owns the rule's status line. Run now's
+    write carries the lease predicate, so the dispatcher never re-queues an
+    occurrence that is still running and the tab keeps showing it; the click's
+    own result still reaches the manager in the response."""
+    conn, _generate = _wire_run(monkeypatch, _rule_row(last_status=leased))
+
+    async def lease_held(query, *args):
+        conn.queries.append(query)
+        conn.updates.append(args)
+        return "UPDATE 0"
+
+    conn.execute = lease_held
+
+    result = _run(auto_schedules.run_auto_schedule_now(LOCATION, current_user=_manager()))
+
+    assert result["status"] == "generated"
+    assert "NOT IN ('queued', 'running', 'retrying')" in conn.queries[0]
+    assert "last_status IS NULL OR" in conn.queries[0]

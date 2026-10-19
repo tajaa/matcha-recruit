@@ -55,7 +55,7 @@ server/
 
 **Background work**:
 - FastAPI `BackgroundTasks.add_task(fn, ...)` for lightweight per-request work — plain `async def` functions, run in the same process after the response is sent.
-- Celery for anything that survives the request lifecycle, runs scheduled, or needs separate concurrency limits. Tasks live in `app/workers/tasks/`. The worker container restarts every 15 min via systemd; `@worker_ready` re-dispatches periodic tasks (no celery-beat).
+- Celery for anything that survives the request lifecycle, runs scheduled, or needs separate concurrency limits. Tasks live in `app/workers/tasks/`. The worker container restarts hourly via systemd; `@worker_ready` re-dispatches periodic tasks (no celery-beat).
 
 **Email**:
 - Gmail API via OAuth2 (`app/core/services/email/`) for transactional. MailerSend for a few transactional flows. The send wrapper has a defense-in-depth guard that skips RFC 2606 reserved test domains — see root CLAUDE.md test-data rules.

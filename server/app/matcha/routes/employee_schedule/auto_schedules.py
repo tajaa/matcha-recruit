@@ -225,6 +225,13 @@ async def run_auto_schedule_now(
         raise HTTPException(status_code=404, detail="Configure this location's auto schedule first.")
     if row["mode"] == "template" and not row["week_template_id"]:
         raise HTTPException(status_code=422, detail="Choose a saved week template first.")
+    if row["mode"] == "autopilot":
+        # The gate the save route applies to an enabled Autopilot rule. A
+        # revoked premium grant is a 403 here too, not a readiness message
+        # the tab would file under "last result".
+        features = await get_company_features(company_id)
+        if not features.get("schedule_autopilot"):
+            raise HTTPException(status_code=403, detail="Schedule Autopilot is not enabled for this company.")
     async with get_connection() as conn:
         location_week_start_weekday = await resolve_week_start_weekday(
             conn, company_id=company_id, location_id=location_id,
@@ -258,11 +265,17 @@ async def run_auto_schedule_now(
     )
     generation_id = result.get("generation_run_id")
     async with get_connection() as conn:
+        # A scheduled occurrence in flight owns the status line: `queued` /
+        # `running` / `retrying` are the dispatcher's lease, and overwriting
+        # them re-queued the occurrence and hid "Running" from the tab. The
+        # worker's completion write records that run; this click's result
+        # reaches the manager in the response either way.
         await conn.execute(
             """UPDATE schedule_automation_rules
                SET last_attempt_at=NOW(), last_completed_at=NOW(), last_status=$1,
                    last_message=$2, last_generation_run_id=$3, updated_at=NOW()
-               WHERE id=$4 AND company_id=$5""",
+               WHERE id=$4 AND company_id=$5
+                 AND (last_status IS NULL OR last_status NOT IN ('queued', 'running', 'retrying'))""",
             result["status"], result.get("message"), UUID(generation_id) if generation_id else None,
             row["id"], company_id,
         )

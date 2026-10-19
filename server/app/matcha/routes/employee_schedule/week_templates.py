@@ -122,14 +122,42 @@ async def update_week_template(week_template_id: UUID, body: WeekTemplateUpdate,
             )
             if not tpl:
                 raise HTTPException(status_code=404, detail="Week template not found")
+            paused_rules = []
             if "location_id" in patch:
                 await conn.execute(
                     "UPDATE schedule_shift_templates SET location_id = $1, updated_at = NOW() "
                     "WHERE week_template_id = $2",
                     patch["location_id"], week_template_id,
                 )
+                if patch["location_id"] is not None:
+                    # A store-scoped template is offered only to its own
+                    # store's rule (the save route's `location_id=$3 OR
+                    # location_id IS NULL`). Moving it left another store's
+                    # rule pointing at a template it may no longer use, which
+                    # reported "unavailable" every week instead of pausing —
+                    # the delete path's treatment, same shape. Moving to
+                    # company-wide (NULL) widens availability and pauses nothing.
+                    paused_rules = await conn.fetch(
+                        """
+                        UPDATE schedule_automation_rules
+                        SET enabled = false, next_run_at = NULL,
+                            schedule_version = schedule_version + 1,
+                            last_status = 'template_moved',
+                            last_message = 'Paused because its saved week template was moved to another store.',
+                            updated_at = NOW(), updated_by = $4
+                        WHERE company_id = $1 AND week_template_id = $2 AND location_id <> $3
+                        RETURNING id, location_id
+                        """,
+                        company_id, week_template_id, patch["location_id"], current_user.id,
+                    )
             await log_audit(conn, company_id, "week_template", week_template_id, current_user.id,
                             "week_template.update", {"fields": sorted(patch)})
+            for rule in paused_rules:
+                await log_audit(
+                    conn, company_id, "schedule_automation", rule["id"], current_user.id,
+                    "schedule_automation.pause_template_moved",
+                    {"location_id": str(rule["location_id"]), "week_template_id": str(week_template_id)},
+                )
             blocks = await _fetch_blocks(conn, week_template_id)
     return serialize_week_template(tpl, blocks)
 

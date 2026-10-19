@@ -623,15 +623,31 @@ async def archive_thread(
         raise HTTPException(status_code=404, detail="Thread not found")
 
     async with get_connection() as conn:
-        result = await conn.execute(
-            """
-            UPDATE mw_threads
-            SET status='archived', updated_at=NOW()
-            WHERE id=$1 AND company_id=$2 AND status != 'archived'
-            """,
-            thread_id,
-            company_id,
-        )
+        async with conn.transaction():
+            result = await conn.execute(
+                """
+                UPDATE mw_threads
+                SET status='archived', updated_at=NOW()
+                WHERE id=$1 AND company_id=$2 AND status != 'archived'
+                """,
+                thread_id,
+                company_id,
+            )
+            if result != "UPDATE 0":
+                # A schedule chat archived from the thread list rather than
+                # the editor: an archived thread refuses turns, so a week
+                # draft it staged can never be confirmed, and left 'proposed'
+                # it blocks that week's automatic suggestion for good. Same
+                # cancel `archive_schedule_assistant_session` runs; the
+                # thread UPDATE above holds the row lock `propose_week_draft`
+                # re-reads, so a build in flight lands first or refuses.
+                await conn.execute(
+                    """UPDATE schedule_generation_runs
+                       SET status='cancelled', updated_at=NOW()
+                       WHERE thread_id=$1 AND company_id=$2 AND status='proposed'""",
+                    thread_id,
+                    company_id,
+                )
     if result == "UPDATE 0":
         raise HTTPException(status_code=404, detail="Thread not found")
     await doc_svc.sync_element_record(thread_id)

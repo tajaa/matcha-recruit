@@ -676,13 +676,32 @@ editor week (anchored on each location's own `week_start_weekday`). Migration
 `schedule_automation_rules` rows carrying their own `next_run_at` — it deletes
 the global `schedule_auto_generation` scheduler row the earlier migration
 seeded. Each location still requires the merged `employee_schedule`, `huume`,
-and `matcha_work` feature flags. The worker uses existing draft shifts
-as staffing demand or the one unambiguous saved week template, then calls the
-same deterministic `week_builder.propose_week_draft` path as conversational
-Huume. It creates only a `schedule_generation_runs` proposal (`origin=automatic`)
-and is idempotent per company/location/week. Existing manual proposals and
-applied plans suppress it; cancelling an automatic proposal suppresses it for
-the rest of that week rather than recreating it on the next worker restart.
+and `matcha_work` feature flags. The worker builds from the rule's saved week
+template (`mode='template'`) or from Autopilot demand (`mode='autopilot'`) —
+never from existing drafts: a week that already has draft shifts is refused
+as not ready, by `get_week_build_readiness` and `propose_week_draft` alike —
+then calls the same deterministic `week_builder.propose_week_draft` path as
+conversational Huume. It creates only a `schedule_generation_runs` proposal
+(`origin=automatic`) and is idempotent per company/location/week. Existing
+manual proposals and applied plans suppress it. Cancelling an automatic
+proposal does NOT reserve the week: what stops a replay is the durable
+per-rule `next_run_at` (an occurrence is consumed once), so the same week is
+rebuilt only by Run now, a re-saved one-time rule, or a later occurrence whose
+`target_weeks_ahead` lands on it. A manual `proposed` draft blocks the week's
+automatic suggestion until it is confirmed or cancelled; both thread-archive
+paths (the editor's `archive_schedule_assistant_session` and the generic
+`DELETE /matcha-work/threads/{id}`) cancel the archived thread's proposed
+drafts for that reason. **Run now supersedes only the week's AUTOMATIC
+suggestion** (`propose_week_draft(supersede_proposed=True)` filters
+`origin='automatic'`): a manual draft another manager staged in their own chat
+is theirs to confirm or cancel, and `apply_week_draft`'s "week now has drafts"
+recheck stales whichever of two proposals is confirmed second. Run now's status
+write also leaves a `queued`/`running`/`retrying` lease on the rule alone — the
+worker's completion records that occurrence. Known limitation: the week-rules
+gate (`location_profile.missing_fields`) judges the store's DEFAULT template's
+blocks, not the rule's chosen template, so a rule pointing at a different
+template at a store with no usable default is refused as "staffing pattern"
+missing.
 
 **The duplicate guard's refusal names the week and what holds it**
 (`schedule_automation.already_present_result`): "waiting for review" for a

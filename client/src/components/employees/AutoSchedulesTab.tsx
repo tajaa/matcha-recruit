@@ -27,21 +27,43 @@ type FormState = {
   targetWeekStart: string
 }
 
-// Worker lifecycle states a manager can see between occurrences; terminal
-// planner results fall through to their own wording.
+// Every `last_status` the server writes: the worker's lifecycle states
+// between occurrences, its terminal results, and the pauses the template
+// routes apply. An unknown value still renders, as its own words.
 const STATUS_LABELS: Record<string, string> = {
   queued: 'Queued',
   running: 'Running',
   retrying: 'Retrying after a problem',
   dispatch_failed: 'Waiting to be queued again',
   failed: 'Failed',
+  generated: 'Suggestion prepared',
+  already_present: 'Already prepared',
+  not_ready: 'Not ready',
+  feature_disabled: 'Paused — features not enabled',
+  template_deleted: 'Paused — template deleted',
+  template_moved: 'Paused — template moved to another store',
 }
 
-function defaults(weekStartWeekday = 0): FormState {
-  const tomorrow = addDays(toISODate(new Date()), 1)
+/** Today on the location's wall clock when its zone is known, else UTC's
+ * today (what the server falls back to). */
+function locationToday(timezoneName: string | undefined, now = new Date()): string {
+  if (!timezoneName) return toISODate(now)
+  try {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezoneName, year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(now)
+  } catch {
+    return toISODate(now)
+  }
+}
+
+function defaults(weekStartWeekday = 0, timezoneName?: string): FormState {
+  const today = locationToday(timezoneName)
+  const tomorrow = addDays(today, 1)
   // The server rejects a target week that is not aligned to this location's
-  // own start day, so the default has to be aligned too.
-  const nextWeek = addDays(toISODate(startOfWeek(new Date(), weekStartWeekday)), 7)
+  // own start day, so the default has to be aligned too — and judged on the
+  // location's day, not UTC's, or a Saturday-evening save lands a week late.
+  const nextWeek = addDays(toISODate(startOfWeek(new Date(`${today}T00:00:00Z`), weekStartWeekday)), 7)
   return {
     enabled: true,
     cadence: 'weekly',
@@ -56,7 +78,7 @@ function defaults(weekStartWeekday = 0): FormState {
 }
 
 function fromRule(rule: ScheduleAutomationRule, weekStartWeekday = 0): FormState {
-  const fallback = defaults(weekStartWeekday)
+  const fallback = defaults(weekStartWeekday, rule.timezone)
   return {
     enabled: rule.enabled,
     cadence: rule.cadence,
@@ -108,7 +130,9 @@ export default function AutoSchedulesTab({ locationId, weekStartWeekday = 0 }: {
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [running, setRunning] = useState(false)
-  const [generatedWeekStart, setGeneratedWeekStart] = useState<string | null>(null)
+  // The week Run now left for review: freshly generated, or the suggestion
+  // that was already waiting (the server names it, so link to it too).
+  const [reviewWeek, setReviewWeek] = useState<{ weekStart: string; waiting: boolean } | null>(null)
 
   // Reset and refetch whenever the location changes — the synchronous
   // setState the rule objects to is clearing the previous location's rule
@@ -119,7 +143,7 @@ export default function AutoSchedulesTab({ locationId, weekStartWeekday = 0 }: {
     setRule(null)
     setForm(defaults(weekStartWeekday))
     setTemplates([])
-    setGeneratedWeekStart(null)
+    setReviewWeek(null)
     setSaving(false)
     setRunning(false)
     setLoading(!!locationId)
@@ -179,12 +203,20 @@ export default function AutoSchedulesTab({ locationId, weekStartWeekday = 0 }: {
       const result = await runAutoScheduleNow(runLocationId)
       if (!current()) return
       toast(result.message, result.status === 'generated' ? 'success' : 'info')
-      setGeneratedWeekStart(result.status === 'generated' ? result.week_start : null)
-      const refreshed = await fetchAutoSchedule(runLocationId)
-      if (!current()) return
-      setRule(refreshed.rule)
+      const waiting = result.status === 'already_present' && result.blocking_status === 'proposed'
+      setReviewWeek(result.status === 'generated' || waiting ? { weekStart: result.week_start, waiting } : null)
     } catch (err) {
       if (current()) toast(errorMessage(err), 'error')
+      if (current()) setRunning(false)
+      return
+    }
+    try {
+      // The run already happened and was reported above; a failed status
+      // refresh must not read as a failed run.
+      const refreshed = await fetchAutoSchedule(runLocationId)
+      if (current()) setRule(refreshed.rule)
+    } catch {
+      // The sidebar keeps the previous status until the next load.
     } finally {
       if (current()) setRunning(false)
     }
@@ -298,12 +330,12 @@ export default function AutoSchedulesTab({ locationId, weekStartWeekday = 0 }: {
               The week of {rule.target_week_start} has already passed. Run now will refuse it until you pick a later week and save.
             </p>
           )}
-          {generatedWeekStart && (
+          {reviewWeek && (
             <Link
-              to={`/ops/schedule/editor?week=${generatedWeekStart}&location=${locationId}`}
+              to={`/ops/schedule/editor?week=${reviewWeek.weekStart}&location=${locationId}`}
               className="inline-flex items-center gap-1.5 text-sm text-emerald-300 hover:text-emerald-200"
             >
-              <Sparkles className="h-4 w-4" /> Review the generated week in the full shift editor
+              <Sparkles className="h-4 w-4" /> {reviewWeek.waiting ? 'Review the suggestion already waiting' : 'Review the generated week'} in the full shift editor
             </Link>
           )}
         </div>

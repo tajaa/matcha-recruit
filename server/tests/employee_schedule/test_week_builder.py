@@ -2120,6 +2120,10 @@ async def test_rebuild_retires_the_old_suggestion_with_its_replacement(monkeypat
     begin = statements.index("BEGIN")
     assert statements[begin:begin + 4] == ["BEGIN", "UPDATE", "INSERT", "COMMIT"]
     assert "status='proposed'" in conn.executed[begin + 1][0]
+    # Only the week's automatic suggestion is replaced; a manual draft in
+    # another manager's chat is theirs, and retiring it here showed as
+    # "failed" in a session nobody told.
+    assert "origin='automatic'" in conn.executed[begin + 1][0]
 
     # A plain build never retires anything.
     conn = _TxConn(None)
@@ -2232,6 +2236,33 @@ async def test_autopilot_readiness_blocks_on_drafts_and_missing_timezone(monkeyp
     assert any("already has draft shifts" in blocker for blocker in result["blockers"])
     assert any("needs a timezone" in blocker for blocker in result["blockers"])
     assert result["recommended_source"] != "autopilot"
+
+
+@pytest.mark.asyncio
+async def test_template_readiness_blocks_on_drafts_like_the_builder(monkeypatch):
+    """`propose_week_draft` refuses a template build on top of draft shifts;
+    readiness only said so for Autopilot, so the auto-schedule worker called
+    the week ready and then recorded the builder's refusal as the rule's
+    result. Huume's unspecified source is different: there the drafts ARE the
+    demand, so it stays ready."""
+    conn = _FakeConn({"id": LOCATION_ID, "name": "Downtown", "timezone": "America/Los_Angeles"})
+    _empty_week(monkeypatch, conn, [{"id": str(DEFAULT_TEMPLATE_ID), "name": "Busy week", "block_count": 7}])
+    monkeypatch.setattr(week_builder, "_load_existing_demand", AsyncMock(return_value=[_demand_shift()]))
+    monkeypatch.setattr(week_builder, "_load_roster_context", AsyncMock(return_value={
+        "employees": [_employee("amy", "Amy")], "gated_job_ids": set(),
+    }))
+    kwargs = dict(
+        company_id=COMPANY_ID, location_id=LOCATION_ID, week_start=WEEK_START,
+        week_template_id=str(DEFAULT_TEMPLATE_ID),
+    )
+
+    result = await week_builder.get_week_build_readiness(source_mode="template", **kwargs)
+    drafts = [blocker for blocker in result["blockers"] if "already has draft shifts" in blocker]
+    assert result["ready"] is False
+    assert len(drafts) == 1 and "a saved week template" in drafts[0]
+
+    result = await week_builder.get_week_build_readiness(source_mode=None, **kwargs)
+    assert not any("already has draft shifts" in blocker for blocker in result["blockers"])
 
 
 # A generic readiness check must not turn an unrequested forecast into a

@@ -38,6 +38,12 @@ function automationRule(locationId: string, weeks = 1) {
   }
 }
 
+function templateRule(locationId: string) {
+  return {
+    ...automationRule(locationId), mode: 'template', week_template_id: 'template-1', week_template_name: 'Standard Week',
+  }
+}
+
 function deferred<T>() {
   let resolve!: (value: T) => void
   let reject!: (reason: Error) => void
@@ -215,6 +221,55 @@ describe('AutoSchedulesTab', () => {
     )
   })
 
+  it('links a suggestion that was already waiting for review', async () => {
+    mocks.fetchRule.mockResolvedValue({ rule: templateRule('loc-1') })
+    mocks.runNow.mockResolvedValue({
+      status: 'already_present', message: 'A schedule suggestion for the week of 2026-08-30 is already waiting for review.',
+      week_start: '2026-08-30', generation_run_id: 'generation-1', blocking_status: 'proposed',
+    })
+
+    render(automationTree('loc-1'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Run now' }))
+
+    expect(await screen.findByRole('link', { name: /Review the suggestion already waiting/ })).toHaveAttribute(
+      'href', '/ops/schedule/editor?week=2026-08-30&location=loc-1',
+    )
+  })
+
+  it('offers no link when an approved schedule holds the week', async () => {
+    mocks.fetchRule.mockResolvedValue({ rule: templateRule('loc-1') })
+    mocks.runNow.mockResolvedValue({
+      status: 'already_present', message: 'An approved schedule for the week of 2026-08-30 already exists.',
+      week_start: '2026-08-30', generation_run_id: 'generation-1', blocking_status: 'applied',
+    })
+
+    render(automationTree('loc-1'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Run now' }))
+
+    await screen.findByText(/already exists/)
+    expect(screen.queryByRole('link', { name: /Review/ })).not.toBeInTheDocument()
+  })
+
+  it('reports a run that succeeded even when the status refresh fails', async () => {
+    mocks.fetchRule
+      .mockResolvedValueOnce({ rule: templateRule('loc-1') })
+      .mockRejectedValueOnce(new Error('refresh failed'))
+    mocks.runNow.mockResolvedValue({
+      status: 'generated', message: 'Huume prepared a schedule suggestion for manager review.',
+      week_start: '2026-08-30', generation_run_id: 'generation-1',
+    })
+
+    render(automationTree('loc-1'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Run now' }))
+
+    await screen.findByRole('link', { name: /Review the generated week/ })
+    expect(screen.getByText('Huume prepared a schedule suggestion for manager review.')).toBeInTheDocument()
+    expect(screen.queryByText(/refresh failed/)).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Run now' })).toBeEnabled())
+    // The sidebar keeps the rule it had rather than falling back to "not configured".
+    expect(screen.queryByText('Not configured for this location yet.')).not.toBeInTheDocument()
+  })
+
   it('discards a generated suggestion when the selected location changes', async () => {
     mocks.fetchRule.mockResolvedValue({
       rule: {
@@ -287,7 +342,7 @@ describe('AutoSchedulesTab', () => {
       const stamp = new Intl.DateTimeFormat(undefined, {
         timeZone: 'America/Los_Angeles', dateStyle: 'medium', timeStyle: 'short',
       }).format(new Date('2026-09-28T06:25:12Z'))
-      expect(await screen.findByText(`already present · ${stamp}`)).toBeInTheDocument()
+      expect(await screen.findByText(`Already prepared · ${stamp}`)).toBeInTheDocument()
     })
 
     it('stays quiet for the current or a future week', async () => {

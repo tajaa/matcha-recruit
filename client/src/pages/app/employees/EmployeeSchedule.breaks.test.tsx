@@ -431,7 +431,20 @@ describe('EmployeeSchedule break planning', () => {
     )
   })
 
+  it('hides the Auto schedules tab without Huume, even by URL', async () => {
+    renderSchedule('/ops/schedule?tab=auto-schedules&date=2026-08-30')
+    await screen.findByRole('button', { name: /Templates/ })
+    expect(screen.queryByRole('button', { name: /Auto schedules/ })).not.toBeInTheDocument()
+    expect(screen.queryByText('Auto schedule settings')).not.toBeInTheDocument()
+  })
+
   it('refreshes prepared suggestions when returning from auto schedules', async () => {
+    // The auto-schedule routes 403 without Huume, so the tab needs the flags.
+    useMeMock.mockReturnValue({
+      me: { user: { role: 'client' } },
+      hasFeature: (flag: string) => flag === 'huume' || flag === 'matcha_work',
+      loading: false,
+    })
     renderSchedule('/ops/schedule?tab=auto-schedules&date=2026-08-30')
     expect(await screen.findByText('Auto schedule settings')).toBeInTheDocument()
     expect(getScheduleSuggestionStatusMock).not.toHaveBeenCalled()
