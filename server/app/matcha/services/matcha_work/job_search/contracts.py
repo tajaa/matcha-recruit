@@ -195,7 +195,7 @@ def normalize_postings(args: dict, *, citable: set[str]) -> tuple[dict, list[str
     warnings: list[str] = []
     seen: set[str] = set()
     given = 0
-    for item in result.get("postings") or []:
+    for item in finish.items(result, "postings"):
         if not isinstance(item, dict):
             continue
         given += 1
@@ -243,7 +243,7 @@ def normalize_screen(args: dict, batch: dict[str, str]) -> tuple[dict[str, dict]
     result = finish.answer(args)
     verdicts: dict[str, dict] = {}
     warnings = []
-    for item in result.get("verdicts") or []:
+    for item in finish.items(result, "verdicts"):
         if not isinstance(item, dict):
             continue
         short = str(item.get("id") or "").strip().upper()
@@ -338,7 +338,7 @@ def normalize_approaches(
     out: dict[str, dict] = {}
     warnings: list[str] = []
     user_lower = (user_text or "").lower()
-    for item in result.get("approaches") or []:
+    for item in finish.items(result, "approaches"):
         if not isinstance(item, dict):
             continue
         lead_id = batch.get(str(item.get("id") or "").strip().upper())
@@ -408,5 +408,5 @@ def normalize_approaches(
             "sources": sources[:8],
         }
     if not out:
-        raise ValueError("give an approach for each job shown, by its short id")
+        raise ValueError(f"give an approach for each job shown, by its short id: {', '.join(batch)}")
     return out, warnings
