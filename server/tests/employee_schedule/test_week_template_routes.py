@@ -7,7 +7,9 @@ from uuid import UUID
 import pytest
 from fastapi import HTTPException
 
-from app.matcha.models.scheduling.employee_schedule import BlockCreate, BlockUpdate, WeekTemplateReplace
+from app.matcha.models.scheduling.employee_schedule import (
+    BlockCreate, BlockUpdate, WeekTemplateReplace, WeekTemplateUpdate,
+)
 from app.matcha.routes.employee_schedule import week_templates
 from app.matcha.services.scheduling import week_template_writes
 
@@ -170,3 +172,64 @@ async def test_delete_template_pauses_and_invalidates_dependent_auto_schedules(m
     assert "schedule_version = schedule_version + 1" in pause_sql
     assert "next_run_at = NULL" in pause_sql
     assert audit.await_args_list[1].args[5] == "schedule_automation.pause_template_deleted"
+
+
+def _patch_conn(template_location):
+    conn = MagicMock()
+    conn.transaction.return_value = _transaction()
+    conn.fetchrow = AsyncMock(return_value={
+        "id": TEMPLATE_ID, "name": "Weekday coverage", "location_id": template_location,
+        "color": None, "notes": None,
+    })
+    conn.execute = AsyncMock(return_value="UPDATE 1")
+    conn.fetch = AsyncMock(return_value=[{"id": RULE_ID, "location_id": LOCATION_ID}])
+    return conn
+
+
+def _wire_patch(monkeypatch, conn):
+    audit = AsyncMock()
+    monkeypatch.setattr(week_templates, "get_connection", _connection_factory(conn))
+    monkeypatch.setattr(week_templates, "require_company_id", AsyncMock(return_value=COMPANY_ID))
+    monkeypatch.setattr(week_templates, "assert_location_in_company", AsyncMock())
+    monkeypatch.setattr(week_templates, "_fetch_blocks", AsyncMock(return_value=[]))
+    monkeypatch.setattr(
+        week_templates, "serialize_week_template",
+        lambda tpl, blocks: {"id": str(tpl["id"]), "blocks": blocks},
+    )
+    monkeypatch.setattr(week_templates, "log_audit", audit)
+    return audit
+
+
+@pytest.mark.asyncio
+async def test_moving_a_template_to_another_store_pauses_other_stores_auto_schedules(monkeypatch):
+    """A store-scoped template is offered only to its own store's rule, so
+    moving it left another store's rule enabled and reporting 'template
+    unavailable' on every occurrence. Same pause the delete path applies."""
+    other_location = UUID("88888888-8888-8888-8888-888888888888")
+    conn = _patch_conn(other_location)
+    audit = _wire_patch(monkeypatch, conn)
+
+    result = await week_templates.update_week_template(
+        TEMPLATE_ID, WeekTemplateUpdate(location_id=other_location), SimpleNamespace(id=ACTOR_ID),
+    )
+
+    assert result["id"] == str(TEMPLATE_ID)
+    pause_sql, *pause_args = conn.fetch.await_args.args
+    assert "enabled = false" in pause_sql and "next_run_at = NULL" in pause_sql
+    assert "schedule_version = schedule_version + 1" in pause_sql
+    assert "location_id <> $3" in pause_sql
+    assert pause_args == [COMPANY_ID, TEMPLATE_ID, other_location, ACTOR_ID]
+    assert audit.await_args_list[1].args[5] == "schedule_automation.pause_template_moved"
+
+
+@pytest.mark.asyncio
+async def test_widening_a_template_to_company_wide_pauses_nothing(monkeypatch):
+    conn = _patch_conn(None)
+    audit = _wire_patch(monkeypatch, conn)
+
+    await week_templates.update_week_template(
+        TEMPLATE_ID, WeekTemplateUpdate(location_id=None), SimpleNamespace(id=ACTOR_ID),
+    )
+
+    conn.fetch.assert_not_awaited()
+    assert [call.args[5] for call in audit.await_args_list] == ["week_template.update"]

@@ -325,7 +325,11 @@ export function saveAutoSchedule(locationId: string, payload: ScheduleAutomation
 }
 
 export function runAutoScheduleNow(locationId: string) {
-  return api.post<{ status: string; message: string; week_start: string; generation_run_id?: string }>(
+  return api.post<{
+    status: string; message: string; week_start: string; generation_run_id?: string
+    // 'proposed' | 'applied' | null on an `already_present` result — what holds the week.
+    blocking_status?: string | null
+  }>(
     `/employee-schedule/auto-schedules/${locationId}/run-now`, {},
   )
 }

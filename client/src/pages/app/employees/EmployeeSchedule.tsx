@@ -77,6 +77,9 @@ export default function EmployeeSchedule() {
   const [automaticSuggestion, setAutomaticSuggestion] = useState<ScheduleSuggestionStatus | null>(null)
   const { jobs, reloadJobs } = useScheduleJobs(locationId)
   const intelligenceEnabled = me?.user.role === 'admin' || hasFeature('schedule_intelligence')
+  // The auto-schedule routes 403 without Huume; a tab that renders an
+  // editable form over a 403 is worse than no tab.
+  const autoSchedulesEnabled = me?.user.role === 'admin' || (hasFeature('huume') && hasFeature('matcha_work'))
   const initialTab = requestedTab === 'intelligence' && !meLoading && !intelligenceEnabled
     ? 'schedule'
     : requestedTab
@@ -187,7 +190,7 @@ export default function EmployeeSchedule() {
         <div className="flex items-center gap-1">
           <TabButton active={tab === 'schedule'} onClick={() => setTab('schedule')} icon={<CalendarDays className="h-4 w-4" />}>Schedule</TabButton>
           <TabButton active={tab === 'templates'} onClick={() => setTab('templates')} icon={<LayoutTemplate className="h-4 w-4" />}>Templates</TabButton>
-          <TabButton active={tab === 'auto-schedules'} onClick={() => setTab('auto-schedules')} icon={<CalendarClock className="h-4 w-4" />}>Auto schedules</TabButton>
+          {autoSchedulesEnabled && <TabButton active={tab === 'auto-schedules'} onClick={() => setTab('auto-schedules')} icon={<CalendarClock className="h-4 w-4" />}>Auto schedules</TabButton>}
           <TabButton active={tab === 'requests'} onClick={() => setTab('requests')} icon={<Inbox className="h-4 w-4" />}>Requests</TabButton>
           <TabButton active={tab === 'audit'} onClick={() => setTab('audit')} icon={<History className="h-4 w-4" />}>Audit log</TabButton>
           {intelligenceEnabled && <TabButton active={tab === 'intelligence'} onClick={() => setTab('intelligence')} icon={<BarChart2 className="h-4 w-4" />}>Intelligence</TabButton>}
@@ -272,7 +275,7 @@ export default function EmployeeSchedule() {
       )}
 
       {tab === 'templates' && <TemplatesTab locationId={locationId} onGenerated={() => { setTab('schedule'); reload() }} />}
-      {tab === 'auto-schedules' && <AutoSchedulesTab locationId={locationId} weekStartWeekday={weekStartWeekday} />}
+      {tab === 'auto-schedules' && autoSchedulesEnabled && <AutoSchedulesTab locationId={locationId} weekStartWeekday={weekStartWeekday} />}
       {tab === 'requests' && <RequestsTab locationId={locationId} onReviewed={reload} />}
       {tab === 'audit' && <ScheduleAuditTab />}
       {tab === 'intelligence' && intelligenceEnabled && <ScheduleIntelligence />}

@@ -2400,11 +2400,17 @@ async def get_week_build_readiness(
         blockers.append(
             "This week already has published shifts. Add only the remaining staffing needs as drafts before asking Huume to fill them."
         )
-    # Same refusal `propose_week_draft` makes: a full-week build on top of
-    # drafts would duplicate them, so readiness must not call the week ready.
-    if autopilot_mode and demand:
+    # Same refusal `propose_week_draft` makes for a template or Autopilot
+    # build: a full-week build on top of drafts would duplicate them, so
+    # readiness must not call the week ready. Huume's unspecified ("auto")
+    # source is different — there the drafts ARE the demand — so it stays
+    # ready. The auto-schedule worker always names a mode, and until this
+    # matched the builder it called the week ready, then recorded the
+    # builder's refusal as the rule's result.
+    if demand and (autopilot_mode or source_mode == "template"):
         blockers.append(
-            "This week already has draft shifts. Clear them before building with Autopilot, or ask Huume to fill the drafts you have."
+            "This week already has draft shifts. Clear them before building with "
+            f"{'Autopilot' if autopilot_mode else 'a saved week template'}, or ask Huume to fill the drafts you have."
         )
     # Not blockers: a manager may still want the plan (and its open seats) in
     # view while the paperwork is sorted out.
@@ -2492,10 +2498,13 @@ async def propose_week_draft(
 ) -> dict[str, Any]:
     """Plan a whole week and persist it as a reviewable generation run.
 
-    ``supersede_proposed`` (a manager's own rebuild) marks the week's older
-    unapproved suggestion stale in the SAME transaction that inserts this one,
-    so a rebuild that is refused or fails leaves the previous suggestion in
-    place instead of an empty week.
+    ``supersede_proposed`` (a manager's own rebuild — Run now, the Autopilot
+    wizard) marks the week's older unapproved AUTOMATIC suggestion stale in
+    the SAME transaction that inserts this one, so a rebuild that is refused
+    or fails leaves the previous suggestion in place instead of an empty
+    week. A manual draft another manager staged in their own chat is not
+    touched: it is theirs to confirm or cancel, and retiring it here flipped
+    it to "failed" in a session nobody told.
     """
     if origin not in {"manual", "automatic"}:
         return {"status": "refused", "message": "Unknown schedule generation origin."}
@@ -2776,11 +2785,16 @@ async def propose_week_draft(
                         "message": "This schedule chat was archived, so the week was not staged.",
                     }
             if supersede_proposed:
+                # Every caller that supersedes builds through
+                # `generate_review_suggestion` (origin automatic). If a manual
+                # draft and this one are both confirmed, `apply_week_draft`
+                # stales whichever lands second on its "week now has drafts"
+                # recheck — the broad filter here was never needed for that.
                 await conn.execute(
                     """UPDATE schedule_generation_runs
                        SET status='stale', updated_at=NOW()
                        WHERE company_id=$1 AND location_id=$2 AND week_start=$3
-                         AND status='proposed'""",
+                         AND status='proposed' AND origin='automatic'""",
                     company_id, location_id, week_start,
                 )
             insert_result = await conn.execute(
