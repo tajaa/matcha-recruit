@@ -15,7 +15,9 @@ wrapper for callers that don't.
 
 Everything here is BEST-EFFORT, exactly as it was in ``property_cat``: timed
 out, broadly excepted, returns ``None`` on any failure, and NEVER raises into a
-request. US-only — the Census geocoder has no international coverage, so a
+request. The one exception is ``geocode_or_raise``, for a caller that must tell
+"no such address" from "the geocoder didn't answer" (Espresso research tasks
+retry the second and remember the first). US-only — the Census geocoder has no international coverage, so a
 non-US address simply returns None and the caller degrades (in Cappe's case,
 the site stays in text/category search and drops out of radius search).
 """
@@ -63,12 +65,47 @@ def _one_line(address, city, state, zipcode) -> str:
     return ", ".join(p for p in (address, city, state, zipcode) if p)
 
 
+class GeocoderUnavailable(Exception):
+    """The Census geocoder didn't answer: a timeout, a dropped connection, a
+    5xx, or an answer that isn't its JSON."""
+
+
+async def geocode_or_raise(client: httpx.AsyncClient, one_line: str) -> dict | None:
+    """``geocode`` for one line, except that a geocoder that didn't answer
+    raises ``GeocoderUnavailable`` instead of reading as no match. None only
+    when it answered and found nothing (a 4xx is the query's own problem)."""
+    if not one_line:
+        return None
+    try:
+        resp = await client.get(CENSUS_GEOCODER_URL, params={"address": one_line, **_BENCHMARK_PARAMS},
+                                timeout=GEOCODE_TIMEOUT_S)
+    except httpx.HTTPError as exc:
+        raise GeocoderUnavailable(type(exc).__name__) from exc
+    if resp.status_code >= 500:
+        raise GeocoderUnavailable(f"HTTP {resp.status_code}")
+    if resp.status_code >= 400:
+        return None
+    try:
+        data = resp.json()
+    except ValueError as exc:
+        raise GeocoderUnavailable("not JSON") from exc
+    result = data.get("result") if isinstance(data, dict) else None
+    if not isinstance(result, dict) or "addressMatches" not in result:
+        raise GeocoderUnavailable("not the geocoder's answer")
+    return _first_match(data)
+
+
 async def geocode(client, address, city, state, zipcode) -> dict | None:
     """US Census one-line geocode → {lat, lng, county, source}. None on no match."""
     one_line = _one_line(address, city, state, zipcode)
     if not one_line:
         return None
     data = await _get_json(client, CENSUS_GEOCODER_URL, {"address": one_line, **_BENCHMARK_PARAMS})
+    return _first_match(data)
+
+
+def _first_match(data) -> dict | None:
+    """{lat, lng, county, source} from the geocoder's first match, or None."""
     try:
         matches = data["result"]["addressMatches"]
         if not matches:

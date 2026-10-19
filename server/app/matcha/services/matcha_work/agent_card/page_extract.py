@@ -301,6 +301,15 @@ def _amenities(value: Any) -> list[str]:
     return out[:12]
 
 
+def _listing_type(types: set[str]) -> str:
+    """One type for a home: ApartmentComplex whenever the node says it (a
+    building's homes are many), else the first by name."""
+    found = types & LISTING_TYPES
+    if "ApartmentComplex" in found:
+        return "ApartmentComplex"
+    return sorted(found)[0] if found else "Residence"
+
+
 def _listing(node: dict, base: str) -> dict:
     """A home for rent or sale (Apartment, House, RealEstateListing...)."""
     about = node.get("about") if isinstance(node.get("about"), dict) else {}
@@ -309,7 +318,7 @@ def _listing(node: dict, base: str) -> dict:
     url = home.get("url")
     offers = [_loose_offer(o, base) for o in _as_list(home.get("offers")) if isinstance(o, dict)]
     return {
-        "type": sorted(_types(node) & LISTING_TYPES)[0] if _types(node) & LISTING_TYPES else "Residence",
+        "type": _listing_type(_types(node)),
         "name": _text_of(home.get("name"), 200),
         "url": urljoin(base, url) if isinstance(url, str) else None,
         "description": plain_text(home.get("description"), 600),

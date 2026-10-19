@@ -37,7 +37,6 @@ from uuid import UUID
 from app.core.services.safe_fetch import UnsafeURL, fetch_public
 from app.database import connection_or_direct, decode_jsonb
 from app.matcha.services.matcha_work.agent_card.page_extract import anchors, extract_page, site_of
-from app.matcha.services.matcha_work.agent_card.schema import normalize_url
 from app.matcha.services.matcha_work.agent_runtime import chain
 from app.matcha.services.matcha_work.agent_runtime.chain import Budget, PhaseOutcome
 
@@ -46,6 +45,7 @@ from ..playbook import Budgets
 from . import fields as F
 from . import batches, geo, ranking
 from . import units as leasing
+from .links import own_page
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +79,6 @@ ENRICH_IMAGES_PER_BATCH = 12
 IMAGE_SECONDS = 60.0
 # Pages that are a search engine's, never the finding's own: any google.<tld>,
 # and these.
-NOT_OWN_PAGE = ("gstatic.com", "bing.com", "duckduckgo.com")
 _GONE = re.compile(
     r"\b(?:no longer available|listing (?:has been |was )?(?:removed|deleted|expired)|"
     r"this (?:listing|posting|ad) (?:has been |was )?(?:removed|deleted|expired)|"
@@ -222,16 +221,6 @@ async def run_providers(task: dict, deps: Deps, guard: chain.Guard) -> PhaseOutc
 
 # ── enrich ───────────────────────────────────────────────────────────────────
 
-def own_page(url: str | None) -> bool:
-    normalized = normalize_url(url)
-    if not normalized:
-        return False
-    host = normalized.split("/")[2]
-    if "google" in host.split("."):
-        return False
-    return not any(host == h or host.endswith("." + h) for h in NOT_OWN_PAGE)
-
-
 def page_images(page: dict, title: str, url: str) -> list[dict]:
     found = []
     for key in ("products", "listings", "places"):
@@ -252,28 +241,62 @@ _PLANS = re.compile(r"floor\s*-?\s*plans?|floorplans|pricing|availability|plans?
 _FLOOR_PLANS = re.compile(r"floor\s*-?\s*plans?|floorplans", re.I)
 
 
-def plans_link(html: bytes, base: str, *, pattern: re.Pattern = _PLANS) -> str | None:
-    """A building's floor plans page on its own site (where its rents are),
-    from any link on the page, its menu included."""
+@dataclass(frozen=True)
+class PlanLinks:
+    """A page's links to its own site's rents, from one read of its links:
+    the first that says floor plans, and the first to floor plans, pricing or
+    availability (`plans`, where `plans_page` goes)."""
+
+    floor_plans: str | None = None
+    plans: str | None = None
+
+
+def plan_links(html: bytes, base: str) -> PlanLinks:
+    """The page's links to its floor plans (or pricing) page on its own site,
+    from any link on the page, its menu included. Parses the page: run it in
+    a thread."""
     site = site_of(urlsplit(base).hostname)
+    here = base.split("#")[0].rstrip("/")
+    floor_plans = plans = None
     for anchor, href, parts, its_site in anchors(html, base, limit=400):
-        if parts.scheme not in ("http", "https") or its_site != site:
+        if parts.scheme not in ("http", "https") or its_site != site or href.rstrip("/") == here:
             continue
-        if href.rstrip("/") != base.split("#")[0].rstrip("/") and (
-                pattern.search(anchor.get_text(" ", strip=True)) or pattern.search(parts.path)):
-            return href
-    return None
+        words = anchor.get_text(" ", strip=True)
+        if plans is None and (_PLANS.search(words) or _PLANS.search(parts.path)):
+            plans = href
+        if _FLOOR_PLANS.search(words) or _FLOOR_PLANS.search(parts.path):
+            floor_plans = href
+            break
+    return PlanLinks(floor_plans=floor_plans, plans=plans)
 
 
-def building_page(page: dict, html: bytes, url: str) -> bool:
+def plans_link(html: bytes, base: str) -> str | None:
+    """A building's floor plans page on its own site (where its rents are)."""
+    return plan_links(html, base).plans
+
+
+def one_home(text: str) -> bool:
+    """A page that states one rent, a plain figure (not a range, not "from"):
+    one home's listing, even on a building's site, whose menu links its floor
+    plans and whose every page may say it is an ApartmentComplex."""
+    text = " ".join(text.split())
+    if F.starts_from(text):
+        return False
+    spans = {(low, high) for low, high, _ in F.rent_spans(text)}
+    return len(spans) == 1 and len({*next(iter(spans))}) == 1
+
+
+def building_page(page: dict, html: bytes, url: str, links: PlanLinks) -> bool:
     """An apartment building's own site (many homes, rents on its floor plans)
-    rather than one home's listing: it names its leasing system, says it is an
-    ApartmentComplex, or links its own floor plans page."""
+    rather than one home's listing (`one_home`): it names its leasing system,
+    says it is an ApartmentComplex, or links its own floor plans page."""
+    if one_home(str(page.get("text") or "")):
+        return False
     if leasing.sightmap_embed(html) or leasing.avalon_code(html, url):
         return True
     if any(listing.get("type") == "ApartmentComplex" for listing in page.get("listings") or []):
         return True
-    return plans_link(html, url, pattern=_FLOOR_PLANS) is not None
+    return links.floor_plans is not None
 
 
 def _no_rent(fields: dict) -> bool:
@@ -319,10 +342,11 @@ class Loaded:
     page: dict
 
 
-async def plans_page(html: bytes, base: str, deps: Deps, fetches: Budget) -> Loaded | None:
+async def plans_page(html: bytes, base: str, deps: Deps, fetches: Budget,
+                     links: PlanLinks | None = None) -> Loaded | None:
     """A building's floor plans page on its own site, loaded: where its rents
-    are, and often its unit map."""
-    url = await asyncio.to_thread(plans_link, html, base)
+    are, and often its unit map. `links` when the page's were already read."""
+    url = (links or await asyncio.to_thread(plan_links, html, base)).plans
     if url is None or not fetches.take():
         return None
     try:
@@ -415,9 +439,11 @@ async def enrich_one(row: dict, deps: Deps, fetches: Budget, views: Budget, *, p
     structured = any(page.get(k) for k in ("products", "listings", "places", "events", "offers"))
     # An apartment building: many homes, rents on its floor plans. One found
     # on Google Maps before 2026-10-18 always was; one from the web, when its
-    # page shows it.
-    building = row.get("kind") == "listing" and (
-        row.get("origin") == "provider" or building_page(page, fetched.body, fetched.final_url))
+    # page shows it. Its links are read once, off the event loop.
+    links = await asyncio.to_thread(plan_links, fetched.body, fetched.final_url) \
+        if row.get("kind") == "listing" else None
+    building = links is not None and (
+        row.get("origin") == "provider" or building_page(page, fetched.body, fetched.final_url, links))
     viewed_own = False
     shots: list[dict] = []
     if row.get("kind") == "listing":
@@ -435,7 +461,7 @@ async def enrich_one(row: dict, deps: Deps, fetches: Budget, views: Budget, *, p
         load, tried = leasing_loader(deps, fetches, Budget(left=LEASING_LOADS)), set()
         homes = await leasing.find_units(fetched.body, fetched.final_url, load, today=today, tried=tried)
         if homes is None:
-            plans = await plans_page(fetched.body, fetched.final_url, deps, fetches)
+            plans = await plans_page(fetched.body, fetched.final_url, deps, fetches, links)
             if plans is not None:
                 homes = await leasing.find_units(plans.body, plans.url, load, today=today, tried=tried)
     if homes is not None:

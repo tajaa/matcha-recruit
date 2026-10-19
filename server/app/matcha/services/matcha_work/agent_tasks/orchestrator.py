@@ -33,7 +33,8 @@ MAX_ATTEMPTS = 3
 RETRY_COUNTDOWN = 30
 # A live task with no lease that has not moved in this long lost its worker task.
 IDLE_INTERVAL = "2 minutes"
-BUDGET_COLUMNS = frozenset({"provider_calls", "fetch_calls", "browser_views"})
+# (`provider_calls` paid Google Maps and Shopping until 2026-10-18: the column stays, unused.)
+BUDGET_COLUMNS = frozenset({"fetch_calls", "browser_views"})
 
 
 async def _ending(task: dict, message: str) -> PhaseOutcome:

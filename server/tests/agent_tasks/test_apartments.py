@@ -182,6 +182,60 @@ async def test_the_anchor_is_an_address_else_a_town():
     assert "transient" not in nowhere  # looked up, not there
 
 
+@pytest.mark.parametrize("near, location, state", [
+    ("Pasadena", "Los Angeles, CA", "CA"),   # not Texas's, the largest Pasadena
+    ("Pasadena", "California", "CA"),
+    ("Pasadena", "Texas", "TX"),
+    ("Pasadena, TX", "Los Angeles, CA", "TX"),  # a state of its own wins
+    ("Round Rock", "Austin, TX", "TX"),
+    ("Cambridge", "Boston, MA", "MA"),
+    ("Venice", "Los Angeles, CA", None),     # LA's Venice isn't a town: not Florida's either
+    ("Lady Bird Lake", "Austin, TX", None),
+    ("Camden", "London, United Kingdom", None),  # abroad: the US gazetteer can't say
+])
+def test_a_town_is_the_one_in_the_tasks_area(near, location, state):
+    found = geo.town_point(near, location)
+    if state is None:
+        assert found is None
+    else:
+        lat, lng = found[1]
+        ca, tx, ma = (32 < lat < 42 and lng < -114), (25 < lat < 37 and -107 < lng < -93), (41 < lat < 43 and lng > -74)
+        assert {"CA": ca, "TX": tx, "MA": ma}[state], (near, location, found)
+
+
+@pytest.mark.asyncio
+async def test_the_anchor_is_found_in_the_tasks_area():
+    """Seen in review: "Pasadena" in a Los Angeles search was Texas's, so every
+    home measured some 1,400 miles away and the distance limit hid them all."""
+    found = await geo.resolve_anchor("Pasadena", "Los Angeles, CA", geocode=AsyncMock(return_value=None))
+    assert found["source"] == "gazetteer" and 34 < found["lat"] < 34.3 and found["lng"] < -118
+    venice = await geo.resolve_anchor("Venice", "Los Angeles, CA", geocode=AsyncMock(return_value=None))
+    assert "lat" not in venice and "transient" not in venice
+
+
+@pytest.mark.asyncio
+async def test_a_census_outage_is_tried_again(monkeypatch):
+    """The shared geocoder reads an outage as no match; the anchor's doesn't,
+    so a down geocoder is retried, not kept as not found."""
+    from app.core.services import geo as core_geo
+
+    async def down(_client, _line):
+        raise core_geo.GeocoderUnavailable("HTTP 503")
+
+    monkeypatch.setattr(core_geo, "geocode_or_raise", down)
+    with pytest.raises(core_geo.GeocoderUnavailable):
+        await geo.census_point("100 Congress Ave, Austin, TX")
+    lost = await geo.resolve_anchor("Mordor", "Austin, TX", geocode=geo.census_point)
+    assert lost["transient"] is True
+
+    async def found(_client, line):
+        return {"lat": 30.27, "lng": -97.74} if line == "100 Congress Ave, Austin, TX" else None
+
+    monkeypatch.setattr(core_geo, "geocode_or_raise", found)
+    assert await geo.census_point("  100 Congress Ave,  Austin, TX ") == (30.27, -97.74)
+    assert await geo.census_point("nowhere") is None
+
+
 def test_a_town_is_one_named_on_its_own():
     assert geo.town_point("Brooklyn")[0] == "Brooklyn" and geo.town_point("San Francisco, CA")[0] == "San Francisco"
     # A landmark that only mentions a town, or no town at all, is not one.
@@ -523,17 +577,37 @@ async def test_one_homes_listing_is_read_as_one_home():
 def test_a_building_page_shows_it_is_one():
     url = "https://www.bldg.test/"
 
-    def page(html, ld=None):
+    def check(html, ld=None, at=url):
         body = f"<html><head>{_ld(ld) if ld else ''}</head><body>{html}</body></html>".encode()
-        return extract_page(body, url), body
+        return phases.building_page(extract_page(body, at), body, at, phases.plan_links(body, at))
 
+    complex_ld = {"@context": "https://schema.org", "@type": "ApartmentComplex", "name": "Bldg"}
     for html, ld in (("<a href='/floor-plans'>Floor Plans</a>", None),
                      ("<iframe src='https://sightmap.com/embed/abc12345'></iframe>", None),
-                     ("x", {"@context": "https://schema.org", "@type": "ApartmentComplex", "name": "Bldg"})):
-        assert phases.building_page(*page(html, ld), url), html
+                     ("x", complex_ld),
+                     # Several types: ApartmentComplex isn't lost to "Accommodation" sorting first.
+                     ("x", {**complex_ld, "@type": ["Accommodation", "ApartmentComplex"]}),
+                     ("<a href='/floorplans'>Floor plans</a> 1 bd from $1,800/mo, 2 bd $2,400/mo", None)):
+        assert check(html, ld), html
     for html in ("<a href='/availability'>Check availability</a> <a href='/pricing'>Pricing</a>",
                  "<a href='https://other.test/floorplans'>Floor plans</a>", "One home, $2,000/mo"):
-        assert not phases.building_page(*page(html), url), html
+        assert not check(html), html
+    # A unit's page on the building's own site: its menu links Floor Plans and
+    # every page says ApartmentComplex, but it states one rent: one home.
+    unit = "https://www.bldg.test/unit/1204/"
+    assert not check("<a href='/floorplans/'>Floor Plans</a> Unit 1204: 2 bd / 2 ba, $2,750/mo", complex_ld, unit)
+
+
+def test_a_pages_plan_links_are_read_once():
+    html = (b"<a href='/'>Home</a><a href='/pricing'>Pricing</a><a href='/floorplans/'>Floor Plans</a>"
+            b"<a href='https://other.test/floor-plans'>Floor plans elsewhere</a>")
+    links = phases.plan_links(html, "https://bldg.test/")
+    assert links == phases.PlanLinks(floor_plans="https://bldg.test/floorplans/", plans="https://bldg.test/pricing")
+    assert phases.plans_link(html, "https://bldg.test/") == "https://bldg.test/pricing"
+    assert phases.plan_links(b"<a href='/amenities'>Amenities</a>", "https://bldg.test/") == phases.PlanLinks()
+    assert phases.one_home("Unit 4: $2,100/mo") and phases.one_home("$2,100/mo and again $2,100/mo")
+    for text in ("", "From $1,800/mo", "$1,800 - $2,200/mo", "$1,800/mo or $2,100/mo"):
+        assert not phases.one_home(text), text
 
 
 def _ld(ld):

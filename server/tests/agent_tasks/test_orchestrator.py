@@ -29,7 +29,7 @@ def test_the_spec():
     spec = orchestrator.TASK_CHAIN
     assert spec.table == "mw_agent_tasks" and spec.phase_column == "phase"
     assert spec.live == ("queued", "running") and "research.plan" in spec.phases
-    assert spec.budget_columns == {"provider_calls", "fetch_calls", "browser_views"}
+    assert spec.budget_columns == {"fetch_calls", "browser_views"}
 
 
 @pytest.mark.asyncio

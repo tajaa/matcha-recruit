@@ -91,11 +91,13 @@ def page_point(page: dict, title: str) -> Point | None:
 
 
 async def census_point(line: str) -> Point | None:
-    """A street address on the map through the US Census geocoder (US only)."""
+    """A street address on the map through the US Census geocoder (US only):
+    None when it has no such address, `GeocoderUnavailable` when it didn't
+    answer (so an anchor lookup is tried again rather than kept as not found)."""
     from app.core.services import geo as core_geo
 
     async with httpx.AsyncClient(timeout=CENSUS_SECONDS) as client:
-        found = await core_geo.geocode(client, line, None, None, None)
+        found = await core_geo.geocode_or_raise(client, " ".join(str(line or "").split()))
     return (found["lat"], found["lng"]) if found else None
 
 
@@ -106,13 +108,16 @@ def anchor_query(near: str, location: str | None) -> str:
     return near if not location or names_place(near, location) else f"{near}, {location}"
 
 
-def town_point(near: str) -> tuple[str, Point] | None:
+def town_point(near: str, location: str | None = None) -> tuple[str, Point] | None:
     """A city or town named on its own ("Santa Monica", "Austin, TX") from
     the offline Census gazetteer: `(its name, its point)`. Anything that only
-    mentions one ("Lady Bird Lake, Austin") is not it."""
+    mentions one ("Lady Bird Lake, Austin") is not it. A name with no state of
+    its own is the one in the task's `location` ("Pasadena" in a Los Angeles
+    search is California's, never Texas's: `places.target_near`), and none
+    when that area has no place by that name."""
     from app.matcha.services.matcha_work.job_search import places
 
-    found = places.target(near)
+    found = places.target_near(near, location)
     if found is None or not found.points or not found.name:
         return None
     head = places.place_key(near.split(",")[0])
@@ -131,7 +136,7 @@ async def resolve_anchor(near: str, location: str | None, *, geocode: Geocode) -
         point, transient = None, True
     if point is not None:
         return {"name": near, "lat": point[0], "lng": point[1], "source": "census", "label": query}
-    town = town_point(near)
+    town = town_point(near, location)
     if town is not None:
         label, (lat, lng) = town
         return {"name": near, "lat": lat, "lng": lng, "source": "gazetteer", "label": label}

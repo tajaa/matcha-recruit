@@ -275,6 +275,29 @@ def target(text: str) -> Target | None:
     return Target(label=text, points=(entry.point,), name=place.name)
 
 
+def target_near(text: str, around: str | None) -> Target | None:
+    """A place named inside another one: "Pasadena" around "Los Angeles, CA"
+    is California's, not the largest Pasadena anywhere. Only a same-named
+    place in `around`'s state and within `NEAR_MILES` of its city counts;
+    None when the gazetteer has none there (a neighborhood, a landmark).
+    Text that names its own state, or no `around`, is `target(text)`."""
+    places = named(text)
+    context = target(around) if around else None
+    place = places[0] if places else None
+    if place is None or not place.name or place.abroad or place.state or context is None:
+        return target(text)
+    if context.abroad or not (context.points or context.state):
+        return None
+    entries = _entries(place)
+    state = context.state or next((n.state for n in named(around) if n.state), None)
+    if state:
+        entries = tuple(e for e in entries if e.state == state)
+    if context.points:
+        entries = tuple(e for e in entries if min(miles(e.point, a) for a in context.points) <= NEAR_MILES)
+    entry = _nearest(entries, context.points)
+    return Target(label=text, points=(entry.point,), name=place.name) if entry else None
+
+
 def targets(criteria: dict) -> list[Target]:
     """The places a search keeps jobs in; empty when it named none."""
     out = []

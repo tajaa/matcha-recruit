@@ -289,7 +289,7 @@ next batch from them before it searches again.
 | Field library, reading pages, checking claims (pure) | `fields.py` |
 | Hard constraints, bands, scores (pure) | `ranking.py` |
 | Finish contracts and their checks (pure) | `contracts.py` |
-| A finding's own link, never Google's (`is_google`, `store_link`: Buy and Apply unwrap Google's redirects on findings from before 2026-10-18). No provider: Google Maps (Google's Places API) and Google Shopping (SearchAPI, else SerpApi) were taken out on 2026-10-18, so every kind is the model's web search (Brave) read on the findings' own pages | `links.py` |
+| A finding's own page and link, never Google's or a search engine's (`own_page`, `is_google`, `store_link`: Buy and Apply unwrap Google's redirects on findings from before 2026-10-18). No provider: Google Maps (Google's Places API) and Google Shopping (SearchAPI, else SerpApi) were taken out on 2026-10-18, so every kind is the model's web search (Brave) read on the findings' own pages | `links.py` |
 | The model's page loader: agent cards' page facts plus the page's same-site links | `fetch.py` |
 | No-model phases, `rerank`, `Deps` | `phases.py` |
 | Model phases | `model_phases.py` |
@@ -334,9 +334,16 @@ the plan as `anchor` (`{name, lat, lng, source, label}`, or `{name, error}`, so
 a place that can't be found isn't looked up again). A landmark ("Lady Bird
 Lake", "Downtown Austin") is on neither, so its distances are Unconfirmed:
 until 2026-10-18 Google Maps found those, and it is not asked any more. A
-geocoder that failed rather than found nothing (with no town to fall back on)
-is kept with `transient` and `tries`, and the next step tries again, up to
-`ANCHOR_TRIES` (3) times in all. A finding's point: its page's schema.org `geo`
+town named without a state is the one in the brief's `location`
+(`places.target_near`: its state, within 50 mi of its city), never the
+largest of that name anywhere: in review, "Pasadena" in a Los Angeles search
+was Texas's, every home measured some 1,400 mi away, and the distance limit
+hid them all. No such town there (LA's Venice): not found. A geocoder that
+failed rather than found nothing (with no town to fall back on) is kept with
+`transient` and `tries`, and the next step tries again, up to `ANCHOR_TRIES`
+(3) times in all. The shared `core/services/geo.geocode` reads an outage as
+no match, so the anchor uses `geocode_or_raise`, which raises
+`GeocoderUnavailable` for a timeout, a 5xx or an answer that isn't its JSON. A finding's point: its page's schema.org `geo`
 (`page_extract` adds `geo` to a listing or place only when the page has one),
 else its stored address through the Census geocoder (a street number needed).
 `distance` (miles, straight line, shown "12.4 mi north") and `direction` (the
@@ -363,9 +370,14 @@ preference may name).
 
 A building's rent is every figure its floor plans state, not one number.
 `enrich_one` treats a listing as a building when its page shows it is one
-(`building_page`: it names its leasing system, says it is an ApartmentComplex,
-or links its own floor plans page; one home's listing is read as one home,
-beds and all; a Google Maps row from before 2026-10-18 always is): its page and then its
+(`building_page`: it names its leasing system, says it is an ApartmentComplex
+(`page_extract` keeps that type when a node has several), or links its own
+floor plans page. A page that states one plain rent is one home's
+(`one_home`), even a unit's page on the building's site, whose menu links
+Floor Plans and whose every page may say ApartmentComplex: it is read as one
+home, beds and all. A Google Maps row from before 2026-10-18 always is a
+building.) The page's links are read once, in a thread (`plan_links`), and
+reused for the floor plans page. Its page and then its
 floor plans page (`plans_link`, same site; viewed in the browser when the
 figures are drawn by JavaScript) are read by `building_rent`, which keeps each
 plan's `[low, high]` in `price.spans` (`high` None for "starting at") and shows

@@ -497,7 +497,7 @@ async def refine(task: dict, deps: Deps, guard: Guard) -> PhaseOutcome:
         if (outcome.result["search_again"] or visible < MIN_SURVIVORS) and room > 0:
             nxt = PhaseOutcome(
                 status="running", phase=PROVIDERS,
-                cursor={"refine": True, "note": note, "provider_page": 1, "web_runs": 0},
+                cursor={"refine": True, "note": note, "web_runs": 0},
                 progress={"note": f"{note} Searching again…"},
             )
         elif new_keys:
