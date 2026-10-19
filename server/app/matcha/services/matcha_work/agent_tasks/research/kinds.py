@@ -7,7 +7,7 @@ same way; what it changes:
 * `intake`: what Espresso asks for (an apartment's beds and move-in date), and
   `brief_model`, the check of the answers.
 * `item_kind`, `source`: what one finding is and where the search starts
-  (Google Maps, or the web). The plan can't change them.
+  (the web: Brave and Claude). The plan can't change them.
 * `fields`: the facts shown for every finding, in order.
 * `limits`: the person's answers as hard limits (at least 2 beds, takes
   dogs), kept like a typed budget: the plan can't drop them, a refine may
@@ -42,9 +42,6 @@ class SearchKind:
     actions: tuple[str, ...] = ()
     # The budget's unit, when it has one (rent is a month).
     budget_unit: str | None = None
-    # What to search the map for around each area a distance limit covers
-    # (`geo.areas`), whatever the plan's queries say.
-    area_query: str = ""
 
     def labels(self) -> dict[str, str]:
         return {f.key: f.label for f in self.intake}
@@ -110,13 +107,13 @@ APARTMENTS = SearchKind(
     description=(
         "Find a home to rent (apartment, condo, house, room): monthly rent, move-in specials and "
         "concessions, beds, baths, pets, address and how far it is from a place they name (at least "
-        "or at most so many miles, and which direction), from Google Maps and the buildings' and "
-        "listing sites' own pages. Each finding can be applied to (Espresso opens its application)."
+        "or at most so many miles, and which direction), from the buildings' and listing sites' own "
+        "pages, found with web search. Each finding can be applied to (Espresso opens its application)."
     ),
     item_kind="listing",
-    # Apartment buildings are on Google Maps with their own site and where they
-    # are; the model's web search then adds single listings.
-    source="places",
+    # Buildings and single listings from the model's web search (Brave), each
+    # read on its own page: Google Maps was taken out 2026-10-18.
+    source="web",
     fields=("price", "specials", "distance", "beds", "baths", "address", "direction", "pets",
             "available_date", "neighborhood", "sqft"),
     intake=(
@@ -138,15 +135,14 @@ APARTMENTS = SearchKind(
     ),
     brief_model=ApartmentBrief,
     budget_unit="month",
-    area_query="apartments",
     limits=apartment_limits,
     limit_keys=("beds_min", "baths_min", "pets", "move_in", "min_miles", "max_miles", "directions"),
     plan_hint=(
-        "This is a search for a home to rent. The rent is a price with unit month. The first queries "
-        "go to Google Maps, so make them find apartment buildings by area (\"apartments Round Rock "
-        "TX\"), one area per query; when distances are measured from a place, pick areas that fit "
-        "the miles and directions asked, and alternate the directions (north, south, north, ...) so "
-        "each comes early. Then prefer the building's or management company's own "
+        "This is a search for a home to rent. The rent is a price with unit month. Make the first "
+        "queries find apartment buildings by area (\"apartments Round Rock TX\"), one area per query; "
+        "when distances are measured from a place, pick areas that fit the miles and directions "
+        "asked, and alternate the directions (north, south, north, ...) so each comes early. Prefer "
+        "the building's or management company's own "
         "site and listing sites that serve pages to anyone (Craigslist, the property's own site) "
         "over ones that block automated readers. Collect move-in specials (weeks free, money off) "
         "and the address. When they care about specials or concessions, add a preference on specials "
@@ -160,10 +156,10 @@ PLACES = SearchKind(
     label="Places",
     description=(
         "Find a place to go: a restaurant, bar, café, venue or shop near somewhere. Rating, reviews, "
-        "price level, hours and address from Google Maps, then the place's own site."
+        "price level, hours and address from its own site and pages about it, found with web search."
     ),
     item_kind="place",
-    source="places",
+    source="web",
     fields=("rating", "review_count", "price_level", "cuisine", "hours", "address", "phone"),
     intake=(
         IntakeField(key="location", label="Near", type="location", required=True,

@@ -295,7 +295,7 @@ extension FeatureGuide {
              points: [
                 "A task takes a few minutes and runs on our servers, so you can close Espresso. When it's done you get a notification and an email with what it found; if it needs you, a notification.",
                 "It never pays, orders, books, applies or contacts anyone on its own. Buy takes you to the store's checkout and Apply to the application; you review, fill in and pay there.",
-                "Distances are straight-line miles from where Google Maps or the US Census puts each place. A home it couldn't place is Unconfirmed, not ruled out.",
+                "Distances are straight-line miles from where each place's own page or the US Census puts it. A home it couldn't place, or a landmark it couldn't find, is Unconfirmed, not ruled out.",
                 "Only a fact it verified can rule a finding out. One it couldn't check is marked Unconfirmed and ranked after the confirmed ones.",
                 "A building fits only when one of its homes meets all your limits at once, not one home's rent with another's bedrooms. A special like “6 weeks free” counts: the net rent spreads the free weeks over the lease, and a home whose net rent is in your budget fits. “Up to” specials don't count.",
                 "Many buildings' sites don't list their homes one by one, or turn away anything but a person's browser. Those show the rents their floor plans give instead.",

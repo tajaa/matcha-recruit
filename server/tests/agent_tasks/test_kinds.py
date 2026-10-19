@@ -53,7 +53,7 @@ def test_a_kind_fixes_its_plan_and_adds_its_limits():
              "fields": ["rating"], "constraints": [{"field": "beds", "op": "gte", "value": 3}],
              "preferences": [], "fit_weight": 0.4, "prefer_sources": [], "summary": ""}
     plan, _ = contracts.normalize_plan({"result": model}, brief=APARTMENT_BRIEF, today=TODAY, kind=kinds.APARTMENTS)
-    assert plan["item_kind"] == "listing" and plan["source"] == "places"
+    assert plan["item_kind"] == "listing" and plan["source"] == "web"
     # No place to measure from, so no distance.
     assert plan["fields"][:9] == [k for k in kinds.APARTMENTS.fields if k not in ("distance", "direction")]
     assert "rating" in plan["fields"]

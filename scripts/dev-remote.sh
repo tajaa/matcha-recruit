@@ -436,10 +436,7 @@ fi
 # for an apartment hunt starts a structured task instead of a chat answer.
 # Prod stays off until its migrations and deploy land. ESPRESSO_TASKS_ENABLED=0
 # in the environment runs dev the way prod is.
-# Google Places (research tasks' Google Maps): Google gives 1,000 Text Search
-# calls free a month. Dev's share is 200 (prod's default is 800), so testing
-# can't spend prod's: one dev session made 267 in an hour on 2026-10-18.
-TASKS_ENV="export ESPRESSO_TASKS_ENABLED='${ESPRESSO_TASKS_ENABLED:-1}' && export GOOGLE_PLACES_MONTHLY_CALLS='${GOOGLE_PLACES_MONTHLY_CALLS:-200}' && "
+TASKS_ENV="export ESPRESSO_TASKS_ENABLED='${ESPRESSO_TASKS_ENABLED:-1}' && "
 
 # Create new tmux session
 echo -e "${YELLOW}Creating tmux session...${NC}"

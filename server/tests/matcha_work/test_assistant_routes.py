@@ -135,12 +135,12 @@ async def test_abilities_say_what_stands_in_the_way(wired, monkeypatch):
     }))
     out = await routes.list_abilities(current_user=_user())
     by_key = {a["key"]: a for a in out["abilities"]}
-    assert list(by_key) == ["web", "places", "job_listings", "screenshots", "shopping", "files", "flights",
+    assert list(by_key) == ["web", "job_listings", "screenshots", "shopping", "files", "flights",
                             "email", "calendar", "sales", "jobs", "reservations"]
-    # Google Maps and live job listings: look-ups with no consent, in any chat.
-    for key in ("places", "job_listings"):
-        assert by_key[key]["always_on"] and not by_key[key]["acts"] and not by_key[key]["private_only"]
-        assert by_key[key]["disclosure"] is None
+    # Live job listings: a look-up with no consent, in any chat.
+    listings = by_key["job_listings"]
+    assert listings["always_on"] and not listings["acts"] and not listings["private_only"]
+    assert listings["disclosure"] is None
     # The person's job searches: private, behind its own disclosure, never acting outward.
     jobs = by_key["jobs"]
     assert jobs["private_only"] and not jobs["acts"] and not jobs["enabled"]

@@ -1,9 +1,9 @@
-"""The request rules for the paid APIs Espresso's agents call: Google's Places
-API (research tasks' Google Maps) and Brave's web search (`brave_search.py`).
-No search API (SearchAPI, SerpApi) is called since 2026-10-18: job search and
-research tasks run on Brave, Claude and Google's own APIs.
+"""The request rules for the paid API Espresso's agents call: Brave's web
+search (`brave_search.py`). No search API (SearchAPI, SerpApi) is called since
+2026-10-18, and no Google API either: job search, research tasks and the chat
+assistant run on Brave and Claude.
 
-`answer` makes one request under the rules both follow:
+`answer` makes one request under these rules:
 - 401 or 403: the key was refused. `fatal`: asking again can't help.
 - 402, or a 429 whose own words say the account has no searches left
   (`out_of_searches`): `fatal` too.
@@ -14,27 +14,15 @@ research tasks run on Brave, Claude and Google's own APIs.
 Each call is logged to the AI usage ledger (`ai_usage.record_api_call`), so
 Admin → AI Usage shows every paid search by API, what asked for it and what
 it cost.
-
-`Fallback` holds the APIs that have keys, in order, for one phase. A call goes
-to the first one still in play. One that refuses for good is dropped (logged
-once as an error, so it shows in Admin → Server Errors), and so is one that is
-down while another follows it (a warning); the last one is always asked. A
-token an API gave (a next page, a product's stores) means nothing to another,
-so `tag` marks it with its API, and a call with a dropped API's token returns
-None. Once every API is dropped nothing more can be asked this phase: each
-call raises a fresh fatal error.
 """
 from __future__ import annotations
 
 import asyncio
-import logging
 import re
 import time
 from typing import Any, Awaitable, Callable
 
 import httpx
-
-logger = logging.getLogger(__name__)
 
 TIMEOUT_SECONDS = 20.0
 
@@ -153,72 +141,3 @@ async def _ask(name: str, send: SendFn, *, transport: httpx.AsyncBaseTransport |
             await sleep(2.0)
     raise ProviderError(f"{name} did not answer: {last}", down=True)
 
-
-Ask = Callable[[Any, "str | None"], Awaitable[Any]]
-
-
-class Fallback:
-    """The APIs that have keys, in order, for one phase (see the module's
-    docstring). Each API has a `name`."""
-
-    label = "search"
-
-    def __init__(self, apis: list[Any]):
-        self.apis = list(apis)
-        self._dropped: dict[int, ProviderError] = {}
-
-    def _first(self) -> int | None:
-        return next((n for n in range(len(self.apis)) if n not in self._dropped), None)
-
-    def first(self) -> Any | None:
-        """The API a call goes to now; None with none left."""
-        n = self._first()
-        return None if n is None else self.apis[n]
-
-    @staticmethod
-    def tag(at: int, token: str | None) -> str | None:
-        """`token`, marked as API `at`'s."""
-        return f"{at}:{token}" if token else None
-
-    def _owner(self, token: str) -> int | None:
-        given = token.partition(":")[0]
-        return int(given) if given.isdigit() and int(given) < len(self.apis) else None
-
-    def holds(self, token: str | None) -> bool:
-        """Whether the API that gave `token` is still in play."""
-        at = self._owner(token or "")
-        return at is not None and at not in self._dropped
-
-    def _drop(self, at: int, exc: ProviderError) -> bool:
-        """Whether `exc` takes API `at` out of play (now, or already)."""
-        if at in self._dropped:
-            return True
-        if not (exc.fatal or (exc.down and any(n > at and n not in self._dropped for n in range(len(self.apis))))):
-            return False
-        self._dropped[at] = exc
-        following = self.first()
-        instead = f"using {following.name} instead" if following is not None else "none left"
-        (logger.error if exc.fatal else logger.warning)("%s: %s; %s", self.label, exc, instead)
-        return True
-
-    def _spent(self) -> ProviderError:
-        # A fresh error each time: re-raising one from several calls at once
-        # grows its traceback.
-        last = list(self._dropped.values())[-1] if self._dropped else None
-        return ProviderError(f"no {self.label} API left" + (f" ({last})" if last else ""), fatal=True)
-
-    async def call(self, ask: Ask, token: str | None = None) -> tuple[int, Any] | None:
-        """`(n, its answer)`: `ask(api, the token as that API gave it)` answered
-        by API n, the first still in play, or the one that gave `token`. None
-        when that API has been dropped since."""
-        while True:
-            if len(self._dropped) == len(self.apis):
-                raise self._spent()
-            at = self._first() if token is None else self._owner(token)
-            if at is None or at in self._dropped:
-                return None
-            try:
-                return at, await ask(self.apis[at], token.partition(":")[2] if token else None)
-            except ProviderError as exc:
-                if not self._drop(at, exc):
-                    raise

@@ -1,16 +1,19 @@
 """How far a finding is from a place the person named, and which way.
 
-A brief's `near` ("Lady Bird Lake") is put on the map once per task, its
-`anchor`, kept in the plan: Google Maps through the listings provider, else
-the US Census geocoder (street addresses only). A finding's own point comes
-from Google Maps (a provider result), its page's schema.org `geo`, or its
-address through the Census geocoder.
+A brief's `near` ("2100 Barton Springs Rd", "Santa Monica") is put on the
+map once per task, its `anchor`, kept in the plan: a street address through
+the US Census geocoder, else a city or town by name from the offline Census
+gazetteer job search uses (`job_search/places.py`). A landmark neither knows
+("Lady Bird Lake") isn't found, and distances from it are unknown. A
+finding's own point comes from its page's schema.org `geo` or its address
+through the Census geocoder. (Google Maps was a source until 2026-10-18:
+Espresso uses no Google API now.)
 
 Distance (miles in a straight line) and direction (the quarter of the compass
 it lies in from the anchor: north is within 45 degrees of due north) are then
 arithmetic, never a model's claim (`fields.COMPUTED`). Each is as good as the
-point it came from: verified from Google Maps, page data or a verified
-address; claimed from an address only claimed on another page.
+point it came from: verified from page data or a verified address; claimed
+from an address only claimed on another page.
 """
 from __future__ import annotations
 
@@ -60,45 +63,6 @@ def bearing(a: Point, b: Point) -> float:
     return (math.degrees(math.atan2(x, y)) + 360) % 360
 
 
-def offset(start: Point, distance: float, degrees: float) -> Point:
-    """The point `distance` miles from `start` along a compass bearing."""
-    lat, lng, theta, d = math.radians(start[0]), math.radians(start[1]), math.radians(degrees), distance / EARTH_MILES
-    lat2 = math.asin(math.sin(lat) * math.cos(d) + math.cos(lat) * math.sin(d) * math.cos(theta))
-    lng2 = lng + math.atan2(math.sin(theta) * math.sin(d) * math.cos(lat), math.cos(d) - math.sin(lat) * math.sin(lat2))
-    return math.degrees(lat2), (math.degrees(lng2) + 540) % 360 - 180
-
-
-BEARINGS = {"north": 0.0, "east": 90.0, "south": 180.0, "west": 270.0}
-# How far out to look when a direction is asked with no miles ("north of downtown").
-DIRECTION_MILES = 8.0
-
-
-def _out_to(low: float | None, high: float | None) -> float:
-    if low is not None and high is not None:
-        return (low + high) / 2
-    if low is not None:
-        return low + 5
-    return high / 2 if high is not None else DIRECTION_MILES
-
-
-def areas(anchor: dict, brief: dict) -> list[str]:
-    """Where to search the map so every direction asked is covered: a map
-    centre (`@lat,lng,zoom`) that far out in each direction, or the anchor
-    itself for "within so many miles". Empty when the brief sets no distance."""
-    low, high, ways = brief.get("min_miles"), brief.get("max_miles"), list(brief.get("directions") or [])
-    if low is None and high is None and not ways:
-        return []
-    home = (float(anchor["lat"]), float(anchor["lng"]))
-    if low is None and not ways:
-        return [f"@{home[0]:.5f},{home[1]:.5f},{12 if high > 6 else 13}z"]
-    out_to = _out_to(low, high)
-    centres = [offset(home, out_to, BEARINGS[way]) for way in ways or BEARINGS]
-    # Close enough in that Google keeps to the area rather than the city's
-    # densest part: at 12z a centre 15 mi south of Austin's lake came back
-    # 4-9 mi out; at 13z all twenty were 10-20.
-    return [f"@{lat:.5f},{lng:.5f},13z" for lat, lng in centres]
-
-
 def quarter(degrees: float) -> str:
     return ("north", "east", "south", "west")[int(((degrees + 45) % 360) // 90)]
 
@@ -142,22 +106,24 @@ def anchor_query(near: str, location: str | None) -> str:
     return near if not location or names_place(near, location) else f"{near}, {location}"
 
 
-async def resolve_anchor(near: str, location: str | None, *, provider: Any, geocode: Geocode) -> dict:
+def town_point(near: str) -> tuple[str, Point] | None:
+    """A city or town named on its own ("Santa Monica", "Austin, TX") from
+    the offline Census gazetteer: `(its name, its point)`. Anything that only
+    mentions one ("Lady Bird Lake, Austin") is not it."""
+    from app.matcha.services.matcha_work.job_search import places
+
+    found = places.target(near)
+    if found is None or not found.points or not found.name:
+        return None
+    head = places.place_key(near.split(",")[0])
+    return (found.name.title(), found.points[0]) if head == found.name else None
+
+
+async def resolve_anchor(near: str, location: str | None, *, geocode: Geocode) -> dict:
     """`{name, lat, lng, source, label}`, or `{name, error}` when it can't be
     found, with `transient` when a lookup failed rather than found nothing."""
-    from .providers import ProviderError
-
     query = anchor_query(near, location)
     transient = False
-    if provider is not None:
-        try:
-            found = await provider.locate(query)
-        except ProviderError as exc:
-            logger.info("research anchor lookup failed: %s", exc)
-            found, transient = None, True
-        if found is not None:
-            label, point = found
-            return {"name": near, "lat": point[0], "lng": point[1], "source": "google_maps", "label": label}
     try:
         point = await geocode(query)
     except Exception:
@@ -165,6 +131,10 @@ async def resolve_anchor(near: str, location: str | None, *, provider: Any, geoc
         point, transient = None, True
     if point is not None:
         return {"name": near, "lat": point[0], "lng": point[1], "source": "census", "label": query}
+    town = town_point(near)
+    if town is not None:
+        label, (lat, lng) = town
+        return {"name": near, "lat": lat, "lng": lng, "source": "gazetteer", "label": label}
     failed = {"name": near, "error": f"Couldn't find {near} on a map, so distances from it are unknown."}
     return {**failed, "transient": True} if transient else failed
 

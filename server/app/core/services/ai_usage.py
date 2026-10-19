@@ -26,8 +26,9 @@ escape hatch: it overrides the label for every wrapped call issued inside the
 Use sparingly (each distinct label is a permanent row in "by feature"); the
 default stack-derived label is right for the other ~100 call sites.
 
-Paid APIs that bill per request rather than per token (Brave, SearchAPI,
-SerpApi, Google Places, through `matcha_work/search_apis.answer`) log here too,
+Paid APIs that bill per request rather than per token (Brave, through
+`matcha_work/search_apis.answer`; SearchAPI, SerpApi and Google Places until
+2026-10-18, whose rows and prices stay for the history) log here too,
 one row per request: `record_api_call`, priced from `API_PRICING`. Claude's
 hosted web search bills per search on top of the tokens, so each one Anthropic
 reports is its own `anthropic / web_search` row. Quota a provider reports on its

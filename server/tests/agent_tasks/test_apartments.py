@@ -12,11 +12,11 @@ from app.core.services.safe_fetch import FetchedResponse, UnsafeURL
 from app.matcha.services.matcha_work.agent_card.page_extract import extract_page
 from app.matcha.services.matcha_work.agent_runtime import chain
 from app.matcha.services.matcha_work.agent_runtime.chain import Budget, Guard
-from app.matcha.services.matcha_work.agent_tasks import actions, items as items_mod, orchestrator, playbooks
+from app.matcha.services.matcha_work.agent_tasks import actions, orchestrator, playbooks
 from app.matcha.services.matcha_work.agent_tasks.actions import apply
 from app.matcha.services.matcha_work.agent_tasks.actions.base import ActionContext, ActionError
 from app.matcha.services.matcha_work.agent_tasks.research import (
-    contracts, fields as F, geo, kinds, phases, prompts, providers, ranking,
+    contracts, fields as F, geo, kinds, phases, prompts, ranking,
 )
 from tests.agent_runtime.helpers import FakeConn, connection
 
@@ -77,7 +77,7 @@ def test_the_plan_measures_from_the_named_place():
     assert [(c["op"], c["value"]) for c in only_low] == [("gte", 1600.0)]
     assert typed[("distance", "gte")]["value"] == 10 and typed[("direction", "any_of")]["value"] == ["north", "south"]
     assert plan["fields"][:4] == ["price", "specials", "distance", "beds"] and "direction" in plan["fields"]
-    assert plan["source"] == "places"
+    assert plan["source"] == "web"
     # A model's distance limit means nothing without a place: it is dropped, and so are the columns.
     model = {**plan, "constraints": [{"field": "distance", "op": "lte", "value": 5}],
              "preferences": [{"field": "distance", "weight": 0.5}], "fields": ["distance"]}
@@ -165,20 +165,28 @@ def test_distance_and_direction_are_arithmetic():
 
 
 @pytest.mark.asyncio
-async def test_the_anchor_is_found_on_google_maps_else_by_address():
-    provider = AsyncMock()
-    provider.locate = AsyncMock(return_value=("Lady Bird Lake", LAKE))
-    census = AsyncMock(return_value=(1.0, 2.0))
-    found = await geo.resolve_anchor("Lady Bird Lake", "Austin", provider=provider, geocode=census)
-    assert found["lat"] == LAKE[0] and found["source"] == "google_maps"
-    provider.locate.assert_awaited_once_with("Lady Bird Lake, Austin")
-    census.assert_not_awaited()
-    provider.locate = AsyncMock(side_effect=providers.ProviderError("down"))
-    assert (await geo.resolve_anchor("100 Congress Ave", "Austin", provider=provider, geocode=census))["source"] == "census"
-    lost = await geo.resolve_anchor("Atlantis", None, provider=None, geocode=AsyncMock(side_effect=RuntimeError()))
-    assert "lat" not in lost and "Atlantis" in lost["error"] and lost["transient"] is True  # the lookup failed
-    nowhere = await geo.resolve_anchor("Atlantis", None, provider=None, geocode=AsyncMock(return_value=None))
+async def test_the_anchor_is_an_address_else_a_town():
+    census = AsyncMock(return_value=LAKE)
+    found = await geo.resolve_anchor("100 Congress Ave", "Austin, TX", geocode=census)
+    assert (found["lat"], found["lng"], found["source"]) == (*LAKE, "census")
+    census.assert_awaited_once_with("100 Congress Ave, Austin, TX")
+    # Not an address: a town named on its own is on the Census gazetteer.
+    town = await geo.resolve_anchor("Santa Monica", None, geocode=AsyncMock(return_value=None))
+    assert town["source"] == "gazetteer" and town["label"] == "Santa Monica" and 33.9 < town["lat"] < 34.1
+    # The geocoder down: the gazetteer still answers, and nothing is tried again.
+    down = await geo.resolve_anchor("Austin, TX", None, geocode=AsyncMock(side_effect=RuntimeError()))
+    assert down["source"] == "gazetteer" and "transient" not in down
+    lost = await geo.resolve_anchor("Mordor", None, geocode=AsyncMock(side_effect=RuntimeError()))
+    assert "lat" not in lost and "Mordor" in lost["error"] and lost["transient"] is True  # the lookup failed
+    nowhere = await geo.resolve_anchor("Mordor", None, geocode=AsyncMock(return_value=None))
     assert "transient" not in nowhere  # looked up, not there
+
+
+def test_a_town_is_one_named_on_its_own():
+    assert geo.town_point("Brooklyn")[0] == "Brooklyn" and geo.town_point("San Francisco, CA")[0] == "San Francisco"
+    # A landmark that only mentions a town, or no town at all, is not one.
+    for near in ("Lady Bird Lake, Austin", "Downtown Austin", "Lady Bird Lake", "", "Mordor"):
+        assert geo.town_point(near) is None, near
 
 
 @pytest.mark.asyncio
@@ -206,122 +214,51 @@ def test_a_page_says_where_it_is():
     assert "geo" not in plain["listings"][0] and geo.page_point(plain, "x") is None
 
 
-def test_google_maps_results_carry_their_point():
-    raw = {"title": "The Domain", "place_id": "p1", "website": "https://thedomain.test/", "address": "11400 Domain Dr",
-           "gps_coordinates": {"latitude": 30.4021, "longitude": -97.7253}, "type": "Apartment complex",
-           "price": "$$", "rating": 4.4, "reviews": 210}
-    item = providers.place_item(raw, today=TODAY)
-    assert item.point == (30.4021, -97.7253)
-    home = phases.as_kind(item, {"item_kind": "listing"}, ANCHOR)
-    assert home.kind == "listing" and "cuisine" not in home.fields and "price_level" not in home.fields
-    assert home.fields["distance"]["evidence"]["origin"] == "provider" and home.fields["rating"]["value"] == 4.4
-    place = phases.as_kind(item, {"item_kind": "place"}, None)
-    assert place.kind == "place" and "cuisine" in place.fields and "distance" not in place.fields
-
-
 @pytest.mark.asyncio
 async def test_the_anchor_is_found_once_and_kept_in_the_plan(conn):
-    provider = AsyncMock()
-    provider.locate = AsyncMock(return_value=("Lady Bird Lake", LAKE))
+    census = AsyncMock(return_value=LAKE)
     task = task_row(playbook="apartments", brief=json.dumps(BRIEF))
-    asked = []
-    anchor = await phases.ensure_anchor(task, _deps(provider=lambda source: asked.append(source) or provider), _guard())
-    assert anchor["lat"] == LAKE[0] and asked == ["places"]
+    anchor = await phases.ensure_anchor(task, _deps(geocode=census), _guard())
+    assert anchor["lat"] == LAKE[0] and anchor["source"] == "census"
+    census.assert_awaited_once_with("Lady Bird Lake, Austin, TX")
     saved = conn.ran("jsonb_build_object('anchor'")
     assert saved and json.loads(saved[0][2][2])["name"] == "Lady Bird Lake" and saved[0][2][1] == TOKEN
     # Kept: no second lookup.
-    assert (await phases.ensure_anchor(task, _deps(provider=lambda *_: provider), _guard()))["lat"] == LAKE[0]
-    provider.locate.assert_awaited_once()
+    assert (await phases.ensure_anchor(task, _deps(geocode=census), _guard()))["lat"] == LAKE[0]
+    census.assert_awaited_once()
     # Not found: kept as not found, distances stay unknown.
     lost = task_row(playbook="apartments", brief=json.dumps(BRIEF))
-    deps = _deps(provider=lambda *_: None, geocode=AsyncMock(return_value=None))
-    assert await phases.ensure_anchor(lost, deps, _guard()) is None
-    assert "error" in phases.plan_of(lost)["anchor"]
+    assert await phases.ensure_anchor(lost, _deps(geocode=AsyncMock(return_value=None)), _guard()) is None
+    assert "error" in phases.plan_of(lost)["anchor"] and "transient" not in phases.plan_of(lost)["anchor"]
     assert await phases.ensure_anchor(task_row(), _deps(), _guard()) is None  # nothing named
 
 
 @pytest.mark.asyncio
 async def test_an_anchor_lookup_that_failed_is_tried_again(conn):
-    provider = AsyncMock()
-    provider.locate = AsyncMock(side_effect=providers.ProviderError("rate limited"))
-    deps = _deps(provider=lambda *_: provider, geocode=AsyncMock(return_value=None))
+    census = AsyncMock(side_effect=OSError("census down"))
     task = task_row(playbook="apartments", brief=json.dumps(BRIEF))
     for n in range(1, phases.ANCHOR_TRIES + 1):
-        assert await phases.ensure_anchor(task, deps, _guard()) is None
+        assert await phases.ensure_anchor(task, _deps(geocode=census), _guard()) is None
         assert phases.plan_of(task)["anchor"]["tries"] == n
-    await phases.ensure_anchor(task, deps, _guard())
-    assert provider.locate.await_count == phases.ANCHOR_TRIES  # then it stops asking
+    await phases.ensure_anchor(task, _deps(geocode=census), _guard())
+    assert census.await_count == phases.ANCHOR_TRIES  # then it stops asking
     # Found on a later try: kept.
     task = task_row(playbook="apartments", brief=json.dumps(BRIEF))
-    provider.locate = AsyncMock(side_effect=[providers.ProviderError("down"), ("Lady Bird Lake", LAKE)])
-    assert await phases.ensure_anchor(task, deps, _guard()) is None
-    assert (await phases.ensure_anchor(task, deps, _guard()))["lat"] == LAKE[0]
-    # No provider calls left this round: also tried again.
-    conn.on("RETURNING GREATEST(LEAST($2, $3 - cur.before), 0)", lambda row_id, want, limit: 0)
-    task = task_row(playbook="apartments", brief=json.dumps(BRIEF))
-    await phases.ensure_anchor(task, deps, _guard())
-    assert phases.plan_of(task)["anchor"]["transient"] is True
+    census = AsyncMock(side_effect=[OSError("down"), LAKE])
+    assert await phases.ensure_anchor(task, _deps(geocode=census), _guard()) is None
+    assert (await phases.ensure_anchor(task, _deps(geocode=census), _guard()))["lat"] == LAKE[0]
 
 
 @pytest.mark.asyncio
-async def test_google_maps_buildings_become_listings_with_distance(conn, monkeypatch):
-    provider = AsyncMock()
-    provider.locate = AsyncMock(return_value=("Lady Bird Lake", LAKE))
-    provider.search = AsyncMock(return_value=[
-        providers.ProviderItem(kind="place", title="North Lofts", url="https://north.test/", provider="google_maps",
-                               point=ROUND_ROCK),
-        providers.ProviderItem(kind="place", title="East Flats", url="https://east.test/", provider="google_maps",
-                               point=MANOR),
-    ])
-    insert = AsyncMock(return_value=2)
-    monkeypatch.setattr(items_mod, "insert_items", insert)
-    conn.on("COUNT(*) FROM mw_agent_task_items", 0)
+async def test_the_providers_step_places_the_anchor_and_goes_on_to_the_web(conn):
+    """No API is asked for findings: tasks still at this step from before
+    2026-10-18 only get their anchor, then search the web."""
     plan = contracts.plan_from_brief("apartments", BRIEF, today=TODAY, kind=kinds.APARTMENTS)
     task = task_row(playbook="apartments", brief=json.dumps(BRIEF), plan=json.dumps(plan))
-    out = await phases.run_providers(task, _deps(provider=lambda *_: provider), _guard())
-    assert "Google Maps" in out.progress["note"]
-    records = insert.await_args.args[4]
-    # Each search finds both (the store keeps one of each): east breaks a limit, so it is last.
-    assert list(dict.fromkeys(r["title"] for r in records)) == ["North Lofts", "East Flats"]
-    assert all(r["kind"] == "listing" for r in records)
-    assert insert.await_args.kwargs["room"] == phases.PROVIDER_BUILDINGS  # page loads for each one's floor plans
-    assert records[0]["fields"]["direction"]["value"] == ["north"]
-    # The map is searched around each direction asked first, then the plan's own queries.
-    calls = provider.search.await_args_list
-    assert [c.args[1] for c in calls[:2]] == ["apartments", "apartments"]
-    north, south = (float(c.kwargs["ll"][1:].split(",")[0]) for c in calls[:2])
-    assert north > LAKE[0] + 0.1 and south < LAKE[0] - 0.1
-    assert all("ll" not in c.kwargs for c in calls[2:]) and len(calls) == 2 + len(plan["queries"][:6])
-
-
-def test_the_map_is_searched_in_every_direction_asked():
-    north, south = geo.areas(ANCHOR, BRIEF)
-    assert north.endswith(",13z") and south.endswith(",13z")
-    for spot, way in ((north, "north"), (south, "south")):
-        point = tuple(float(x) for x in spot[1:-4].split(","))
-        assert round(geo.miles(LAKE, point)) == 15 and geo.quarter(geo.bearing(LAKE, point)) == way
-    between = geo.areas(ANCHOR, {"min_miles": 10, "max_miles": 20})  # no direction: all four
-    assert len(between) == 4 and round(geo.miles(LAKE, tuple(float(x) for x in between[1][1:-4].split(",")))) == 15
-    assert geo.areas(ANCHOR, {"max_miles": 5}) == [f"@{LAKE[0]:.5f},{LAKE[1]:.5f},13z"]
-    assert geo.areas(ANCHOR, {"max_miles": 10})[0].endswith(",12z")
-    out_to = geo.areas(ANCHOR, {"max_miles": 10, "directions": ["east"]})[0]
-    assert round(geo.miles(LAKE, tuple(float(x) for x in out_to[1:-4].split(",")))) == 5
-    assert geo.areas(ANCHOR, {}) == []
-    west = geo.areas(ANCHOR, {"directions": ["west"]})[0]
-    assert round(geo.miles(LAKE, tuple(float(x) for x in west[1:-4].split(",")))) == geo.DIRECTION_MILES
-
-
-@pytest.mark.asyncio
-async def test_nothing_measured_searches_only_the_plans_queries(conn, monkeypatch):
-    provider = AsyncMock()
-    provider.search = AsyncMock(return_value=[])
-    monkeypatch.setattr(items_mod, "insert_items", AsyncMock(return_value=0))
-    conn.on("COUNT(*) FROM mw_agent_task_items", 0)
-    brief = {"location": "Austin, TX", "budget_max": 2000}
-    plan = contracts.plan_from_brief("apartments", brief, today=TODAY, kind=kinds.APARTMENTS)
-    task = task_row(playbook="apartments", brief=json.dumps(brief), plan=json.dumps(plan))
-    await phases.run_providers(task, _deps(provider=lambda *_: provider), _guard())
-    assert provider.search.await_args_list and all("ll" not in c.kwargs for c in provider.search.await_args_list)
+    out = await phases.run_providers(task, _deps(geocode=AsyncMock(return_value=LAKE)), _guard())
+    assert out.phase == phases.DISCOVER and out.status == "running" and out.progress["note"] == "Searching the web…"
+    assert phases.plan_of(task)["anchor"]["lat"] == LAKE[0]
+    assert not conn.ran("INSERT INTO mw_agent_task_items")
 
 
 @pytest.mark.asyncio
@@ -562,6 +499,48 @@ async def test_a_building_from_google_maps_reads_its_floor_plans():
 
 
 @pytest.mark.asyncio
+async def test_a_building_found_on_the_web_reads_its_floor_plans_too():
+    home = b"<html><body><a href='/floorplans/'>View Floor Plans</a> Starting at $1125</body></html>"
+    plans = f"<html><body><p>{FLOOR_PLANS}</p></body></html>".encode()
+    fetch = AsyncMock(side_effect=[_fetched(home, final="https://www.bldg.test/"),
+                                   _fetched(plans, final="https://www.bldg.test/floorplans/")])
+    row = dict(item_row(fields="{}", origin="web", url="https://www.bldg.test/", title="Bldg"))
+    update = await phases.enrich_one(row, _deps(page_fetch=fetch), Budget(left=2), Budget(left=0), prefix="p")
+    assert update["fields"]["price"]["display"] == "$1,449–$2,753/mo" and fetch.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_one_homes_listing_is_read_as_one_home():
+    page = (b"<html><body><a href='/apply'>Check availability</a> Sunny 2 bed / 1 ba. $2,150/mo. "
+            b"Cats welcome.</body></html>")
+    fetch = AsyncMock(return_value=_fetched(page, final="https://rentals.test/unit/12"))
+    row = dict(item_row(fields="{}", origin="web", url="https://rentals.test/unit/12", title="Unit 12"))
+    update = await phases.enrich_one(row, _deps(page_fetch=fetch), Budget(left=4), Budget(left=0), prefix="p")
+    assert update["fields"]["price"]["display"] == "$2,150/mo" and "spans" not in update["fields"]["price"]
+    assert update["fields"]["beds"]["value"] == 2 and fetch.await_count == 1  # no floor plans page asked
+
+
+def test_a_building_page_shows_it_is_one():
+    url = "https://www.bldg.test/"
+
+    def page(html, ld=None):
+        body = f"<html><head>{_ld(ld) if ld else ''}</head><body>{html}</body></html>".encode()
+        return extract_page(body, url), body
+
+    for html, ld in (("<a href='/floor-plans'>Floor Plans</a>", None),
+                     ("<iframe src='https://sightmap.com/embed/abc12345'></iframe>", None),
+                     ("x", {"@context": "https://schema.org", "@type": "ApartmentComplex", "name": "Bldg"})):
+        assert phases.building_page(*page(html, ld), url), html
+    for html in ("<a href='/availability'>Check availability</a> <a href='/pricing'>Pricing</a>",
+                 "<a href='https://other.test/floorplans'>Floor plans</a>", "One home, $2,000/mo"):
+        assert not phases.building_page(*page(html), url), html
+
+
+def _ld(ld):
+    return f'<script type="application/ld+json">{json.dumps(ld)}</script>'
+
+
+@pytest.mark.asyncio
 async def test_a_buildings_one_price_is_where_its_rents_start():
     # Its page gives one figure (schema.org), and there are no floor plans to read.
     home = (b"<html><head><script type='application/ld+json'>{\"@type\": \"ApartmentComplex\", "
@@ -758,26 +737,6 @@ def test_nearer_is_better_whatever_the_planner_says():
     assert [r.item_id for r in ranking.rank(found, {"preferences": [pref], "fit_weight": 0})] == ["near", "far"]
     assert contracts.clean_preference({"field": "rating", "weight": 1, "higher_is_better": False})["higher_is_better"] is False
 
-
-def _building(title, miles, way):
-    point = geo.offset(LAKE, miles, geo.BEARINGS[way])
-    return phases.as_kind(providers.ProviderItem(kind="place", title=title, url=f"https://{title}.test/",
-                                                 provider="google_maps", point=point),
-                          {"item_kind": "listing"}, ANCHOR)
-
-
-def test_every_direction_asked_gets_room():
-    plan = contracts.plan_from_brief("apartments", BRIEF, today=TODAY, kind=kinds.APARTMENTS)
-    norths = [_building(f"n{i}", 12 + i, "north") for i in range(4)]
-    found = [*norths, _building("s0", 15, "south"), _building("close", 3, "south"), _building("s1", 16, "south")]
-    titles = [i.title for i in phases.prerank(found, plan)]
-    assert titles[:4] == ["n0", "s0", "n1", "s1"] and titles[-1] == "close"  # too close: last
-    assert phases.asked_directions(plan) == ["north", "south"]
-    one_way = {**BRIEF, "directions": ["north"]}
-    plan = contracts.plan_from_brief("apartments", one_way, today=TODAY, kind=kinds.APARTMENTS)
-    assert [i.title for i in phases.prerank(norths, plan)] == ["n0", "n1", "n2", "n3"]
-    unplaced = providers.ProviderItem(kind="listing", title="u", url="https://u.test/", provider="google_maps")
-    assert phases.by_direction([unplaced, norths[0]], ["north", "south"])[-1] is unplaced
 
 
 def test_espresso_reads_a_multi_choice_field_as_a_list():

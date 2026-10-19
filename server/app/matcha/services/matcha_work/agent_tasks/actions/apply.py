@@ -28,7 +28,7 @@ from app.core.services.safe_fetch import UnsafeURL, fetch_public
 from app.database import decode_jsonb
 from app.matcha.services.matcha_work.agent_card.page_extract import anchors, site_of
 
-from ..research import providers
+from ..research.links import store_link
 from .base import ActionContext, ActionError, ItemAction, Line, Proposal, outcome
 
 logger = logging.getLogger(__name__)
@@ -55,7 +55,7 @@ PORTALS = (
 
 def page_of(item: dict) -> str | None:
     """The listing's own page: an http(s) link that isn't one of Google's."""
-    return providers.store_link(item.get("url"))
+    return store_link(item.get("url"))
 
 
 def available(ctx: ActionContext) -> str | None:

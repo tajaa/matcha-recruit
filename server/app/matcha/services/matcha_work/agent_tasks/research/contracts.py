@@ -44,9 +44,9 @@ MAX_CONSTRAINTS = 8
 MAX_PREFERENCES = 6
 MAX_CANDIDATES = 20
 MAX_FACTS = 10
-# Where a task's search starts: Google Maps, or the web alone. ("shopping",
-# Google Shopping through SearchAPI, was taken out on 2026-10-18.)
-SOURCES = ("places", "web")
+# Where a task's search starts: the web (Brave and Claude). ("shopping" and
+# "places", Google Shopping and Google Maps, were taken out on 2026-10-18.)
+SOURCES = ("web",)
 ITEM_KINDS = ("product", "place", "listing", "offer", "other")
 DEFAULT_FIELDS = {
     "product": ("price", "rating", "review_count", "seller"),
@@ -288,7 +288,7 @@ PLAN_SCHEMA = {
         "title": {"type": "string", "description": "A short name for the task, under 60 characters"},
         "item_kind": {"type": "string", "enum": list(ITEM_KINDS)},
         "source": {"type": "string", "enum": list(SOURCES),
-                   "description": "places for restaurants/shops/venues, web otherwise (things to buy too)"},
+                   "description": "web: every task searches the web"},
         "queries": {"type": "array", "items": {"type": "string"}, "maxItems": MAX_QUERIES},
         "fields": {"type": "array", "items": {"type": "string", "enum": _FIELD_ENUM}, "maxItems": MAX_FIELDS},
         "constraints": {"type": "array", "items": CONSTRAINT_SCHEMA, "maxItems": MAX_CONSTRAINTS},
