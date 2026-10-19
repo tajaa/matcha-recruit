@@ -81,13 +81,28 @@ Worker: `workers/tasks/job_search.py`. Migrations: `mwjobs01`
   dropped, not guessed at, and so is a remote job open only outside the
   country of every place they named. Code decides from the posting's text and
   the Census gazetteer, never a model: a model given Brave results with no
-  location in their snippets kept one of six that fit (prod, 2026-10-17).
+  location in their snippets kept one of six that fit (prod, 2026-10-17). So
+  a read posting carries only its own location (`discovery._ats_record`,
+  `_page_record`), never the web run's claim. How places are read
+  (`places.named`): "OR" in capitals is Oregon, never the word "or"; a city
+  and state with no comma ("Austin TX") is the city in that state; a country
+  alone ("Canada") keeps the jobs its postings place there (`Target.country`);
+  nationwide phrases ("US only", "Open to relocation") name no place; regions
+  ("Midwest", "East Coast") are measured from their biggest city (`ALIASES`);
+  "not remote" is not remote. Tests: `tests/job_search/test_places.py`.
 - **A board or web posting is kept only for a related title.** A board search
   for "Chief People Officer" turns up any job that names it somewhere, so a
   posting read from the boards or the web is kept only when its title shares
   a core word with a wanted title (`normalize.related_title`: "HR Business
-  Partner" for "Head of HR", never "Software Engineer"). Level is the
-  screen's to judge.
+  Partner" for "Head of HR", never "Software Engineer"). Words are kin when
+  equal or one a short inflection of the other (`normalize._kin`), never a
+  five-letter stem (which kept Forklift Operator for COO). A wanted title of
+  level words alone (CEO, President, General Manager) needs the whole title
+  and no level word of the posting's own: an Account Executive is not a CEO.
+  `same_title` is symmetric (either side may add a city or a team), and
+  `same_employer` compares whole names, never one word of a longer one
+  (Delta Air Lines' "delta" board is not Delta Dental's). Tests:
+  `tests/job_search/test_normalize.py`. Level is the screen's to judge.
 - **No pay figure without evidence.** Every base/bonus/equity value carries
   `evidence {quote, origin, url}`. From text, the quote is a slice of the text
   it came from; from a structured field (Lever `salaryRange`, Greenhouse pay
@@ -210,8 +225,8 @@ ran out before is left unread (`NOT_TRIED`), not marked read.
 | Status | Phase | Notes |
 |---|---|---|
 | `queued` → `planning` | `model_phases.plan` | Model: titles (≥1, ≤10, as postings write them: theirs, then real synonyms at that level), deal-breakers, profile summary, weights (applied only while `weights_source='default'`), directions. Falls back to `plan_from_criteria`. What the person typed always comes first, then kept directions, and every search takes all of both (`phases.must_search`); a failed plan with nothing typed searches the role the ask names (`phases.title_from_ask`), never the sentence, or no title |
-| `discovering` | `discovery.discover` | Three steps, each its own task (`phase_cursor.step`; a cursor still saying `listings`, from before 2026-10-18, starts at `boards`). `boards`: code's Brave searches (`boards.board_searches`: at least 4 titles (and every typed title and kept direction) on each of the 4 board hosts, host by host, interleaved with the first 2 titles in each of up to 6 places (`phases.cover`), ≤24, one a second for Brave's free plan; a Brave that is out stops them, and the unused searches go back). Every board job link waits in the cursor (`boards_ok` when any search answered). `web`: one model run with web search only (no page loads: code reads every posting; with them a run spent its turns re-checking pages), ≤300 s, ≤16 searches (≤4 in one turn, `prompts.SEARCHES_PER_TURN`, and its prompt says so: told "one at a time", a dev run sent 7 at once and 3 were refused), finds ≤40 postings on careers pages, other boards and search firms; the links wait in the cursor. Code writes the searches it starts from (`web_searches`: at least 3 titles, every typed one and direction, each title and each place reached first, then on Workable and SmartRecruiters, then the other pairs, ≤14), half to each run, because a model left to choose ran one search and stopped. Workday isn't asked for: its pages are scripts with no posting data, and its API refuses servers (checked 2026-10-16). `read` (after the boards and after each web run): each is read (1 fetch reserved for a board link, 2 for Workable's (`ats.most_reads`; a closed or missing one spends 1 and the rest goes back), 4 for a page, 6 at a time, 240 s; what's still loading then is dropped), and kept only for a related title in a place named (Invariants). Each read counts what became of every posting it was handed (`discovery.READ_OUTCOMES`: known, aggregator, unread, late, title, elsewhere, duplicate, full, kept) into the search's `progress.reads`, under `boards` or `web`, and logs it: a dev search read 160 board links and kept 21, and nothing said why the 139 went. A careers page that can't be read (a bot check, a script page) is looked up on the employer's own board (`ats.find_on_board`, same title and employer). Known links and aggregators are skipped, and duplicates of a lead are dropped (`dedupe_key`, `same_posting`). Kept leads are `enriched_at` set with `source` greenhouse/lever/ashby/workable/web and their `ats` questions. Workable postings (`apply.workable.com/{account}/j/{shortcode}`) were dropped here until 2026-10-18: 3 of the web runs' postings in one prod search. The web runs when fewer than 30 came from the boards, and a second time when the search is still short and the first added jobs or searches are left. Nothing found: `UNAVAILABLE` (free) when no source could be searched (the boards and the web both failed), else "No postings matched" |
-| `screening` | `model_phases.screen` | Model, batches of 40 by short id (J1…): relevant, fit 0-5, reasons, deal-breaker. A failed batch stays in (unranked fit) |
+| `discovering` | `discovery.discover` | Three steps, each its own task (`phase_cursor.step`; a cursor still saying `listings`, from before 2026-10-18, starts at `boards`). `boards`: code's Brave searches (`boards.board_searches`: at least 4 titles (and every typed title and kept direction) on each of the 4 board hosts, titles and hosts paired by `phases.cover` so a capped list reaches every host (listed host by host, two places left Ashby unsearched), interleaved with the first 2 titles in each of up to 6 places, also paired with the hosts, ≤24, one a second for Brave's free plan; a Brave that is out stops them, a cancelled search stops at the next guard check, and the unused searches go back). Every board job link waits in the cursor (`boards_ok` when any search answered, or when the budget was already spent by an earlier pass, which did search). `web`: one model run with web search only (no page loads: code reads every posting; with them a run spent its turns re-checking pages), ≤300 s, ≤16 searches (≤4 in one turn, `prompts.SEARCHES_PER_TURN`, and its prompt says so: told "one at a time", a dev run sent 7 at once and 3 were refused), finds ≤40 postings on careers pages, other boards and search firms; the links wait in the cursor. Code writes the searches it starts from (`web_searches`: at least 3 titles, every typed one and direction, each title and each place reached first, then on Workable and SmartRecruiters, then the other pairs, ≤14), half to each run, because a model left to choose ran one search and stopped. Workday isn't asked for: its pages are scripts with no posting data, and its API refuses servers (checked 2026-10-16). `read` (after the boards and after each web run): each is read (1 fetch reserved for a board link, 2 for Workable's (`ats.most_reads`; a closed or missing one spends 1 and the rest goes back), 4 for a page, 6 at a time, 240 s; what's still loading then is dropped), and kept only for a related title in a place named (Invariants). Each read counts what became of every posting it was handed (`discovery.READ_OUTCOMES`: known, aggregator, unread, late, title, elsewhere, duplicate, full, kept) into the search's `progress.reads`, under `boards` or `web`, and logs it: a dev search read 160 board links and kept 21, and nothing said why the 139 went. A careers page that can't be read (a bot check, a script page) is looked up on the employer's own board (`ats.find_on_board`, same title and employer). Known links and aggregators are skipped, and duplicates of a lead are dropped (`dedupe_key`, `same_posting`). Kept leads are `enriched_at` set with `source` greenhouse/lever/ashby/workable/web and their `ats` questions. Workable postings (`apply.workable.com/{account}/j/{shortcode}`) were dropped here until 2026-10-18: 3 of the web runs' postings in one prod search. The web runs when fewer than 30 came from the boards, and a second time when the search is still short and the first added jobs or searches are left. Nothing found: `UNAVAILABLE` (free) when no source could be searched (the boards and the web both failed), else "No postings matched" |
+| `screening` | `model_phases.screen` | Model, batches of 40 by short id (J1…): relevant, fit 0-5, reasons, deal-breaker ("None"/"N/A" as text is none). A failed batch stays in (unranked fit). A job the model skipped (the contract lets 20% go) stays `pending` and is shown once more (`phase_cursor.rescreen`); skipped again, it is kept in unrated, never counted as a match unseen |
 | `enriching` | `enrich` | Batches of 24. Reads up to 2 ATS links (via the API), then up to 2 company pages (their JSON-LD `JobPosting`); a careers page that redirects into an ATS is read as that ATS. Only the lead's own job counts, see Invariants. If no link is it, `ats.find_on_board` looks the title up on the employer's Greenhouse, Lever and Ashby boards, by name. Only jobs at the fit floor (Invariants); the floor is written token-guarded before the re-rank reads it. Then `service.rerank` and the top 8 matches are queued (`phase_cursor.approach_queue`). A widen ends here, drafting nothing |
 | `approaching` | `model_phases.approach` | Model with web search + `fetch_page`, 2 jobs per task. A failed batch is `approach_status='failed'`; the person can redraft. The done note counts the jobs as they are (`_drafted_note`): "5 of 8 approaches drafted", or none, never "drafted" when they failed |
 | `done` / `failed` / `cancelled` | | |
@@ -258,12 +273,23 @@ the orchestrator writes what survives:
 A search that ends any other way (cancelled, past `MAX_ATTEMPTS`, swept as
 stale) drafts nothing more: `service.release_drafts` marks its still-queued
 jobs `approach_status='failed'`, so they show Redraft, never "drafting" forever.
+That holds because every write that marks a job `queued` or `drafting`
+(enrich's top-8 queue, approach's `drafting`) checks the chain's token, so a
+cancel landing between them can't leave one behind. The stale sweep at
+create (`service.end_stale`) runs the same terminal hooks as the chain
+(`job_tasks.search_stopped`: told once, the Tasks row completed). The worker
+tasks run under `run_with_chat_fanout`, so the done card and bell reach an
+open Espresso.
 
 Redraft: `POST …/leads/{lead}/approach` puts a `done` or `cancelled` search
-back into `approaching` for that one job (free; ≤20 per search, 10/hour). The
-cursor's `after` remembers which: a cancelled search goes back to `cancelled`
-when the draft finishes, fails or goes stale (`service.resting_status`), never
-to `done`. A `failed` search has no ranked jobs and can't redraft.
+back into `approaching` for that one job (free; ≤20 per search, 10/hour; the
+hour's limit is spent only after `service.check_redraftable` says it would be
+accepted). The cursor's `after` remembers which: a cancelled search goes back
+to `cancelled` when the draft finishes, fails or goes stale
+(`service.resting_status`), never to `done`; Cancel during a redraft or widen
+returns the search to its `after`, not `cancelled`. Widen and redraft clear
+an earlier "stopped early" `error`. A `failed` search has no ranked jobs and
+can't redraft.
 
 Widen ("Show N more at 3/5" on the Mac): `POST …/widen` puts a `done` or
 `cancelled` search still at floor 4 back into `enriching` with the floor at 3

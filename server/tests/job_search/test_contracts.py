@@ -147,10 +147,10 @@ def test_a_contact_is_named_on_the_page_as_a_name():
 
 def test_nested_fields_sent_as_json_text_are_read_or_refused():
     text_fields = approach(
-        contacts='[{"name": "Dana Ruiz", "role": "CEO", "source_url": "%s"}]' % PAGE,
+        contacts=f'[{{"name": "Dana Ruiz", "role": "CEO", "source_url": "{PAGE}"}}]',
         outreach='{"to_email": null, "subject": "COO", "body": "Hi Dana"}',
         answers='[{"question_key": "q_why", "question": "Why?", "answer": "Because."}]',
-        steps='["Apply", "Email"]', sources='["%s"]' % PAGE,
+        steps='["Apply", "Email"]', sources=f'["{PAGE}"]',
     )
     out, _ = run(text_fields)
     drafted = out["lead-1"]
