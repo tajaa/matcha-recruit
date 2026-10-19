@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
 from uuid import UUID
 
 from app.database import connection_or_direct, decode_jsonb
@@ -32,7 +31,6 @@ logger = logging.getLogger(__name__)
 
 SCREEN_BATCH = 40
 APPROACH_BATCH = 2
-APPROACH_TOP = 8
 SNIPPET_CHARS = 600
 APPROACH_DESCRIPTION_CHARS = 6_000
 APPROACH_FETCHES = 8
@@ -343,7 +341,3 @@ async def _drafted_note(search: dict) -> str:
     if not done:
         return "Done: ranked. The approaches couldn't be drafted; Redraft a job to try again."
     return f"Done: ranked, with {done} of {done + failed} approaches drafted; Redraft the others to try again."
-
-
-def approach_queue_for_top(rows: list[Any]) -> list[str]:
-    return [str(row["id"]) for row in rows][:APPROACH_TOP]

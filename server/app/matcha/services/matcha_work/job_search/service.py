@@ -284,6 +284,22 @@ def _one_line(text: str | None, limit: int) -> str:
 
 
 _DRAFT_GONE = "That draft isn't in your Gmail drafts any more: it was sent or deleted there."
+_RECONNECT = "Gmail needs to be connected again in Email."
+
+
+def _gmail_failure(exc: Exception) -> JobSearchError:
+    """What the person is told when Gmail refused or failed, instead of a 500:
+    a revoked or expired connection (a 401/403, or Google refusing the token
+    refresh) is "connect Gmail again", anything else a 502."""
+    import httpx
+
+    if isinstance(exc, ValueError):  # the stored token is incomplete: reconnect
+        return JobSearchError(_RECONNECT, 409, {"code": "email_not_connected", "message": _RECONNECT})
+    status = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
+    host = exc.request.url.host if isinstance(exc, httpx.HTTPStatusError) else ""
+    if status in (401, 403) or (status is not None and host == "oauth2.googleapis.com"):
+        return JobSearchError(_RECONNECT, 409, {"code": "email_not_connected", "message": _RECONNECT})
+    return JobSearchError("Gmail didn't answer. Try Draft email again in a moment.", 502)
 
 
 async def draft_email(search_id: UUID, lead_id: UUID, user_id: UUID, *, existing_only: bool = False) -> dict:
@@ -325,9 +341,12 @@ async def draft_email(search_id: UUID, lead_id: UUID, user_id: UUID, *, existing
                     "created": False, "lead": lead_detail(lead)}
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code not in (400, 404):
-                raise
+                # Not "gone": never a reason to make a second draft.
+                raise _gmail_failure(exc) from exc
         except ValueError:
             pass  # a stored id Gmail would refuse: make a new draft
+        except httpx.HTTPError as exc:
+            raise _gmail_failure(exc) from exc
     if existing_only:
         if waiting:
             async with connection_or_direct() as conn:
@@ -346,7 +365,10 @@ async def draft_email(search_id: UUID, lead_id: UUID, user_id: UUID, *, existing
     to = to if _ADDRESS.fullmatch(to) else ""  # the hiring contact, when the approach found one
     subject = _one_line(outreach.get("subject"), 200) or _one_line(
         f"{lead['title'] or 'The role'} at {lead['company'] or 'your company'}", 200)
-    created = await gmail.create_draft(to=to, subject=subject, body=body)
+    try:
+        created = await gmail.create_draft(to=to, subject=subject, body=body)
+    except (httpx.HTTPError, ValueError) as exc:
+        raise _gmail_failure(exc) from exc
     async with connection_or_direct() as conn:
         lead = await conn.fetchrow(
             """UPDATE mw_job_leads
