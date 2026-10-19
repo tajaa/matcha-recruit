@@ -561,7 +561,10 @@ async def run_agent(
             try:
                 normalized, warnings = contract.normalize(dict(call["arguments"] or {}), state)
             except ValueError as exc:
-                await step(contract.finish.name, "finish", "Result rejected", {"error": str(exc)}, {}, "error")
+                # What was refused, not only why: with the error alone a failed
+                # approach batch on dev (2026-10-19) couldn't be told apart.
+                await step(contract.finish.name, "finish", "Result rejected",
+                           {"error": str(exc), "arguments": call["arguments"]}, {}, "error")
                 if repairs >= limits.max_repairs:
                     raise AgentRunError("The agent could not produce a usable result.") from exc
                 repairs += 1

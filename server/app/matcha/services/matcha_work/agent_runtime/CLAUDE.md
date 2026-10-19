@@ -18,7 +18,7 @@ There is one loop in this package and no other: do not add a second.
 | Loop | `runner.py` | Budgets, dispatch by name, forced finish, one repair, the commit pipeline |
 | Policy | `policy.py` | `evaluate_commit`: allow / confirm / deny. Pure: no I/O, no clock, no model |
 | Result | `result.py` | `agent_result.v2` (headline, summary, typed blocks); reads v1 as v2 |
-| Phase finish | `finish.py` | A model phase's flat `finish` tool and reading its answer (`tool`, `answer`, `unquoted`), for job search's and research tasks' contracts |
+| Phase finish | `finish.py` | A model phase's flat `finish` tool and reading its answer (`tool`, `answer`, `unquoted`, `items` for a list field), for job search's and research tasks' contracts |
 | Catalog | `catalog.py` | Every ability, and `abilities_for`: the only filter on what a run gets |
 | Abilities | `abilities/*.py` | `web`, `job_listings`, `screenshots`, `shopping`, `files`, `flights`, `email`, `calendar`, `reservations`, `purchase`, `domains`, `sales`, `jobs`, `tasks` |
 | Files | `inputs.py` | Files the person gives Espresso: private storage, extracted text, what a run sees |
@@ -150,6 +150,10 @@ column as `<playbook>.<phase>`).
 - **A finish is judged after every other call in its turn.** A result written
   beside a search (`finish` and `find_jobs` in one response) is normalized
   once the search has run, so its blocks see what the search found.
+- **A refused finish keeps what it sent.** Its `Result rejected` step stores
+  `{error, arguments}` (capped like any step's args, the error first), so a
+  failed run can be told apart afterwards. Apps read a step's label and
+  status only, and the history the model sees leaves finish steps out.
 - **The claim is written before the call.** `store.claim_step` (status
   `claimed`), then the handler, then `store.resolve_step`. A request that left
   and got no answer resolves to `unknown`, never `failed`, and the model is

@@ -188,6 +188,24 @@ async def test_an_invalid_finish_gets_one_repair_then_fails(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_a_rejected_finish_keeps_what_was_sent(monkeypatch):
+    """With only the error kept, a failed approach batch on dev (2026-10-19)
+    couldn't be told apart: the refused arguments are on its step, capped
+    like any step's, with the error first."""
+    record, _, _ = wire_store(monkeypatch)
+    client = FakeClient([response(call("finish", {"answr": "typo"})), response(call("finish", {"answer": "ok"}))])
+    assert (await run(client, [])).result == {"answer": "ok"}
+    rejected = [c.args for c in record.await_args_list if c.args[4] == "Result rejected"]
+    assert rejected[0][5] == {"error": "answer is required", "arguments": {"answr": "typo"}}
+    assert rejected[0][7] == "error"
+    record.reset_mock()
+    client = FakeClient([response(call("finish", {"answr": "x" * 5000})), response(call("finish", {"answer": "ok"}))])
+    await run(client, [])
+    kept = [c.args for c in record.await_args_list if c.args[4] == "Result rejected"][0][5]
+    assert kept["truncated"] is True
+    assert kept["preview"].startswith('{"error": "answer is required", "arguments": {"answr": "xxx')
+
+@pytest.mark.asyncio
 async def test_two_finishes_in_one_turn_keep_the_first(monkeypatch):
     """Seen on dev: a model sent its real result and then a stub ("x") in the
     same turn, and the stub replaced it."""

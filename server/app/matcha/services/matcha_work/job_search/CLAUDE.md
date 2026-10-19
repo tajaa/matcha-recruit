@@ -237,8 +237,13 @@ The finish tool's parameters are the answer's fields themselves
 object as JSON text in 4 of 12 plan and approach runs on prod (2026-10-15..18),
 and each failed. `finish.answer` still
 reads the wrapped form, an answer sent as JSON text and a list or object sent
-as JSON text inside it. `contracts.py` checks it; the orchestrator writes what
-survives:
+as JSON text inside it. A list field (`postings`, `verdicts`, `approaches`)
+that comes as text it can't read is refused by name (`finish.items`), so the
+repair fixes the JSON: read letter by letter, it came back as "give an
+approach for each job shown, by its short id", which sent the model after its
+ids. A refused finish keeps what was sent on its step (`arguments`, capped at
+4,000 characters like any step), next to the error. `contracts.py` checks it;
+the orchestrator writes what survives:
 
 - a found posting's link must be one this run's searches or loads returned;
 - ids must be the batch's short ids;

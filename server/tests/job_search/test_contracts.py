@@ -139,6 +139,30 @@ def test_approach_email_and_likely_answers():
                                        observed_emails=set(), user_text="")
 
 
+def test_a_list_sent_as_text_is_refused_by_name():
+    """A list sent as JSON that isn't valid (a cover letter's quotes left
+    unescaped) was read letter by letter, and the model was told to fix its
+    ids: now the repair names the field and says it came as text."""
+    broken = '[{"id": "J1", "cover_letter": "I "love" this role"}]'
+    with pytest.raises(ValueError, match="`approaches` came as text"):
+        contracts.normalize_approaches({"approaches": broken}, batch=BATCH, questions={}, citable=set(),
+                                       pages={}, observed_emails=set(), user_text="")
+    with pytest.raises(ValueError, match="`verdicts` came as text"):
+        contracts.normalize_screen({"verdicts": "[{bad"}, BATCH)
+    with pytest.raises(ValueError, match="`postings` came as text"):
+        contracts.normalize_postings({"postings": "[{bad"}, citable=set())
+    with pytest.raises(ValueError, match="`verdicts` must be a list"):
+        contracts.normalize_screen({"verdicts": {"id": "J1"}}, BATCH)
+    # Each job sent as its own JSON text is read as the job it is.
+    out, _ = run(json.dumps(approach()))
+    assert out["lead-1"]["contacts"][0]["name"] == "Dana Ruiz"
+    # No postings at all is still a fine answer.
+    assert contracts.normalize_postings({}, citable=set()) == ({"postings": []}, [])
+    # Ids that aren't the batch's: the repair names the ones to use.
+    with pytest.raises(ValueError, match="by its short id: J1, J2"):
+        run(approach(id="J7"))
+    assert finish.items({}, "approaches") == []
+
 def test_the_answer_comes_flat_wrapped_or_as_json_text():
     """Claude Haiku sent the wrapped `result` as JSON text, and the run failed
     (prod, 2026-10-15..18): every shape a model may send is the same answer."""

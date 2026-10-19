@@ -53,3 +53,21 @@ def unquoted(value: Any) -> Any:
         if isinstance(parsed, (list, dict)):
             return parsed
     return value
+
+
+def items(result: dict, key: str) -> list:
+    """A list field of the answer, [] when it is missing, each element sent as
+    JSON text read as itself. A ValueError (the model's one repair) when the
+    field is text or not a list: text here is a list sent as JSON that isn't
+    valid (a cover letter's quotes left unescaped, say). Read letter by letter,
+    it came back as "give an approach for each job shown, by its short id",
+    which points the model at its ids, not its JSON."""
+    value = result.get(key)
+    if value is None:
+        return []
+    if isinstance(value, str):
+        raise ValueError(f"`{key}` came as text, not a list: send it as a list of objects, "
+                         "not as a string of JSON")
+    if not isinstance(value, list):
+        raise ValueError(f"`{key}` must be a list")
+    return [unquoted(item) for item in value]
