@@ -53,6 +53,73 @@ Worker: `workers/tasks/job_search.py`. Migrations: `mwjobs01`
 (`source = 'workable'` allowed), `mwjobs04` (`mw_job_postings`,
 `mw_job_board_searches`).
 
+## How a search finds jobs (call map)
+
+The quick chat look-up (`find_jobs`, "Quick") and a job search task's
+discovery ("Full") run the same steps on the same functions. Read this before
+the code; the Invariants below say why each rule holds.
+
+```
+ENTRY
+  Quick: runner.run_agent → find_jobs → agent_runtime/abilities/job_listings._find
+  Full:  discovery.discover → _search_boards → boards.find       (boards step)
+                            → _read → read_postings              (read step)
+
+1. PLACES TO SEARCH IN
+   boards.board_searches(titles, criteria)
+     ├─ boards.search_places(criteria)
+     │    ├─ places.targets(criteria)        offline Census gazetteer
+     │    └─ boards.STATE_HUBS[state]        a whole state: its name + hubs (CA → LA, SF, San Diego)
+     └─ phases.cover(...)                    titles × places × board hosts, each reached before a repeat
+
+2. STORED POSTINGS
+   Quick: job_listings._store()  ·  Full: postings.store(connection_or_direct)
+     ├─ Store.sent(searches)                 SELECT mw_job_board_searches
+     └─ Store.matching(titles, criteria)     SELECT mw_job_postings (title tsvector index)
+          └─ postings.keep → normalize.related_title + phases.keep_job
+
+3. BRAVE SEARCH
+   postings.plan(searches, sent)             page 0 / next page / skip (read to its end)
+   Quick: job_listings._web_search  ·  Full: deps.web_search
+     └─ brave_search.search(query, count=20, offset=page)        → Brave API
+   postings.key_of_url → ats.detect          board job links only
+   postings.last_page                        was it the search's last page?
+
+4. READ EACH LINK
+   Store.known(keys)                         SELECT mw_job_postings
+     read live < 12 h → stored record · closed < 14 d → skip · else read:
+   Quick: _read_some (8 at once, 40 s) → _read(url)
+   Full:  read_postings (6 at once, 240 s)
+     └─ discovery.read_posting
+          └─ postings.Reads.fetch → ats.read(ref)
+               ├─ safe_fetch.fetch_public(ref.api_url())          → the board's public API
+               └─ ats.parse_greenhouse / parse_lever / parse_ashby / parse_workable
+
+5. SAVE
+   Store.save(read, closed)                  INSERT … ON CONFLICT mw_job_postings
+   Store.searched(pages)                     INSERT … ON CONFLICT mw_job_board_searches
+     Full: boards.record_searched, in the read step once the links are read
+
+6. FILTER + ANSWER
+   normalize.related_title                   a related title?
+   phases.keep_job → places.fits             in a place named, or remote?
+   Quick: _shown_before(ctx)                 SELECT mw_project_agent_runs (jobs shown in this chat)
+   normalize.same_posting                    the same job on two boards?
+   Quick: job_row → model_line → job_postings block (gate_block)
+   Full:  phases.insert_leads → mw_job_leads
+          → model_phases.screen (Claude: fit against the résumé)
+          → phases.enrich → service.rerank (ranking.py)
+          → model_phases.approach (Claude: drafts for the top 8)
+```
+
+The Full search also runs the web step between boards and read
+(`discovery.web_run`: a Claude run with web search only, from
+`discovery.web_searches`, for careers pages and other boards); its links go
+through step 4 too. Outside services called: Brave (step 3), the boards'
+public APIs and employers' pages (step 4), and Claude (the chat run, and the
+Full search's plan, web, screen and approach). Everything else is our own
+Postgres or code.
+
 ## Invariants
 
 - **A posting is the lead's only when it is the same job.** Google Jobs (the

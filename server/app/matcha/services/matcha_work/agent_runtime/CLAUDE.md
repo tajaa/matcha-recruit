@@ -685,6 +685,10 @@ offered only while Brave can answer (`env_ready`). There is no places tool:
 2026-10-18 with the rest of Espresso's Google API calls, so businesses in an
 area are found with `web_search` and read on their own sites.
 
+The step-by-step call map of `find_jobs` (and of a job search task's
+discovery, which runs the same steps) is in `../job_search/CLAUDE.md`, "How a
+search finds jobs".
+
 - **`find_jobs`**: open postings on employers' own job boards, on Brave alone
   (no search API: its Google Jobs source, SearchAPI else SerpApi, was taken
   out on 2026-10-18). One title and place makes up to 8 Brave searches
