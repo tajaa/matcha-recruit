@@ -12,7 +12,8 @@ from ...services.cart import price_cart, priceable_products
 from ...services.recurring import build_subscription_lines
 from ...services.common import receipt_filename as _receipt_filename
 from ...services.discounts import apply_discount_cents, best_discount_percent, fetch_active_discounts, site_today
-from ...services.entitlements import resolve_entitlements
+from ...services.variants import fetch_variants
+from ...services.entitlements import resolve_entitlements, sells
 from ...services.shipping import Destination, home_country, load_zones, resolve_destination, ship_countries
 from ...services.promos import find_code, normalize_code
 from .._shared import fetch_option_groups, loads_list
@@ -44,7 +45,11 @@ async def public_products(slug: str, request: Request):
         )
         discounts = await fetch_active_discounts(conn, site["id"])
         now_utc = await conn.fetchval("SELECT NOW()")
+        # Only what the store's plan sells: checkout refuses the rest.
+        ent = await _site_entitlements(conn, site["id"])
+        rows = [r for r in rows if ent is None or sells(ent, r["fulfillment"])]
         groups = await fetch_option_groups(conn, [r["id"] for r in rows])
+        variants = await fetch_variants(conn, [r["id"] for r in rows])
         subscribable = any(r["subscription_intervals"] for r in rows) and await _sells_subscriptions(conn, site["id"])
         ratings = {
             r["product_id"]: r for r in await conn.fetch(
@@ -66,10 +71,20 @@ async def public_products(slug: str, request: Request):
             "rating_avg": ratings[r["id"]]["avg"] if r["id"] in ratings else None,
             "intake_fields": loads_list(r["intake_fields"]),
             "option_groups": groups.get(r["id"], []),
+            "variants": variants.get(r["id"], []),
             "discount_percent": pct,
             "discounted_price_cents": apply_discount_cents(r["price_cents"], pct) if pct else None,
         })
     return out
+
+
+async def _site_entitlements(conn, site_id):
+    """The store owner's plan, as entitlements."""
+    plan = await conn.fetchval(
+        "SELECT a.plan FROM cappe_sites s JOIN cappe_accounts a ON a.id = s.account_id WHERE s.id = $1",
+        site_id,
+    )
+    return await resolve_entitlements(plan, conn=conn)
 
 
 async def _sells_subscriptions(conn, site_id) -> bool:
@@ -131,7 +146,11 @@ async def quote(slug: str, body: CartQuoteRequest, request: Request):
         # this used to quote them to anyone holding the product's id. A missing
         # product prices as an unavailable line, same as one that never existed.
         products = await conn.fetch("SELECT * FROM cappe_products WHERE site_id=$1 AND status='active' AND id=ANY($2::uuid[])", site["id"], [i.product_id for i in body.items])
+        ent = await _site_entitlements(conn, site["id"])
+        # What the plan doesn't sell prices as unavailable, as checkout refuses it.
+        products = [r for r in products if ent is None or sells(ent, r["fulfillment"])]
         groups = await fetch_option_groups(conn, [r["id"] for r in products])
+        variants = await fetch_variants(conn, [r["id"] for r in products])
         discounts = await fetch_active_discounts(conn, site["id"])
         today = site_today(await conn.fetchval("SELECT NOW()"), site["timezone"])
         ships = any(r["fulfillment"] == "physical" for r in products)
@@ -139,11 +158,6 @@ async def quote(slug: str, body: CartQuoteRequest, request: Request):
         if code and body.interval:
             raise HTTPException(status_code=422, detail="Promo codes can't be used on subscriptions.")
         zones, promo = [], None
-        plan = await conn.fetchval(
-            "SELECT a.plan FROM cappe_sites s JOIN cappe_accounts a ON a.id = s.account_id WHERE s.id = $1",
-            site["id"],
-        )
-        ent = await resolve_entitlements(plan, conn=conn)
         # Whether the bag offers a code box at all.
         takes_codes = ent is None or ent.has("promo_codes")
         if ships and not body.interval:
@@ -155,7 +169,7 @@ async def quote(slug: str, body: CartQuoteRequest, request: Request):
                 "reason": None if takes_codes else "This store doesn't take promo codes.",
             }
     settings = dict(settings)
-    products = priceable_products(products, groups, discounts, today)
+    products = priceable_products(products, groups, discounts, today, variants)
     # Where the bag ships and what that costs. Subscriptions ship within the
     # home country only (their shipping is fixed into the Stripe price).
     shipping: dict = {}

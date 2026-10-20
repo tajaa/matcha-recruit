@@ -41,6 +41,7 @@ from ..services.email import (
 )
 from ..services.directory import refresh_site_search
 from ..services.inventory import log_adjustment, release_order_bookings, restock_order
+from ..services.variants import fetch_variants, prune_variants, replace_variants
 from ..services.entitlements import require_fulfillment, resolve_entitlements
 from ..services.order_lifecycle import REFUNDABLE_STATUSES, transition_error
 from ..services.refunds import (
@@ -158,15 +159,23 @@ _ORDER_COLS = (
 _ITEM_COLS = (
     "id, product_id, title, unit_price_cents, quantity, fulfillment, "
     "intake_answers, selected_options, deliverable_url, booking_id, restocked_quantity, "
-    "promo_discount_cents"
+    "promo_discount_cents, variant_id, sku"
 )
 
 
-def _product_row(row, groups=None) -> dict:
+def _product_row(row, groups=None, variants=None) -> dict:
     d = dict(row)
     d["intake_fields"] = loads_list(row["intake_fields"])
     d["option_groups"] = groups or []
+    d["variants"] = variants or []
     return d
+
+
+async def _product_out(conn, row) -> dict:
+    """One product as the dashboard shows it: options and variants included."""
+    groups = await fetch_option_groups(conn, [row["id"]])
+    variants = await fetch_variants(conn, [row["id"]])
+    return _product_row(row, groups.get(row["id"]), variants.get(row["id"]))
 
 
 def _item_row(row) -> dict:
@@ -223,6 +232,8 @@ async def _replace_option_groups(conn, site_id, product_id, groups) -> None:
         options_by_group.setdefault(row["group_id"], []).append(row)
 
     group_pairs, groups_gone = match_prior_rows(list(prior_groups), groups)
+    # The groups as this save leaves them, for `prune_variants`.
+    written: list[dict] = []
     for gi, (g, was) in enumerate(zip(groups, group_pairs)):
         # Position is the order unless the caller pinned one: rows keep their
         # created_at now, so it can no longer stand in for "the order sent".
@@ -243,6 +254,9 @@ async def _replace_option_groups(conn, site_id, product_id, groups) -> None:
                 g.name, g.select_type, g.required, g_sort, gid,
             )
             stored = options_by_group.get(gid, [])
+        kept: list[dict] = []
+        written.append({"id": gid, "name": g.name, "select_type": g.select_type,
+                        "required": g.required, "options": kept})
 
         incoming = g.options or []
         option_pairs, options_gone = match_prior_rows(stored, incoming)
@@ -255,6 +269,7 @@ async def _replace_option_groups(conn, site_id, product_id, groups) -> None:
                        VALUES ($1, $2, $3, $4, $5, $6) RETURNING id""",
                     site_id, gid, o.name, o.price_delta_cents, o_sort, o.inventory,
                 )
+                kept.append({"id": new_oid, "name": o.name})
                 if o.inventory is not None:
                     await log_adjustment(
                         conn, site_id=site_id, product_id=product_id, option_id=new_oid,
@@ -262,6 +277,7 @@ async def _replace_option_groups(conn, site_id, product_id, groups) -> None:
                         reason="adjustment", note="Opening stock",
                     )
                 continue
+            kept.append({"id": owas["id"], "name": o.name})
             sets = "name = $1, price_delta_cents = $2, sort_order = $3"
             args = [o.name, o.price_delta_cents, o_sort]
             if "inventory" in o.model_fields_set and o.inventory != owas["inventory"]:
@@ -289,6 +305,8 @@ async def _replace_option_groups(conn, site_id, product_id, groups) -> None:
             "DELETE FROM cappe_product_option_groups WHERE id = ANY($1::uuid[]) AND site_id = $2",
             [row["id"] for row in groups_gone], site_id,
         )
+    # A combination that no longer fits these groups can never be picked again.
+    await prune_variants(conn, site_id, product_id, written)
 
 
 def _subscription_changed(body, existing) -> bool:
@@ -368,7 +386,8 @@ async def list_products(site_id: UUID, account: CappeAccount = Depends(require_c
             site_id,
         )
         groups = await fetch_option_groups(conn, [r["id"] for r in rows])
-    return [_product_row(r, groups.get(r["id"])) for r in rows]
+        variants = await fetch_variants(conn, [r["id"] for r in rows])
+    return [_product_row(r, groups.get(r["id"]), variants.get(r["id"])) for r in rows]
 
 
 @router.post("/sites/{site_id}/products", response_model=CappeProduct, status_code=status.HTTP_201_CREATED)
@@ -410,11 +429,12 @@ async def create_product(
                     balance_after=body.inventory, reason="adjustment", note="Opening stock",
                 )
             await _replace_option_groups(conn, site_id, row["id"], body.option_groups)
-        groups = await fetch_option_groups(conn, [row["id"]])
+            await replace_variants(conn, site_id, row["id"], body.variants)
+        out = await _product_out(conn, row)
         # Product names are indexed at weight D, so "cold brew" finds the cafe
         # that sells it even when its name and blurb say neither word.
         await refresh_site_search(conn, site_id)
-    return _product_row(row, groups.get(row["id"]))
+    return out
 
 
 @router.get("/sites/{site_id}/products/{product_id}", response_model=CappeProduct)
@@ -429,8 +449,7 @@ async def get_product(
         )
         if row is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
-        groups = await fetch_option_groups(conn, [product_id])
-    return _product_row(row, groups.get(product_id))
+        return await _product_out(conn, row)
 
 
 @router.put("/sites/{site_id}/products/{product_id}", response_model=CappeProduct)
@@ -515,9 +534,10 @@ async def update_product(
                     reason="adjustment", note="Set in the product editor",
                 )
             await _replace_option_groups(conn, site_id, product_id, body.option_groups)
-        groups = await fetch_option_groups(conn, [product_id])
+            await replace_variants(conn, site_id, product_id, body.variants)
+        out = await _product_out(conn, row)
         await refresh_site_search(conn, site_id)
-    return _product_row(row, groups.get(product_id))
+    return out
 
 
 @router.delete("/sites/{site_id}/products/{product_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -549,7 +569,29 @@ async def adjust_stock(
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
         async with conn.transaction():
-            if body.option_id is not None:
+            if body.variant_id is not None:
+                vrow = await conn.fetchrow(
+                    "SELECT id, inventory FROM cappe_product_variants "
+                    "WHERE id = $1 AND product_id = $2 AND site_id = $3 FOR UPDATE",
+                    body.variant_id, product_id, site_id,
+                )
+                if vrow is None:
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Variant not found")
+                if vrow["inventory"] is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="That variant isn't tracking stock — set a stock number on it first.",
+                    )
+                new_bal = max(0, vrow["inventory"] + body.delta)
+                await conn.execute(
+                    "UPDATE cappe_product_variants SET inventory = $1, updated_at = NOW() WHERE id = $2",
+                    new_bal, body.variant_id,
+                )
+                await log_adjustment(
+                    conn, site_id=site_id, product_id=product_id, variant_id=body.variant_id,
+                    delta=new_bal - vrow["inventory"], balance_after=new_bal, reason=body.reason, note=body.note,
+                )
+            elif body.option_id is not None:
                 vrow = await conn.fetchrow(
                     "SELECT o.id, o.inventory FROM cappe_product_options o "
                     "JOIN cappe_product_option_groups g ON g.id = o.group_id "
@@ -597,8 +639,7 @@ async def adjust_stock(
                 f"SELECT {_PRODUCT_COLS} FROM cappe_products WHERE id = $1 AND site_id = $2",
                 product_id, site_id,
             )
-        groups = await fetch_option_groups(conn, [product_id])
-    return _product_row(row, groups.get(product_id))
+        return await _product_out(conn, row)
 
 
 @router.get(
@@ -612,7 +653,7 @@ async def inventory_log(
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
         rows = await conn.fetch(
-            "SELECT id, product_id, option_id, delta, balance_after, reason, note, created_at "
+            "SELECT id, product_id, option_id, variant_id, delta, balance_after, reason, note, created_at "
             "FROM cappe_inventory_adjustments WHERE site_id = $1 AND product_id = $2 "
             "ORDER BY created_at DESC LIMIT 100",
             site_id, product_id,

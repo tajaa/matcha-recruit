@@ -244,6 +244,14 @@ def require_can_sell(ent: Entitlements) -> None:
         )
 
 
+def sells(ent: Entitlements, fulfillment: Optional[str]) -> bool:
+    """Whether this plan may sell that kind of thing at all. Checkout asks it of
+    every line: the editor's gate only runs when a product is created or its
+    kind changes, so without it a store that downgraded kept selling what its
+    new plan doesn't allow."""
+    return (fulfillment or "physical").lower() in ent.allowed_fulfillment
+
+
 def require_fulfillment(ent: Entitlements, fulfillment: Optional[str]) -> None:
     """403 unless this plan may sell that kind of thing.
 
@@ -252,7 +260,7 @@ def require_fulfillment(ent: Entitlements, fulfillment: Optional[str]) -> None:
     Creator-vs-Business branch.
     """
     value = (fulfillment or "physical").lower()
-    if value not in ent.allowed_fulfillment:
+    if not sells(ent, value):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=(

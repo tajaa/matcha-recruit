@@ -10,8 +10,9 @@ from app.database import get_connection
 from .cart import cart_totals, price_cart, priceable_products
 from .common import loads_list, site_origins, site_public_origin, url_within_origins
 from .discounts import fetch_active_discounts, site_today
-from .entitlements import resolve_entitlements, require_can_sell
+from .entitlements import resolve_entitlements, require_can_sell, sells
 from .options import fetch_option_groups
+from .variants import fetch_variants, match_variant
 from .shipping import home_country
 from .shopper_customers import connected_customer
 from .stripe_connect import get_cappe_stripe, CappeStripeError
@@ -201,10 +202,13 @@ async def checkout(site, shopper, body):
         if not owner or not owner["stripe_account_id"] or not owner["stripe_charges_enabled"]:
             raise HTTPException(409, "This store has not enabled card payments")
         product_rows = await conn.fetch("SELECT * FROM cappe_products WHERE site_id=$1 AND id=ANY($2::uuid[])", site["id"], [i.product_id for i in body.items])
+        # What the plan doesn't sell is unavailable here too, as at one-off checkout.
+        product_rows = [r for r in product_rows if sells(ent, r["fulfillment"])]
         groups = await fetch_option_groups(conn, [r["id"] for r in product_rows])
+        variants = await fetch_variants(conn, [r["id"] for r in product_rows])
         discounts = await fetch_active_discounts(conn, site["id"])
         today = site_today(await conn.fetchval("SELECT NOW()"), site.get("timezone"))
-        products = priceable_products(product_rows, groups, discounts, today)
+        products = priceable_products(product_rows, groups, discounts, today, variants)
         stripe_lines, snapshot, totals = build_subscription_lines(
             products, body.items, body.interval, site,
         )
@@ -338,12 +342,29 @@ async def record_invoice_order(conn, row, invoice, payment_intent=None):
     if not order:
         return None, False
     for item in loads_list(row["items"]):
-        pid = await conn.fetchval("SELECT id FROM cappe_products WHERE id=$1 AND site_id=$2", UUID(item["product_id"]), row["site_id"])
+        selected = [UUID(v) for v in item.get("selected_option_ids", [])]
+        product = await conn.fetchrow(
+            "SELECT id, sku FROM cappe_products WHERE id=$1 AND site_id=$2", UUID(item["product_id"]), row["site_id"],
+        )
+        # The combination as the store has it today, matched exactly as
+        # checkout matches it (services/variants.py) — not remembered, because
+        # the one subscribed to may since have been removed.
+        variant = None
+        if product and selected:
+            pid = product["id"]
+            variant = match_variant(
+                (await fetch_variants(conn, [pid])).get(pid, []),
+                (await fetch_option_groups(conn, [pid])).get(pid, []),
+                selected,
+            )
         await conn.execute(
-            "INSERT INTO cappe_order_items(order_id,site_id,product_id,title,unit_price_cents,quantity,fulfillment,selected_options,selected_option_ids) "
-            "VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::uuid[])",
-            order["id"], row["site_id"], pid, item["title"], item["unit_price_cents"], item["quantity"], item["fulfillment"],
-            json.dumps(item.get("selected_options", [])), [UUID(v) for v in item.get("selected_option_ids", [])],
+            "INSERT INTO cappe_order_items(order_id,site_id,product_id,title,unit_price_cents,quantity,fulfillment,"
+            "selected_options,selected_option_ids,variant_id,sku) "
+            "VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::uuid[],$10,$11)",
+            order["id"], row["site_id"], product["id"] if product else None, item["title"], item["unit_price_cents"],
+            item["quantity"], item["fulfillment"], json.dumps(item.get("selected_options", [])), selected,
+            variant["id"] if variant else None,
+            (variant["sku"] if variant else None) or (product["sku"] if product else None),
         )
     # Paid goods are owed even when stock is short. Match Cappe's existing late
     # payment recovery: negative inventory records the debt and refunds reverse
@@ -353,7 +374,8 @@ async def record_invoice_order(conn, row, invoice, payment_intent=None):
     short = await conn.fetchval(
         "SELECT EXISTS(SELECT 1 FROM cappe_order_items i LEFT JOIN cappe_products p ON p.id=i.product_id "
         "WHERE i.order_id=$1 AND i.fulfillment='physical' AND (p.id IS NULL OR p.inventory<0 "
-        "OR EXISTS(SELECT 1 FROM cappe_product_options o WHERE o.id=ANY(i.selected_option_ids) AND o.inventory<0)))", order["id"],
+        "OR EXISTS(SELECT 1 FROM cappe_product_variants v WHERE v.id=i.decremented_variant_id AND v.inventory<0) "
+        "OR EXISTS(SELECT 1 FROM cappe_product_options o WHERE o.id=ANY(i.decremented_option_ids) AND o.inventory<0)))", order["id"],
     )
     await conn.execute("UPDATE cappe_orders SET metadata=metadata || $2::jsonb WHERE id=$1", order["id"],
                        json.dumps({"stock_shortfall": bool(short), "invoice_total_changed": invoice.get("total", row["total_cents"]) != row["total_cents"]}))
@@ -450,8 +472,10 @@ async def handle_event(etype, obj, event, background):
                     "SELECT COALESCE(p.name,i.title) AS name,COALESCE(p.inventory,-1) AS balance "
                     "FROM cappe_order_items i LEFT JOIN cappe_products p ON p.id=i.product_id "
                     "WHERE i.order_id=$1 AND i.fulfillment='physical' AND (p.id IS NULL OR p.inventory<0 "
+                    "OR EXISTS(SELECT 1 FROM cappe_product_variants v "
+                    "WHERE v.id=i.decremented_variant_id AND v.inventory<0) "
                     "OR EXISTS(SELECT 1 FROM cappe_product_options o "
-                    "WHERE o.id=ANY(i.selected_option_ids) AND o.inventory<0))",
+                    "WHERE o.id=ANY(i.decremented_option_ids) AND o.inventory<0))",
                     order_id,
                 )
             if owner and owner["email"]:

@@ -49,6 +49,7 @@ from app.cappe.services import inventory as inv_mod  # noqa: E402
 from app.cappe.services.discounts import best_discount_percent  # noqa: E402
 from app.cappe.services.options import match_prior_rows  # noqa: E402
 from app.cappe.services.stripe_connect import CappeStripeError  # noqa: E402
+from app.cappe.services.entitlements import ALL_FULFILLMENT  # noqa: E402
 
 SITE, PRODUCT, ORDER = uuid4(), uuid4(), uuid4()
 ACCOUNT = SimpleNamespace(id=uuid4(), plan="business")
@@ -169,10 +170,11 @@ def test_a_stale_id_falls_back_to_the_name():
     assert paired == [stored] and gone == []
 
 
-def _groups_conn(group_id, options):
+def _groups_conn(group_id, options, variants=()):
     return SqlConn([
         ("FROM cappe_product_option_groups", [{"id": group_id, "name": "Size"}]),
         ("FROM cappe_product_options o", options),
+        ("SELECT id, option_ids FROM cappe_product_variants", list(variants)),
         ("INSERT INTO cappe_product_options", lambda _s, _a: uuid4()),
         ("INSERT INTO cappe_product_option_groups", lambda _s, _a: uuid4()),
     ])
@@ -182,11 +184,12 @@ def test_saving_a_product_keeps_its_option_ids(monkeypatch):
     """The old code deleted every group and re-inserted the set."""
     ledger = _ledger(monkeypatch, shop_mod)
     gid, small, large = uuid4(), uuid4(), uuid4()
+    v_small, v_large = uuid4(), uuid4()
     conn = _groups_conn(gid, [
         {"id": small, "group_id": gid, "name": "Small", "inventory": 5},
         {"id": large, "group_id": gid, "name": "Large", "inventory": 2},
-    ])
-    groups = [CappeProductOptionGroupInput(id=gid, name="Size", options=[
+    ], [{"id": v_small, "option_ids": [small]}, {"id": v_large, "option_ids": [large]}])
+    groups = [CappeProductOptionGroupInput(id=gid, name="Size", required=True, options=[
         _opt("Small", id=small), _opt("Medium", inventory=4),
     ])]
     asyncio.run(shop_mod._replace_option_groups(conn, SITE, PRODUCT, groups))
@@ -199,9 +202,72 @@ def test_saving_a_product_keeps_its_option_ids(monkeypatch):
     assert "inventory" not in updated[0][1]
     assert len(conn.sql("INSERT INTO cappe_product_options")) == 1       # Medium
     assert conn.sql("DELETE FROM cappe_product_options")[0][2] == ([large], SITE)
+    # Every combination made of Large goes with it; Small's stays.
+    assert conn.sql("DELETE FROM cappe_product_variants")[0][2] == ([v_large], SITE)
     assert [(e["delta"], e["note"]) for e in ledger] == [(4, "Opening stock")]
     # Stock rows are read under a lock, in id order.
     assert "ORDER BY o.id FOR UPDATE OF o" in conn.sql("FROM cappe_product_options o")[0][1]
+
+
+def test_removing_a_group_takes_its_options_variants_with_it(monkeypatch):
+    _ledger(monkeypatch, shop_mod)
+    gid, small, large = uuid4(), uuid4(), uuid4()
+    v_small, v_large = uuid4(), uuid4()
+    conn = _groups_conn(gid, [
+        {"id": small, "group_id": gid, "name": "Small", "inventory": None},
+        {"id": large, "group_id": gid, "name": "Large", "inventory": None},
+    ], [{"id": v_small, "option_ids": [small]}, {"id": v_large, "option_ids": [large]}])
+    asyncio.run(shop_mod._replace_option_groups(conn, SITE, PRODUCT, []))
+    assert conn.sql("DELETE FROM cappe_product_option_groups")[0][2] == ([gid], SITE)
+    (_kind, _sql, args), = conn.sql("DELETE FROM cappe_product_variants")
+    assert args == ([v_small, v_large], SITE)
+
+
+def test_a_group_made_optional_takes_its_variants_with_it(monkeypatch):
+    """No option was deleted, but Size is no longer a variant group: nothing
+    can match those rows at checkout, so they must not linger."""
+    _ledger(monkeypatch, shop_mod)
+    gid, small = uuid4(), uuid4()
+    v_small = uuid4()
+    conn = _groups_conn(gid, [{"id": small, "group_id": gid, "name": "Small", "inventory": None}],
+                        [{"id": v_small, "option_ids": [small]}])
+    groups = [CappeProductOptionGroupInput(id=gid, name="Size", required=False, options=[_opt("Small", id=small)])]
+    asyncio.run(shop_mod._replace_option_groups(conn, SITE, PRODUCT, groups))
+    (_kind, _sql, args), = conn.sql("DELETE FROM cappe_product_variants")
+    assert args == ([v_small], SITE)
+
+
+def _wire_adjust(monkeypatch, variant):
+    conn = SqlConn([
+        ("FROM cappe_product_variants", variant),
+        ("FROM cappe_products WHERE id", {"id": PRODUCT}),
+    ])
+    monkeypatch.setattr(shop_mod, "get_connection", lambda: Ctx(conn))
+    monkeypatch.setattr(shop_mod, "get_owned_site", AsyncMock())
+    monkeypatch.setattr(shop_mod, "_product_out", AsyncMock(side_effect=lambda _c, row: dict(row)))
+    return conn, _ledger(monkeypatch, shop_mod)
+
+
+def test_a_variant_can_be_restocked_by_hand_and_the_change_is_logged(monkeypatch):
+    from app.cappe.models.shop import CappeStockAdjust
+    vid = uuid4()
+    conn, ledger = _wire_adjust(monkeypatch, {"id": vid, "inventory": 2})
+    asyncio.run(shop_mod.adjust_stock(SITE, PRODUCT, CappeStockAdjust(delta=-5, variant_id=vid, reason="damage"),
+                                      account=ACCOUNT))
+    (_k, sql, args), = conn.sql("UPDATE cappe_product_variants SET inventory")
+    assert args == (0, vid)                                  # floored at zero, like the product
+    assert [(e["variant_id"], e["delta"], e["reason"]) for e in ledger] == [(vid, -2, "damage")]
+
+
+@pytest.mark.parametrize("variant,code", [(None, 404), ({"id": uuid4(), "inventory": None}, 400)])
+def test_only_a_tracked_variant_of_this_product_can_be_adjusted(monkeypatch, variant, code):
+    from app.cappe.models.shop import CappeStockAdjust
+    conn, ledger = _wire_adjust(monkeypatch, variant)
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(shop_mod.adjust_stock(SITE, PRODUCT, CappeStockAdjust(delta=1, variant_id=uuid4()),
+                                          account=ACCOUNT))
+    assert exc.value.status_code == code and ledger == []
+    assert "AND product_id = $2" in conn.sql("FROM cappe_product_variants")[0][1]
 
 
 def test_option_stock_is_tri_state_and_a_change_is_logged(monkeypatch):
@@ -276,8 +342,9 @@ def _wire_update(monkeypatch, *, shelf):
     monkeypatch.setattr("app.cappe.services.recurring.validate_product_subscription", validated)
     monkeypatch.setattr(shop_mod, "_replace_option_groups", AsyncMock())
     monkeypatch.setattr(shop_mod, "fetch_option_groups", AsyncMock(return_value={}))
+    monkeypatch.setattr(shop_mod, "fetch_variants", AsyncMock(return_value={}))
     monkeypatch.setattr(shop_mod, "refresh_site_search", AsyncMock())
-    monkeypatch.setattr(shop_mod, "_product_row", lambda row, groups=None: dict(row))
+    monkeypatch.setattr(shop_mod, "_product_row", lambda row, *_rest: dict(row))
     return conn, validated, _ledger(monkeypatch, shop_mod)
 
 
@@ -358,8 +425,9 @@ def test_creating_a_tracked_product_logs_its_opening_stock(monkeypatch):
     monkeypatch.setattr("app.cappe.services.recurring.validate_product_subscription", AsyncMock())
     monkeypatch.setattr(shop_mod, "_replace_option_groups", AsyncMock())
     monkeypatch.setattr(shop_mod, "fetch_option_groups", AsyncMock(return_value={}))
+    monkeypatch.setattr(shop_mod, "fetch_variants", AsyncMock(return_value={}))
     monkeypatch.setattr(shop_mod, "refresh_site_search", AsyncMock())
-    monkeypatch.setattr(shop_mod, "_product_row", lambda row, groups=None: dict(row))
+    monkeypatch.setattr(shop_mod, "_product_row", lambda row, *_rest: dict(row))
     ledger = _ledger(monkeypatch, shop_mod)
     asyncio.run(shop_mod.create_product(SITE, CappeProductCreate(name="Mug", inventory=8), account=ACCOUNT))
     asyncio.run(shop_mod.create_product(SITE, CappeProductCreate(name="PDF", fulfillment="digital"), account=ACCOUNT))
@@ -452,7 +520,7 @@ def test_retake_writes_down_what_it_took_when_the_line_had_no_record(monkeypatch
     conn = StockConn([line])
     asyncio.run(inv_mod.retake_order_stock(conn, site_id=SITE, order_id=ORDER))
     reset, (sql, args) = conn.recorded
-    assert "stock_decremented = $2" in sql and args == (line["id"], True, [o1])
+    assert "stock_decremented = $2" in sql and args == (line["id"], True, [o1], None)
     # Every unit is out again, so none counts as back on the shelf.
     assert "restocked_quantity = 0" in reset[0] and reset[1] == (line["id"],)
 
@@ -539,7 +607,7 @@ def _wire_checkout(monkeypatch, *, tracked=True, balance=4, option_stock=6, thre
         "id": PRODUCT, "name": "Mug", "price_cents": 1500, "currency": "USD",
         "inventory": 5 if tracked else None, "low_stock_threshold": threshold,
         "status": "active", "fulfillment": "physical", "booking_type_id": None,
-        "requires_approval": False, "intake_fields": "[]",
+        "requires_approval": False, "intake_fields": "[]", "sku": None,
     }
     conn = CheckoutConn(product, {"name": "Blue", "inventory": option_stock}, balance=balance)
     groups = {PRODUCT: [{
@@ -552,9 +620,10 @@ def _wire_checkout(monkeypatch, *, tracked=True, balance=4, option_stock=6, thre
     monkeypatch.setattr(commerce, "get_connection", lambda: conn)
     monkeypatch.setattr(commerce, "fetch_active_discounts", AsyncMock(return_value=[]))
     monkeypatch.setattr(commerce, "fetch_option_groups", AsyncMock(return_value=groups))
+    monkeypatch.setattr(commerce, "fetch_variants", AsyncMock(return_value={}))
     monkeypatch.setattr(commerce, "fetch_site_owner", AsyncMock(return_value=owner))
     monkeypatch.setattr(commerce, "resolve_entitlements",
-                        AsyncMock(return_value=SimpleNamespace(platform_fee_bps=200, has=lambda _f: False)))
+                        AsyncMock(return_value=SimpleNamespace(platform_fee_bps=200, allowed_fulfillment=ALL_FULFILLMENT, has=lambda _f: False)))
     monkeypatch.setattr(commerce, "require_can_sell", lambda _: None)
     monkeypatch.setattr(commerce, "check_recipient_send_ok", AsyncMock(return_value=False))
     body = CappeCheckoutRequest(
@@ -574,7 +643,8 @@ async def test_a_physical_sale_locks_first_and_records_what_it_took(monkeypatch)
     # Every stock lock is taken up front: products, then options.
     assert conn.locks == [("products", [PRODUCT]), ("options", [option_id])]
     # The line remembers what came off the shelf.
-    assert conn.items[0][-3:-1] == (True, [option_id])
+    assert conn.items[0][11:13] == (True, [option_id])
+    assert conn.items[0][14:] == (None, None, None)          # no variant: nothing recorded for one
     assert conn.option_updates == [(5, option_id)]
     assert [(e.get("option_id"), e["delta"], e["balance_after"]) for e in ledger] == [
         (None, -1, 4), (option_id, -1, 5),
@@ -589,7 +659,7 @@ async def test_a_physical_sale_locks_first_and_records_what_it_took(monkeypatch)
 async def test_an_untracked_product_is_recorded_as_not_decremented(monkeypatch):
     site, body, conn, ledger, _option_id = _wire_checkout(monkeypatch, tracked=False, option_stock=None)
     await commerce.create_public_order(site, body, BackgroundTasks())
-    assert conn.items[0][-3:-1] == (False, [])
+    assert conn.items[0][11:13] == (False, [])
     assert ledger == []
 
 
@@ -790,6 +860,7 @@ async def test_the_public_quote_reads_active_products_only(monkeypatch):
     monkeypatch.setattr(public_shop, "_read_rate_limit", AsyncMock())
     monkeypatch.setattr(public_shop, "_published_site", AsyncMock(return_value={"id": SITE, "timezone": "UTC"}))
     monkeypatch.setattr(public_shop, "fetch_option_groups", AsyncMock(return_value={}))
+    monkeypatch.setattr(public_shop, "fetch_variants", AsyncMock(return_value={}))
     monkeypatch.setattr(public_shop, "fetch_active_discounts", AsyncMock(return_value=[]))
     out = await public_shop.quote(
         "store", CartQuoteRequest(items=[{"product_id": str(PRODUCT), "quantity": 1}]), request=None,
@@ -893,7 +964,12 @@ def test_a_validation_error_is_shown_as_text_not_object_object():
 
 def test_the_storefront_shows_sold_out_and_obeys_the_servers_availability():
     js = _asset("store.js")
-    assert "function soldOut(p){return p.fulfillment==='physical'&&out(p.inventory);}" in js
+    # Sold out: the product has run out, or every combination it sells has.
+    assert "function soldOut(p){if(p.fulfillment!=='physical')return false;if(out(p.inventory))return true;" in js
+    assert "vs.every(function(v){return out(v.inventory);})" in js
     assert "sb.textContent='Sold out'" in js
     # The quote knows about variant stock the product row does not carry.
     assert "l.available===false" in js and "sb.textContent='Out of stock'" in js
+    # The quantity box stops at the lower of the product's and the combination's counts.
+    assert "[p.inventory,v&&v.inventory].filter(function(n){return n>0;})" in js
+    assert "Math.min.apply(null,caps)" in js

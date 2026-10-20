@@ -9,6 +9,7 @@ import pytest
 from app.cappe.models.shop import CappeCartItem, CappeCheckoutRequest
 from app.cappe.routes import render
 from app.cappe.services import commerce, shopper_customers
+from app.cappe.services.entitlements import ALL_FULFILLMENT  # noqa: E402
 from fastapi import BackgroundTasks
 from starlette.requests import Request
 
@@ -68,7 +69,7 @@ async def test_checkout_returns_bind_guest_and_signed_orders_without_leaking_tok
     origin = "https://store.example.com"
     site = {"id": uuid4(), "name": "Store", "timezone": "UTC", "custom_domain": "store.example.com"}
     product = {"id": uuid4(), "name": "Guide", "price_cents": 1000, "currency": "USD",
-               "status": "active", "fulfillment": "digital", "requires_approval": False}
+               "status": "active", "fulfillment": "digital", "requires_approval": False, "sku": None}
     conn = CheckoutConnection(site, product)
     owner = {"plan": "business", "stripe_account_id": "acct_store", "stripe_charges_enabled": True}
     stripe = SimpleNamespace(create_checkout_session=AsyncMock(return_value={
@@ -77,9 +78,10 @@ async def test_checkout_returns_bind_guest_and_signed_orders_without_leaking_tok
     monkeypatch.setattr(commerce, "get_connection", lambda: conn)
     monkeypatch.setattr(commerce, "fetch_active_discounts", AsyncMock(return_value=[]))
     monkeypatch.setattr(commerce, "fetch_option_groups", AsyncMock(return_value={}))
+    monkeypatch.setattr(commerce, "fetch_variants", AsyncMock(return_value={}))
     monkeypatch.setattr(commerce, "lock_stock_rows", AsyncMock())
     monkeypatch.setattr(commerce, "fetch_site_owner", AsyncMock(return_value=owner))
-    monkeypatch.setattr(commerce, "resolve_entitlements", AsyncMock(return_value=SimpleNamespace(platform_fee_bps=200, has=lambda _f: False)))
+    monkeypatch.setattr(commerce, "resolve_entitlements", AsyncMock(return_value=SimpleNamespace(platform_fee_bps=200, allowed_fulfillment=ALL_FULFILLMENT, has=lambda _f: False)))
     monkeypatch.setattr(commerce, "require_can_sell", lambda _: None)
     monkeypatch.setattr(commerce, "get_cappe_stripe", lambda: stripe)
     monkeypatch.setattr(shopper_customers, "connected_customer", AsyncMock(return_value="cus_buyer"))

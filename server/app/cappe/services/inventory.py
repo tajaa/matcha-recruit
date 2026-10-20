@@ -24,27 +24,31 @@ async def log_adjustment(
     reason: str = "manual",
     option_id: Optional[UUID] = None,
     note: Optional[str] = None,
+    variant_id: Optional[UUID] = None,
 ) -> None:
     """Record one stock change. `reason` is coerced to a valid value."""
     if reason not in VALID_REASONS:
         reason = "manual"
     await conn.execute(
         """INSERT INTO cappe_inventory_adjustments
-               (site_id, product_id, option_id, delta, balance_after, reason, note)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)""",
+               (site_id, product_id, option_id, delta, balance_after, reason, note, variant_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)""",
         site_id, product_id, option_id, delta, balance_after, reason,
-        (note or None) if note is None else note[:1000],
+        (note or None) if note is None else note[:1000], variant_id,
     )
 
 
 _PHYSICAL_LINES = (
-    "SELECT id, product_id, quantity, selected_option_ids, stock_decremented, decremented_option_ids, "
-    "restocked_quantity FROM cappe_order_items WHERE order_id = $1 AND fulfillment = 'physical' ORDER BY id"
+    "SELECT i.id, i.product_id, i.quantity, i.selected_option_ids, i.stock_decremented, "
+    "i.decremented_option_ids, i.restocked_quantity, i.variant_id, i.decremented_variant_id, "
+    "v.option_ids AS variant_option_ids "
+    "FROM cappe_order_items i LEFT JOIN cappe_product_variants v ON v.id = i.variant_id "
+    "WHERE i.order_id = $1 AND i.fulfillment = 'physical' ORDER BY i.id"
 )
 
 
-async def lock_stock_rows(conn, *, site_id: UUID, product_ids, option_ids=()) -> None:
-    """Lock product rows, then option rows, each in id order.
+async def lock_stock_rows(conn, *, site_id: UUID, product_ids, option_ids=(), variant_ids=()) -> None:
+    """Lock product rows, then variant rows, then option rows, each in id order.
 
     Every path that writes stock for more than one row — checkout, restock,
     re-take — takes its locks through here. Checkout used to lock in cart order
@@ -54,12 +58,19 @@ async def lock_stock_rows(conn, *, site_id: UUID, product_ids, option_ids=()) ->
     means the second simply waits. Run inside the caller's transaction.
     """
     pids = sorted({p for p in product_ids if p is not None}, key=str)
+    vids = sorted({v for v in variant_ids if v is not None}, key=str)
     oids = sorted({o for o in option_ids if o is not None}, key=str)
     if pids:
         await conn.fetch(
             "SELECT id FROM cappe_products WHERE site_id = $1 AND id = ANY($2::uuid[]) "
             "ORDER BY id FOR UPDATE",
             site_id, pids,
+        )
+    if vids:
+        await conn.fetch(
+            "SELECT id FROM cappe_product_variants WHERE site_id = $1 AND id = ANY($2::uuid[]) "
+            "ORDER BY id FOR UPDATE",
+            site_id, vids,
         )
     if oids:
         await conn.fetch(
@@ -72,9 +83,24 @@ async def lock_stock_rows(conn, *, site_id: UUID, product_ids, option_ids=()) ->
 def _line_option_ids(line) -> list:
     """The options a line's stock movement applies to. `decremented_option_ids`
     is what the sale actually took; NULL is a line from before that was
-    recorded, where every selected option is the best that can be known."""
+    recorded, where every selected option is the best that can be known —
+    minus those its variant is made of (a renewal line), whose stock is the
+    variant's (services/variants.py)."""
     recorded = line.get("decremented_option_ids")
-    return list(recorded if recorded is not None else (line.get("selected_option_ids") or []))
+    if recorded is not None:
+        return list(recorded)
+    covered = {str(i) for i in (line.get("variant_option_ids") or [])}
+    return [o for o in (line.get("selected_option_ids") or []) if str(o) not in covered]
+
+
+def _line_variant_id(line):
+    """The variant whose stock a line's movement applies to. A line the sale
+    recorded (`stock_decremented` set) took `decremented_variant_id` — None when
+    the variant wasn't tracking stock; an unrecorded line has only the variant
+    it bought."""
+    if line.get("stock_decremented") is not None:
+        return line.get("decremented_variant_id")
+    return line.get("variant_id")
 
 
 async def restock_order(conn, *, site_id: UUID, order_id: UUID, reason: str, only: dict | None = None) -> None:
@@ -101,6 +127,7 @@ async def restock_order(conn, *, site_id: UUID, order_id: UUID, reason: str, onl
         conn, site_id=site_id,
         product_ids=[it["product_id"] for it in phys],
         option_ids=[oid for it in phys for oid in _line_option_ids(it)],
+        variant_ids=[_line_variant_id(it) for it in phys],
     )
     for it in phys:
         pid = it["product_id"]
@@ -123,6 +150,18 @@ async def restock_order(conn, *, site_id: UUID, order_id: UUID, reason: str, onl
                 await log_adjustment(
                     conn, site_id=site_id, product_id=pid, delta=q,
                     balance_after=bal, reason=reason,
+                )
+        vid = _line_variant_id(it)
+        if vid is not None:
+            vbal = await conn.fetchval(
+                "UPDATE cappe_product_variants SET inventory = inventory + $1, updated_at = NOW() "
+                "WHERE id = $2 AND site_id = $3 AND inventory IS NOT NULL RETURNING inventory",
+                q, vid, site_id,
+            )
+            if vbal is not None and pid is not None:
+                await log_adjustment(
+                    conn, site_id=site_id, product_id=pid, variant_id=vid, delta=q,
+                    balance_after=vbal, reason=reason,
                 )
         for oid in _line_option_ids(it):
             obal = await conn.fetchval(
@@ -205,10 +244,11 @@ async def retake_order_stock(conn, *, site_id: UUID, order_id: UUID) -> None:
         conn, site_id=site_id,
         product_ids=[it["product_id"] for it in phys],
         option_ids=[oid for it in phys for oid in _line_option_ids(it)],
+        variant_ids=[_line_variant_id(it) for it in phys],
     )
     for it in phys:
         pid, q = it["product_id"], it["quantity"]
-        took_product, took_options = False, []
+        took_product, took_options, took_variant = False, [], None
         if pid is not None and it.get("stock_decremented") is not False:
             bal = await conn.fetchval(
                 "UPDATE cappe_products SET inventory = inventory - $1, updated_at = NOW() "
@@ -221,6 +261,20 @@ async def retake_order_stock(conn, *, site_id: UUID, order_id: UUID) -> None:
                     conn, site_id=site_id, product_id=pid, delta=-q,
                     balance_after=bal, reason="sale",
                 )
+        vid = _line_variant_id(it)
+        if vid is not None:
+            vbal = await conn.fetchval(
+                "UPDATE cappe_product_variants SET inventory = inventory - $1, updated_at = NOW() "
+                "WHERE id = $2 AND site_id = $3 AND inventory IS NOT NULL RETURNING inventory",
+                q, vid, site_id,
+            )
+            if vbal is not None:
+                took_variant = vid
+                if pid is not None:
+                    await log_adjustment(
+                        conn, site_id=site_id, product_id=pid, variant_id=vid, delta=-q,
+                        balance_after=vbal, reason="sale",
+                    )
         for oid in _line_option_ids(it):
             obal = await conn.fetchval(
                 "UPDATE cappe_product_options SET inventory = inventory - $1 "
@@ -241,9 +295,9 @@ async def retake_order_stock(conn, *, site_id: UUID, order_id: UUID) -> None:
             # order, or a line older than the record): write down what came off
             # the shelf so the eventual restock is its exact inverse.
             await conn.execute(
-                "UPDATE cappe_order_items SET stock_decremented = $2, decremented_option_ids = $3::uuid[] "
-                "WHERE id = $1",
-                it["id"], took_product, took_options,
+                "UPDATE cappe_order_items SET stock_decremented = $2, decremented_option_ids = $3::uuid[], "
+                "decremented_variant_id = $4 WHERE id = $1",
+                it["id"], took_product, took_options, took_variant,
             )
     # Its promo-code use comes back too: the buyer paid the discounted price,
     # so the use counts again (even past the cap — it's owed, like the stock).

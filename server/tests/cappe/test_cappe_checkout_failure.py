@@ -27,6 +27,7 @@ from app.cappe.models.shop import CappeCartItem, CappeCheckoutRequest  # noqa: E
 from app.cappe.services import commerce  # noqa: E402
 from app.cappe.services.discounts import apply_discount_cents  # noqa: E402
 from app.cappe.services.stripe_connect import CappeStripeError  # noqa: E402
+from app.cappe.services.entitlements import ALL_FULFILLMENT  # noqa: E402
 
 ORIGIN = "https://store.example.com"
 
@@ -79,7 +80,7 @@ class Conn:
 def _wire(monkeypatch, *, owner, stripe):
     site = {"id": uuid4(), "name": "Store", "timezone": "UTC", "custom_domain": "store.example.com"}
     product = {"id": uuid4(), "name": "Guide", "price_cents": 1000, "currency": "USD",
-               "status": "active", "fulfillment": "digital", "requires_approval": False}
+               "status": "active", "fulfillment": "digital", "requires_approval": False, "sku": None}
     conn = Conn(site, product)
     released = []
 
@@ -93,10 +94,11 @@ def _wire(monkeypatch, *, owner, stripe):
     monkeypatch.setattr(commerce, "get_connection", lambda: conn)
     monkeypatch.setattr(commerce, "fetch_active_discounts", AsyncMock(return_value=[]))
     monkeypatch.setattr(commerce, "fetch_option_groups", AsyncMock(return_value={}))
+    monkeypatch.setattr(commerce, "fetch_variants", AsyncMock(return_value={}))
     monkeypatch.setattr(commerce, "lock_stock_rows", AsyncMock())
     monkeypatch.setattr(commerce, "fetch_site_owner", AsyncMock(return_value=owner))
     monkeypatch.setattr(commerce, "resolve_entitlements",
-                        AsyncMock(return_value=SimpleNamespace(platform_fee_bps=200, has=lambda _f: False)))
+                        AsyncMock(return_value=SimpleNamespace(platform_fee_bps=200, allowed_fulfillment=ALL_FULFILLMENT, has=lambda _f: False)))
     monkeypatch.setattr(commerce, "require_can_sell", lambda _: None)
     monkeypatch.setattr(commerce, "get_cappe_stripe", lambda: stripe)
     monkeypatch.setattr(commerce, "restock_order", _restock)
