@@ -42,6 +42,7 @@ from ..common import loads, slugify
 from ..design_gate import is_premium_plan
 from ..directory import refresh_site_search
 from ..entitlements import Entitlements, resolve_entitlements
+from ..product_pages import assign_slug
 from .catalog import BLOCK_FIELDS, BLOCK_TYPES
 from .ops import _field_value_error
 
@@ -350,6 +351,8 @@ async def _execute_create_product(conn, site: dict[str, Any], account: Any, payl
         site["id"], payload["name"], payload.get("description"), payload["price_cents"],
         status_, payload["fulfillment"], payload.get("digital_file_url"), payload.get("category"),
     )
+    # Its address on the store, /shop/<slug> (services/product_pages.py).
+    await assign_slug(conn, site["id"], row["id"], payload["name"])
     await refresh_site_search(conn, site["id"])
     return {"product_id": str(row["id"]), "name": row["name"], "status": row["status"]}
 

@@ -72,6 +72,40 @@ describe('Shop — variants', () => {
   })
 })
 
+describe('Shop — pictures and the product address', () => {
+  it('sends the pictures in order and the address only when it changed', async () => {
+    api.put.mockResolvedValue(tee)
+    api.get.mockImplementation((path: string) => Promise.resolve(
+      path.endsWith('/products')
+        ? [{ ...tee, slug: 'tee', brand: null, gtin: null, image_url: '/u/1.png',
+             images: [{ id: 'i1', url: '/u/1.png', alt: 'Front', sort_order: 0 }, { id: 'i2', url: '/u/2.png', alt: null, sort_order: 1 }] }]
+        : path === '/billing/entitlements' ? plan('business', 'Business', ['physical']) : [],
+    ))
+    render(
+      <MemoryRouter initialEntries={['/sites/s-1/shop']}>
+        <Routes><Route path="/sites/:siteId/shop" element={<Shop />} /></Routes>
+      </MemoryRouter>,
+    )
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit Tee' }))
+    expect(screen.getByRole('textbox', { name: 'Web address' })).toHaveValue('tee')
+    fireEvent.click(screen.getByRole('button', { name: 'Move picture 2 up' }))
+    fireEvent.change(screen.getByPlaceholderText('Barcode — UPC / EAN (optional)'), { target: { value: '4006381333931' } })
+    fireEvent.click(screen.getByRole('button', { name: /Save changes/ }))
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1))
+    const body = api.put.mock.calls[0][1]
+    expect(body.images).toEqual([{ url: '/u/2.png', alt: null }, { url: '/u/1.png', alt: 'Front' }])
+    expect(body).not.toHaveProperty('image_url')                 // the pictures decide the cover
+    expect(body).not.toHaveProperty('slug')                       // unchanged: never resent
+    expect(body.gtin).toBe('4006381333931')
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit Tee' }))
+    fireEvent.change(screen.getByRole('textbox', { name: 'Web address' }), { target: { value: 'Summer-Tee' } })
+    fireEvent.click(screen.getByRole('button', { name: /Save changes/ }))
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(2))
+    expect(api.put.mock.calls[1][1].slug).toBe('summer-tee')
+  })
+})
+
 describe('Shop — what the plan sells', () => {
   it('says which products shoppers cannot buy and does not offer that kind', async () => {
     renderShop(plan('free', 'Free', ['booking', 'digital', 'service']))

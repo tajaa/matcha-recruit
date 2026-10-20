@@ -606,7 +606,8 @@ def test_a_renewal_line_takes_its_variant_and_records_it(monkeypatch):
 # ── what the storefront and dashboard are told ───────────────────────────────
 
 def test_the_storefront_lists_only_what_the_plan_sells(monkeypatch):
-    rows = [{"id": uuid4(), "fulfillment": f, "subscription_intervals": [], "price_cents": 100, "intake_fields": "[]"}
+    rows = [{"id": uuid4(), "fulfillment": f, "subscription_intervals": [], "price_cents": 100, "intake_fields": "[]",
+             "slug": f}
             for f in ("physical", "booking")]
     conn = SimpleNamespace(fetch=AsyncMock(side_effect=lambda sql, *a: [] if "cappe_reviews" in sql else rows),
                            fetchval=AsyncMock(return_value=datetime.now(timezone.utc)))
@@ -626,6 +627,7 @@ def test_the_storefront_lists_only_what_the_plan_sells(monkeypatch):
     monkeypatch.setattr(public_shop, "fetch_active_discounts", AsyncMock(return_value=[]))
     monkeypatch.setattr(public_shop, "fetch_option_groups", AsyncMock(return_value={}))
     monkeypatch.setattr(public_shop, "fetch_variants", AsyncMock(return_value={rows[1]["id"]: [_variant(M, RED)]}))
+    monkeypatch.setattr(public_shop, "fetch_images", AsyncMock(return_value={}))
     monkeypatch.setattr(public_shop, "site_today", lambda *_a: None)
     out = asyncio.run(public_shop.public_products("store", SimpleNamespace()))
     assert [p["fulfillment"] for p in out] == ["booking"] and len(out[0]["variants"]) == 1

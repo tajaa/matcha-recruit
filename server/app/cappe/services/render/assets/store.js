@@ -1,5 +1,8 @@
 (function(){
 var box=document.getElementById('__ID__'),RT=window.__CAPPE_RT__;if(!box||!RT)return;
+// On a product's own page (/shop/<slug>) the panel is already in the page:
+// this fills it in place instead of drawing the grid.
+var single=box.getAttribute('data-product');
 if(RT.preview){box.innerHTML='<p style="color:var(--muted)">Your products appear here once your site is live.</p>';return;}
 function field(f){var req=f.required?' required':'';var l='<label class="cz-label">'+RT.esc(f.label||f.key)+'</label>';
 if(f.type==='textarea')return '<div>'+l+'<textarea class="cz-field" data-k="'+RT.esc(f.key)+'"'+req+'></textarea></div>';
@@ -55,15 +58,24 @@ if(!iv.length||RT.preview)return '';var save=p.subscription_discount_bps?(' and 
 return '<div class="cz-pd__sub"><label class="cz-label" for="cz-every">Or subscribe'+save+'</label><div class="cz-bag__row">'+
 '<select class="cz-field" id="cz-every" data-every>'+iv.map(function(i){return '<option value="'+i+'">Every '+i+'</option>';}).join('')+'</select>'+
 '<button type="button" class="cz-btn cz-btn--ghost" data-sub>Subscribe</button></div></div>';}
-function openDetail(p){
-var shownImg;function showImg(u){if(u===shownImg)return;shownImg=u;
-ov.querySelector('[data-media]').innerHTML=u?'<img src="'+RT.esc(u)+'" alt="" />':'<div class="cz-pd__noimg"></div>';}
-showImg(RT.url(p.image_url));
+function pics(p){var l=(p.images||[]).map(function(i){return {url:i.url,alt:i.alt||''};});
+if(!l.length&&p.image_url)l=[{url:p.image_url,alt:''}];return l;}
+// `root` is the panel on a product's own page; the overlay otherwise.
+function openDetail(p,root){
+var R=root||ov,inline=R!==ov,media=R.querySelector('[data-media]'),list=pics(p);
+media.innerHTML='<div class="cz-pd__shot"></div>'+(list.length>1?'<div class="cz-pd__thumbs">'+list.map(function(x,i){
+return '<button type="button" class="cz-pd__thumb" data-img="'+i+'" aria-label="Picture '+(i+1)+'"><img src="'+RT.esc(RT.url(x.url))+'" alt="'+RT.esc(x.alt)+'" /></button>';}).join('')+'</div>':'');
+var shot=media.querySelector('.cz-pd__shot'),shownImg,shownV;
+function showImg(u){if(u===shownImg)return;shownImg=u;
+shot.innerHTML=u?'<img src="'+RT.esc(u)+'" alt="'+RT.esc(p.name)+'" />':'<div class="cz-pd__noimg"></div>';
+media.querySelectorAll('.cz-pd__thumb').forEach(function(t){t.classList.toggle('is-on',RT.url(list[+t.getAttribute('data-img')].url)===u);});}
+media.querySelectorAll('.cz-pd__thumb').forEach(function(t){t.addEventListener('click',function(){showImg(RT.url(list[+t.getAttribute('data-img')].url));});});
+showImg(list.length?RT.url(list[0].url):'');
 var priceHtml;if(p.discount_percent&&p.discounted_price_cents!=null){priceHtml='<span class="cz-pd__was">'+RT.money(p.price_cents,p.currency)+'</span>'+RT.money(p.discounted_price_cents,p.currency)+'<span class="cz-pd__off">'+p.discount_percent+'% off</span>';}else{priceHtml=p.price_cents?RT.money(p.price_cents,p.currency):'Free';}
 var booking=p.fulfillment==='booking';
-var info=ov.querySelector('[data-info]');
+var info=R.querySelector('[data-info]'),hn=inline?'h1':'h2';
 info.innerHTML=(p.category?'<div class="cz-eyebrow">'+RT.esc(p.category)+'</div>':'')+
-'<h2 class="cz-pd__name">'+RT.esc(p.name)+'</h2>'+
+'<'+hn+' class="cz-pd__name">'+RT.esc(p.name)+'</'+hn+'>'+
 '<div class="cz-pd__price">'+priceHtml+'</div>'+
 (p.description?'<p class="cz-pd__desc">'+RT.esc(p.description)+'</p>':'')+
 
@@ -98,7 +110,9 @@ sb.textContent=verb()+RT.money(q.total_cents,cur);
 if(qbox)qbox.textContent=parts.length?('Subtotal '+RT.money(q.subtotal_cents,cur)+' · '+parts.join(' · ')):'';
 }).catch(function(){});}
 function refresh(){var v=variantFor(p,chosen()),phys=p.fulfillment==='physical';
-showImg(RT.url((v&&v.image_url)||p.image_url));
+// A newly chosen combination shows its own picture, or the cover when it has none;
+// a thumbnail the buyer clicked stays until the combination changes.
+if(v&&v!==shownV){shownV=v;showImg(RT.url(v.image_url||(list.length?list[0].url:'')));}
 if(v&&v.status!=='active'){sb.disabled=true;sb.textContent='Unavailable';if(qbox)qbox.textContent='We don\u2019t sell that combination.';return;}
 if(gone||(phys&&v&&out(v.inventory))){sb.disabled=true;sb.textContent='Sold out';if(qbox)qbox.textContent='';return;}
 // The lower of the product's own count and the combination's: both limit the sale.
@@ -132,31 +146,36 @@ if(!ok){msg.textContent='Please choose the required options';msg.className='cz-m
 window.location='/account?subscribe='+encodeURIComponent(p.id)+'&every='+encodeURIComponent(info.querySelector('[data-every]').value)+
 '&qty='+qn()+'&opts='+encodeURIComponent(chosen().join(','));});
 // The overlay is shared: a slow answer for a product opened earlier must not land under this one.
-var rv=ov.querySelector('[data-reviews]'),seq=++rseq;rv.innerHTML=reviewsHtml();
+var rv=R.querySelector('[data-reviews]'),seq=++rseq;rv.innerHTML=reviewsHtml();
 if(p.rating_count)RT.get('/reviews?product_id='+encodeURIComponent(p.id)).then(function(list){if(seq===rseq&&list&&list.length)rv.innerHTML=productReviewsHtml(p,list);}).catch(function(){});
+if(inline)return;
 ov.querySelector('.cz-pd__panel').scrollTop=0;ov.hidden=false;document.body.style.overflow='hidden';
-if(!(history.state&&history.state.czpd))history.pushState({czpd:1},'');
+// The address bar shows the product's own page while it's open: shareable,
+// and Back closes it.
+if(!(history.state&&history.state.czpd))history.pushState({czpd:1},'',p.url||location.href);
 }
-function card(p){var c=document.createElement('button');c.type='button';c.className='cz-product';
+// A card is a link to the product's page, opened in the overlay on a plain
+// click; a new-tab click, a crawler or no script follows the link.
+function card(p){var c=document.createElement(p.url?'a':'button');if(p.url)c.href=p.url;else c.type='button';c.className='cz-product';
 var iu=RT.url(p.image_url);var img=iu?'<img class="cz-product__img" src="'+RT.esc(iu)+'" alt="" />':'<div class="cz-product__img"></div>';
 var price;if(p.discount_percent&&p.discounted_price_cents!=null){price='<span class="cz-pd__was">'+RT.money(p.price_cents,p.currency)+'</span>'+RT.money(p.discounted_price_cents,p.currency);}else{price=p.price_cents?RT.money(p.price_cents,p.currency):'Free';}
 var rated=p.rating_count?'<span class="cz-product__rating" aria-label="'+p.rating_avg+' out of 5">'+stars(p.rating_avg)+' <span>'+p.rating_count+'</span></span>':'';
 c.innerHTML=img+'<div class="cz-product__body"><h3>'+RT.esc(p.name)+'</h3>'+rated+'<div class="cz-product__foot"><span class="cz-price">'+price+'</span>'+(soldOut(p)?'<span class="cz-product__opts">Sold out</span>':((p.option_groups||[]).length?'<span class="cz-product__opts">Options</span>':''))+'</div></div>';
-c.addEventListener('click',function(){openDetail(p);});return c;}
-// Search engines read products (with their own ratings) from structured data.
-function productData(list){if(RT.preview||!list.length)return;try{
+c.addEventListener('click',function(e){if(e.metaKey||e.ctrlKey||e.shiftKey||e.altKey||e.button>0)return;e.preventDefault();openDetail(p);});return c;}
+// Search engines read a list page as links to the products; each product's
+// own page (/shop/<slug>) carries its full Product data, ratings included.
+function productData(list){if(RT.preview)return;list=list.filter(function(p){return p.url;});if(!list.length)return;try{
 var data={'@context':'https://schema.org','@type':'ItemList',itemListElement:list.slice(0,50).map(function(p,i){
-var prod={'@type':'Product',name:p.name,offers:{'@type':'Offer',price:((p.discounted_price_cents!=null?p.discounted_price_cents:p.price_cents)/100).toFixed(2),priceCurrency:p.currency||'USD',availability:'https://schema.org/'+(soldOut(p)?'OutOfStock':'InStock')}};
-if(p.description)prod.description=String(p.description).slice(0,500);var iu=RT.url(p.image_url);if(iu&&iu.charAt(0)!=='/')prod.image=iu;
-if(p.rating_count)prod.aggregateRating={'@type':'AggregateRating',ratingValue:p.rating_avg,reviewCount:p.rating_count};
-return {'@type':'ListItem',position:i+1,item:prod};})};
+return {'@type':'ListItem',position:i+1,url:location.origin+p.url,name:p.name};})};
 var sc=document.createElement('script');sc.type='application/ld+json';sc.textContent=JSON.stringify(data).replace(/</g,'\\u003c');document.head.appendChild(sc);}catch(e){}}
 function grid(list){var g=document.createElement('div');g.className='cz-store-grid';list.forEach(function(p){g.appendChild(card(p));});return g;}
 Promise.all([RT.get('/products'),RT.get('/reviews').catch(function(){return [];})]).then(function(r){
-var items=r[0]||[];REVIEWS=r[1]||[];productData(items);
+var items=r[0]||[];REVIEWS=r[1]||[];
+if(single){var mine=items.filter(function(x){return x.slug===single;})[0];if(mine)openDetail(mine,box.querySelector('.cz-pd__panel'));return;}
+productData(items);
 if(!items.length){box.innerHTML='<p style="color:var(--muted)">No products yet.</p>';return;}box.innerHTML='';
 var cats=[],byCat={};items.forEach(function(p){var k=(p.category||'').trim();if(!(k in byCat)){byCat[k]=[];cats.push(k);}byCat[k].push(p);});
 if(cats.filter(function(k){return k;}).length===0){box.appendChild(grid(items));return;}
 cats.sort(function(a,b){if(!a)return 1;if(!b)return -1;return 0;});
 cats.forEach(function(k){if(k){var h=document.createElement('h3');h.className='cz-store-cat';h.textContent=k;box.appendChild(h);}box.appendChild(grid(byCat[k]));});
-}).catch(function(){box.innerHTML='<p style="color:var(--muted)">Unable to load products.</p>';});})();
+}).catch(function(){if(!single)box.innerHTML='<p style="color:var(--muted)">Unable to load products.</p>';});})();

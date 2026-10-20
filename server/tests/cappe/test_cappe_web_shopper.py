@@ -532,7 +532,7 @@ def test_subscribe_is_offered_only_where_it_can_be_completed(monkeypatch, owner,
 
 def test_the_product_list_drops_subscribe_options_a_store_cant_fulfil(monkeypatch):
     row = {"id": uuid4(), "subscription_intervals": ["month"], "subscription_discount_bps": 1000,
-           "price_cents": 1000, "intake_fields": "[]", "fulfillment": "physical"}
+           "price_cents": 1000, "intake_fields": "[]", "fulfillment": "physical", "slug": None}
     conn = Conn([("SELECT NOW()", None)])
 
     async def _fetch(sql, *args):
@@ -545,6 +545,7 @@ def test_the_product_list_drops_subscribe_options_a_store_cant_fulfil(monkeypatc
     monkeypatch.setattr(public_shop, "fetch_active_discounts", AsyncMock(return_value=[]))
     monkeypatch.setattr(public_shop, "fetch_option_groups", AsyncMock(return_value={}))
     monkeypatch.setattr(public_shop, "fetch_variants", AsyncMock(return_value={}))
+    monkeypatch.setattr(public_shop, "fetch_images", AsyncMock(return_value={}))
     monkeypatch.setattr(public_shop, "site_today", lambda *_a: None)
     monkeypatch.setattr(public_shop, "_site_entitlements", AsyncMock(
         return_value=SimpleNamespace(allowed_fulfillment=frozenset({"physical"}))))
