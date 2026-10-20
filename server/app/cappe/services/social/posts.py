@@ -126,6 +126,18 @@ async def attach_posters(conn, posts: list[dict]) -> None:
                 m["poster"] = poster(frames.get(str(m.get("asset_id"))))
 
 
+async def set_content(conn, post_id: UUID, by_platform: dict[str, dict[str, Any]]) -> None:
+    """Each network's own copy for this post (`{"text", "link_url"}`), on
+    its targets. A target with none uses the post's caption and link."""
+    for platform, content in by_platform.items():
+        await conn.execute(
+            """UPDATE cappe_social_post_targets t SET content = $3::jsonb
+               FROM cappe_social_connections c
+               WHERE t.post_id = $1 AND c.id = t.connection_id AND c.platform = $2""",
+            post_id, platform, json.dumps(content),
+        )
+
+
 async def get_post(conn, site_id: UUID, post_id: UUID) -> Optional[dict]:
     row = await conn.fetchrow(
         f"SELECT {POST_COLUMNS} FROM cappe_social_posts WHERE id = $1 AND site_id = $2", post_id, site_id,
@@ -267,10 +279,11 @@ async def claim_due_targets(conn, limit: int, *, post_id: Optional[UUID | str] =
                    AND ($2::uuid IS NULL OR p.id = $2::uuid)
                  ORDER BY x.next_attempt_at
                  LIMIT $1 FOR UPDATE SKIP LOCKED)
-             RETURNING t.id, t.post_id, t.connection_id, t.attempts, t.state""",
+             RETURNING t.id, t.post_id, t.connection_id, t.attempts, t.state, t.content""",
         limit, UUID(str(post_id)) if post_id else None,
     )
-    claimed = [{**dict(r), "state": loads(r["state"]) if "state" in r.keys() else {}} for r in rows]
+    claimed = [{**dict(r), "state": loads(r["state"]) if "state" in r.keys() else {},
+                "content": loads(r["content"]) if "content" in r.keys() else {}} for r in rows]
     if claimed:
         await conn.execute(
             "UPDATE cappe_social_posts SET status = 'publishing', updated_at = NOW() "
@@ -421,7 +434,7 @@ async def rollup_post(conn, post_id: UUID) -> str:
 
 
 __all__ = [
-    "MAX_ATTEMPTS", "OPEN_STATUSES", "backoff_after", "validate_for_targets", "create_post", "set_targets",
+    "MAX_ATTEMPTS", "OPEN_STATUSES", "backoff_after", "validate_for_targets", "create_post", "set_targets", "set_content",
     "attach_posters", "get_post",
     "targets_for", "list_posts", "update_post", "set_schedule", "publish_now", "cancel_post", "delete_post",
     "claim_due_targets", "record_success", "record_failure", "record_pending", "recover_stale_claims",

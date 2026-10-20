@@ -4,6 +4,7 @@ import { Loader2 } from 'lucide-react'
 import { cappeApi } from '../../../api'
 import SurfaceShell from '../../../components/SurfaceShell'
 import type { CappeSocialConnection, CappeSocialConnections, CappeSocialOverview, CappeSocialSettings } from '../../../types'
+import Chat from './Chat'
 import Composer from './Composer'
 import Inbox from './Inbox'
 import Queue from './Queue'
@@ -11,9 +12,10 @@ import Setup from './Setup'
 
 type Tab = 'create' | 'queue' | 'inbox' | 'setup'
 
-// Social growth: drop photos → caption (optionally with AI) → schedule to the
-// connected Instagram / Facebook accounts; the inbox answers comments and DMs.
-// Server side: server/app/cappe/routes/social.py (+ services/social/).
+// Social growth: drop photos or videos → say what to post (the chat writes
+// each network's copy) or fill in the form → schedule to the connected
+// Instagram / Facebook accounts; the inbox answers comments and DMs.
+// Server side: server/app/cappe/routes/social.py + social_chat.py (+ services/social/).
 export default function Social() {
   const { siteId = '' } = useParams<{ siteId: string }>()
   const [params, setParams] = useSearchParams()
@@ -31,6 +33,7 @@ export default function Social() {
   const [settings, setSettings] = useState<CappeSocialSettings | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
+  const [createWith, setCreateWith] = useState<'chat' | 'form'>('chat')
 
   // The OAuth round-trip lands here with ?connected= / ?social_error=; show it
   // once and take it off the URL so a reload doesn't repeat it.
@@ -104,7 +107,18 @@ export default function Social() {
             ))}
           </div>
           {tab === 'create' && (
-            <Composer siteId={siteId} connections={connections} settings={settings} metaConfigured={configured} onPosted={posted} />
+            <>
+              <div className="mb-3 flex justify-end gap-1 text-xs">
+                {([['chat', 'Chat'], ['form', 'Form']] as const).map(([k, label]) => (
+                  <button key={k} type="button" onClick={() => setCreateWith(k)} aria-pressed={createWith === k}
+                    className={`rounded-md px-2.5 py-1 font-medium ${createWith === k
+                      ? 'bg-zinc-100 text-zinc-900' : 'text-zinc-400 hover:text-zinc-200'}`}>{label}</button>
+                ))}
+              </div>
+              {createWith === 'chat'
+                ? <Chat siteId={siteId} connections={connections} settings={settings} onPosted={posted} />
+                : <Composer siteId={siteId} connections={connections} settings={settings} metaConfigured={configured} onPosted={posted} />}
+            </>
           )}
           {tab === 'queue' && <Queue siteId={siteId} refreshKey={refreshKey} />}
           {tab === 'inbox' && <Inbox siteId={siteId} settings={settings} />}

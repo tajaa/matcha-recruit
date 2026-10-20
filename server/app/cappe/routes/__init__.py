@@ -43,6 +43,7 @@ from .shop import router as shop_router
 from .shopper_subscriptions import router as shopper_subscriptions_router
 from .sites import router as sites_router
 from .social import router as social_router
+from .social_chat import router as social_chat_router
 from .templates import router as templates_router
 from .uploads import router as uploads_router
 
@@ -110,5 +111,6 @@ cappe_router.include_router(blog_router)
 cappe_router.include_router(uploads_router)
 # Social growth: connected accounts, scheduled posts, the AI reply inbox.
 cappe_router.include_router(social_router)
+cappe_router.include_router(social_chat_router)
 
 __all__ = ["cappe_router"]

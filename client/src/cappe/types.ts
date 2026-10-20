@@ -1639,6 +1639,78 @@ export type CappeSocialPostInput = {
   alt_text?: string | null
 }
 
+// Chat composer (server/app/cappe/routes/social_chat.py, services/social/chat/)
+export type CappeSocialChatAttachment = {
+  kind: 'image' | 'video'
+  url?: string | null
+  asset_id?: string | null
+  name?: string | null
+}
+
+export type CappeSocialChatMessage = {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  attachments: CappeSocialChatAttachment[]
+  created_at: string
+}
+
+export type CappeSocialPlanMedia = CappeSocialChatAttachment & {
+  poster?: string | null
+  duration_ms?: number | null
+}
+
+export type CappeSocialPlanPost = {
+  items: number[]
+  media: CappeSocialPlanMedia[]
+  instagram: { caption: string; hashtags: string[] }
+  facebook: { text: string }
+  alt_text: string | null
+  offset_days: number
+}
+
+export type CappeSocialPlan = {
+  when: {
+    mode: 'now' | 'at' | 'unset'
+    /** The store's wall clock, `YYYY-MM-DDTHH:MM`. */
+    local: string | null
+    scheduled_at: string | null
+    label: string | null
+    source: 'owner' | 'model' | null
+  }
+  accounts: { connection_id: string; platform: CappeSocialPlatform; handle: string | null }[]
+  link: { kind: 'store' | 'product' | 'none'; product_id: string | null; product_name: string | null; url: string | null }
+  posts: CappeSocialPlanPost[]
+  spread_days: number
+  warnings: string[]
+  needs: ('when' | 'what')[]
+}
+
+export type CappeSocialPlanCard = {
+  id: string
+  status: 'proposed' | 'executed' | 'dismissed' | 'replaced'
+  revision: number
+  plan: CappeSocialPlan
+  post_ids: string[]
+  model: string | null
+  created_at: string | null
+}
+
+export type CappeSocialChat = {
+  id: string
+  title: string
+  messages: CappeSocialChatMessage[]
+  plan: CappeSocialPlanCard | null
+}
+
+export type CappeSocialChatTurn = {
+  conversation_id: string
+  message: CappeSocialChatMessage
+  plan: CappeSocialPlanCard | null
+}
+
+export type CappeSocialPlanConfirmed = { plan: CappeSocialPlanCard; posts: CappeSocialPost[] }
+
 export type CappeSocialCaptionOption = { text: string; hashtags: string[] }
 export type CappeSocialCaptions = { options: CappeSocialCaptionOption[]; alt_text: string | null; model: string }
 
