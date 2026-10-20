@@ -1,15 +1,20 @@
-"""Cappe shared image upload — product images, post covers, etc.
+"""Cappe shared image upload — product images, post covers, etc. — and the
+site's image library.
 
 Reuses the platform storage service (S3/CloudFront-transparent). Scoped to an
-owned site; images go under the `cappe` prefix.
+owned site; images go under the `cappe` prefix. Every image is re-encoded
+before it is stored (`services/media.py`), so a photo's EXIF — GPS position
+included — never reaches the public CDN.
 """
+import asyncio
 import logging
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 
 from ...core.services.image_gen import ImageGenError, generate_image
+from ...core.services.redis_cache import check_rate_limit
 from ...core.services.storage import get_storage
 from ...database import get_connection
 from ..dependencies import require_cappe_account
@@ -17,10 +22,11 @@ from ..models.cappe import (
     CappeAccount,
     CappeAsset,
     CappeAssetList,
+    CappeAssetPatch,
     CappeImageGenRequest,
     CappeUploadResponse,
 )
-from ..services import cappe_assets, image_quota, upload_guard
+from ..services import cappe_assets, image_quota, media, upload_guard
 from ..services.design_gate import is_premium_plan
 from ..services.image_prompting import build_image_prompt
 from ..services.merlin.catalog import AI_IMAGE_SIZES, DEFAULT_AI_IMAGE_SIZE
@@ -31,6 +37,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 _MAX_BYTES = 5 * 1024 * 1024  # 5 MB
+# The library takes a phone photo as it comes off the camera; it is re-encoded
+# and capped at media.MAX_SIDE before anything is stored.
+_MAX_LIBRARY_BYTES = 15 * 1024 * 1024
 
 # AI image generation — real per-image cost, so a DAILY per-account quota (not
 # hourly). Free/hosting plans get a taste (upgrade funnel, like Merlin's lite
@@ -69,20 +78,29 @@ async def upload_image(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file")
 
     content_type = upload_guard.verify_upload(data, file.content_type, upload_guard.ALLOWED_IMAGE)
+    image = await _process(data, content_type, derivatives=False)
     url = await get_storage().upload_file(
-        file_bytes=data,
-        filename=file.filename or "upload",
+        file_bytes=image.data,
+        filename=media.filename_for(file.filename, image.ext),
         prefix="cappe",
-        content_type=content_type,
+        content_type=image.mime,
     )
     try:
         async with get_connection() as conn:
             await cappe_assets.record(
                 conn, account_id=account.id, site_id=site["id"], kind="upload", url=url,
+                width=image.width, height=image.height, size_bytes=len(image.data), mime=image.mime,
             )
     except Exception as exc:  # noqa: BLE001 — catalog bookkeeping never fails the upload
         logger.warning("cappe asset catalog insert failed (upload): %s", exc)
     return CappeUploadResponse(url=url)
+
+
+async def _process(data: bytes, content_type: str, *, derivatives: bool) -> media.ProcessedImage:
+    try:
+        return await asyncio.to_thread(media.process_image, data, content_type, derivatives=derivatives)
+    except media.ImageRejected as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 @router.post("/sites/{site_id}/generate-image", response_model=CappeUploadResponse)
@@ -215,16 +233,93 @@ async def upload_video(
 @router.get("/sites/{site_id}/assets", response_model=CappeAssetList)
 async def list_site_assets(
     site_id: UUID,
-    kind: Optional[str] = Query(default=None, pattern="^(generated|upload)$"),
+    kind: Optional[str] = Query(default=None, pattern="^(generated|upload|stock)$"),
+    q: Optional[str] = Query(default=None, max_length=100),
     account: CappeAccount = Depends(require_cappe_account),
 ):
-    """The site's image asset library — everything generated or uploaded for
-    it, newest first. Backs the editor's image-field "Library" picker and
-    Merlin's "from library" attach."""
+    """The site's image asset library — everything generated, uploaded or
+    imported for it, newest first. Backs the editor's image-field "Library"
+    picker, Merlin's "from library" attach and the magazine's Library page."""
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
-        rows = await cappe_assets.list_assets(conn, site_id, kind=kind)
+        rows = await cappe_assets.list_assets(conn, site_id, kind=kind, q=(q or "").strip() or None)
     return CappeAssetList(assets=[CappeAsset(**r) for r in rows])
+
+
+@router.post("/sites/{site_id}/assets/upload", response_model=CappeAsset, status_code=status.HTTP_201_CREATED)
+async def upload_library_image(
+    site_id: UUID,
+    file: UploadFile = File(...),
+    rights_attested: bool = Form(...),
+    ai_made: bool = Form(False),
+    alt: Optional[str] = Form(default=None, max_length=500),
+    caption: Optional[str] = Form(default=None, max_length=1000),
+    credit_line: Optional[str] = Form(default=None, max_length=500),
+    account: CappeAccount = Depends(require_cappe_account),
+):
+    """Add a picture to the library with what a story prints beside it.
+
+    The owner must say they took it or may use it (`rights_attested`); an
+    AI-made picture is credited "AI illustration" whatever else is typed. It is
+    stored with its responsive sizes, and — unlike the editor's quick upload —
+    the library row is the point, so a failed insert fails the request."""
+    if not rights_attested:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Confirm you took this picture or have permission to use it.",
+        )
+    await check_rate_limit(str(account.id), "cappe_library_upload", 200, 3600)
+    async with get_connection() as conn:
+        site = await get_owned_site(conn, site_id, account.id)
+
+    if file.content_type not in upload_guard.ALLOWED_IMAGE:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported image type")
+    data = await read_capped(file, _MAX_LIBRARY_BYTES, "Image too large (max 15 MB)")
+    content_type = upload_guard.verify_upload(data, file.content_type, upload_guard.ALLOWED_IMAGE)
+    image = await _process(data, content_type, derivatives=True)
+    stored = await media.store_processed(image, prefix="cappe/library", filename=file.filename)
+
+    async with get_connection() as conn:
+        asset = await cappe_assets.insert_upload(
+            conn, account_id=account.id, site_id=site["id"], url=stored.url,
+            width=stored.width, height=stored.height, size_bytes=stored.bytes, mime=stored.mime,
+            variants=stored.variants, alt=_text(alt), caption=_text(caption),
+            credit_line=_text(credit_line), ai_made=ai_made,
+        )
+    return CappeAsset(**asset)
+
+
+def _text(value: Optional[str]) -> Optional[str]:
+    return (value or "").strip() or None
+
+
+@router.patch("/sites/{site_id}/assets/{asset_id}", response_model=CappeAsset)
+async def update_site_asset(
+    site_id: UUID,
+    asset_id: UUID,
+    body: CappeAssetPatch,
+    account: CappeAccount = Depends(require_cappe_account),
+):
+    """Edit a library picture's alt text and caption — and, on the owner's own
+    uploads, its credit. An archive image's credit comes from its license and
+    an AI image is always credited as AI, so those are 422."""
+    changes = body.model_dump(exclude_unset=True)
+    async with get_connection() as conn:
+        await get_owned_site(conn, site_id, account.id)
+        asset = await cappe_assets.get_asset(conn, site_id, asset_id)
+        if asset is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
+        try:
+            fields = cappe_assets.editable_fields(asset, changes)
+        except cappe_assets.NotEditable as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"This picture's credit comes from its source and can't be changed ({exc}).",
+            ) from exc
+        updated = await cappe_assets.update_asset(conn, site_id, asset_id, fields)
+    if updated is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
+    return CappeAsset(**updated)
 
 
 @router.delete("/sites/{site_id}/assets/{asset_id}", status_code=status.HTTP_204_NO_CONTENT)

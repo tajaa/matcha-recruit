@@ -20,6 +20,9 @@ Website-builder frontend for the consumer brand **Gummfit**, host-routed on gumm
 - `onboarding/CappeOnboardingWizard.tsx` asks the Discover category ONCE (step 3) — it sorts the
   shelf and seeds `directory_category` on `POST /sites/from-template`.
 - `utils/plan.ts` — `isPremiumPlan`, the client mirror of the server's `design_gate.PREMIUM_PLANS`.
+- `magazine/` — photo-journalism magazines (server spec: `server/app/cappe/CLAUDE.md` §Magazines).
+  `library/LibraryPanel.tsx` is the picture library with alt text, captions and credits (the
+  Library page at `sites/:siteId/library`; pass `onPick` to use it as a picker).
 
 ## Backend pairing
 

@@ -3,7 +3,7 @@ import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import {
   LayoutGrid, LayoutTemplate, LogOut, Globe, ArrowLeft, FileText, ShoppingBag,
   Receipt, Calendar, MessageSquare, Users, Mail, Inbox, Newspaper, UserCircle, Star, MapPin,
-  Handshake, Wallet, Compass, CreditCard, Landmark,
+  Handshake, Wallet, Compass, CreditCard, Landmark, Images,
 } from 'lucide-react'
 import { cappeApi, clearCappeTokens } from '../api'
 import { invalidateCappeMeCache } from '../hooks/useCappeMe'
@@ -56,6 +56,7 @@ const SITE_NAV: { to: string; label: string; icon: typeof Globe; end?: boolean }
   { to: 'forms', label: 'Forms', icon: Inbox },
   { to: 'reviews', label: 'Reviews', icon: Star },
   { to: 'blog', label: 'Blog', icon: Newspaper },
+  { to: 'library', label: 'Library', icon: Images },
 ]
 
 export default function CappeSidebar({ account, open = false, onClose }: {

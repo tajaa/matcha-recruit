@@ -271,6 +271,33 @@ DB safety rules, test-data email domain rules, and deploy rules are in root `CLA
 - **Merlin's `create_product` takes `inventory`/`sku`/`weight_g`**; a physical product with no
   `inventory` key (nobody said the stock) is created a draft — `null` means made to order.
 
+## Magazines (2026-10, photo-journalism stories; `cappemag01`→)
+
+Writers tell stories through pictures, laid out like a print magazine, from their own photos,
+open-licensed and public-domain archive images, and labeled AI illustrations. The plan is a stack
+of seven PRs (library → stories → archive imports → AI → writers/follows/issues → paid → showcase).
+What is built so far:
+
+- **Every stored image is re-encoded first (`services/media.py`)**, so no EXIF (a phone photo's GPS
+  position, camera serial, time) reaches the CDN: the editor's `/upload`, the library upload and
+  the creator upload all go through `process_image`. It decodes, turns the picture upright
+  (`exif_transpose`), converts an embedded colour profile to sRGB and writes a new file from the
+  pixels alone, capped at `MAX_SIDE` (3200). An animated GIF is stored as it came (GIF has no
+  EXIF); an animated WebP is written again without it. Runs in `asyncio.to_thread`.
+- **The library knows where each picture came from and what is printed beside it** (`cappe_assets`,
+  `cappemag01`): `source`, `license`, `credit_line`, `alt`, `caption`, size, `variants` (WebP at
+  480/960/1440/2048, never wider than the original, plus a 1200 px JPEG for email and link
+  previews), `rights_attested_at`, `moderation`. **A generated image is always AI**:
+  `cappe_assets.record` sets `ai_generated`, `license='ai'` and the credit "AI illustration" for
+  every `kind='generated'` row (the editor button and Merlin both record through it), and the
+  table has `CHECK (kind <> 'generated' OR ai_generated)`.
+- **Credits: the owner writes them only on their own non-AI uploads** (`cappe_assets.editable_fields`;
+  `PATCH /sites/{id}/assets/{asset_id}` answers 422 otherwise). An archive picture's credit comes
+  from its license; an AI picture's is fixed. Alt text and captions are always the owner's.
+- **The library upload (`POST /sites/{id}/assets/upload`) needs `rights_attested`** ("I took this
+  or may publish it"), takes up to 15 MB, stores the sizes under `cappe/library`, and its row is the
+  point of the request (not best-effort, unlike the editor upload's catalog row).
+
 ## Site templates (`services/site_templates/`)
 
 - **The catalog is code, not the `cappe_templates` table.** One `SiteTemplate` per entry, one module
