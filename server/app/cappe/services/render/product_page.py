@@ -19,6 +19,7 @@ from ..email import fmt_money
 from ..product_pages import absolute, is_sold_out, product_ld, product_path
 from .blocks import _STORE_JS
 from .page import render_site_html
+from .sanitize import _safe_image
 
 _WIDGET_ID = "czproduct"
 
@@ -51,6 +52,10 @@ def render_product_page(site: dict, nav: list[dict], product: dict, *, images: l
                         back_href: str, back_label: str) -> str:
     name = product.get("name") or ""
     cur = product.get("currency") or "USD"
+    # A cover set through the one-column `image_url` path (the apps, Merlin,
+    # the migration's backfill) never passed the picture validator: the same
+    # filter the rest of the page uses (og:image, store.js `RT.url`).
+    images = [i for i in images if _safe_image(i.get("url"))]
     url = f"{origin}{product_path(product['slug'])}"
     sold_out = is_sold_out(product, variants)
     desc = (product.get("description") or "").strip()
@@ -78,7 +83,7 @@ def render_product_page(site: dict, nav: list[dict], product: dict, *, images: l
         f'<meta property="product:price:currency" content="{escape(cur, quote=True)}" />'
         f'<meta property="product:availability" content="{"out of stock" if sold_out else "in stock"}" />'
         + product_ld(product, images=images, variants=variants, origin=origin, url=url,
-                     price_cents=price_cents, rating=rating)
+                     price_cents=price_cents, discount_percent=discount_percent, rating=rating)
     )
     return render_site_html(
         site, {"title": name, "slug": "__product", "content": {}}, nav,

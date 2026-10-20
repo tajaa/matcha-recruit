@@ -3,8 +3,11 @@ import { describe, expect, it, vi } from 'vitest'
 import ProductImagesEditor, { MAX_IMAGES } from './ProductImagesEditor'
 
 vi.mock('./ImageUpload', () => ({
-  default: ({ value, onChange }: { value: string; onChange: (u: string) => void }) => (
-    <input aria-label="Picture link" value={value} onChange={(e) => onChange(e.target.value)} />
+  default: ({ value, onChange, onUploaded }: { value: string; onChange: (u: string) => void; onUploaded?: (u: string) => void }) => (
+    <>
+      <input aria-label="Picture link" value={value} onChange={(e) => onChange(e.target.value)} />
+      <button type="button" onClick={() => onUploaded?.('/uploads/new.png')}>Finish upload</button>
+    </>
   ),
 }))
 
@@ -18,6 +21,13 @@ describe('ProductImagesEditor', () => {
     expect(onChange).not.toHaveBeenCalled()                  // typing a link is not adding it
     fireEvent.click(screen.getByRole('button', { name: 'Add' }))
     expect(onChange).toHaveBeenCalledWith([...two, { url: 'https://c.example.com/3.jpg', alt: '' }])
+  })
+
+  it('adds an uploaded picture at once, so a save never drops it', () => {
+    const onChange = vi.fn()
+    render(<ProductImagesEditor siteId="s" images={two} onChange={onChange} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Finish upload' }))
+    expect(onChange).toHaveBeenCalledWith([...two, { url: '/uploads/new.png', alt: '' }])
   })
 
   it('reorders and removes, so any picture can become the cover', () => {

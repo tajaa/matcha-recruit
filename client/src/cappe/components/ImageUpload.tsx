@@ -14,6 +14,7 @@ export default function ImageUpload({
   endpoint = '/upload',
   accept = 'image/*',
   kind = 'image',
+  onUploaded,
 }: {
   siteId: string
   value: string
@@ -23,6 +24,9 @@ export default function ImageUpload({
   endpoint?: string
   accept?: string
   kind?: 'image' | 'file'
+  /** Called with a finished upload's URL instead of `onChange`: for a list
+   *  that takes the file as soon as it's up rather than on a separate "Add". */
+  onUploaded?: (url: string) => void
 }) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
@@ -35,7 +39,8 @@ export default function ImageUpload({
       const fd = new FormData()
       fd.append('file', file)
       const res = await cappeApi.upload<{ url: string }>(`/sites/${siteId}${endpoint}`, fd)
-      onChange(res.url)
+      if (onUploaded) onUploaded(res.url)
+      else onChange(res.url)
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Upload failed')
     } finally {

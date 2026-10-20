@@ -138,7 +138,7 @@ def _clean_gtin(value):
     from ..services.product_pages import gtin_valid
     if value is None:
         return value
-    value = re_sub_spaces(value)
+    value = _gtin_digits(value)
     if not value:
         return None
     if not gtin_valid(value):
@@ -146,7 +146,8 @@ def _clean_gtin(value):
     return value
 
 
-def re_sub_spaces(value: str) -> str:
+def _gtin_digits(value: str) -> str:
+    """A barcode as typed ("4006 3813-3393 1") without its spaces and hyphens."""
     return "".join(value.split()).replace("-", "")
 
 

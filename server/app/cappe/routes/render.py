@@ -33,6 +33,7 @@ from ..services.product_pages import SLUG_RE, fetch_images, product_path
 from ..services.render import render_site_html
 from ..services.render.account_page import render_account_page
 from ..services.render.order_page import render_order_page
+from ..services.render.page import home_slug
 from ..services.render.product_page import render_catalog_page, render_product_page
 from ..services.variants import fetch_variants
 from ..services.render_cache import invalidate_site_render_cache
@@ -346,7 +347,7 @@ async def _render(request: Request, page_slug: str | None) -> HTMLResponse:
 
         if page_slug is None:
             # Home = a page slugged 'home', else the first.
-            target = next((r["slug"] for r in nav_rows if r["slug"] == "home"), nav_rows[0]["slug"])
+            target = home_slug(nav_rows)
         elif any(r["slug"] == page_slug for r in nav_rows):
             target = page_slug
         else:
@@ -421,8 +422,7 @@ async def _back_link(conn, site_id, nav: list[dict]) -> tuple[str, str]:
     )
     if page is None:
         return "/shop", "All products"
-    home = nav[0]["slug"] if nav else "home"
-    return ("/" if page["slug"] in ("home", home) else f"/p/{page['slug']}"), page["title"]
+    return ("/" if page["slug"] == home_slug(nav) else f"/p/{page['slug']}"), page["title"]
 
 
 @router.get("/shop/{product_slug}", response_class=HTMLResponse)
@@ -568,8 +568,8 @@ async def tenant_seo(request: Request, kind: str):
     def day(ts):
         return ts.strftime("%Y-%m-%d") if ts else None
 
-    home = pages[0]["slug"] if pages else "home"
-    urls = [(f"{origin}/" if r["slug"] in ("home", home) else f"{origin}/p/{r['slug']}", day(r["updated_at"]))
+    home = home_slug(pages)
+    urls = [(f"{origin}/" if r["slug"] == home else f"{origin}/p/{r['slug']}", day(r["updated_at"]))
             for r in pages]
     if products:
         urls.append((f"{origin}/shop", day(max(r["updated_at"] for r in products))))

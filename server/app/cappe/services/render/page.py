@@ -22,6 +22,13 @@ _SOCIAL_LABELS = [
 ]
 
 
+def home_slug(nav_pages: list[dict]) -> str:
+    """The page `/` shows (routes/render.py `_render`): the one slugged
+    "home", else the first. Every other page lives at /p/<slug>."""
+    return next((p["slug"] for p in nav_pages if p["slug"] == "home"),
+                nav_pages[0]["slug"] if nav_pages else "home")
+
+
 def _head_seo(site: dict, page: dict, meta: dict, override: dict | None = None) -> tuple[str, str]:
     """Return (title_text, extra_head_html) from meta_config.seo + favicon_url.
     Falls back to "{site} — {page}" when no SEO title is set.
@@ -218,7 +225,7 @@ def render_site_html(site: dict, page: dict, nav_pages: list[dict], preview: boo
     t = _tokens(site.get("theme_config"))
     c = t["colors"]
     slug = site.get("slug") or ""
-    home_slug = nav_pages[0]["slug"] if nav_pages else "home"
+    home = home_slug(nav_pages)
     locations = locations or []
     # Default location (default-first ordered) drives the global hours/tz badge;
     # the booking widget fetches /locations itself for the per-location picker.
@@ -257,7 +264,7 @@ def render_site_html(site: dict, page: dict, nav_pages: list[dict], preview: boo
     ) or _text({"body": page.get("title")}, t))
 
     nav_links = "".join(
-        f'<a href="{"/" if p["slug"] in ("home", home_slug) else "/p/" + _esc(p["slug"])}">{_esc(p["title"])}</a>'
+        f'<a href="{"/" if p["slug"] == home else "/p/" + _esc(p["slug"])}">{_esc(p["title"])}</a>'
         for p in nav_pages)
     header_cls = "cz-header center" if t["navStyle"] == "centered" else "cz-header"
 
