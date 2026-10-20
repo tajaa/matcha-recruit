@@ -241,6 +241,32 @@ DB safety rules, test-data email domain rules, and deploy rules are in root `CLA
   Matcha's files; they now ask `register_host_seo` hooks first, and `main.py` registers Cappe's.
   A store that isn't published answers `Disallow: /`.
 
+## Policies, the seller on receipts, mail as the store (2026-10, `zzzzcappe54`)
+
+- **A store's policies are `cappe_site_policies`** (refund, shipping, terms, privacy; plain text,
+  `services/policies.py`), served at `/policies/<kind>`, linked from the footer (`_site_dict(site,
+  kinds)` → `site["policies"]`, also `window.__CAPPE__.policies` for the bag), the sitemap, the bag
+  and Stripe's page. No row = no page. Every write drops the store's render cache.
+- **Checkout points at the terms; it does not ask Stripe to collect consent.** Stripe's
+  `consent_collection.terms_of_service` refuses to open a page unless the CONNECTED account has its
+  own terms URL in its own Stripe settings — it would break a seller's checkout. The bag says "By
+  placing your order you agree to…" and Stripe's page shows `policies.checkout_note` as
+  `custom_text.submit`. `collect_phone` turns on `phone_number_collection`.
+- **Selling physical goods requires the refund and shipping policies to publish**
+  (`readiness`'s `policies` item, `policies.REQUIRED_FOR_PHYSICAL`). Payments, shipping, tax,
+  identity and product pictures are nudges, shown only when they apply.
+- **Receipts name the seller** (`legal_name`, `business_address`, `tax_id` → "VAT ID: …") **and the
+  buyer's billing address** (`cappe_orders.billing_address`, from Stripe's `customer_details` in
+  `_mark_order_paid`; scrubbed by `anonymize_dev.sql`).
+- **Mail to a store's buyers is sent as the store and replies reach it**: `email.store_from_name`
+  ("Lumen via Gummfit", address-list characters stripped — it goes into a From header) and
+  `email.store_reply_to` (the store's `meta_config.contact_email`, else the owner's login), through
+  core's `send_email_with_fallback(reply_to=)` (Gmail `Reply-To` header, MailerSend `reply_to`;
+  `client.clean_reply_to` drops anything but one plain address). Orders, the paid receipt and
+  subscriptions do this; owner alerts stay "Gummfit". Booking mail to customers doesn't yet.
+- **Merlin's `create_product` takes `inventory`/`sku`/`weight_g`**; a physical product with no
+  `inventory` key (nobody said the stock) is created a draft — `null` means made to order.
+
 ## Site templates (`services/site_templates/`)
 
 - **The catalog is code, not the `cappe_templates` table.** One `SiteTemplate` per entry, one module

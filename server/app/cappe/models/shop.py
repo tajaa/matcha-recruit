@@ -617,6 +617,31 @@ class CappeDiscount(BaseModel):
     created_at: datetime
 
 
+# --- Store policies (services/policies.py) -----------------------------------
+
+class CappePolicyUpdate(BaseModel):
+    """A policy's text. Empty takes the page down."""
+    body: str = Field(default="", max_length=20000)
+
+    @field_validator("body")
+    @classmethod
+    def _trim(cls, v: str) -> str:
+        return (v or "").replace("\r\n", "\n").strip()
+
+
+class CappePolicy(BaseModel):
+    kind: str
+    title: str
+    path: str                       # on the store, /policies/<kind>
+    starter: str                    # our starting text — not legal advice
+    body: Optional[str] = None      # None = not published
+    updated_at: Optional[datetime] = None
+
+
+class CappePolicies(BaseModel):
+    policies: list[CappePolicy] = Field(default_factory=list)
+
+
 # --- Shipping zones (services/shipping.py) -----------------------------------
 
 ShippingMethod = Literal["ship", "pickup", "local_delivery"]
@@ -873,6 +898,9 @@ __all__ = [
     "CappeDiscountInput",
     "CappeDiscountReplace",
     "CappeDiscount",
+    "CappePolicyUpdate",
+    "CappePolicy",
+    "CappePolicies",
     "ShippingMethod",
     "CappeShippingRateInput",
     "CappeShippingRate",

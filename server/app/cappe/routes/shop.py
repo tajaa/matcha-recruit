@@ -38,6 +38,7 @@ from ..services.email import (
     send_cappe_order_declined_email,
     send_cappe_order_refunded_email,
     send_cappe_order_shipped_email,
+    store_reply_to,
 )
 from ..services.directory import refresh_site_search
 from ..services.inventory import log_adjustment, release_order_bookings, restock_order
@@ -883,6 +884,7 @@ async def update_order_status(
             _items_summary(items), order["carrier"], order["tracking_number"],
             order_page_url(site, await _order_token(order_id)),
             any(i["fulfillment"] == "physical" for i in items),
+            reply_to=store_reply_to(site.get("meta_config"), getattr(account, "email", None)),
         )
     from ..services.push import schedule_push
     body_fields = getattr(body, "model_fields_set", set())
@@ -1064,7 +1066,7 @@ async def refund_order(
         view = await _order_view(conn, site_id, order_id)
         if background is not None and view.get("customer_email"):
             who = await conn.fetchrow(
-                "SELECT o.access_token, s.name, s.subdomain, s.custom_domain FROM cappe_orders o "
+                "SELECT o.access_token, s.name, s.subdomain, s.custom_domain, s.meta_config FROM cappe_orders o "
                 "JOIN cappe_sites s ON s.id = o.site_id WHERE o.id = $1",
                 order_id,
             )
@@ -1073,6 +1075,7 @@ async def refund_order(
                     send_cappe_order_refunded_email, view["customer_email"], view.get("customer_name"),
                     who["name"], amount, view.get("currency") or "USD", amount >= left,
                     order_page_url(who, who["access_token"]),
+                    reply_to=store_reply_to(who.get("meta_config"), getattr(account, "email", None)),
                 )
     return view
 
@@ -1139,6 +1142,7 @@ async def accept_order(
             _items_summary(items), order["total_cents"] or order["subtotal_cents"], order["currency"],
             order_page_url(site, token),
             format_when(order["pay_by"], site["timezone"]) if order["pay_by"] else None,
+            reply_to=store_reply_to(site.get("meta_config"), getattr(account, "email", None)),
         )
     return _order_row(order, [_item_row(i) for i in items])
 
@@ -1179,7 +1183,7 @@ async def decline_order(
     if order.get("customer_email"):
         background.add_task(
             send_cappe_order_declined_email, order["customer_email"], order["customer_name"], site["name"],
-            _items_summary(items), body.reason,
+            _items_summary(items), body.reason, reply_to=store_reply_to(site.get("meta_config"), getattr(account, "email", None)),
         )
     return _order_row(order, [_item_row(i) for i in items])
 

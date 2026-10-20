@@ -8,6 +8,8 @@ vi.mock('../../api', async (importOriginal) => ({ ...(await importOriginal<objec
 vi.mock('../../components/TaxSettingsCard', () => ({ default: () => null }))
 vi.mock('../../components/ShippingSettingsCard', () => ({ default: () => null }))
 vi.mock('../../components/PromoCodesCard', () => ({ default: () => null }))
+vi.mock('../../components/PoliciesCard', () => ({ default: () => null }))
+vi.mock('../../components/BusinessIdentityCard', () => ({ default: () => null }))
 vi.mock('../../components/ImageUpload', () => ({ default: () => null }))
 
 const tee = {

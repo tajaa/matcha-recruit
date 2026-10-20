@@ -267,6 +267,15 @@ UPDATE cappe_orders SET
     stripe_session_id     = CASE WHEN stripe_session_id IS NOT NULL THEN 'cs_dev_' || replace(id::text,'-','') END,
     stripe_payment_intent = CASE WHEN stripe_payment_intent IS NOT NULL THEN 'pi_dev_' || replace(id::text,'-','') END,
     payment_ref           = CASE WHEN payment_ref IS NOT NULL THEN 'pi_dev_' || replace(id::text,'-','') END;
+-- The buyer's billing name, phone and address (zzzzcappe54); absent on a dump
+-- taken before that migration.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'cappe_orders' AND column_name = 'billing_address') THEN
+        UPDATE cappe_orders SET billing_address = NULL WHERE billing_address IS NOT NULL;
+    END IF;
+END $$;
 UPDATE cappe_bookings SET
     customer_email = CASE WHEN customer_email IS NOT NULL THEN 'booking_' || replace(id::text,'-','') || '@example.com' END,
     customer_name  = CASE WHEN customer_name IS NOT NULL THEN 'Customer ' || left(replace(id::text,'-',''), 6) END,

@@ -175,6 +175,8 @@ class CappeStripe:
         shipping_option: Optional[dict] = None,
         expires_in_seconds: Optional[int] = None,
         ship_countries: Optional[list[str]] = None,
+        collect_phone: bool = False,
+        submit_note: Optional[str] = None,
     ):
         """Create a Checkout Session ON the connected account (direct charge),
         taking a platform `application_fee_amount`. Returns the Session.
@@ -196,6 +198,10 @@ class CappeStripe:
         abandoned page would otherwise keep those units off the shelf for a day.
         Stripe refuses anything under 30 minutes; `CONNECT_CHECKOUT_TTL_SECONDS`
         leaves a minute of clock-skew margin above that.
+
+        `collect_phone` asks the buyer for a phone number (the store's
+        `collect_phone`); `submit_note` is the line above the pay button —
+        what paying agrees to (services/policies.checkout_note).
         """
         self._ensure_key()
         fee = max(0, int(application_fee_cents))
@@ -219,6 +225,10 @@ class CappeStripe:
                 extra["expires_at"] = int(time.time()) + max(
                     CONNECT_CHECKOUT_TTL_SECONDS, int(expires_in_seconds)
                 )
+            if collect_phone:
+                extra["phone_number_collection"] = {"enabled": True}
+            if submit_note:
+                extra["custom_text"] = {"submit": {"message": submit_note[:1200]}}
             return stripe.checkout.Session.create(
                 mode="payment",
                 success_url=success_url,

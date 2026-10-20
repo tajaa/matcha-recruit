@@ -30,9 +30,11 @@ from ..services.common import normalize_host_header, site_public_origin
 from ..services.discounts import apply_discount_cents, best_discount_percent, fetch_active_discounts, site_today
 from ..services.entitlements import resolve_entitlements, sells
 from ..services.product_pages import SLUG_RE, fetch_images, product_path
+from ..services.policies import KINDS as POLICY_KINDS, links as policy_links, policy_kinds, policy_path
 from ..services.render import render_site_html
 from ..services.render.account_page import render_account_page
 from ..services.render.order_page import render_order_page
+from ..services.render.policy_page import render_policy_page
 from ..services.render.product_page import render_catalog_page, render_product_page
 from ..services.variants import fetch_variants
 from ..services.render_cache import invalidate_site_render_cache
@@ -296,12 +298,15 @@ async def invalidate_render_cache(site_id) -> None:
     _host_cache.clear()
 
 
-def _site_dict(site) -> dict:
+def _site_dict(site, policies=()) -> dict:
+    """`policies` are the kinds the store published (services/policies.py):
+    linked from the footer and the bag."""
     return {
         "name": site["name"],
         "slug": site["slug"],
         "theme_config": loads(site["theme_config"]),
         "meta_config": loads(site["meta_config"]),
+        "policies": policy_links(policies),
     }
 
 
@@ -367,9 +372,11 @@ async def _render(request: Request, page_slug: str | None) -> HTMLResponse:
             site["id"],
         )
 
+        kinds = await policy_kinds(conn, site["id"])
+
     locations = [{**dict(r), "id": str(r["id"]), "hours": loads_list(r["hours"])} for r in loc_rows]
     nav = [{"slug": r["slug"], "title": r["title"]} for r in nav_rows]
-    html = render_site_html(_site_dict(site), _page_dict(page), nav, locations=locations)
+    html = render_site_html(_site_dict(site, kinds), _page_dict(page), nav, locations=locations)
     if redis:
         await cache_set(redis, cache_key, html, ttl=_RENDER_TTL)
     return HTMLResponse(html, headers=tenant_security_headers())
@@ -464,9 +471,10 @@ async def product_page(product_slug: str, request: Request):
             site["id"], product["id"],
         )
         back_href, back_label = await _back_link(conn, site["id"], nav)
+        kinds = await policy_kinds(conn, site["id"])
     pct = best_discount_percent(discounts, kind="product", target_id=str(product["id"]), on_date=today)
     html = render_product_page(
-        _site_dict(site), nav, dict(product), images=images, variants=variants,
+        _site_dict(site, kinds), nav, dict(product), images=images, variants=variants,
         price_cents=apply_discount_cents(product["price_cents"], pct) if pct else product["price_cents"],
         discount_percent=pct, origin=site_public_origin(site) or f"https://{_norm_host(host)}",
         rating=dict(rating) if rating else None, back_href=back_href, back_label=back_label,
@@ -506,8 +514,44 @@ async def catalog_page(request: Request):
         if not nav:
             return _not_found_html("Site not found")
         products = await _sellable_products(conn, site)
-    html = render_catalog_page(_site_dict(site), nav, [dict(r) for r in products],
+        kinds = await policy_kinds(conn, site["id"])
+    html = render_catalog_page(_site_dict(site, kinds), nav, [dict(r) for r in products],
                                origin=site_public_origin(site) or f"https://{_norm_host(host)}")
+    if redis:
+        await cache_set(redis, cache_key, html, ttl=_RENDER_TTL)
+    return HTMLResponse(html, headers=tenant_security_headers())
+
+
+@router.get("/policies/{kind}", response_class=HTMLResponse)
+async def policy_page(kind: str, request: Request):
+    """A store's refund / shipping / terms / privacy page (services/policies.py)."""
+    host = request.headers.get("host")
+    if not _is_tenant_host(host):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    if kind not in POLICY_KINDS:
+        return _not_found_html("Page not found")
+    redis = get_redis_cache()
+    async with get_connection() as conn:
+        site = await _resolve_published_site(conn, host)
+        if site is None:
+            return _not_found_html("Site not found")
+        cache_key = f"cappe:render:{site['id']}:__policy__:{kind}"
+        if redis:
+            cached = await cache_get(redis, cache_key)
+            if isinstance(cached, str):
+                return HTMLResponse(cached, headers=tenant_security_headers())
+        nav = await _nav(conn, site["id"])
+        if not nav:
+            return _not_found_html("Site not found")
+        row = await conn.fetchrow(
+            "SELECT body, updated_at FROM cappe_site_policies WHERE site_id = $1 AND kind = $2",
+            site["id"], kind,
+        )
+        if row is None:
+            return _not_found_html("Page not found")
+        kinds = await policy_kinds(conn, site["id"])
+    html = render_policy_page(_site_dict(site, kinds), nav, kind, row["body"], updated_at=row["updated_at"],
+                              origin=site_public_origin(site) or f"https://{_norm_host(host)}")
     if redis:
         await cache_set(redis, cache_key, html, ttl=_RENDER_TTL)
     return HTMLResponse(html, headers=tenant_security_headers())
@@ -564,6 +608,9 @@ async def tenant_seo(request: Request, kind: str):
             site["id"],
         )
         products = await _sellable_products(conn, site)
+        policies = await conn.fetch(
+            "SELECT kind, updated_at FROM cappe_site_policies WHERE site_id = $1", site["id"],
+        )
 
     def day(ts):
         return ts.strftime("%Y-%m-%d") if ts else None
@@ -574,6 +621,8 @@ async def tenant_seo(request: Request, kind: str):
     if products:
         urls.append((f"{origin}/shop", day(max(r["updated_at"] for r in products))))
         urls += [(f"{origin}{product_path(r['slug'])}", day(r["updated_at"])) for r in products]
+    by_kind = {r["kind"]: r["updated_at"] for r in policies}
+    urls += [(f"{origin}{policy_path(k)}", day(by_kind[k])) for k in POLICY_KINDS if k in by_kind]
     xml = _sitemap_xml(urls)
     if redis:
         await cache_set(redis, cache_key, xml, ttl=_RENDER_TTL)
@@ -654,6 +703,7 @@ async def order_page(token: str, request: Request):
             site["id"],
         )
         now = await conn.fetchval("SELECT NOW()")
+        kinds = await policy_kinds(conn, site["id"])
     takes_cards = bool(owner and owner["stripe_account_id"] and owner["stripe_charges_enabled"]
                        and (owner["status"] or "active") == "active")
     order_ctx = {
@@ -667,7 +717,7 @@ async def order_page(token: str, request: Request):
         "download_url": it["digital_file_url"] if it["fulfillment"] == "digital" else None,
     } for it in items]
     html = render_order_page(
-        {**_site_dict(site), "timezone": site["timezone"]},
+        {**_site_dict(site, kinds), "timezone": site["timezone"]},
         [{"slug": r["slug"], "title": r["title"]} for r in nav_rows],
         order_ctx, item_ctx, token=token, takes_cards=takes_cards, now=now,
         clear_cart=order["status"] not in ("cancelled", "declined"),

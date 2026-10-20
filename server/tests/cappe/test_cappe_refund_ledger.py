@@ -579,7 +579,7 @@ def test_the_refund_email_says_how_much_and_links_the_order(monkeypatch, full, f
     from app.cappe.services import email as mail
     sent = []
 
-    async def _send(to, name, subject, html, text, *, label):
+    async def _send(to, name, subject, html, text, *, label, from_name=None, reply_to=None):
         sent.append((subject, html, text))
 
     monkeypatch.setattr(mail, "_send", _send)

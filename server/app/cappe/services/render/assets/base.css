@@ -240,6 +240,8 @@ a.cz-product{text-decoration:none}
 .cz-foot-social{display:flex;flex-wrap:wrap;justify-content:center;gap:1.1rem;margin-bottom:1rem}
 .cz-foot-social a{color:var(--ink);text-decoration:none;font-size:.82rem;font-weight:600;letter-spacing:.02em}
 .cz-foot-social a:hover{color:var(--brand)}
+.cz-foot-policies{display:flex;flex-wrap:wrap;justify-content:center;gap:.4rem 1.1rem;margin:.6rem 0 .9rem;font-size:.8rem}.cz-foot-policies a{color:var(--muted);text-decoration:none}.cz-foot-policies a:hover{color:var(--ink)}
+.cz-policy{padding:3rem 0 4rem}.cz-policy__wrap{max-width:46rem}.cz-policy h1{margin:0 0 .4rem}.cz-policy__updated{color:var(--muted);font-size:.85rem;margin:0 0 2rem}.cz-policy__body h2{font-size:1.05rem;margin:1.6rem 0 .4rem}.cz-policy__body p{line-height:1.65;margin:0 0 1rem}.cz-bag__terms{margin:.2rem 0 0;font-size:.78rem;color:var(--muted)}.cz-bag__terms a{color:inherit}
 .cz-foot-contact{display:flex;flex-wrap:wrap;justify-content:center;gap:.4rem 1.2rem;margin-bottom:1rem}
 .cz-foot-contact a,.cz-foot-contact span{color:var(--muted);text-decoration:none;font-size:.9rem}
 .cz-foot-contact a:hover{color:var(--brand)}

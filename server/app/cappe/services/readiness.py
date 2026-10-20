@@ -5,8 +5,88 @@ Recommended items are nudges, not blockers: having something to book or buy is
 one of them, because a brochure, menu or portfolio site is a real site. The same
 computation backs the GET /readiness endpoint and the publish gate, so the UI
 and the server can never disagree about what's missing.
+
+A store selling physical goods gets a commerce section: its refund and
+shipping policies are REQUIRED (a buyer of a parcel is owed both, and the
+starter text makes them a minute's work); shipping, tax, the seller's identity
+on receipts, product pictures and card payments are nudges.
 """
 from .common import loads
+from .policies import REQUIRED_FOR_PHYSICAL
+
+# One round trip for everything the commerce items look at.
+_COMMERCE_SQL = """
+SELECT
+  (SELECT COUNT(*) FROM cappe_products
+    WHERE site_id = $1 AND status = 'active' AND fulfillment = 'physical') AS physical,
+  (SELECT COUNT(*) FROM cappe_products
+    WHERE site_id = $1 AND status = 'active' AND fulfillment = 'physical'
+      AND COALESCE(image_url, '') = '') AS physical_without_picture,
+  (EXISTS (SELECT 1 FROM cappe_products WHERE site_id = $1 AND status = 'active' AND price_cents > 0)
+   OR EXISTS (SELECT 1 FROM cappe_booking_types
+               WHERE site_id = $1 AND status = 'active' AND COALESCE(price_cents, 0) > 0)) AS sells_paid,
+  EXISTS (SELECT 1 FROM cappe_shipping_rates WHERE site_id = $1) AS has_rates,
+  ARRAY(SELECT kind FROM cappe_site_policies WHERE site_id = $1) AS policy_kinds,
+  (SELECT COALESCE(a.stripe_charges_enabled, false) FROM cappe_sites s
+     JOIN cappe_accounts a ON a.id = s.account_id WHERE s.id = $1) AS takes_cards
+"""
+
+
+def _get(row, key):
+    try:
+        return row[key]
+    except (KeyError, IndexError, TypeError):
+        return None
+
+
+def _commerce_items(facts, site_row) -> list[dict]:
+    items = []
+    if _get(facts, "sells_paid"):
+        items.append({
+            "key": "payments", "required": False, "done": bool(_get(facts, "takes_cards")), "action": "payments",
+            "label": "Take card payments",
+            "hint": "Connect Stripe so buyers can pay by card at checkout.",
+        })
+    if not _get(facts, "physical"):
+        return items
+    kinds = set(_get(facts, "policy_kinds") or ())
+    shipping_set = bool(
+        int(_get(site_row, "shipping_flat_cents") or 0) > 0
+        or _get(site_row, "shipping_free_threshold_cents") is not None
+        or _get(facts, "has_rates")
+    )
+    items += [
+        {
+            "key": "policies", "required": True, "done": all(k in kinds for k in REQUIRED_FOR_PHYSICAL),
+            "action": "policies",
+            "label": "Publish your refund and shipping policies",
+            "hint": "Buyers of physical goods are owed both. Start from our text and make it yours.",
+        },
+        {
+            "key": "shipping", "required": False, "done": shipping_set, "action": "shipping",
+            "label": "Set what shipping costs",
+            "hint": "A flat rate, free over an amount, or delivery options. If it's always free, set Free over to 0.",
+        },
+        {
+            "key": "tax", "required": False, "done": int(_get(site_row, "tax_rate_bps") or 0) > 0, "action": "tax",
+            "label": "Set your tax rate",
+            "hint": "Skip this if you don't charge tax where you sell.",
+        },
+        {
+            "key": "identity", "required": False,
+            "done": bool((_get(site_row, "legal_name") or "").strip() and (_get(site_row, "business_address") or "").strip()),
+            "action": "identity",
+            "label": "Add your business name and address",
+            "hint": "They go on every receipt, with your tax number if you have one.",
+        },
+        {
+            "key": "product_pictures", "required": False,
+            "done": not _get(facts, "physical_without_picture"), "action": "shop",
+            "label": "Give every product a picture",
+            "hint": "Products without one look unfinished in your shop and in link previews.",
+        },
+    ]
+    return items
 
 # Blocks that count as real homepage content (an intro / about / sections).
 _CONTENT_BLOCKS = {"hero", "text", "features", "menu", "gallery", "pricing", "testimonial"}
@@ -85,5 +165,6 @@ async def compute_readiness(conn, site_id, site_row) -> dict:
             "hint": "Upload a logo so your header looks like you.",
         },
     ]
+    items += _commerce_items(await conn.fetchrow(_COMMERCE_SQL, site_id), site_row)
     ready = all(i["done"] for i in items if i["required"])
     return {"ready": ready, "items": items}

@@ -17,7 +17,7 @@ from uuid import UUID
 
 from ...core.services.pdf import render_pdf
 from ...database import get_connection
-from .email import _email_shell, _send  # noqa: F401  (shell reused; _send kept for parity)
+from .email import _email_shell, _send, store_from_name, store_reply_to  # noqa: F401  (shell reused; _send kept for parity)
 from ...core.services.email.client import get_email_service
 
 logger = logging.getLogger("cappe.receipt")
@@ -86,31 +86,55 @@ def _items_rows_html(items: list[dict], currency: str) -> str:
     return "".join(out)
 
 
-def _ship_to_html(shipping_address) -> str:
-    """Render the Ship-to block from the persisted Stripe shipping_details.
-    Accepts str-or-dict (asyncpg JSONB); every field HTML-escaped."""
-    addr = shipping_address
+def _address_lines(stored, *, name: bool = True) -> list[str]:
+    """The lines of a stored Stripe-shaped address ({name, phone, address});
+    accepts str-or-dict (asyncpg JSONB). Plain text — callers escape."""
+    addr = stored
     if isinstance(addr, str):
         try:
             addr = json.loads(addr)
         except ValueError:
             addr = None
     if not isinstance(addr, dict):
-        return ""
+        return []
     a = addr.get("address")
     if not isinstance(a, dict):
         a = {}
     city_line = ", ".join(str(x) for x in [a.get("city"), a.get("state")] if x)
     if a.get("postal_code"):
         city_line = f"{city_line} {a['postal_code']}".strip()
-    lines = [addr.get("name"), a.get("line1"), a.get("line2"), city_line, a.get("country")]
-    rows = "".join(f"<div>{escape(str(x))}</div>" for x in lines if x)
+    lines = [addr.get("name") if name else None, a.get("line1"), a.get("line2"), city_line, a.get("country")]
+    return [str(x) for x in lines if x]
+
+
+def _ship_to_html(shipping_address) -> str:
+    """Render the Ship-to block from the persisted Stripe shipping_details.
+    Accepts str-or-dict (asyncpg JSONB); every field HTML-escaped."""
+    rows = "".join(f"<div>{escape(x)}</div>" for x in _address_lines(shipping_address))
     if not rows:
         return ""
     return (
         '<div style="margin:20px 0 8px;font-size:13px;color:#3f3f46;">'
         '<div style="color:#71717a;">Ship to</div>' + rows + "</div>"
     )
+
+
+def _seller_html(order: dict) -> str:
+    """Who sold it: the legal name (when it isn't the store's name), the
+    business address and its tax number — what makes a receipt a VAT invoice."""
+    rows = []
+    legal = (order.get("legal_name") or "").strip()
+    if legal and legal != (order.get("business_name") or "").strip():
+        rows.append(escape(legal))
+    address = (order.get("business_address") or "").strip()
+    if address:
+        rows += [escape(line.strip()) for line in address.splitlines() if line.strip()]
+    tax_id = (order.get("tax_id") or "").strip()
+    if tax_id:
+        rows.append(f"{escape(str(order.get('tax_label') or 'Tax'))} ID: {escape(tax_id)}")
+    if not rows:
+        return ""
+    return '<div style="color:#71717a;font-size:12px;margin-top:4px;line-height:1.5;">' + "<br>".join(rows) + "</div>"
 
 
 def build_receipt_html(order: dict, items: list[dict]) -> str:
@@ -154,13 +178,15 @@ def build_receipt_html(order: dict, items: list[dict]) -> str:
         if discount > 0 else ""
     )
     ship_to = _ship_to_html(order.get("shipping_address"))
+    seller = _seller_html(order)
+    billed = "".join(f"<div>{escape(x)}</div>" for x in _address_lines(order.get("billing_address"), name=False))
     return f"""\
 <!doctype html><html><head><meta charset="utf-8"><style>
   @page {{ size: A4; margin: 28mm 20mm; }}
   body {{ font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; color:#18181b; }}
 </style></head><body>
   <div style="display:flex;justify-content:space-between;align-items:flex-start;">
-    <div><div style="font-size:22px;font-weight:700;">{biz}</div>
+    <div><div style="font-size:22px;font-weight:700;">{biz}</div>{seller}
       <div style="color:#71717a;font-size:13px;margin-top:2px;">Receipt</div></div>
     <div style="text-align:right;font-size:13px;color:#3f3f46;">
       <div><b>{number}</b></div><div>{when_txt}</div>
@@ -169,6 +195,7 @@ def build_receipt_html(order: dict, items: list[dict]) -> str:
   <div style="margin:20px 0 8px;font-size:13px;color:#3f3f46;">
     <div style="color:#71717a;">Billed to</div><div>{cust}</div>
     {f'<div style="color:#71717a;">{cust_email}</div>' if cust and cust_email and cust != cust_email else ''}
+    {billed}
   </div>
   {ship_to}
   <table style="width:100%;border-collapse:collapse;font-size:14px;margin-top:8px;">
@@ -206,8 +233,11 @@ async def render_order_receipt_pdf(conn, order_id: UUID) -> tuple[dict, bytes] |
                   o.stripe_payment_intent, o.paid_at, o.created_at, o.site_id, o.access_token,
                   s.name AS business_name, s.tax_label,
                   COALESCE(o.shipping_rate_label, s.shipping_label) AS shipping_label,
-                  s.subdomain, s.custom_domain
+                  s.subdomain, s.custom_domain, s.meta_config,
+                  s.legal_name, s.business_address, s.tax_id, o.billing_address,
+                  a.email AS owner_email
              FROM cappe_orders o JOIN cappe_sites s ON s.id = o.site_id
+             JOIN cappe_accounts a ON a.id = s.account_id
             WHERE o.id = $1""",
         order_id,
     )
@@ -253,10 +283,15 @@ async def email_receipt(order: dict, pdf: bytes) -> None:
         "disposition": "attachment",
     }]
     try:
+        # Sent as the store, and a reply reaches it. This one used to go out
+        # under Matcha's own display name.
+        reply_to = store_reply_to(order.get("meta_config"), order.get("owner_email"))
         await get_email_service().send_email_with_fallback(
             to_email=to_email, to_name=order.get("customer_name"),
             subject=f"Receipt {number} — {biz}",
             html_content=html, text_content=text, attachments=att,
+            from_name=store_from_name(order.get("business_name")),
+            **({"reply_to": reply_to} if reply_to else {}),
         )
     except Exception:
         logger.exception("Cappe receipt email failed for %s", to_email)

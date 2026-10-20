@@ -19,6 +19,9 @@ class _Conn:
     async def fetchval(self, sql, _site_id):
         return next(n for table, n in self.counts.items() if table in sql)
 
+    async def fetchrow(self, sql, _site_id):
+        return getattr(self, "commerce", None)  # nothing physical or paid to sell
+
 
 def _readiness(**kw):
     conn = _Conn(**kw)

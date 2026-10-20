@@ -178,6 +178,8 @@ class CappeClient(BaseModel):
     has_thread: bool = False
     is_imported: bool = False           # has a row in cappe_clients (manual/CSV)
     total_spent_cents: int = 0
+    # What total_spent_cents is in: the store's currency.
+    currency: str = "USD"
     last_activity: Optional[datetime] = None
     # Branch the client belongs to (explicit on import, else latest booking's).
     location_id: Optional[UUID] = None

@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useLocation, useParams } from 'react-router-dom'
 import { Loader2, Plus, Trash2, Package, SlidersHorizontal, AlertTriangle, Pencil, Search } from 'lucide-react'
 import { cappeApi, CappeApiError } from '../../api'
 import SurfaceShell, { centsToMoney } from '../../components/SurfaceShell'
 import TaxSettingsCard from '../../components/TaxSettingsCard'
 import ShippingSettingsCard from '../../components/ShippingSettingsCard'
+import PoliciesCard from '../../components/PoliciesCard'
+import BusinessIdentityCard from '../../components/BusinessIdentityCard'
 import PromoCodesCard from '../../components/PromoCodesCard'
 import StockAdjustModal from '../../components/StockAdjustModal'
 import ImageUpload from '../../components/ImageUpload'
@@ -118,6 +120,16 @@ export default function Shop() {
     cappeApi.get<CappeBookingType[]>(`/sites/${siteId}/booking-types`).then(setBookingTypes).catch(() => {})
     cappeApi.get<CappeEntitlements>('/billing/entitlements').then(setPlan).catch(() => setPlan(null))
   }, [siteId])
+
+  // The setup guide links straight to a settings card (#policies, #tax, …);
+  // the cards load their own data, so scroll once they have had a moment to.
+  const { hash } = useLocation()
+  useEffect(() => {
+    const id = hash.slice(1)
+    if (!id) return
+    const t = setTimeout(() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 400)
+    return () => clearTimeout(t)
+  }, [hash])
 
   const { combos, tooMany } = combinations(optionGroups)
 
@@ -409,7 +421,9 @@ export default function Shop() {
   return (
     <SurfaceShell title="Shop" subtitle="Anything you sell — goods, downloads, services, or bookable sessions.">
       {error && <p className="mb-4 text-sm text-red-400">{error}</p>}
-      <TaxSettingsCard siteId={siteId || ''} />
+      {/* The ids are the setup guide's deep links (#policies, #tax, …). */}
+      <div id="tax"><TaxSettingsCard siteId={siteId || ''} /></div>
+      <div id="shipping">
       <ShippingSettingsCard
         siteId={siteId || ''}
         onHomeCountryChange={setHomeCountry}
@@ -420,6 +434,9 @@ export default function Shop() {
           setProducts((ps) => (ps && ps.some((p) => p.currency !== c) ? ps.map((p) => ({ ...p, currency: c })) : ps))
         }}
       />
+      </div>
+      <div id="policies"><PoliciesCard siteId={siteId || ''} /></div>
+      <div id="identity"><BusinessIdentityCard siteId={siteId || ''} /></div>
       <PromoCodesCard siteId={siteId || ''} currency={siteCurrency} />
       {plan && (products || []).some((p) => p.status === 'active' && !canSell(p.fulfillment)) && (
         <UpgradeNotice message={`Your ${plan.plan_name} plan doesn't sell ${

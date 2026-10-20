@@ -566,12 +566,18 @@ def test_the_product_list_drops_subscribe_options_a_store_cant_fulfil(monkeypatc
 def test_subscription_emails_link_to_the_account_page(monkeypatch, send, args, label):
     sent = []
 
-    async def _send(to, name, subject, html, text, *, label):
+    senders = []
+
+    async def _send(to, name, subject, html, text, *, label, from_name=None, reply_to=None):
         sent.append((html, text))
+        senders.append((from_name, reply_to))
 
     monkeypatch.setattr(mail, "_send", _send)
-    asyncio.run(send("b@example.com", "B", "Lumière", *args, "https://lumiere.gummfit.com/account"))
+    asyncio.run(send("b@example.com", "B", "Lumière", *args, "https://lumiere.gummfit.com/account",
+                     reply_to="hello@lumiere.test"))
     ((html, text),) = sent
+    # Sent as the store, and a reply reaches it.
+    assert senders == [("Lumière via Gummfit", "hello@lumiere.test")]
     assert label in html and "https://lumiere.gummfit.com/account" in html and "/account" in text
     sent.clear()
     asyncio.run(send("b@example.com", "B", "Lumière", *args))           # no link: as before

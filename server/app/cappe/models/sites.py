@@ -158,6 +158,13 @@ class CappeSiteUpdate(_SnapshotSizeLimit):
     # option's time in transit. Explicit null clears (model_fields_set gate).
     handling_days_min: Optional[int] = Field(default=None, ge=0, le=60)
     handling_days_max: Optional[int] = Field(default=None, ge=0, le=60)
+    # Who is selling, on every receipt (an EU/UK VAT invoice needs all three).
+    # Explicit null or "" clears (model_fields_set gate in the route).
+    legal_name: Optional[str] = Field(default=None, max_length=200)
+    business_address: Optional[str] = Field(default=None, max_length=500)
+    tax_id: Optional[str] = Field(default=None, max_length=64)
+    # Stripe's payment page asks the buyer for a phone number.
+    collect_phone: Optional[bool] = None
     # What the store charges in. Products follow it; see routes/sites.py.
     currency: Optional[str] = Field(default=None, max_length=3)
     _currency = field_validator("currency")(store_currency)
@@ -211,6 +218,10 @@ class CappeSite(BaseModel):
     home_country: str = "US"
     handling_days_min: Optional[int] = None
     handling_days_max: Optional[int] = None
+    legal_name: Optional[str] = None
+    business_address: Optional[str] = None
+    tax_id: Optional[str] = None
+    collect_phone: bool = False
     currency: str = "USD"
     receipt_prefix: Optional[str] = None
     # Discover directory. `listed` is the tenant's own opt-out; the platform-side

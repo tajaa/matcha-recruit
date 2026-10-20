@@ -20,6 +20,28 @@ logger = logging.getLogger(__name__)
 _FROM_NAME = "Gummfit"
 
 
+_NAME_SPECIALS = frozenset('"<>\\,;:@()[]\r\n\t')
+
+
+def store_from_name(site_name: str | None) -> str:
+    """The sender name for mail a store's buyers get: "Lumen Candles via
+    Gummfit" — they bought from the store, not from us. It goes into a From
+    header unquoted, so line breaks and the characters that delimit addresses
+    (a comma would make it two) are taken out."""
+    name = " ".join("".join(" " if c in _NAME_SPECIALS else c for c in (site_name or "")).split())[:60]
+    return f"{name} via {_FROM_NAME}" if name else _FROM_NAME
+
+
+def store_reply_to(meta_config, owner_email: str | None = None) -> str | None:
+    """Where a buyer's reply goes: the store's public contact address (its
+    footer's), else the owner's login. A reply used to reach us."""
+    meta = meta_config if isinstance(meta_config, dict) else {}
+    if not meta and isinstance(meta_config, str):
+        from .common import loads
+        meta = loads(meta_config)
+    return (meta.get("contact_email") or "").strip() or (owner_email or "").strip() or None
+
+
 async def send_cappe_shopper_code_email(to_email: str, site_name: str, code: str):
     html = _email_shell(
         f"Sign in to {escape(site_name)}",
@@ -174,6 +196,7 @@ def _email_shell(
 async def _send(
     to_email: str, to_name: str | None, subject: str, html: str, text: str, *,
     label: str, log_recipient: bool = True, critical: bool = False,
+    from_name: str | None = None, reply_to: str | None = None,
 ) -> bool:
     """Best-effort send — logs and swallows so it's safe in a background task.
 
@@ -187,12 +210,16 @@ async def _send(
     confirmation link): an undelivered one is logged at ERROR so it lands in
     `server_error_reports` instead of vanishing. Reserved test domains are
     skipped by design and are not a failure.
+
+    `from_name` / `reply_to` are for mail sent on a store's behalf
+    (`store_from_name`, `store_reply_to`).
     """
     who = to_email if log_recipient else "<recipient>"
     try:
         ok = await get_email_service().send_email_with_fallback(
             to_email=to_email, to_name=to_name, subject=subject,
-            html_content=html, text_content=text, from_name=_FROM_NAME,
+            html_content=html, text_content=text, from_name=from_name or _FROM_NAME,
+            **({"reply_to": reply_to} if reply_to else {}),
         )
     except Exception:
         logger.exception("Cappe %s email failed for %s", label, who)
@@ -351,6 +378,7 @@ async def send_cappe_order_receipt_email(
     to_email: str, to_name: str | None, site_name: str, items_summary: str,
     total_cents: int, currency: str, requires_approval: bool,
     order_url: str | None = None, payment: str = "free",
+*, reply_to: str | None = None,
 ) -> None:
     """"Order received" for an order that was NOT paid on the spot — waiting
     for approval, or for a store that takes payment itself. It used to say
@@ -369,12 +397,14 @@ async def send_cappe_order_receipt_email(
                         cta_label="View your order" if order_url else None, cta_url=order_url)
     text = (f"Thanks for your order from {site_name}.\n\n{items_summary}\nTotal: {total}\n\n{next_line}"
             + (f"\n\nYour order: {order_url}" if order_url else ""))
-    await _send(to_email, to_name, f"Your order — {site_name}", html, text, label="order receipt")
+    await _send(to_email, to_name, f"Your order — {site_name}", html, text, label="order receipt",
+                from_name=store_from_name(site_name), reply_to=reply_to)
 
 
 async def send_cappe_order_approved_email(
     to_email: str, to_name: str | None, site_name: str, items_summary: str,
     total_cents: int, currency: str, order_url: str | None, pay_by_label: str | None,
+*, reply_to: str | None = None,
 ) -> None:
     """The store accepted an order that waited for approval. With
     `pay_by_label` the buyer pays by card from the order page before then;
@@ -401,11 +431,13 @@ async def send_cappe_order_approved_email(
     html = _email_shell(f"Order accepted — {e_site}", body, accent="#10b981",
                         cta_label=cta if order_url else None, cta_url=order_url)
     text = f"{site_name} accepted your order ({items_summary}). {plain}." + (f"\n\n{order_url}" if order_url else "")
-    await _send(to_email, to_name, f"Order accepted — {site_name}", html, text, label="order approved")
+    await _send(to_email, to_name, f"Order accepted — {site_name}", html, text, label="order approved",
+                from_name=store_from_name(site_name), reply_to=reply_to)
 
 
 async def send_cappe_order_declined_email(
     to_email: str, to_name: str | None, site_name: str, items_summary: str, reason: str | None,
+*, reply_to: str | None = None,
 ) -> None:
     """The store turned down an order that waited for approval. The buyer used
     to hear nothing outside the iOS app. Best-effort."""
@@ -420,12 +452,14 @@ async def send_cappe_order_declined_email(
     html = _email_shell(f"Order update — {e_site}", body)
     text = (f"{site_name} couldn't accept your order ({items_summary}), so it has been cancelled. "
             "You have not been charged." + (f"\nReason: {reason}" if reason else ""))
-    await _send(to_email, to_name, f"Order update — {site_name}", html, text, label="order declined")
+    await _send(to_email, to_name, f"Order update — {site_name}", html, text, label="order declined",
+                from_name=store_from_name(site_name), reply_to=reply_to)
 
 
 async def send_cappe_order_refunded_email(
     to_email: str, to_name: str | None, site_name: str, amount_cents: int, currency: str,
     full: bool, order_url: str | None,
+*, reply_to: str | None = None,
 ) -> None:
     """The store refunded some or all of an order. Buyers used to learn of a
     refund only from their bank statement. Best-effort."""
@@ -444,12 +478,14 @@ async def send_cappe_order_refunded_email(
     html = _email_shell(f"Refund — {e_site}", body)
     text = (f"{site_name} refunded {'your order' if full else 'part of your order'}: {amount}. {note}"
             + (f"\nView your order: {order_url}" if order_url else ""))
-    await _send(to_email, to_name, f"Refund from {site_name}", html, text, label="order refunded")
+    await _send(to_email, to_name, f"Refund from {site_name}", html, text, label="order refunded",
+                from_name=store_from_name(site_name), reply_to=reply_to)
 
 
 async def send_cappe_order_shipped_email(
     to_email: str, to_name: str | None, site_name: str, items_summary: str,
     carrier: str | None, tracking_number: str | None, order_url: str | None, shipped: bool,
+*, reply_to: str | None = None,
 ) -> None:
     """The order shipped (`shipped`, with tracking when given) or is ready (a
     digital/service order fulfilled). Shipping used to be an app push only, so
@@ -473,7 +509,8 @@ async def send_cappe_order_shipped_email(
     text = (f"{lead.replace(e_site, site_name or '')} {items_summary}."
             + (f"\nTracking: {track}" if track else "") + (f"\n\n{order_url}" if order_url else ""))
     subject = f"Shipped — {site_name}" if shipped else f"Ready — {site_name}"
-    await _send(to_email, to_name, subject, html, text, label="order shipped")
+    await _send(to_email, to_name, subject, html, text, label="order shipped",
+                from_name=store_from_name(site_name), reply_to=reply_to)
 
 
 async def send_cappe_order_alert_email(
@@ -715,7 +752,7 @@ _INTERVAL_WORD = {"week": "every week", "month": "every month"}
 async def send_cappe_subscription_started_email(
     to_email: str, to_name: str | None, site_name: str, items_summary: str,
     total_cents: int, currency: str, interval: str, account_url: str | None = None,
-) -> None:
+*, reply_to: str | None = None) -> None:
     """Confirm a new subscription: what, how much, how often, how to stop.
     The shopper used to get only a receipt, which says none of the last two.
     Best-effort."""
@@ -738,7 +775,8 @@ async def send_cappe_subscription_started_email(
         f"Cancel any time from your account with {site_name}; it stops before the next charge."
         + (f"\nManage your subscription: {account_url}" if account_url else "")
     )
-    await _send(to_email, to_name, f"Subscription started — {site_name}", html, text, label="subscription started")
+    await _send(to_email, to_name, f"Subscription started — {site_name}", html, text, label="subscription started",
+                from_name=store_from_name(site_name), reply_to=reply_to)
 
 
 def _account_link(account_url: str | None, label: str) -> str:
@@ -750,7 +788,7 @@ def _account_link(account_url: str | None, label: str) -> str:
 
 async def send_cappe_subscription_payment_failed_email(
     to_email: str, to_name: str | None, site_name: str, items_summary: str, account_url: str | None = None,
-) -> None:
+*, reply_to: str | None = None) -> None:
     """A renewal could not be charged. Sent once per invoice. Best-effort."""
     e_site = escape(site_name or "")
     body = (
@@ -769,12 +807,13 @@ async def send_cappe_subscription_payment_failed_email(
         f"It will be retried over the next few days; if it keeps failing, the subscription ends. "
         + (f"Update your card: {account_url}" if account_url else f"Contact {site_name} to update your card.")
     )
-    await _send(to_email, to_name, f"Payment failed — {site_name}", html, text, label="subscription payment failed")
+    await _send(to_email, to_name, f"Payment failed — {site_name}", html, text, label="subscription payment failed",
+                from_name=store_from_name(site_name), reply_to=reply_to)
 
 
 async def send_cappe_subscription_cancelled_email(
     to_email: str, to_name: str | None, site_name: str, items_summary: str,
-) -> None:
+*, reply_to: str | None = None) -> None:
     """A subscription has ended (cancelled by anyone, or after failed
     payments). Sent once. Best-effort."""
     e_site = escape(site_name or "")
@@ -786,7 +825,8 @@ async def send_cappe_subscription_cancelled_email(
     )
     html = _email_shell(f"Subscription ended — {e_site}", body)
     text = f"Your subscription with {site_name} ({items_summary}) has ended. You won't be charged for it again."
-    await _send(to_email, to_name, f"Subscription ended — {site_name}", html, text, label="subscription cancelled")
+    await _send(to_email, to_name, f"Subscription ended — {site_name}", html, text, label="subscription cancelled",
+                from_name=store_from_name(site_name), reply_to=reply_to)
 
 
 # ── transactional: creator marketplace collabs ───────────────────────────────

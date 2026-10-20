@@ -22,7 +22,8 @@ from fastapi import HTTPException, status
 
 from ...core.services.redis_cache import check_rate_limit
 from ...database import get_connection
-from .common import loads_list, order_page_url, site_origins, url_within_origins
+from .common import loads_list, order_page_url, site_origins, site_public_origin, url_within_origins
+from .policies import checkout_note
 from .discounts import apply_discount_cents, best_discount_percent, fetch_active_discounts, site_today
 from .email import (
     build_order_items_summary,
@@ -30,6 +31,7 @@ from .email import (
     send_cappe_low_stock_email,
     send_cappe_order_alert_email,
     send_cappe_order_receipt_email,
+    store_reply_to,
 )
 from .inventory import log_adjustment as _inv_log
 from .booking_lifecycle import booking_lock_key, lock_booking_resource
@@ -558,6 +560,7 @@ def bind_return_urls(success_url, cancel_url, site, token):
 async def open_order_checkout(
     *, order, line_rows, owner, owner_ent, success_url, cancel_url, email,
     shopper=None, has_physical, tax_label, shipping_label, line_discounts=None,
+    collect_phone=False, submit_note=None,
 ):
     """Open a Stripe Checkout page for an existing order and record it as the
     order's current page. Shared by order creation and by "Pay now" on an order
@@ -605,6 +608,9 @@ async def open_order_checkout(
         # anywhere else would ship somewhere the shipping and tax weren't for.
         ship_countries=[order["ship_country"]] if collect and order.get("ship_country") else None,
         expires_in_seconds=CONNECT_CHECKOUT_TTL_SECONDS,
+        # The store's own asks: a phone number, and what paying agrees to.
+        collect_phone=bool(collect_phone),
+        submit_note=submit_note,
         shipping_option=(
             {
                 "label": label if order["shipping_cents"] > 0 else "Free shipping",
@@ -651,7 +657,8 @@ async def pay_for_order(token: str) -> dict:
                       o.tax_included, o.shipping_tax_cents,
                       o.pay_by IS NOT NULL AND o.pay_by < NOW() AS overdue,
                       s.name AS site_name, s.slug, s.subdomain, s.custom_domain,
-                      s.tax_label, s.shipping_label,
+                      s.tax_label, s.shipping_label, s.collect_phone,
+                      ARRAY(SELECT kind FROM cappe_site_policies WHERE site_id = s.id) AS policy_kinds,
                       a.id AS owner_id, a.plan, a.status AS owner_status, a.email AS owner_email,
                       a.name AS owner_name, a.stripe_account_id, a.stripe_charges_enabled
                  FROM cappe_orders o
@@ -705,6 +712,8 @@ async def pay_for_order(token: str) -> dict:
         has_physical=any(it["fulfillment"] == "physical" for it in items),
         tax_label=row["tax_label"] or "Tax", shipping_label=row["shipping_label"] or "Shipping",
         line_discounts=[int(it.get("promo_discount_cents") or 0) for it in items],
+        collect_phone=row.get("collect_phone"),
+        submit_note=checkout_note(row["site_name"], site_public_origin(site), row.get("policy_kinds")),
     )
     return {"checkout_url": sess.get("url")}
 
@@ -1014,10 +1023,13 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
             tax_cfg = await conn.fetchrow(
                 "SELECT tax_rate_bps, tax_label, shipping_flat_cents, "
                 "shipping_free_threshold_cents, shipping_label, home_country, "
-                "handling_days_min, handling_days_max, prices_include_tax, tax_on_shipping "
+                "handling_days_min, handling_days_max, prices_include_tax, tax_on_shipping, collect_phone, "
+                "ARRAY(SELECT kind FROM cappe_site_policies WHERE site_id = $1) AS policy_kinds "
                 "FROM cappe_sites WHERE id = $1", site["id"]
             )
             cfg = dict(tax_cfg) if tax_cfg else {}
+            # What the payment page says paying agrees to (the store's policies).
+            submit_note = checkout_note(site.get("name"), site_public_origin(site), cfg.get("policy_kinds"))
             tax_label = cfg.get("tax_label") or "Tax"
             shipping_label = cfg.get("shipping_label") or "Shipping"
             has_physical = any(f == "physical" for (_p, _t, _u, _q, f, *_r) in line_rows)
@@ -1142,7 +1154,7 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
                 order=order, line_rows=line_rows, owner=owner, owner_ent=owner_ent,
                 success_url=success_url, cancel_url=cancel_url, email=email, shopper=shopper,
                 has_physical=has_physical, tax_label=tax_label, shipping_label=shipping_label,
-                line_discounts=shares,
+                line_discounts=shares, collect_phone=cfg.get("collect_phone"), submit_note=submit_note,
             )
             checkout_url = sess.get("url")
         except CappeStripeError as exc:
@@ -1178,6 +1190,7 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
                 order_page_url(site, order["access_token"]),
                 # Who settles the money next, which the email has to say.
                 "free" if order["subtotal_cents"] <= 0 else ("card_after_approval" if takes_cards else "store"),
+                reply_to=store_reply_to(site.get("meta_config"), owner["email"] if owner else None),
             )
         if owner and owner["email"]:
             background.add_task(

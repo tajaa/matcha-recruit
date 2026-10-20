@@ -121,6 +121,11 @@ export type CappeSite = {
   /** Business days to get an order out of the door, added to each delivery estimate. */
   handling_days_min?: number | null
   handling_days_max?: number | null
+  /** Who is selling, on every receipt; and whether Stripe asks buyers for a phone. */
+  legal_name?: string | null
+  business_address?: string | null
+  tax_id?: string | null
+  collect_phone?: boolean
   listed?: boolean
   directory_category?: string | null
   directory_tags?: string[]
@@ -1014,6 +1019,8 @@ export type CappeClient = {
   has_thread: boolean
   is_imported?: boolean
   total_spent_cents: number
+  /** What total_spent_cents is in: the store's currency. */
+  currency?: string
   last_activity: string | null
   location_id?: string | null
   location_name?: string | null
@@ -1401,6 +1408,22 @@ export type EarningsRow = {
   status: string
   paid_at: string | null
 }
+
+// --- Store policies --------------------------------------------------------------
+
+export type CappePolicy = {
+  kind: 'refund' | 'shipping' | 'terms' | 'privacy'
+  title: string
+  /** On the store: /policies/<kind>. */
+  path: string
+  /** Our starting text — a prompt to edit, not legal advice. */
+  starter: string
+  /** null = not published. */
+  body: string | null
+  updated_at: string | null
+}
+
+export type CappePolicies = { policies: CappePolicy[] }
 
 // --- Shipping zones ------------------------------------------------------------
 
