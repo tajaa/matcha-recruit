@@ -11,6 +11,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
+from email.utils import formataddr
 from pathlib import Path
 from typing import Optional
 
@@ -159,8 +160,12 @@ class EmailService(
         """The base64url RFC 822 message the Gmail API sends."""
         msg = MIMEMultipart("alternative") if not attachments else MIMEMultipart("mixed")
         msg["Subject"] = subject
-        msg["From"] = f"{from_name or self.from_name} <{self.from_email}>"
-        msg["To"] = f"{to_name} <{to_email}>" if to_name else to_email
+        # formataddr quotes and RFC 2047-encodes the display name on its own;
+        # a hand-built "<name> <addr>" with any non-ASCII character (a store
+        # called "Café Lumen", a buyer called José) gets encoded whole,
+        # address included, and the header no longer names an address.
+        msg["From"] = formataddr((from_name or self.from_name or "", self.from_email))
+        msg["To"] = formataddr((to_name, to_email)) if to_name else to_email
         if extra_headers:
             for name, value in extra_headers.items():
                 msg[name] = value

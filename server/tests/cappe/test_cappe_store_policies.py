@@ -164,7 +164,10 @@ def _wire(monkeypatch, *, policy=None, kinds=("refund", "terms")):
         ("FROM cappe_sites WHERE subdomain", SITE_ROW),
         ("SELECT title, slug, content FROM cappe_pages", {"title": "Home", "slug": "home", "content": '{"blocks": []}'}),
         ("FROM cappe_pages", [{"slug": "home", "title": "Home", "updated_at": NOW}]),
-        ("SELECT body, updated_at FROM cappe_site_policies", policy),
+        # The policy page reads every row once: its own body and the footer's list.
+        ("SELECT kind, body, updated_at FROM cappe_site_policies",
+         [{"kind": "refund", **policy}] + [{"kind": k, "body": "x", "updated_at": NOW} for k in kinds if k != "refund"]
+         if policy else []),
         ("SELECT kind, updated_at FROM cappe_site_policies", [{"kind": k, "updated_at": NOW} for k in kinds]),
         ("SELECT kind FROM cappe_site_policies", [{"kind": k} for k in kinds]),
     ])
@@ -185,6 +188,8 @@ def test_a_policy_has_its_own_page(monkeypatch):
     assert "Within &lt;b&gt;30&lt;/b&gt; days." in body and "Last updated 20 October 2026" in body
     assert 'rel="canonical" href="https://bloom.gummfit.com/policies/refund"' in body
     assert response.headers["content-security-policy"] == render_mod.TENANT_CSP
+    # The footer lists the store's other published policies from the same read.
+    assert 'href="/policies/terms"' in body
 
 
 def test_an_unpublished_or_unknown_policy_has_no_page(monkeypatch):
@@ -500,6 +505,8 @@ def test_clients_carry_the_stores_currency():
     assert clients_routes._client_from_row(row, "EUR").currency == "EUR"
     src = inspect.getsource(clients_routes)
     assert src.count("site_currency(site)") == 3
+    # Orders from before a currency change don't add to a total labelled in the new one.
+    assert "CASE WHEN upper(currency) = (SELECT upper(currency) FROM cappe_sites WHERE id = $1)" in clients_routes._CLIENTS_SQL
 
 
 def test_the_migration_chains_and_adds_everything_it_says():
@@ -515,3 +522,4 @@ def test_dev_refreshes_scrub_billing_addresses():
     sql = (ROOT / "scripts" / "sql" / "anonymize_dev.sql").read_text()
     assert "UPDATE cappe_orders SET billing_address = NULL WHERE billing_address IS NOT NULL" in sql
     assert "column_name = 'billing_address'" in sql
+    assert "UPDATE cappe_sites SET" in sql and "tax_id           = CASE WHEN tax_id IS NOT NULL" in sql

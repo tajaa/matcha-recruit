@@ -239,6 +239,14 @@ def test_shared_builders_keep_the_boolean_sends_wire_format():
     parsed = email.message_from_bytes(base64.urlsafe_b64decode(raw))
     assert parsed["From"] == "Espresso <espresso@example.com>" and parsed["To"] == "Owner <owner@example.com>"
     assert parsed["List-Unsubscribe"] and parsed.get_content_type() == "multipart/mixed"
+    # A non-ASCII display name is encoded on its own: the header still names the address.
+    from email.header import decode_header, make_header
+    from email.utils import parseaddr
+    accented = email.message_from_bytes(base64.urlsafe_b64decode(
+        made._mime_raw("jose@example.com", "José", "Subject", "<p>h</p>", "t", from_name="Café Lumen")))
+    for header, name, addr in (("From", "Café Lumen", "espresso@example.com"), ("To", "José", "jose@example.com")):
+        shown, address = parseaddr(accented[header])
+        assert address == addr and str(make_header(decode_header(shown))) == name
     assert [part.get_filename() for part in parsed.walk() if part.get_filename()] == ["receipt.pdf"]
     payload = made._mailersend_payload("owner@example.com", None, "Subject", "<p>h</p>", None, attachments=[attachment])
     assert payload["to"] == [{"email": "owner@example.com", "name": "owner@example.com"}]

@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 
 from ...core.services.email import _is_reserved_test_domain
 from ...core.services.email.client import get_email_service
+from .common import loads
 
 logger = logging.getLogger(__name__)
 
@@ -35,11 +36,9 @@ def store_from_name(site_name: str | None) -> str:
 def store_reply_to(meta_config, owner_email: str | None = None) -> str | None:
     """Where a buyer's reply goes: the store's public contact address (its
     footer's), else the owner's login. A reply used to reach us."""
-    meta = meta_config if isinstance(meta_config, dict) else {}
-    if not meta and isinstance(meta_config, str):
-        from .common import loads
-        meta = loads(meta_config)
-    return (meta.get("contact_email") or "").strip() or (owner_email or "").strip() or None
+    contact = loads(meta_config).get("contact_email")
+    contact = contact.strip() if isinstance(contact, str) else ""
+    return contact or (owner_email or "").strip() or None
 
 
 async def send_cappe_shopper_code_email(to_email: str, site_name: str, code: str):

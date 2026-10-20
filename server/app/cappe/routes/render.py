@@ -543,13 +543,14 @@ async def policy_page(kind: str, request: Request):
         nav = await _nav(conn, site["id"])
         if not nav:
             return _not_found_html("Site not found")
-        row = await conn.fetchrow(
-            "SELECT body, updated_at FROM cappe_site_policies WHERE site_id = $1 AND kind = $2",
-            site["id"], kind,
+        # One read gives both this page and the footer's list of the others.
+        rows = await conn.fetch(
+            "SELECT kind, body, updated_at FROM cappe_site_policies WHERE site_id = $1", site["id"],
         )
-        if row is None:
-            return _not_found_html("Page not found")
-        kinds = await policy_kinds(conn, site["id"])
+    row = next((r for r in rows if r["kind"] == kind), None)
+    if row is None:
+        return _not_found_html("Page not found")
+    kinds = [r["kind"] for r in rows]
     html = render_policy_page(_site_dict(site, kinds), nav, kind, row["body"], updated_at=row["updated_at"],
                               origin=site_public_origin(site) or f"https://{_norm_host(host)}")
     if redis:
@@ -744,8 +745,9 @@ async def account_page(request: Request):
             "ORDER BY sort_order, created_at",
             site["id"],
         )
+        kinds = await policy_kinds(conn, site["id"])
     html = render_account_page(
-        {**_site_dict(site), "timezone": site["timezone"]},
+        {**_site_dict(site, kinds), "timezone": site["timezone"]},
         [{"slug": r["slug"], "title": r["title"]} for r in nav_rows],
     )
     return HTMLResponse(html, headers={**tenant_security_headers(), **_ORDER_PAGE_HEADERS})

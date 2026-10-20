@@ -72,8 +72,11 @@ def _clients_sql(filter_email: bool = False) -> str:
     where_clause = "WHERE t.email = $2\n" if filter_email else ""
     return f"""
 WITH touch AS (
+    -- Spent is counted in the store's currency, which the response labels it
+    -- with: an order from before a currency change isn't added to it.
     SELECT lower(customer_email) AS email, customer_name AS name, 'order' AS kind,
-           subtotal_cents AS amount, created_at AS ts
+           CASE WHEN upper(currency) = (SELECT upper(currency) FROM cappe_sites WHERE id = $1)
+                THEN subtotal_cents ELSE 0 END AS amount, created_at AS ts
     FROM cappe_orders WHERE site_id = $1 AND customer_email IS NOT NULL
       AND status IN ('paid', 'fulfilled')
     UNION ALL
@@ -128,8 +131,9 @@ _CLIENTS_SQL = _clients_sql()
 
 
 def _client_from_row(r, currency: str) -> CappeClient:
-    """`currency` is the store's: what `total_spent_cents` is in (every order
-    is — services/shipping.py: one store, one currency)."""
+    """`currency` is the store's: what `total_spent_cents` is in. A store can
+    change currency (routes/sites.py), so the SQL sums only the orders in the
+    current one."""
     return CappeClient(
         currency=currency,
         email=r["email"], name=r["name"], phone=r["phone"],

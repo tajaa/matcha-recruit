@@ -8,6 +8,8 @@ import base64
 import logging
 import os
 from email import message_from_bytes
+from email.header import decode_header, make_header
+from email.utils import parseaddr
 
 os.environ.setdefault("LIVE_API", "test-key")
 os.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost/test")
@@ -184,6 +186,19 @@ def test_a_reply_reaches_the_stores_contact_address_else_the_owner():
     assert email_mod.store_reply_to('{"contact_email": "hi@lumen.test"}') == "hi@lumen.test"
     assert email_mod.store_reply_to({}, "owner@lumen.test") == "owner@lumen.test"
     assert email_mod.store_reply_to(None, None) is None
+    # A contact_email that isn't text falls back instead of raising inside a route.
+    assert email_mod.store_reply_to({"contact_email": ["hi@lumen.test"]}, "owner@lumen.test") == "owner@lumen.test"
+
+
+def test_a_non_ascii_store_or_buyer_name_keeps_its_address(monkeypatch):
+    svc = _service(monkeypatch, gmail=True)
+    assert asyncio.run(svc.send_email_with_fallback(
+        to_email="owner@example.com", to_name="José Pérez", subject="s", html_content="<p>h</p>",
+        from_name="Café Lumen via Gummfit")) is True
+    msg = message_from_bytes(base64.urlsafe_b64decode(_HttpClient.posts[0][1]["raw"]))
+    assert parseaddr(msg["From"])[1] == "sender@example.com"
+    assert str(make_header(decode_header(parseaddr(msg["From"])[0]))) == "Café Lumen via Gummfit"
+    assert parseaddr(msg["To"])[1] == "owner@example.com"
 
 
 def test_buyer_order_mail_is_sent_as_the_store(monkeypatch):
