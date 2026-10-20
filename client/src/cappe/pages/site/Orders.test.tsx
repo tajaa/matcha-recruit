@@ -343,6 +343,27 @@ describe('Orders — the detail view', () => {
     expect(screen.queryByRole('textbox', { name: 'Tracking number' })).not.toBeInTheDocument()
   })
 
+  it('says a pickup is collected, where, and names the option in the totals', async () => {
+    await openOrder({
+      shipping_method: 'pickup', shipping_rate_label: 'Shop counter', shipping_instructions: '12 Market St, 9–5',
+      shipping_cents: 150, total_cents: 4150,
+    })
+    expect(screen.getByText('pickup')).toBeInTheDocument()             // the list badge
+    expect(screen.getByText('Pickup — Shop counter')).toBeInTheDocument()
+    expect(screen.getByText('12 Market St, 9–5')).toBeInTheDocument()
+    expect(screen.getByText('Shop counter', { selector: 'dt' }).nextSibling?.textContent).toBe('$1.50')
+  })
+
+  it('heads a local delivery’s address “Deliver to”', async () => {
+    await openOrder({
+      shipping_method: 'local_delivery', shipping_rate_label: 'Bike courier',
+      shipping_address: { name: 'Ann', address: { line1: '1 Valencia', postal_code: '94110' } },
+    })
+    expect(screen.getByText('local delivery')).toBeInTheDocument()
+    expect(screen.getByText(/Deliver to/)).toBeInTheDocument()
+    expect(screen.getByText('· Bike courier')).toBeInTheDocument()
+  })
+
   it('still shows tracking already recorded on a refunded order', async () => {
     await openOrder({ status: 'refunded', carrier: 'UPS', tracking_number: '1Z9' })
     expect(screen.queryByRole('textbox', { name: 'Tracking number' })).not.toBeInTheDocument()

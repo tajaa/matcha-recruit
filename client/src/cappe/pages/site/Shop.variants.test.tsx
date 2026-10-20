@@ -106,6 +106,36 @@ describe('Shop — pictures and the product address', () => {
   })
 })
 
+describe('Shop — what a delivery option prices', () => {
+  it('sends the weight in grams, the extra per item and ships-free', async () => {
+    api.put.mockResolvedValue(tee)
+    renderShop()
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit Tee' }))
+    // No store country reported (the card is mocked): kilograms.
+    fireEvent.change(screen.getByRole('textbox', { name: 'Weight per item (kg)' }), { target: { value: '1,5' } })
+    fireEvent.change(screen.getByRole('textbox', { name: 'Extra shipping per item (USD)' }), { target: { value: '2' } })
+    fireEvent.click(screen.getByRole('button', { name: /Save changes/ }))
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1))
+    expect(api.put.mock.calls[0][1]).toMatchObject({ weight_g: 1500, shipping_surcharge_cents: 200, ships_free: false })
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit Tee' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: /Ships free/ }))
+    expect(screen.getByRole('textbox', { name: 'Weight per item (kg)' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: /Save changes/ }))
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(2))
+    expect(api.put.mock.calls[1][1].ships_free).toBe(true)
+  })
+
+  it('refuses a weight it cannot read', async () => {
+    renderShop()
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit Tee' }))
+    fireEvent.change(screen.getByRole('textbox', { name: 'Weight per item (kg)' }), { target: { value: '2kg' } })
+    fireEvent.click(screen.getByRole('button', { name: /Save changes/ }))
+    expect(await screen.findByText(/Enter the weight in kg/)).toBeInTheDocument()
+    expect(api.put).not.toHaveBeenCalled()
+  })
+})
+
 describe('Shop — what the plan sells', () => {
   it('says which products shoppers cannot buy and does not offer that kind', async () => {
     renderShop(plan('free', 'Free', ['booking', 'digital', 'service']))

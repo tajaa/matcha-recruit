@@ -14,17 +14,23 @@ def unit_price(product, groups, selected_ids, discount_percent=0, variant=None):
     return apply_discount_cents(base, discount_percent), snapshot
 
 
-def cart_totals(lines, site, destination=None):
-    """Subtotal, tax, shipping and total for priced lines.
+def cart_totals(lines, site, destination=None, *, load=None, rate_id=None, strict=False):
+    """Subtotal, tax, shipping and total for priced lines, and the delivery
+    options the physical lines can take.
 
     `destination` (services/shipping.Destination) is where the physical lines
     ship; None means the store's home country, the only place it shipped to
     before zones. Tax is the store's rate on physical goods, charged at home
     and in a zone only when that zone says so.
+
+    `load` (shipping.ShipLoad) is what the physical lines weigh and count;
+    without one every physical unit counts and weighs nothing. `rate_id` is
+    the option the buyer picked (default: the first). `strict` is placing an
+    order: an option that no longer applies, or none at all, is refused
+    rather than priced.
     """
-    from .commerce import compute_shipping_cents
     from .promos import line_total
-    from .shipping import home_destination
+    from .shipping import ShipLoad, choose_option, handling_days, home_destination, no_delivery_option, shipping_options
 
     # A promo code's share of a line comes off before tax and shipping.
     dest = destination or home_destination(site)
@@ -32,14 +38,21 @@ def cart_totals(lines, site, destination=None):
     physical = [line for line in lines if line["fulfillment"] == "physical"]
     taxable = sum(line_total(line) for line in physical)
     tax = taxable * int(site.get("tax_rate_bps") or 0) // 10000 if dest.charge_tax else 0
-    shipping = compute_shipping_cents(
-        has_physical=bool(physical), goods_subtotal_cents=taxable,
-        flat_cents=dest.flat_cents, free_threshold_cents=dest.free_threshold_cents,
-    )
+    options, chosen = [], None
+    if physical:
+        options = shipping_options(
+            dest, load or ShipLoad(units=sum(int(line["quantity"]) for line in physical)), taxable,
+            label=site.get("shipping_label") or "Shipping", handling=handling_days(site),
+        )
+        chosen = choose_option(options, rate_id, strict=strict)
+        if chosen is None and strict:
+            raise no_delivery_option()
+    shipping = chosen["amount_cents"] if chosen else 0
     if subtotal + tax + shipping > 99_999_999:
         raise HTTPException(422, "Cart total exceeds the checkout limit")
     return {"subtotal_cents": subtotal, "tax_cents": tax, "shipping_cents": shipping,
-            "total_cents": subtotal + tax + shipping}
+            "total_cents": subtotal + tax + shipping,
+            "shipping_options": options, "shipping_option": chosen}
 
 
 def priceable_products(rows, option_groups, discounts, on_date, variants=None):
@@ -65,11 +78,15 @@ def priceable_products(rows, option_groups, discounts, on_date, variants=None):
     }
 
 
-def price_cart(products_by_id, items, site, destination=None, promo=None, on_date=None):
+def price_cart(products_by_id, items, site, destination=None, promo=None, on_date=None, *,
+               rate_id=None, postal_code=None):
     """Read-only quote; unavailable lines remain visible for cart repair.
 
     `promo` (a code row, or None) is applied to the available lines that carry
-    no automatic discount; the result says whether it applied and why not."""
+    no automatic discount; the result says whether it applied and why not.
+    `rate_id` / `postal_code` pick and place the delivery option (cart_totals)."""
+    from .shipping import ship_load
+
     # Each line's variant first: stock is checked against what the WHOLE bag
     # takes from a product, a variant and an option, not line by line.
     matched: list = []
@@ -132,7 +149,13 @@ def price_cart(products_by_id, items, site, destination=None, promo=None, on_dat
     extra = {}
     if promo is not None:
         extra["promo"] = apply_promo(lines, promo, products_by_id, items, on_date, currency)
-    return {"lines": lines, **cart_totals(lines, site, destination), "currency": currency, **extra}
+    load = ship_load(
+        ((products_by_id.get(item.product_id), item.quantity)
+         for item, line in zip(items, lines) if line["fulfillment"] == "physical"),
+        postal_code,
+    )
+    totals = cart_totals(lines, site, destination, load=load, rate_id=rate_id)
+    return {"lines": lines, **totals, "currency": currency, **extra}
 
 
 def promo_eligible(product, line) -> bool:

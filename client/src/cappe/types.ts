@@ -115,6 +115,9 @@ export type CappeSite = {
   home_country?: string
   /** What the store charges in; every product follows it. */
   currency?: string
+  /** Business days to get an order out of the door, added to each delivery estimate. */
+  handling_days_min?: number | null
+  handling_days_max?: number | null
   listed?: boolean
   directory_category?: string | null
   directory_tags?: string[]
@@ -506,6 +509,10 @@ export type CappeProduct = {
   gtin?: string | null
   /** Pictures in order; the first is the cover `image_url` mirrors. */
   images?: CappeProductImage[]
+  /** What a delivery option prices: grams per unit, an extra per unit, or never counted. */
+  weight_g?: number | null
+  shipping_surcharge_cents?: number
+  ships_free?: boolean
   url?: string | null
   created_at: string
   updated_at: string
@@ -535,6 +542,9 @@ export type CappeProductInput = {
   brand?: string | null
   gtin?: string | null
   images?: { url: string; alt: string | null }[]
+  weight_g?: number | null
+  shipping_surcharge_cents?: number
+  ships_free?: boolean
 }
 
 export type CappeOrderItem = {
@@ -604,6 +614,13 @@ export type CappeOrder = {
   shipping_address?: CappeShippingAddress | null
   /** Where a physical order was priced to ship. */
   ship_country?: string | null
+  /** How the buyer chose to get it, that option's name and estimate then,
+   *  and pickup's where-and-when. Orders from before delivery options shipped. */
+  shipping_method?: CappeShippingMethod
+  shipping_rate_label?: string | null
+  delivery_min_days?: number | null
+  delivery_max_days?: number | null
+  shipping_instructions?: string | null
   /** The refund ledger (detail view only). */
   refunds?: CappeOrderRefund[]
   /** The promo code the buyer used and what it took off (subtotal is after it). */
@@ -1380,6 +1397,32 @@ export type EarningsRow = {
 
 // --- Shipping zones ------------------------------------------------------------
 
+export type CappeShippingMethod = 'ship' | 'pickup' | 'local_delivery'
+
+/** One way to get an order: shipped, picked up, or delivered locally. The
+ *  first of a destination's options is the bag's default. */
+export type CappeShippingRateInput = {
+  name: string
+  method: CappeShippingMethod
+  amount_cents: number
+  /** Added for each item after the first (not for pickup). */
+  per_item_cents: number
+  min_subtotal_cents: number | null
+  max_subtotal_cents: number | null
+  min_weight_g: number | null
+  max_weight_g: number | null
+  free_over_cents: number | null
+  /** Business days in transit, on top of the store's handling time. */
+  delivery_min_days: number | null
+  delivery_max_days: number | null
+  /** Local delivery: postal codes (prefixes) it covers; empty = anywhere. */
+  postal_codes: string[]
+  /** Pickup: where and when. */
+  instructions: string | null
+}
+
+export type CappeShippingRate = CappeShippingRateInput & { id: string; sort_order: number }
+
 /** A destination beyond the store's home country, with its own rates. */
 export type CappeShippingZoneInput = {
   name: string
@@ -1390,9 +1433,11 @@ export type CappeShippingZoneInput = {
   free_threshold_cents: number | null
   /** Charge the store's tax rate on goods shipped here. */
   charge_tax: boolean
+  /** The zone's delivery options; omitted = keep what it had. */
+  rates?: CappeShippingRateInput[]
 }
 
-export type CappeShippingZone = CappeShippingZoneInput & { id: string; sort_order: number }
+export type CappeShippingZone = CappeShippingZoneInput & { id: string; sort_order: number; rates: CappeShippingRate[] }
 
 export type CappeShippingZones = {
   /** Whether the plan includes zones; saved zones are paused when it doesn't. */
@@ -1402,6 +1447,8 @@ export type CappeShippingZones = {
   /** Every country a zone can name. */
   countries: string[]
   zones: CappeShippingZone[]
+  /** The home country's delivery options. */
+  home_rates: CappeShippingRate[]
 }
 
 // --- Finances ------------------------------------------------------------------

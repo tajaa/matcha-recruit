@@ -52,7 +52,7 @@ def test_subscription_math_includes_options_discount_tax_and_shipping():
         {"tax_rate_bps": 1000, "shipping_flat_cents": 500, "shipping_free_threshold_cents": 3000},
     )
     assert snapshot[0]["unit_price_cents"] == 1080  # (1000 + 200) less 10%
-    assert totals == {
+    assert {k: v for k, v in totals.items() if not k.startswith("shipping_option")} == {
         "subtotal_cents": 2160,
         "tax_cents": 216,
         "shipping_cents": 500,

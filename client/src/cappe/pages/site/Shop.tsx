@@ -16,6 +16,7 @@ import type {
   CappeProductVariantInput,
 } from '../../types'
 import { parseMoneyCents, parseSignedMoneyCents } from '../../utils/money'
+import { gramsFromText, textFromGrams, weightUnit, type WeightUnit } from '../../utils/weight'
 import { combinations, isVariantGroup, rowsFromProduct, variantPayload, type VariantRow } from '../../utils/variants'
 
 const STATUSES = ['active', 'draft', 'archived'] as const
@@ -48,7 +49,7 @@ type IntakeRow = { label: string; type: string; required: boolean; choices: stri
 // keeps option ids stable across a save (orders and the stock ledger point at them).
 type OptRow = { id?: string; name: string; price: string; stock: string }
 type OptGroupRow = { id?: string; name: string; select_type: 'single' | 'multi'; required: boolean; options: OptRow[] }
-const EMPTY = { name: '', description: '', price: '', sku: '', inventory: '', low_stock_threshold: '', digital_file_url: '', booking_type_id: '', category: '', slug: '', brand: '', gtin: '' }
+const EMPTY = { name: '', description: '', price: '', sku: '', inventory: '', low_stock_threshold: '', digital_file_url: '', booking_type_id: '', category: '', slug: '', brand: '', gtin: '', weight: '', surcharge: '' }
 
 const stockText = (value: number | null | undefined) => (value == null ? '' : String(value))
 const sameSet = (a: string[], b: string[]) => [...a].sort().join() === [...b].sort().join()
@@ -60,6 +61,14 @@ export default function Shop() {
   const [currency, setCurrency] = useState('USD')
   // null until the shipping card reports the store's currency.
   const [siteCurrency, setSiteCurrency] = useState<string | null>(null)
+  // Where the store is based (Shipping & currency card): weights are typed in its unit.
+  const [homeCountry, setHomeCountry] = useState<string | null>(null)
+  // The unit the form's weight was shown or first typed in, pinned so the
+  // store's country arriving (or changing) later can't re-read that text in
+  // another unit. null = nothing typed yet: follow the store.
+  const [formUnit, setFormUnit] = useState<WeightUnit | null>(null)
+  const unit = formUnit ?? weightUnit(homeCountry)
+  const [shipsFree, setShipsFree] = useState(false)
   const [bookingTypes, setBookingTypes] = useState<CappeBookingType[]>([])
   const [error, setError] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
@@ -120,6 +129,8 @@ export default function Shop() {
 
   function resetForm() {
     setForm(EMPTY)
+    setFormUnit(null)
+    setShipsFree(false)
     setIntake([])
     setOptionGroups([])
     setVariantRows({})
@@ -161,11 +172,15 @@ export default function Shop() {
       slug: product.slug || '',
       brand: product.brand || '',
       gtin: product.gtin || '',
+      weight: textFromGrams(product.weight_g, unit),
+      surcharge: product.shipping_surcharge_cents ? String(product.shipping_surcharge_cents / 100) : '',
       digital_file_url: product.digital_file_url || '',
       booking_type_id: product.booking_type_id || '',
       category: product.category || '',
     })
     setFulfillment(product.fulfillment)
+    setShipsFree(!!product.ships_free)
+    setFormUnit(unit)
     setRequireApproval(product.requires_approval)
     setIntervals(product.subscription_intervals || [])
     setSubscriptionDiscount(String((product.subscription_discount_bps || 0) / 100))
@@ -202,6 +217,16 @@ export default function Shop() {
     const priceCents = form.price.trim() === '' ? 0 : parseMoneyCents(form.price)
     if (priceCents === null) {
       setError('Enter the price as a plain amount, e.g. 29 or 29.99')
+      setAdding(false)
+      return
+    }
+    // What a delivery option prices this product by (physical only).
+    const weightG = gramsFromText(form.weight, unit)
+    const surchargeCents = form.surcharge.trim() === '' ? 0 : parseMoneyCents(form.surcharge)
+    if (fulfillment === 'physical' && (weightG === undefined || surchargeCents === null)) {
+      setError(weightG === undefined
+        ? `Enter the weight in ${unit} as a plain number, e.g. 1.5`
+        : 'Enter the extra shipping as a plain amount, e.g. 2 or 2.50')
       setAdding(false)
       return
     }
@@ -242,6 +267,7 @@ export default function Shop() {
             }))
           : [],
         category: form.category.trim() || null,
+        ...(physical ? { weight_g: weightG ?? null, shipping_surcharge_cents: surchargeCents ?? 0, ships_free: shipsFree } : {}),
       }
       const emptySelect = wantsIntake
         ? intake.find((f) => f.label.trim() && f.type === 'select' && !f.choices.split(',').some((c) => c.trim()))
@@ -392,6 +418,7 @@ export default function Shop() {
       <TaxSettingsCard siteId={siteId || ''} />
       <ShippingSettingsCard
         siteId={siteId || ''}
+        onHomeCountryChange={setHomeCountry}
         onCurrencyChange={(c) => {
           setCurrency(c)
           setSiteCurrency(c)
@@ -463,6 +490,12 @@ export default function Shop() {
           <div className="grid gap-3 sm:grid-cols-2">
             <input value={form.inventory} onChange={(e) => setForm({ ...form, inventory: e.target.value })} placeholder="Stock (blank = unlimited)" type="number" min="0" className={input} />
             <input value={form.low_stock_threshold} onChange={(e) => setForm({ ...form, low_stock_threshold: e.target.value })} placeholder="Low-stock alert at… (optional)" type="number" min="0" className={input} />
+            <input value={form.weight} onChange={(e) => { setFormUnit(unit); setForm({ ...form, weight: e.target.value }) }} placeholder={`Weight per item, ${unit} (optional)`} aria-label={`Weight per item (${unit})`} inputMode="decimal" disabled={shipsFree} className={input} />
+            <input value={form.surcharge} onChange={(e) => setForm({ ...form, surcharge: e.target.value })} placeholder={`Extra shipping per item, ${currency} (optional)`} aria-label={`Extra shipping per item (${currency})`} inputMode="decimal" disabled={shipsFree} className={input} />
+            <label className="flex items-center gap-2 text-xs text-zinc-300 sm:col-span-2">
+              <input type="checkbox" checked={shipsFree} onChange={(e) => setShipsFree(e.target.checked)} />
+              Ships free — never adds to the shipping cost (the weight and extra above are ignored)
+            </label>
             {editing && (
               <p className="text-xs text-zinc-500 sm:col-span-2">
                 Changing a stock number here is recorded in the product&apos;s stock history. For a delivery, damage or a

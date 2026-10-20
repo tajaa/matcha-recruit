@@ -46,7 +46,9 @@ from .entitlements import (
 )
 from .stripe_connect import CONNECT_CHECKOUT_TTL_SECONDS, CappeStripeError, get_cappe_stripe
 from .cart import cart_totals
-from .shipping import home_country, load_zones, not_shippable, resolve_destination
+from .shipping import (
+    FLAT_RATE_ID, home_country, load_rates, load_zones, not_shippable, resolve_destination, ship_load,
+)
 from .promos import allocate as allocate_promo, evaluate as evaluate_promo, find_code, normalize_code
 from .promos import redeem as redeem_promo, refuse as refuse_promo, used_by as promo_used_by
 
@@ -90,13 +92,14 @@ def crossed_low_stock(before: int, after: int, threshold: Optional[int]) -> bool
 
 def build_stripe_line_items(
     line_rows: Iterable[tuple], currency: str, tax_cents: int, tax_label: str,
-    line_discounts: Optional[Sequence[int]] = None,
+    line_discounts: Optional[Sequence[int]] = None, shipping: Optional[tuple[str, int]] = None,
 ) -> list[dict]:
     """Cart lines as Stripe `price_data` line items, plus tax as its own line
     (shipping rides `shipping_options`, not a line item — see
-    build_shipping_options). Sum of these unit_amount×quantity equals
-    `subtotal_cents + tax_cents`; adding `shipping_cents` from
-    `shipping_options` brings the charge to `total_cents`.
+    build_shipping_options — except when Stripe isn't asked for an address:
+    pass `shipping` (label, cents) and it is a line too). Sum of these
+    unit_amount×quantity equals `subtotal_cents + tax_cents`; adding
+    `shipping_cents` from `shipping_options` brings the charge to `total_cents`.
 
     A line a promo code discounted is sent as ONE item at its discounted total
     ("Mug × 2"): its share doesn't always divide by the quantity, and Stripe
@@ -128,23 +131,16 @@ def build_stripe_line_items(
             },
             "quantity": 1,
         })
+    if shipping and shipping[1] > 0:
+        line_items.append({
+            "price_data": {
+                "currency": currency,
+                "unit_amount": int(shipping[1]),
+                "product_data": {"name": (shipping[0] or "Shipping")[:120]},
+            },
+            "quantity": 1,
+        })
     return line_items
-
-
-def compute_shipping_cents(
-    *, has_physical: bool, goods_subtotal_cents: int, flat_cents: int,
-    free_threshold_cents: int | None,
-) -> int:
-    """Flat per-site shipping for carts with a paid physical line; zero when the
-    free-shipping threshold is met. Both the gate and the threshold compare the
-    GOODS subtotal (physical lines, pre-tax) — the same base the tax math uses,
-    and what "free shipping over $50" means to a buyer. A goods subtotal of 0
-    (giveaway item, or a cart Stripe will never charge for) never ships paid."""
-    if not has_physical or flat_cents <= 0 or goods_subtotal_cents <= 0:
-        return 0
-    if free_threshold_cents is not None and goods_subtotal_cents >= free_threshold_cents:
-        return 0
-    return flat_cents
 
 
 def _minute_multiplier(
@@ -576,9 +572,19 @@ async def open_order_checkout(
     # Per-plan take rate, computed ONCE here and handed to Stripe, so the number
     # persisted on the order is the same number Stripe actually takes.
     fee = entitlement_fee_cents(pay_total, owner_ent.platform_fee_bps)
+    # What the buyer chose to get it by (an order from before delivery options
+    # was always shipped). Stripe asks for an address only for a shipped one:
+    # a pickup needs none, and a local delivery's was typed (and its postal
+    # code checked) before it was priced.
+    method = order.get("shipping_method") or "ship"
+    label = order.get("shipping_rate_label") or shipping_label
+    collect = has_physical and method == "ship"
     # Tax as its own line so the charged amount equals the receipt total. The
     # platform fee stays on the goods subtotal.
-    line_items = build_stripe_line_items(line_rows, cur, order["tax_cents"], tax_label, line_discounts)
+    line_items = build_stripe_line_items(
+        line_rows, cur, order["tax_cents"], tax_label, line_discounts,
+        shipping=(label, order["shipping_cents"]) if has_physical and not collect else None,
+    )
     customer_id = None
     if shopper:
         from .shopper_customers import connected_customer
@@ -593,17 +599,19 @@ async def open_order_checkout(
         metadata={"order_id": str(order["id"]), "platform_fee_cents": str(fee)},
         customer_email=email or None,
         **({"customer_id": customer_id} if customer_id else {}),
-        collect_shipping_address=has_physical,
+        collect_shipping_address=collect,
         # The country the order was priced for, and only that one: an address
         # anywhere else would ship somewhere the shipping and tax weren't for.
-        ship_countries=[order["ship_country"]] if has_physical and order.get("ship_country") else None,
+        ship_countries=[order["ship_country"]] if collect and order.get("ship_country") else None,
         expires_in_seconds=CONNECT_CHECKOUT_TTL_SECONDS,
         shipping_option=(
             {
-                "label": shipping_label if order["shipping_cents"] > 0 else "Free shipping",
+                "label": label if order["shipping_cents"] > 0 else "Free shipping",
                 "amount_cents": order["shipping_cents"],
+                # The estimate the bag showed, for Stripe's own delivery line.
+                **{k: order[k] for k in ("delivery_min_days", "delivery_max_days") if order.get(k) is not None},
             }
-            if has_physical else None
+            if collect else None
         ),
     )
     async with get_connection() as conn:
@@ -638,6 +646,7 @@ async def pay_for_order(token: str) -> dict:
                       o.subtotal_cents, o.tax_cents, o.shipping_cents, o.total_cents, o.currency,
                       o.customer_email, o.stripe_session_id, o.access_token,
                       COALESCE(o.ship_country, s.home_country) AS ship_country,
+                      o.shipping_method, o.shipping_rate_label, o.delivery_min_days, o.delivery_max_days,
                       o.pay_by IS NOT NULL AND o.pay_by < NOW() AS overdue,
                       s.name AS site_name, s.slug, s.subdomain, s.custom_domain,
                       s.tax_label, s.shipping_label,
@@ -762,6 +771,7 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
             # (product_id, title, unit_price, qty, fulfillment, intake_answers, booking_id)
             line_rows = []
             on_sale: list[bool] = []  # per line: an automatic discount applied (no promo code on top)
+            carried: list = []  # (product row, qty) per physical line, for the delivery price
             # Batch-load option groups for every product in the cart once, instead
             # of one query per line item inside the loop below (N+1).
             opt_groups_by_product = await fetch_option_groups(
@@ -789,7 +799,8 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
             for item, picked_variant in zip(body.items, picked):
                 product = await conn.fetchrow(
                     "SELECT id, name, price_cents, currency, inventory, low_stock_threshold, "
-                    "status, fulfillment, booking_type_id, requires_approval, intake_fields, sku "
+                    "status, fulfillment, booking_type_id, requires_approval, intake_fields, sku, "
+                    "weight_g, ships_free, shipping_surcharge_cents "
                     "FROM cappe_products WHERE id = $1 AND site_id = $2 FOR UPDATE",
                     item.product_id, site["id"],
                 )
@@ -833,6 +844,8 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
 
                 f = product["fulfillment"]
                 qty = item.quantity
+                if f == "physical":
+                    carried.append((product, qty))
                 booking_id = None
                 # Questions are asked (and checked) only for services and
                 # bookings; answers sent with anything else are not kept.
@@ -998,7 +1011,8 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
             # line item below so the charge matches the receipt total.
             tax_cfg = await conn.fetchrow(
                 "SELECT tax_rate_bps, tax_label, shipping_flat_cents, "
-                "shipping_free_threshold_cents, shipping_label, home_country "
+                "shipping_free_threshold_cents, shipping_label, home_country, "
+                "handling_days_min, handling_days_max "
                 "FROM cappe_sites WHERE id = $1", site["id"]
             )
             cfg = dict(tax_cfg) if tax_cfg else {}
@@ -1011,14 +1025,23 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
                 ship_country = _order_ship_country(body, address, cfg)
                 destination = resolve_destination(
                     cfg, await load_zones(conn, site["id"], owner_ent), ship_country,
+                    await load_rates(conn, site["id"], owner_ent),
                 )
                 if destination is None:
                     raise not_shippable(ship_country)
             totals = cart_totals([
                 {"unit_price_cents": unit, "quantity": qty, "fulfillment": fulfillment, "promo_discount_cents": share}
                 for (_pid, _title, unit, qty, fulfillment, *_rest), share in zip(line_rows, shares)
-            ], cfg, destination)
+            ], cfg, destination,
+                load=ship_load(carried, address.postal_code if address is not None else None),
+                rate_id=getattr(body, "shipping_rate_id", None), strict=True)
             tax_cents, shipping_cents, total_cents = totals["tax_cents"], totals["shipping_cents"], totals["total_cents"]
+            # A local delivery was only offered for the typed address's postal
+            # code (shipping.postal_matches), so it always has its address.
+            option = totals["shipping_option"] or {}
+            method = option.get("method") or "ship"
+            if method == "pickup":
+                address = None  # nothing is sent anywhere
             # Nothing to pay (a code that takes it all off, or free items) and
             # no approval to wait for: the order is settled now. Left pending,
             # nothing would ever settle it — Pay now refuses a zero total — and
@@ -1028,11 +1051,15 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
                 """INSERT INTO cappe_orders
                        (site_id, customer_email, customer_name, status, subtotal_cents, tax_cents,
                         shipping_cents, total_cents, currency, note, requires_approval, shipping_address,
-                        ship_country, promo_code, discount_cents, paid_at)
+                        ship_country, promo_code, discount_cents, paid_at,
+                        shipping_rate_id, shipping_method, shipping_rate_label, delivery_min_days,
+                        delivery_max_days, shipping_instructions)
                    VALUES ($1, $2, $3, CASE WHEN $15 THEN 'paid' ELSE 'pending' END, $4, $5, $6, $7, $8, $9,
-                           $10, $11::jsonb, $12, $13, $14, CASE WHEN $15 THEN NOW() END)
+                           $10, $11::jsonb, $12, $13, $14, CASE WHEN $15 THEN NOW() END,
+                           $16::uuid, $17, $18, $19, $20, $21)
                    RETURNING id, status, subtotal_cents, tax_cents, shipping_cents, total_cents,
-                             currency, access_token, requires_approval, ship_country""",
+                             currency, access_token, requires_approval, ship_country,
+                             shipping_method, shipping_rate_label, delivery_min_days, delivery_max_days""",
                 site["id"], email, body.customer_name, subtotal, tax_cents, shipping_cents,
                 total_cents, order_currency or "USD", body.note, order_requires_approval,
                 # The buyer's address, when the storefront asked for it (a
@@ -1041,6 +1068,11 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
                 # Stored in Stripe's shape so the dashboard reads one format.
                 json.dumps(address.as_stripe_shape(ship_country)) if address is not None else None,
                 ship_country, promo_code if promo else None, discount, settled,
+                # What the buyer chose, kept as it was (the rate can be edited
+                # or deleted later). The flat rate has no row of its own.
+                option.get("id") if option.get("id") not in (None, FLAT_RATE_ID) else None,
+                method, option.get("label") if has_physical else None,
+                option.get("delivery_min_days"), option.get("delivery_max_days"), option.get("instructions"),
             )
             if promo:
                 await redeem_promo(

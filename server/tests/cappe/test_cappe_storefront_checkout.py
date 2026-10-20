@@ -40,6 +40,8 @@ class _Conn:
 
     async def fetch(self, query, *args):
         self.calls.append((query, args))
+        if "cappe_shipping_" in query:
+            return []  # no zones, no delivery options: the home flat rate
         return [self.product] if self.product else []
 
     async def fetchval(self, query, *args):

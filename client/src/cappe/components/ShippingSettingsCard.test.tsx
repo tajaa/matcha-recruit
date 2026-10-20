@@ -12,11 +12,11 @@ const SITE = {
   shipping_free_threshold_cents: 5000, shipping_label: 'Shipping',
 }
 const zonesView = (patch: Partial<CappeShippingZones> = {}): CappeShippingZones => ({
-  enabled: true, home_country: 'US', currency: 'USD', countries: ['CA', 'FR', 'MX', 'US'], zones: [], ...patch,
+  enabled: true, home_country: 'US', currency: 'USD', countries: ['CA', 'FR', 'MX', 'US'], zones: [], home_rates: [], ...patch,
 })
 const NA = {
   id: 'z-1', sort_order: 0, name: 'North America', countries: ['CA'], rest_of_world: false,
-  flat_cents: 1500, free_threshold_cents: null, charge_tax: false,
+  flat_cents: 1500, free_threshold_cents: null, charge_tax: false, rates: [],
 }
 
 function load(zones: CappeShippingZones, site = SITE) {
@@ -44,8 +44,8 @@ describe('ShippingSettingsCard — zones', () => {
     expect(api.put.mock.calls[0][1]).toMatchObject({ home_country: 'US', currency: 'USD', shipping_flat_cents: 600 })
     expect(api.put.mock.calls[1]).toEqual(['/sites/s-1/shipping-zones', { zones: [{
       name: 'North America', countries: ['CA'], rest_of_world: false,
-      flat_cents: 1500, free_threshold_cents: null, charge_tax: false,
-    }] }])
+      flat_cents: 1500, free_threshold_cents: null, charge_tax: false, rates: [],
+    }], home_rates: [] }])
   })
 
   it('adds a zone with a country, a rate and tax', async () => {
@@ -64,8 +64,8 @@ describe('ShippingSettingsCard — zones', () => {
     await waitFor(() => expect(api.put).toHaveBeenCalledTimes(2))
     expect(api.put.mock.calls[1][1]).toEqual({ zones: [{
       name: 'Europe', countries: ['FR'], rest_of_world: false,
-      flat_cents: 2500, free_threshold_cents: null, charge_tax: true,
-    }] })
+      flat_cents: 2500, free_threshold_cents: null, charge_tax: true, rates: [],
+    }], home_rates: [] })
   })
 
   it('refuses a zone with no country before sending anything', async () => {
@@ -97,11 +97,77 @@ describe('ShippingSettingsCard — zones', () => {
   it('shows zones a downgrade paused, and can clear them', async () => {
     load(zonesView({ enabled: false, zones: [NA] }))
     const save = await renderCard()
-    expect(screen.getByText(/these zones are paused/)).toHaveTextContent('North America')
+    expect(screen.getByText(/so these are paused/)).toHaveTextContent('North America')
     fireEvent.click(screen.getByRole('button', { name: 'Remove them' }))
     fireEvent.click(save)
     await waitFor(() => expect(api.put).toHaveBeenCalledTimes(2))
-    expect(api.put.mock.calls[1]).toEqual(['/sites/s-1/shipping-zones', { zones: [] }])
+    expect(api.put.mock.calls[1]).toEqual(['/sites/s-1/shipping-zones', { zones: [], home_rates: [] }])
+  })
+})
+
+const PICKUP = {
+  id: 'r-1', sort_order: 0, name: 'Pickup', method: 'pickup' as const, amount_cents: 0, per_item_cents: 0,
+  min_subtotal_cents: null, max_subtotal_cents: null, min_weight_g: null, max_weight_g: null, free_over_cents: null,
+  delivery_min_days: 0, delivery_max_days: 1, postal_codes: [], instructions: '12 Market St, 9–5',
+}
+
+describe('ShippingSettingsCard — delivery options', () => {
+  it('saves the home options and the handling time, and tells the page the store’s country', async () => {
+    load(zonesView({ home_rates: [PICKUP] }), { ...SITE, handling_days_min: 1, handling_days_max: 2 } as typeof SITE)
+    const onHome = vi.fn()
+    render(<MemoryRouter><ShippingSettingsCard siteId="s-1" onHomeCountryChange={onHome} /></MemoryRouter>)
+    const save = await screen.findByRole('button', { name: /Save/ })
+    expect(onHome).toHaveBeenCalledWith('US')
+    expect(screen.getByLabelText('Fewest handling days')).toHaveValue('1')
+    fireEvent.click(screen.getByRole('button', { name: /Local delivery/ }))
+    const local = screen.getByRole('group', { name: 'Local delivery' })
+    fireEvent.change(within(local).getByLabelText(/Price \(USD\)/), { target: { value: '7.50' } })
+    fireEvent.change(within(local).getByLabelText(/Postal codes you deliver to/), { target: { value: '94110, 9411 941' } })
+    fireEvent.change(screen.getByLabelText('Most handling days'), { target: { value: '3' } })
+    fireEvent.click(save)
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(2))
+    expect(api.put.mock.calls[0][1]).toMatchObject({ handling_days_min: 1, handling_days_max: 3 })
+    const body = api.put.mock.calls[1][1]
+    expect(body.home_rates).toEqual([
+      expect.objectContaining({ name: 'Pickup', method: 'pickup', instructions: '12 Market St, 9–5', delivery_max_days: 1 }),
+      expect.objectContaining({ name: 'Local delivery', method: 'local_delivery', amount_cents: 750, postal_codes: ['94110', '9411', '941'] }),
+    ])
+  })
+
+  it('makes an option the default by moving it first', async () => {
+    load(zonesView({ home_rates: [PICKUP, { ...PICKUP, id: 'r-2', name: 'Express', method: 'ship', instructions: null }] }))
+    const save = await renderCard()
+    fireEvent.click(screen.getByRole('button', { name: 'Make “Express” the default' }))
+    fireEvent.click(save)
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(2))
+    expect(api.put.mock.calls[1][1].home_rates.map((r: { name: string }) => r.name)).toEqual(['Express', 'Pickup'])
+  })
+
+  it('refuses an option it can’t read before sending anything', async () => {
+    load(zonesView())
+    const save = await renderCard()
+    fireEvent.click(screen.getByRole('button', { name: /Shipping option/ }))
+    fireEvent.change(screen.getByLabelText(/Price \(USD\)/), { target: { value: '1,299.00' } })
+    fireEvent.click(save)
+    expect(await screen.findByRole('alert')).toHaveTextContent('Enter the price for “Standard”')
+    expect(api.put).not.toHaveBeenCalled()
+  })
+
+  it('refuses a handling time out of order', async () => {
+    load(zonesView())
+    const save = await renderCard()
+    fireEvent.change(screen.getByLabelText('Fewest handling days'), { target: { value: '4' } })
+    fireEvent.change(screen.getByLabelText('Most handling days'), { target: { value: '2' } })
+    fireEvent.click(save)
+    expect(await screen.findByRole('alert')).toHaveTextContent('handling time')
+    expect(api.put).not.toHaveBeenCalled()
+  })
+
+  it('shows home options a downgrade paused', async () => {
+    load(zonesView({ enabled: false, home_rates: [PICKUP] }))
+    await renderCard()
+    expect(screen.getByText(/so these are paused/)).toHaveTextContent('Pickup')
+    expect(screen.queryByRole('button', { name: /Shipping option/ })).not.toBeInTheDocument()
   })
 })
 

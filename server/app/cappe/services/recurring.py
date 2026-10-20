@@ -13,7 +13,7 @@ from .discounts import fetch_active_discounts, site_today
 from .entitlements import resolve_entitlements, require_can_sell, sells
 from .options import fetch_option_groups
 from .variants import fetch_variants, match_variant
-from .shipping import home_country
+from .shipping import home_country, ship_load
 from .shopper_customers import connected_customer
 from .stripe_connect import get_cappe_stripe, CappeStripeError
 
@@ -51,7 +51,13 @@ def build_subscription_lines(products, items, interval, site):
         unit = line["unit_price_cents"] * (10000 - product["subscription_discount_bps"]) // 10000
         snapshot.append({**line, "unit_price_cents": unit,
                          "selected_option_ids": [str(v) for v in item.selected_option_ids]})
-    totals = cart_totals(snapshot, site)
+    # What the physical lines weigh and count, as a one-off order prices
+    # them: a product that ships free adds nothing here either.
+    load = ship_load(
+        (products.get(item.product_id), item.quantity)
+        for item, row in zip(items, snapshot) if row["fulfillment"] == "physical"
+    )
+    totals = cart_totals(snapshot, site, load=load)
     if totals["total_cents"] <= 0:
         raise HTTPException(422, "Subscriptions must have a positive total")
     currency = quoted["currency"]

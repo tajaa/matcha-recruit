@@ -1,6 +1,6 @@
 """Cappe shipping pure-function tests — no DB, no app boot.
 
-Covers the shipping money math, the Stripe shipping_options translation, the
+Covers the flat-rate money math, the Stripe shipping_options translation, the
 webhook address extraction (both API shapes), the order-PATCH model contract,
 and the receipt HTML (shipping row + escaped Ship-to block). Run from server/.
 """
@@ -20,64 +20,67 @@ from app.cappe.models.shop import CappeOrderStatusUpdate  # noqa: E402
 from app.cappe.routes._shared import build_patch  # noqa: E402
 from app.cappe.routes.payments import extract_shipping_details  # noqa: E402
 from app.cappe.routes.shop import should_restock  # noqa: E402
-from app.cappe.services.commerce import build_stripe_line_items, compute_shipping_cents  # noqa: E402
+from app.cappe.services.cart import cart_totals  # noqa: E402
+from app.cappe.services.commerce import build_stripe_line_items  # noqa: E402
 from app.cappe.services.receipt import _ship_to_html, build_receipt_html  # noqa: E402
+from app.cappe.services.shipping import Destination, ShipLoad, shipping_options  # noqa: E402
 from app.cappe.services.stripe_connect import build_shipping_options  # noqa: E402
 
 
-# --- compute_shipping_cents --------------------------------------------------
+# --- the flat rate (services/shipping.py, a destination with no options) ----
+
+def _flat(goods_cents, flat_cents, free_threshold_cents=None, units=1):
+    """What the destination's flat rate charges a bag of `units` physical
+    items whose goods come to `goods_cents`."""
+    dest = Destination("US", flat_cents, free_threshold_cents, True)
+    [option] = shipping_options(dest, ShipLoad(units=units), goods_cents)
+    return option["amount_cents"]
+
 
 def test_shipping_zero_without_physical():
-    assert compute_shipping_cents(
-        has_physical=False, goods_subtotal_cents=5000, flat_cents=700, free_threshold_cents=None
-    ) == 0
+    lines = [{"unit_price_cents": 5000, "quantity": 1, "fulfillment": "digital"}]
+    out = cart_totals(lines, {"shipping_flat_cents": 700})
+    assert out["shipping_cents"] == 0 and out["shipping_options"] == [] and out["shipping_option"] is None
 
 
 def test_shipping_flat_applied_to_physical():
-    assert compute_shipping_cents(
-        has_physical=True, goods_subtotal_cents=5000, flat_cents=700, free_threshold_cents=None
-    ) == 700
+    assert _flat(5000, 700) == 700
 
 
 def test_shipping_zero_when_rate_unset():
-    assert compute_shipping_cents(
-        has_physical=True, goods_subtotal_cents=5000, flat_cents=0, free_threshold_cents=None
-    ) == 0
+    assert _flat(5000, 0) == 0
 
 
 def test_shipping_threshold_met_exactly():
     # Boundary: >= not >
-    assert compute_shipping_cents(
-        has_physical=True, goods_subtotal_cents=5000, flat_cents=700, free_threshold_cents=5000
-    ) == 0
+    assert _flat(5000, 700, 5000) == 0
 
 
 def test_shipping_threshold_not_met():
-    assert compute_shipping_cents(
-        has_physical=True, goods_subtotal_cents=4999, flat_cents=700, free_threshold_cents=5000
-    ) == 700
+    assert _flat(4999, 700, 5000) == 700
 
 
 def test_shipping_threshold_zero_means_always_free():
-    assert compute_shipping_cents(
-        has_physical=True, goods_subtotal_cents=1, flat_cents=700, free_threshold_cents=0
-    ) == 0
+    assert _flat(1, 700, 0) == 0
 
 
 def test_shipping_zero_when_goods_subtotal_zero():
     # A free-item physical cart never ships paid, even with no threshold set —
     # otherwise an order could persist shipping_cents > 0 with no payable amount.
-    assert compute_shipping_cents(
-        has_physical=True, goods_subtotal_cents=0, flat_cents=700, free_threshold_cents=None
-    ) == 0
+    assert _flat(0, 700) == 0
+
+
+def test_shipping_zero_when_every_item_ships_free():
+    assert _flat(5000, 700, units=0) == 0
 
 
 def test_shipping_threshold_ignores_non_physical_lines():
     # Threshold compares the GOODS subtotal only — a $60 booking shouldn't earn
     # free shipping on a $10 physical line against a $50 threshold.
-    assert compute_shipping_cents(
-        has_physical=True, goods_subtotal_cents=1000, flat_cents=700, free_threshold_cents=5000
-    ) == 700
+    lines = [{"unit_price_cents": 1000, "quantity": 1, "fulfillment": "physical"},
+             {"unit_price_cents": 6000, "quantity": 1, "fulfillment": "booking"}]
+    site = {"shipping_flat_cents": 700, "shipping_free_threshold_cents": 5000}
+    assert cart_totals(lines, site)["shipping_cents"] == 700
 
 
 # --- build_shipping_options --------------------------------------------------

@@ -135,6 +135,24 @@ DB safety rules, test-data email domain rules, and deploy rules are in root `CLA
 - **One store, one currency** (`cappe_sites.currency`, two-decimal allowlist `SITE_CURRENCIES`,
   mirrored in the migration and `client/src/cappe/utils/countries.ts`). Products take it on create
   and follow it on change; a change is refused while subscriptions are billing.
+- **A destination may offer delivery options** (`cappe_shipping_rates`, `zzzzcappe52`, zone_id NULL =
+  home; same `shipping_zones` plan gate): `ship`, `pickup`, `local_delivery`, priced by
+  `shipping.rate_price` — amount + per extra item + the products' `shipping_surcharge_cents`, free
+  over an amount, offered only inside its value/weight bands. No rows = the flat rate, presented as
+  the one option `"flat"`; the first option is the default. **One rule for both:** the flat rate is
+  priced by the same `rate_price` (`compute_shipping_cents` is gone), so a quote and its order
+  cannot disagree. `ships_free` products never count; goods of 0 never pay delivery.
+- **The quote falls back to the default; the order refuses** (`choose_option(strict=True)`: 409 for
+  an option it no longer gets, 422 when none fits) — never a silent reprice. The order stores what
+  was chosen as it was (`shipping_rate_id` without FK, method, label, estimate, pickup
+  instructions); the order page, receipt and Pay now read those, not the live rate.
+- **Stripe asks for an address only for `ship`.** Pickup stores none; local delivery is offered
+  only once the bag sends a postal code (`postal_matches` is False without one, area or not), so its
+  typed address is the one priced, and Stripe gets the fee as a line item instead of a shipping
+  option. An app that sends no option and no address is therefore never defaulted onto one.
+- **Rates are saved with zones** (`PUT /sites/{id}/shipping-zones`, `rates` per zone + `home_rates`).
+  Zones are replaced as a set, so their ids change: options left out (`None`) are re-inserted, a
+  zone's by its name. Estimates are the store's `handling_days_*` plus each option's transit days.
 
 - **A promo code applies to lines with no automatic discount, split pro rata before tax**
   (`promos.allocate`, each line's `promo_discount_cents`). `cappe_orders.subtotal_cents` is AFTER

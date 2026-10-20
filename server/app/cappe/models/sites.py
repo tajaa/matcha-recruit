@@ -150,6 +150,10 @@ class CappeSiteUpdate(_SnapshotSizeLimit):
     # the rates for this country (services/shipping.py).
     home_country: Optional[str] = Field(default=None, max_length=2)
     _home = field_validator("home_country")(country_code)
+    # Business days to get an order out of the door, added to each delivery
+    # option's time in transit. Explicit null clears (model_fields_set gate).
+    handling_days_min: Optional[int] = Field(default=None, ge=0, le=60)
+    handling_days_max: Optional[int] = Field(default=None, ge=0, le=60)
     # What the store charges in. Products follow it; see routes/sites.py.
     currency: Optional[str] = Field(default=None, max_length=3)
     _currency = field_validator("currency")(store_currency)
@@ -199,6 +203,8 @@ class CappeSite(BaseModel):
     shipping_free_threshold_cents: Optional[int] = None
     shipping_label: str = "Shipping"
     home_country: str = "US"
+    handling_days_min: Optional[int] = None
+    handling_days_max: Optional[int] = None
     currency: str = "USD"
     receipt_prefix: Optional[str] = None
     # Discover directory. `listed` is the tenant's own opt-out; the platform-side
