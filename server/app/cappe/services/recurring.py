@@ -66,7 +66,9 @@ def build_subscription_lines(products, items, interval, site):
                                "recurring": {"interval": interval}, "product_data": {"name": name[:250]}},
                 "quantity": quantity}
     lines = [stripe_line(row["title"], row["unit_price_cents"], row["quantity"]) for row in snapshot]
-    for label, key in (("Tax", "tax_cents"), ("Shipping", "shipping_cents")):
+    # The store's own name for its tax ("VAT"), as the bag and receipt show it.
+    tax_label = (site.get("tax_label") or "Tax")[:120]
+    for label, key in ((tax_label, "tax_cents"), ("Shipping", "shipping_cents")):
         # Tax the prices already include is in the lines above, not on top.
         if totals[key] and not (key == "tax_cents" and totals["tax_included"]):
             lines.append(stripe_line(label, totals[key], 1))

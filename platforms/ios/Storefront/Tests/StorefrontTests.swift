@@ -33,6 +33,18 @@ final class StorefrontTests: XCTestCase {
         }
         """#.utf8))
         XCTAssertEqual(quote.totalCents, 1380)
+        // A server from before tax rules sends neither key: tax is added on top.
+        XCTAssertNil(quote.taxIncluded)
+        XCTAssertNil(quote.taxLabel)
+
+        let vatQuote = try decoder.decode(Quote.self, from: Data(#"""
+        {
+          "lines":[],"subtotal_cents":12000,"tax_cents":2000,"shipping_cents":600,"total_cents":12600,
+          "currency":"GBP","tax_included":true,"tax_label":"VAT"
+        }
+        """#.utf8))
+        XCTAssertEqual(vatQuote.taxIncluded, true)
+        XCTAssertEqual(vatQuote.taxLabel, "VAT")
 
         let order = try decoder.decode(Order.self, from: Data(#"""
         {

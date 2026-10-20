@@ -241,7 +241,8 @@ def test_a_subscription_with_included_tax_bills_no_tax_line():
     assert names == ["Tea club", "Shipping"] and totals["tax_included"] is True
     assert sum(li["price_data"]["unit_amount"] * li["quantity"] for li in lines) == totals["total_cents"] == 12600
     lines, _snap, totals = _subscription(UK)
-    assert [li["price_data"]["product_data"]["name"] for li in lines] == ["Tea club", "Tax", "Shipping"]
+    # The tax line carries the store's own name for it, as the bag does.
+    assert [li["price_data"]["product_data"]["name"] for li in lines] == ["Tea club", "VAT", "Shipping"]
     assert sum(li["price_data"]["unit_amount"] * li["quantity"] for li in lines) == totals["total_cents"] == 15000
 
 

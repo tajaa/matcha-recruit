@@ -248,10 +248,14 @@ struct CartView: View {
             }
             if let quote {
                 Section("Total") {
+                    let taxName = quote.taxLabel ?? "Tax"
+                    let included = quote.taxIncluded ?? false
                     totalRow("Items", quote.subtotalCents, quote.currency)
-                    totalRow("Tax", quote.taxCents, quote.currency)
+                    if !included { totalRow(taxName, quote.taxCents, quote.currency) }
                     totalRow("Shipping", quote.shippingCents, quote.currency)
                     totalRow("Total", quote.totalCents, quote.currency, bold: true)
+                    // Tax the prices already include is inside the total, not added to it.
+                    if included && quote.taxCents > 0 { totalRow("Includes \(taxName)", quote.taxCents, quote.currency) }
                 }
             }
             ErrorText(message: quoteError)
