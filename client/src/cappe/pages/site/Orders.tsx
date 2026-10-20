@@ -480,7 +480,8 @@ function Totals({ order: o }: { order: CappeOrder }) {
   const discount = o.discount_cents ?? 0
   const rows: [string, number][] = [['Subtotal', o.subtotal_cents + discount]]
   if (discount) rows.push([o.promo_code ? `Discount (${o.promo_code})` : 'Discount', -discount])
-  if (o.tax_cents) rows.push(['Tax', o.tax_cents])
+  // Tax the prices already included is shown under the total, not added to it.
+  if (o.tax_cents && !o.tax_included) rows.push(['Tax', o.tax_cents])
   if (o.shipping_cents) rows.push([o.shipping_rate_label || 'Shipping', o.shipping_cents])
   return (
     <dl className="ml-auto max-w-xs space-y-0.5 pt-1 text-xs">
@@ -490,6 +491,9 @@ function Totals({ order: o }: { order: CappeOrder }) {
       <div className="flex justify-between gap-6 border-t border-zinc-800 pt-1 font-medium text-zinc-200">
         <dt>Total</dt><dd>{centsToMoney(o.total_cents ?? o.subtotal_cents, o.currency)}</dd>
       </div>
+      {o.tax_included && o.tax_cents > 0 && (
+        <div className="flex justify-between gap-6 text-zinc-500"><dt>Includes tax</dt><dd>{centsToMoney(o.tax_cents, o.currency)}</dd></div>
+      )}
       {(o.refunded_cents ?? 0) > 0 && (
         <div className="flex justify-between gap-6 text-red-300"><dt>Refunded</dt><dd>−{centsToMoney(o.refunded_cents ?? 0, o.currency)}</dd></div>
       )}

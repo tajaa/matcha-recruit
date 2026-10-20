@@ -49,6 +49,12 @@ MAX_EXPORT_ROWS = 50_000
 _PAID = "o.status IN ('paid', 'fulfilled', 'refunded')"
 _WHEN = "COALESCE(o.paid_at, o.created_at)"
 
+# Goods and shipping net of tax. A tax-inclusive order (`tax_included`,
+# zzzzcappe53) carries its tax inside them; taking it out keeps
+# goods + tax + shipping = the total for every order, either way it was priced.
+_GOODS_NET = "o.subtotal_cents - CASE WHEN o.tax_included THEN o.tax_cents - o.shipping_tax_cents ELSE 0 END"
+_SHIPPING_NET = "o.shipping_cents - CASE WHEN o.tax_included THEN o.shipping_tax_cents ELSE 0 END"
+
 
 def _tz(site) -> ZoneInfo:
     try:
@@ -110,9 +116,9 @@ async def financials(
         totals = await conn.fetchrow(
             f"""SELECT COUNT(*) AS orders,
                        COALESCE(SUM(COALESCE(o.total_cents, o.subtotal_cents)), 0) AS gross,
-                       COALESCE(SUM(o.subtotal_cents), 0) AS goods,
+                       COALESCE(SUM({_GOODS_NET}), 0) AS goods,
                        COALESCE(SUM(o.tax_cents), 0) AS tax,
-                       COALESCE(SUM(o.shipping_cents), 0) AS shipping,
+                       COALESCE(SUM({_SHIPPING_NET}), 0) AS shipping,
                        COALESCE(SUM(o.platform_fee_cents), 0) AS fees
                   FROM cappe_orders o
                  WHERE o.site_id = $1 AND {_PAID} AND {_WHEN} >= $2 AND {_WHEN} < $3
@@ -228,8 +234,9 @@ async def export_financials(
         if kind == "orders":
             rows = await conn.fetch(
                 f"""SELECT {_WHEN} AS at, o.receipt_number, o.id, o.status, o.customer_name,
-                           o.customer_email, o.currency, o.subtotal_cents, o.tax_cents,
-                           o.shipping_cents, COALESCE(o.total_cents, o.subtotal_cents) AS total_cents,
+                           o.customer_email, o.currency, {_GOODS_NET} AS subtotal_cents, o.tax_cents,
+                           {_SHIPPING_NET} AS shipping_cents,
+                           COALESCE(o.total_cents, o.subtotal_cents) AS total_cents,
                            o.promo_code, o.discount_cents,
                            o.refunded_cents, o.platform_fee_cents, o.ship_country,
                            (o.stripe_payment_intent IS NOT NULL) AS card

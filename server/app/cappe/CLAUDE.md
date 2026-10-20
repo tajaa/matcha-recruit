@@ -153,6 +153,16 @@ DB safety rules, test-data email domain rules, and deploy rules are in root `CLA
 - **Rates are saved with zones** (`PUT /sites/{id}/shipping-zones`, `rates` per zone + `home_rates`).
   Zones are replaced as a set, so their ids change: options left out (`None`) are re-inserted, a
   zone's by its name. Estimates are the store's `handling_days_*` plus each option's transit days.
+- **Tax is on top or inside the price, never both** (`cart.tax_in`, `zzzzcappe53`). The site's
+  `prices_include_tax` makes `tax_cents` the part of the price that is tax (`amount*bps//(10000+bps)`)
+  and the total subtotal + shipping; `tax_on_shipping` taxes shipping at the same rate
+  (`shipping_tax_cents`). A zone that charges tax uses its own `tax_rate_bps`, else the store's; one
+  that doesn't charges none, inclusive prices or not (the price stays as listed). Both flags ungated.
+- **An order and a subscription keep how they were priced** (`tax_included`, `shipping_tax_cents`;
+  renewals copy the subscription's). Everything that reads an order honours it: no Stripe tax line
+  when included (the lines are the total), the receipt, order page, owner view and bag say
+  "Includes VAT" under the total, and finances use `_GOODS_NET` / `_SHIPPING_NET` so goods + tax +
+  shipping = total. **The platform fee is on `cart.goods_net_cents`** — never the inclusive subtotal.
 
 - **A promo code applies to lines with no automatic discount, split pro rata before tax**
   (`promos.allocate`, each line's `promo_discount_cents`). `cappe_orders.subtotal_cents` is AFTER

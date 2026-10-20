@@ -221,7 +221,7 @@ async def test_subscription_checkout_uses_connected_customer_fee_and_app_callbac
         [{"product_id": str(product_id), "title": "Soap", "quantity": 1,
           "unit_price_cents": 1000, "fulfillment": "physical"}],
         {"subtotal_cents": 1000, "tax_cents": 0, "shipping_cents": 0,
-         "total_cents": 1000, "currency": "USD"},
+         "total_cents": 1000, "currency": "USD", "tax_included": False, "shipping_tax_cents": 0},
     ))
     monkeypatch.setattr(recurring, "connected_customer", lambda *_args: _async("cus_buyer"))
     stripe_calls = []
@@ -313,7 +313,8 @@ async def test_subscription_checkout_charges_the_promotional_quote_amount(monkey
             "title": "Sale soap", "selected_option_ids": [],
         }],
         "subtotal_cents": 720, "tax_cents": 72, "shipping_cents": 500,
-        "total_cents": 1292, "currency": "USD",
+        "total_cents": 1292, "currency": "USD", "tax_included": False, "shipping_tax_cents": 0,
+        "tax_label": "Tax",
         # This test's fake connection answers None for the card-payments
         # lookup; the cart only uses the flag to decide whether to ask for an
         # address.

@@ -54,7 +54,7 @@ _SITE_COLS = (
     "app_url_scheme, app_bundle_id, "
     "id, account_id, name, slug, subdomain, custom_domain, source_type, "
     "template_id, template_slug, status, theme_config, meta_config, timezone, is_multi_location, "
-    "tax_rate_bps, tax_label, "
+    "tax_rate_bps, tax_label, prices_include_tax, tax_on_shipping, "
     "shipping_flat_cents, shipping_free_threshold_cents, shipping_label, "
     "home_country, currency, handling_days_min, handling_days_max, "
     "receipt_prefix, "
@@ -437,6 +437,9 @@ async def update_site(
             add("tax_rate_bps", body.tax_rate_bps)
         if body.tax_label is not None:
             add("tax_label", body.tax_label)
+        for key in ("prices_include_tax", "tax_on_shipping"):
+            if getattr(body, key) is not None:
+                add(key, getattr(body, key))
         if body.shipping_flat_cents is not None:
             add("shipping_flat_cents", body.shipping_flat_cents)
         if "shipping_free_threshold_cents" in body.model_fields_set:

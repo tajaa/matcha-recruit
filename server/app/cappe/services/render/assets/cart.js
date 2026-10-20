@@ -127,7 +127,9 @@ linesEl.querySelectorAll('[data-rm]').forEach(function(b){b.addEventListener('cl
 var cur=(quote&&quote.currency)||(items[0]&&items[0].currency)||'USD',rows=[];
 // A code's discount is off the subtotal the server sends; show it on its own line.
 var promo=quote&&quote.promo,disc=promo&&promo.valid?promo.discount_cents:0;
-if(quote&&quote.total_cents!=null){rows.push(['Subtotal',quote.subtotal_cents+disc]);if(disc)rows.push(['Discount ('+promo.code+')',-disc]);if(quote.tax_cents)rows.push(['Tax',quote.tax_cents]);if(quote.shipping_cents)rows.push([(chosen()&&chosen().label)||'Shipping',quote.shipping_cents]);rows.push(['Total',quote.total_cents]);}
+if(quote&&quote.total_cents!=null){rows.push(['Subtotal',quote.subtotal_cents+disc]);if(disc)rows.push(['Discount ('+promo.code+')',-disc]);var taxName=quote.tax_label||'Tax';if(quote.tax_cents&&!quote.tax_included)rows.push([taxName,quote.tax_cents]);if(quote.shipping_cents)rows.push([(chosen()&&chosen().label)||'Shipping',quote.shipping_cents]);rows.push(['Total',quote.total_cents]);
+// Tax the prices already include is shown under the total, not added to it.
+if(quote.tax_cents&&quote.tax_included)rows.push(['Includes '+taxName,quote.tax_cents]);}
 totalsEl.innerHTML=rows.map(function(r){return '<div'+(r[0]==='Total'?' class="cz-bag__total"':'')+'><dt>'+RT.esc(r[0])+'</dt><dd>'+(r[1]<0?'−':'')+RT.money(Math.abs(r[1]),cur)+'</dd></div>';}).join('')||'<div><dt>Total</dt><dd>…</dd></div>';
 promoWrap.hidden=!(quote&&quote.promo_codes);
 if(promoCode&&!promoEl.value)promoEl.value=promoCode;

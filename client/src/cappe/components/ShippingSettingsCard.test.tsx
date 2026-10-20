@@ -44,7 +44,7 @@ describe('ShippingSettingsCard — zones', () => {
     expect(api.put.mock.calls[0][1]).toMatchObject({ home_country: 'US', currency: 'USD', shipping_flat_cents: 600 })
     expect(api.put.mock.calls[1]).toEqual(['/sites/s-1/shipping-zones', { zones: [{
       name: 'North America', countries: ['CA'], rest_of_world: false,
-      flat_cents: 1500, free_threshold_cents: null, charge_tax: false, rates: [],
+      flat_cents: 1500, free_threshold_cents: null, charge_tax: false, tax_rate_bps: null, rates: [],
     }], home_rates: [] }])
   })
 
@@ -57,15 +57,30 @@ describe('ShippingSettingsCard — zones', () => {
     fireEvent.change(within(zone).getByLabelText(/Add a country/), { target: { value: 'FR' } })
     const [rate] = within(zone).getAllByLabelText(/Flat rate/)
     fireEvent.change(rate, { target: { value: '25' } })
-    fireEvent.click(within(zone).getByLabelText(/Charge my tax rate/))
+    fireEvent.click(within(zone).getByLabelText(/Charge tax here/))
     // The home country is never offered for a zone, nor a country another zone has.
     expect(within(zone).queryByRole('option', { name: 'United States' })).not.toBeInTheDocument()
     fireEvent.click(save)
     await waitFor(() => expect(api.put).toHaveBeenCalledTimes(2))
     expect(api.put.mock.calls[1][1]).toEqual({ zones: [{
       name: 'Europe', countries: ['FR'], rest_of_world: false,
-      flat_cents: 2500, free_threshold_cents: null, charge_tax: true, rates: [],
+      flat_cents: 2500, free_threshold_cents: null, charge_tax: true, tax_rate_bps: null, rates: [],
     }], home_rates: [] })
+  })
+
+  it('saves a zone’s own tax rate, and refuses one it can’t read', async () => {
+    load(zonesView({ zones: [{ ...NA, charge_tax: true, tax_rate_bps: 500 }] }))
+    const save = await renderCard()
+    const rate = screen.getByRole('textbox', { name: 'Tax rate for North America' })
+    expect(rate).toHaveValue('5')
+    fireEvent.change(rate, { target: { value: '1,2,3' } })
+    fireEvent.click(save)
+    expect(await screen.findByRole('alert')).toHaveTextContent('tax rate for “North America”')
+    expect(api.put).not.toHaveBeenCalled()
+    fireEvent.change(rate, { target: { value: '13' } })
+    fireEvent.click(save)
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(2))
+    expect(api.put.mock.calls[1][1].zones[0]).toMatchObject({ charge_tax: true, tax_rate_bps: 1300 })
   })
 
   it('refuses a zone with no country before sending anything', async () => {

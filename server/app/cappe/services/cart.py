@@ -14,14 +14,36 @@ def unit_price(product, groups, selected_ids, discount_percent=0, variant=None):
     return apply_discount_cents(base, discount_percent), snapshot
 
 
+def tax_in(amount_cents, rate_bps, included):
+    """The tax on `amount_cents` at `rate_bps`: added on top, or — when the
+    price already includes it — the part of the price that is tax. Both round
+    down, as the exclusive rate always has."""
+    if amount_cents <= 0 or rate_bps <= 0:
+        return 0
+    return amount_cents * rate_bps // (10000 + rate_bps if included else 10000)
+
+
+def goods_net_cents(totals) -> int:
+    """The goods net of tax — what the platform fee is taken on. Exclusive tax
+    sits outside the subtotal already; included tax is inside it (its goods
+    part: the rest, `shipping_tax_cents`, is inside the shipping)."""
+    subtotal = int(totals.get("subtotal_cents") or 0)
+    if not totals.get("tax_included"):
+        return subtotal
+    return subtotal - (int(totals.get("tax_cents") or 0) - int(totals.get("shipping_tax_cents") or 0))
+
+
 def cart_totals(lines, site, destination=None, *, load=None, rate_id=None, strict=False):
     """Subtotal, tax, shipping and total for priced lines, and the delivery
     options the physical lines can take.
 
     `destination` (services/shipping.Destination) is where the physical lines
     ship; None means the store's home country, the only place it shipped to
-    before zones. Tax is the store's rate on physical goods, charged at home
-    and in a zone only when that zone says so.
+    before zones. Tax is on physical goods (and their shipping when the store
+    says `tax_on_shipping`), charged at home and in a zone only when that zone
+    says so, at the zone's own rate when it has one. With the store's
+    `prices_include_tax` the prices already contain it: `tax_cents` is the part
+    that is tax and the total is subtotal + shipping (`tax_included`).
 
     `load` (shipping.ShipLoad) is what the physical lines weigh and count;
     without one every physical unit counts and weighs nothing. `rate_id` is
@@ -37,7 +59,10 @@ def cart_totals(lines, site, destination=None, *, load=None, rate_id=None, stric
     subtotal = sum(line_total(line) for line in lines)
     physical = [line for line in lines if line["fulfillment"] == "physical"]
     taxable = sum(line_total(line) for line in physical)
-    tax = taxable * int(site.get("tax_rate_bps") or 0) // 10000 if dest.charge_tax else 0
+    rate = 0
+    if dest.charge_tax:
+        rate = int(dest.tax_rate_bps if dest.tax_rate_bps is not None else site.get("tax_rate_bps") or 0)
+    included = bool(site.get("prices_include_tax"))
     options, chosen = [], None
     if physical:
         options = shipping_options(
@@ -48,10 +73,13 @@ def cart_totals(lines, site, destination=None, *, load=None, rate_id=None, stric
         if chosen is None and strict:
             raise no_delivery_option()
     shipping = chosen["amount_cents"] if chosen else 0
-    if subtotal + tax + shipping > 99_999_999:
+    shipping_tax = tax_in(shipping, rate, included) if site.get("tax_on_shipping") else 0
+    tax = tax_in(taxable, rate, included) + shipping_tax
+    total = subtotal + shipping + (0 if included else tax)
+    if total > 99_999_999:
         raise HTTPException(422, "Cart total exceeds the checkout limit")
     return {"subtotal_cents": subtotal, "tax_cents": tax, "shipping_cents": shipping,
-            "total_cents": subtotal + tax + shipping,
+            "total_cents": total, "tax_included": included, "shipping_tax_cents": shipping_tax,
             "shipping_options": options, "shipping_option": chosen}
 
 

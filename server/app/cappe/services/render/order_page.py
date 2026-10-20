@@ -129,7 +129,8 @@ def _totals_html(order: dict) -> str:
     if discount:
         code = order.get("promo_code")
         rows.append((f"Discount ({code})" if code else "Discount", -discount))
-    if order.get("tax_cents"):
+    included = bool(order.get("tax_included"))  # inside the prices: shown under the total
+    if order.get("tax_cents") and not included:
         rows.append((order.get("tax_label") or "Tax", order["tax_cents"]))
     if order.get("shipping_cents"):
         rows.append((order.get("shipping_label") or "Shipping", order["shipping_cents"]))
@@ -139,6 +140,9 @@ def _totals_html(order: dict) -> str:
     )
     total = order.get("total_cents") or order.get("subtotal_cents") or 0
     body += f'<div class="cz-order__total"><dt>Total</dt><dd>{escape(fmt_money(total, cur))}</dd></div>'
+    if included and order.get("tax_cents"):
+        body += (f"<div><dt>Includes {escape(order.get('tax_label') or 'Tax')}</dt>"
+                 f"<dd>{escape(fmt_money(order['tax_cents'], cur))}</dd></div>")
     if order.get("refunded_cents"):
         body += f"<div><dt>Refunded</dt><dd>−{escape(fmt_money(order['refunded_cents'], cur))}</dd></div>"
     return f'<dl class="cz-order__totals">{body}</dl>'

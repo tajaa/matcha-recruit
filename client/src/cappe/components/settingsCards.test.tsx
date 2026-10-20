@@ -40,6 +40,52 @@ describe.each([
   })
 })
 
+describe('TaxSettingsCard — how tax is charged', () => {
+  it('loads and saves whether prices include tax and whether shipping is taxed', async () => {
+    api.get.mockResolvedValue({ tax_rate_bps: 2000, tax_label: 'VAT', prices_include_tax: true, tax_on_shipping: false })
+    api.put.mockResolvedValue({})
+    render(<TaxSettingsCard siteId="s-1" />)
+    const included = await screen.findByRole('checkbox', { name: /My prices already include VAT/ })
+    expect(included).toBeChecked()
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Charge VAT on shipping too' }))
+    fireEvent.click(screen.getByRole('button', { name: /Save/ }))
+    await waitFor(() => expect(api.put).toHaveBeenCalledWith('/sites/s-1', expect.objectContaining({
+      tax_rate_bps: 2000, tax_label: 'VAT', prices_include_tax: true, tax_on_shipping: true,
+    })))
+  })
+})
+
+describe('TaxSettingsCard — switching what prices mean', () => {
+  it('asks before prices start including tax, and sends nothing if the owner backs out', async () => {
+    api.get.mockResolvedValue({ tax_rate_bps: 2000, tax_label: 'VAT', prices_include_tax: false })
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true)
+    render(<TaxSettingsCard siteId="s-1" />)
+    fireEvent.click(await screen.findByRole('checkbox', { name: /My prices already include VAT/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Save/ }))
+    expect(confirm).toHaveBeenLastCalledWith(expect.stringContaining('with the VAT inside it'))
+    expect(api.put).not.toHaveBeenCalled()
+    api.put.mockResolvedValue({})
+    fireEvent.click(screen.getByRole('button', { name: /Save/ }))
+    await waitFor(() => expect(api.put).toHaveBeenCalledWith('/sites/s-1', expect.objectContaining({ prices_include_tax: true })))
+    // Saved: the next save of the same setting doesn't ask again.
+    await screen.findByText('Saved')
+    fireEvent.click(screen.getByRole('button', { name: /Save/ }))
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(2))
+    expect(confirm).toHaveBeenCalledTimes(2)
+    confirm.mockRestore()
+  })
+
+  it('warns that turning it off makes checkout cost more', async () => {
+    api.get.mockResolvedValue({ tax_rate_bps: 2000, tax_label: 'VAT', prices_include_tax: true })
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    render(<TaxSettingsCard siteId="s-1" />)
+    fireEvent.click(await screen.findByRole('checkbox', { name: /My prices already include VAT/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Save/ }))
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('will cost buyers more at checkout'))
+    confirm.mockRestore()
+  })
+})
+
 describe('StockAdjustModal — the stock history', () => {
   const product = {
     id: 'p-1', name: 'Mug', inventory: 4, option_groups: [

@@ -158,6 +158,7 @@ _ORDER_COLS = (
     "refunded_at, refunded_cents, dispute_status, disputed_at, "
     "pay_by, shipped_notified_at, platform_fee_cents, ship_country, promo_code, discount_cents, "
     "shipping_method, shipping_rate_label, delivery_min_days, delivery_max_days, shipping_instructions, "
+    "tax_included, shipping_tax_cents, "
     "metadata, created_at, updated_at"
 )
 _ITEM_COLS = (

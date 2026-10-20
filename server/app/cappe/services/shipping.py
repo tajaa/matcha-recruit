@@ -64,7 +64,7 @@ VE VG VN VU WF WS XK YE YT ZA ZM ZW
 
 _ZONE_COLS = (
     "id, name, countries, rest_of_world, flat_cents, free_threshold_cents, "
-    "charge_tax, sort_order"
+    "charge_tax, tax_rate_bps, sort_order"
 )
 
 
@@ -139,6 +139,7 @@ class Destination:
     charge_tax: bool
     zone_id: Optional[str] = None  # None = the home country
     rates: tuple = ()              # ShipRate options; () = the flat rate only
+    tax_rate_bps: Optional[int] = None  # when it charges tax; None = the store's rate
 
     @property
     def is_home(self) -> bool:
@@ -162,6 +163,7 @@ def _zone_destination(country: str, zone: dict) -> Destination:
         free_threshold_cents=zone.get("free_threshold_cents"),
         charge_tax=bool(zone.get("charge_tax")),
         zone_id=str(zone["id"]),
+        tax_rate_bps=zone.get("tax_rate_bps"),
     )
 
 

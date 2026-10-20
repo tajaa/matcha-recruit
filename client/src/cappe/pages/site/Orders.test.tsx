@@ -343,6 +343,13 @@ describe('Orders — the detail view', () => {
     expect(screen.queryByRole('textbox', { name: 'Tracking number' })).not.toBeInTheDocument()
   })
 
+  it('shows tax the prices included under the total, not added to it', async () => {
+    await openOrder({ subtotal_cents: 12000, tax_cents: 2000, tax_included: true, shipping_cents: 0, total_cents: 12000 })
+    expect(screen.queryByText('Tax', { selector: 'dt' })).not.toBeInTheDocument()
+    expect(screen.getByText('Includes tax', { selector: 'dt' }).nextSibling?.textContent).toBe('$20.00')
+    expect(screen.getByText('Total', { selector: 'dt' }).nextSibling?.textContent).toBe('$120.00')
+  })
+
   it('says a pickup is collected, where, and names the option in the totals', async () => {
     await openOrder({
       shipping_method: 'pickup', shipping_rate_label: 'Shop counter', shipping_instructions: '12 Market St, 9–5',
