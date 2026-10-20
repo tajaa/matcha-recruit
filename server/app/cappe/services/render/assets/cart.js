@@ -4,6 +4,13 @@
 // SERVER's (POST /quote) — the estimate is only a placeholder while it loads.
 var RT=window.__CAPPE_RT__;if(!RT||RT.preview||!RT.slug)return;
 var KEY='cz-cart:'+RT.slug,OKEY='cz-cart-order:'+RT.slug,CKEY='cz-cart-country:'+RT.slug,PKEY='cz-cart-promo:'+RT.slug,RKEY='cz-cart-rate:'+RT.slug,MAX_QTY=99;
+// What placing the order agrees to: the store's terms and refund policy,
+// linked, when it has published them (services/policies.py; the page's
+// window.__CAPPE__ carries them).
+function terms(){var ps=((window.__CAPPE__||{}).policies||[]).filter(function(p){return p.kind==='terms'||p.kind==='refund';});
+if(!ps.length)return '';
+return '<p class="cz-bag__terms">By placing your order you agree to the store’s '+ps.map(function(p){
+return '<a href="'+RT.esc(RT.url(p.url))+'" target="_blank" rel="noopener">'+RT.esc(p.kind==='terms'?'terms':'refund policy')+'</a>';}).join(' and ')+'.</p>';}
 function load(){try{var v=JSON.parse(localStorage.getItem(KEY)||'[]');return Array.isArray(v)?v:[];}catch(e){return [];}}
 var items=load(),quote=null,qseq=0,busy=false,shipTo=null;
 try{shipTo=localStorage.getItem(CKEY)||null;}catch(e){}
@@ -52,7 +59,7 @@ root.innerHTML='<div class="cz-bag__scrim" data-close></div>'+
 '<input class="cz-field" data-a="state" placeholder="State / region" autocomplete="address-level1" aria-label="State or region" /></div>'+
 '<input class="cz-field" data-a="postal_code" placeholder="Postal code" autocomplete="postal-code" aria-label="Postal code" /></fieldset>'+
 '<textarea class="cz-field" data-note rows="2" maxlength="1000" placeholder="Note to the store (optional)" aria-label="Note to the store"></textarea>'+
-'<button type="button" class="cz-btn cz-btn--solid cz-btn--block" data-go>Checkout</button>'+
+'<button type="button" class="cz-btn cz-btn--solid cz-btn--block" data-go>Checkout</button>'+terms()+
 '<p class="cz-msg" data-msg role="status"></p></div></aside>';
 document.body.appendChild(root);
 var linesEl=root.querySelector('[data-lines]'),totalsEl=root.querySelector('[data-totals]'),noticeEl=root.querySelector('[data-notice]'),

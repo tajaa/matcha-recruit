@@ -49,6 +49,17 @@ router = APIRouter()
 _RELEASED_STATUSES = ("cancelled", "declined")
 
 
+def extract_billing_details(obj: dict) -> Optional[dict]:
+    """The buyer's name, phone and billing address as Stripe collected them
+    (`customer_details`), in the same {name, phone, address} shape as a
+    shipping address — for the receipt. None when Stripe has no address."""
+    details = obj.get("customer_details") or {}
+    address = {k: v for k, v in (details.get("address") or {}).items() if v}
+    if not address:
+        return None
+    return {"name": details.get("name"), "phone": details.get("phone"), "address": address}
+
+
 def extract_shipping_details(obj: dict) -> Optional[dict]:
     """Newer Stripe API versions nest the buyer's address under
     collected_information.shipping_details; older ones put it at top level.
@@ -385,6 +396,7 @@ async def _mark_order_paid(obj, event, background) -> dict:
                           stripe_payment_intent = $2, payment_ref = $2,
                           platform_fee_cents = COALESCE($3, platform_fee_cents),
                           shipping_address = COALESCE($5::jsonb, o.shipping_address),
+                          billing_address = COALESCE($7::jsonb, o.billing_address),
                           updated_at = NOW()
                     FROM cappe_sites s, cappe_accounts a
                     WHERE o.id = $1 AND o.status = 'pending'
@@ -403,6 +415,7 @@ async def _mark_order_paid(obj, event, background) -> dict:
                 event_account_id,
                 json.dumps(dict(ship)) if ship else None,
                 obj.get("id"),
+                json.dumps(billing) if (billing := extract_billing_details(obj)) else None,
             )
         if row is not None:
             from ..services.push import notify_order_event

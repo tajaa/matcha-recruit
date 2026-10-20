@@ -25,6 +25,7 @@ from fastapi import (
 from ...core.services.email._shared import _is_reserved_test_domain
 from ...database import get_connection
 from ..dependencies import require_cappe_account
+from ..services.shipping import site_currency
 from ..models.cappe import (
     CappeAccount,
     CappeClient,
@@ -71,8 +72,11 @@ def _clients_sql(filter_email: bool = False) -> str:
     where_clause = "WHERE t.email = $2\n" if filter_email else ""
     return f"""
 WITH touch AS (
+    -- Spent is counted in the store's currency, which the response labels it
+    -- with: an order from before a currency change isn't added to it.
     SELECT lower(customer_email) AS email, customer_name AS name, 'order' AS kind,
-           subtotal_cents AS amount, created_at AS ts
+           CASE WHEN upper(currency) = (SELECT upper(currency) FROM cappe_sites WHERE id = $1)
+                THEN subtotal_cents ELSE 0 END AS amount, created_at AS ts
     FROM cappe_orders WHERE site_id = $1 AND customer_email IS NOT NULL
       AND status IN ('paid', 'fulfilled')
     UNION ALL
@@ -126,8 +130,12 @@ ORDER BY last_activity DESC
 _CLIENTS_SQL = _clients_sql()
 
 
-def _client_from_row(r) -> CappeClient:
+def _client_from_row(r, currency: str) -> CappeClient:
+    """`currency` is the store's: what `total_spent_cents` is in. A store can
+    change currency (routes/sites.py), so the SQL sums only the orders in the
+    current one."""
     return CappeClient(
+        currency=currency,
         email=r["email"], name=r["name"], phone=r["phone"],
         orders_count=r["orders_count"], bookings_count=r["bookings_count"],
         is_subscriber=r["is_subscriber"], has_thread=r["has_thread"], is_imported=r["is_imported"],
@@ -139,9 +147,9 @@ def _client_from_row(r) -> CappeClient:
 @router.get("/sites/{site_id}/clients", response_model=list[CappeClient])
 async def list_clients(site_id: UUID, account: CappeAccount = Depends(require_cappe_account)):
     async with get_connection() as conn:
-        await get_owned_site(conn, site_id, account.id)
+        site = await get_owned_site(conn, site_id, account.id)
         rows = await conn.fetch(_CLIENTS_SQL, site_id)
-    return [_client_from_row(r) for r in rows]
+    return [_client_from_row(r, site_currency(site)) for r in rows]
 
 
 async def _add_to_newsletter(conn, site_id: UUID, email: str, name: str | None):
@@ -207,7 +215,7 @@ async def add_client(
     if not _EMAIL_RE.match(email):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Please enter a valid email address.")
     async with get_connection() as conn:
-        await get_owned_site(conn, site_id, account.id)
+        site = await get_owned_site(conn, site_id, account.id)
         if body.location_id is not None:
             ok = await conn.fetchval(
                 "SELECT 1 FROM cappe_locations WHERE id = $1 AND site_id = $2", body.location_id, site_id
@@ -233,8 +241,9 @@ async def add_client(
     if confirm_token is not None:
         _dispatch_confirmations(site_id)
     if row is not None:
-        return _client_from_row(row)
-    return CappeClient(email=email, name=body.name, phone=body.phone, is_imported=True, location_id=body.location_id)
+        return _client_from_row(row, site_currency(site))
+    return CappeClient(email=email, name=body.name, phone=body.phone, is_imported=True, location_id=body.location_id,
+                       currency=site_currency(site))
 
 
 @router.delete("/sites/{site_id}/clients/{email}", status_code=status.HTTP_204_NO_CONTENT)

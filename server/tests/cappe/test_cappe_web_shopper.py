@@ -488,6 +488,8 @@ def test_the_account_page_route_serves_tenant_hosts_without_caching(monkeypatch)
     conn = Conn()
 
     async def _fetch(sql, *args):
+        if "cappe_site_policies" in sql:
+            return [{"kind": "refund"}]
         return [{"title": "Shop", "slug": "shop"}]
 
     conn.fetch = _fetch
@@ -498,6 +500,8 @@ def test_the_account_page_route_serves_tenant_hosts_without_caching(monkeypatch)
         "slug": "lumiere", "subdomain": "lumiere", "custom_domain": None, "status": "draft"}))
     resp = asyncio.run(render_mod.account_page(_request({"host": "lumiere.gummfit.com"})))
     assert resp.status_code == 200 and b"data-czaccount" in resp.body
+    # Its footer links the store's policies like every other page.
+    assert b'href="/policies/refund"' in resp.body
     assert resp.headers["cache-control"] == "no-store" and resp.headers["referrer-policy"] == "no-referrer"
     # An unpublished store still serves it: a shopper must be able to cancel.
     monkeypatch.setattr(render_mod, "_resolve_site_any_status", AsyncMock(return_value=None))
@@ -566,12 +570,18 @@ def test_the_product_list_drops_subscribe_options_a_store_cant_fulfil(monkeypatc
 def test_subscription_emails_link_to_the_account_page(monkeypatch, send, args, label):
     sent = []
 
-    async def _send(to, name, subject, html, text, *, label):
+    senders = []
+
+    async def _send(to, name, subject, html, text, *, label, from_name=None, reply_to=None):
         sent.append((html, text))
+        senders.append((from_name, reply_to))
 
     monkeypatch.setattr(mail, "_send", _send)
-    asyncio.run(send("b@example.com", "B", "Lumière", *args, "https://lumiere.gummfit.com/account"))
+    asyncio.run(send("b@example.com", "B", "Lumière", *args, "https://lumiere.gummfit.com/account",
+                     reply_to="hello@lumiere.test"))
     ((html, text),) = sent
+    # Sent as the store, and a reply reaches it.
+    assert senders == [("Lumière via Gummfit", "hello@lumiere.test")]
     assert label in html and "https://lumiere.gummfit.com/account" in html and "/account" in text
     sent.clear()
     asyncio.run(send("b@example.com", "B", "Lumière", *args))           # no link: as before

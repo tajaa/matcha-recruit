@@ -145,8 +145,9 @@ class Background:
     def __init__(self):
         self.tasks = []
 
-    def add_task(self, fn, *args):
+    def add_task(self, fn, *args, **kwargs):
         self.tasks.append((fn.__name__, args))
+        self.kwargs = getattr(self, "kwargs", []) + [kwargs]
 
 
 class FakeStripe:
@@ -522,7 +523,7 @@ def test_the_buyer_is_emailed_about_their_refund(monkeypatch):
         ("a.stripe_account_id", {"status": "paid", "stripe_payment_intent": "pi_1",
                                  "stripe_invoice_id": None, "stripe_account_id": "acct_1"}),
         ("o.access_token, s.name", {"access_token": "tok", "name": "Lumière", "subdomain": "lumiere",
-                                    "custom_domain": None}),
+                                    "custom_domain": None, "meta_config": {"contact_email": "hi@lumiere.test"}}),
     ])
     log = _wire(monkeypatch, conn, FakeStripe())
 
@@ -537,4 +538,5 @@ def test_the_buyer_is_emailed_about_their_refund(monkeypatch):
     assert name == "send_cappe_order_refunded_email"
     assert args[:6] == ("b@example.com", "B", "Lumière", 1200, "USD", False)
     assert args[6].endswith("/order/tok")
+    assert bg.kwargs == [{"reply_to": "hi@lumiere.test"}]  # a reply reaches the store
     assert log[-1] == ("apply", "re_live")

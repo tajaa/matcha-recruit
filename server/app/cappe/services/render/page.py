@@ -131,8 +131,13 @@ def _footer(site: dict, meta: dict) -> str:
                 f'<a href="{_esc(_safe_href(u))}" target="_blank" rel="noopener noreferrer nofollow">{label}</a>'
             )
     social_html = f'<div class="cz-foot-social">{"".join(links)}</div>' if links else ""
+    # The store's policies (services/policies.py), when it has published any.
+    policies = "".join(
+        f'<a href="{_esc(p["url"])}">{_esc(p["title"])}</a>' for p in (site.get("policies") or [])
+    )
+    policies_html = f'<div class="cz-foot-policies">{policies}</div>' if policies else ""
 
-    return (f'<footer class="cz-footer"><div class="cz-wrap">{social_html}{contact_html}'
+    return (f'<footer class="cz-footer"><div class="cz-wrap">{social_html}{contact_html}{policies_html}'
             f'<p>© {name}</p><p class="small">Built with Cappe</p></div></footer>')
 
 
@@ -241,6 +246,8 @@ def render_site_html(site: dict, page: dict, nav_pages: list[dict], preview: boo
         "slug": slug, "api": f"/api/cappe/public/sites/{slug}", "preview": bool(preview),
         "tz": _def_loc.get("timezone") or site.get("timezone") or "UTC",
         "hours": _ctx_hours,
+        # The bag links them under its checkout button.
+        "policies": site.get("policies") or [],
     })
 
     meta = site.get("meta_config") or {}

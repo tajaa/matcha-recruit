@@ -309,9 +309,28 @@ def _validate_create_product(payload: dict[str, Any]) -> tuple[Optional[dict[str
     category = payload.get("category")
     if category is not None and (not isinstance(category, str) or len(category) > 120):
         return None, "'category' must be at most 120 characters"
+    # Physical goods: how many there are, the SKU, and what one weighs.
+    # `inventory` null = unlimited (made to order) — said, not assumed.
+    extra: dict[str, Any] = {}
+    if fulfillment == "physical":
+        if "inventory" in payload:
+            inventory = payload["inventory"]
+            if inventory is not None and (not isinstance(inventory, int) or isinstance(inventory, bool)
+                                          or not (0 <= inventory <= 1_000_000)):
+                return None, "'inventory' must be a whole number from 0, or null for unlimited"
+            extra["inventory"] = inventory
+        sku = payload.get("sku")
+        if sku is not None and (not isinstance(sku, str) or len(sku) > 120):
+            return None, "'sku' must be at most 120 characters"
+        weight = payload.get("weight_g")
+        if weight is not None and (not isinstance(weight, int) or isinstance(weight, bool)
+                                   or not (0 <= weight <= 1_000_000)):
+            return None, "'weight_g' must be grams, a whole number from 0"
+        extra.update(sku=(sku or "").strip() or None, weight_g=weight)
     return {
         "name": name.strip(), "fulfillment": fulfillment, "price_cents": price_cents,
         "description": description, "digital_file_url": digital_file_url, "category": category,
+        **extra,
     }, None
 
 
@@ -328,7 +347,15 @@ def _gate_create_product(payload: dict[str, Any], entitlements: Entitlements, pl
 
 def _summary_create_product(payload: dict[str, Any]) -> str:
     price = f"${payload['price_cents'] / 100:.2f}" if payload["price_cents"] else "free"
-    return f'Sell "{payload["name"]}" ({payload["fulfillment"]}, {price})'
+    stock = ""
+    if payload["fulfillment"] == "physical":
+        if "inventory" not in payload:
+            stock = ", saved as a draft until you set the stock"
+        elif payload["inventory"] is None:
+            stock = ", unlimited stock"
+        else:
+            stock = f", {payload['inventory']} in stock"
+    return f'Sell "{payload["name"]}" ({payload["fulfillment"]}, {price}{stock})'
 
 
 async def _execute_create_product(conn, site: dict[str, Any], account: Any, payload: dict[str, Any]) -> dict[str, Any]:
@@ -338,19 +365,32 @@ async def _execute_create_product(conn, site: dict[str, Any], account: Any, payl
     # product with a NULL booking_type_id.
     if payload.get("fulfillment") == "booking":
         raise SetupActionError(_BOOKING_PRODUCT_GUIDANCE)
-    # A digital good with no file yet would be a sale with nothing to deliver
-    # — created as a draft so it can't be bought until the seller finishes it
-    # in Shop. Everything else is safe to activate straight from chat.
-    status_ = "draft" if payload["fulfillment"] == "digital" and not payload.get("digital_file_url") else "active"
+    # A digital good with no file yet would be a sale with nothing to deliver,
+    # and a physical one nobody said the stock of would sell without limit —
+    # both are created as drafts, to finish in Shop. Everything else is safe to
+    # activate straight from chat.
+    unfinished = (
+        (payload["fulfillment"] == "digital" and not payload.get("digital_file_url"))
+        or (payload["fulfillment"] == "physical" and "inventory" not in payload)
+    )
+    status_ = "draft" if unfinished else "active"
     row = await conn.fetchrow(
         """INSERT INTO cappe_products
-               (site_id, name, description, price_cents, status, fulfillment, digital_file_url, category, currency)
+               (site_id, name, description, price_cents, status, fulfillment, digital_file_url, category, currency,
+                inventory, sku, weight_g)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
-                   COALESCE((SELECT currency FROM cappe_sites WHERE id = $1), 'USD'))
+                   COALESCE((SELECT currency FROM cappe_sites WHERE id = $1), 'USD'), $9, $10, $11)
            RETURNING id, name, status, fulfillment""",
         site["id"], payload["name"], payload.get("description"), payload["price_cents"],
         status_, payload["fulfillment"], payload.get("digital_file_url"), payload.get("category"),
+        payload.get("inventory"), payload.get("sku"), payload.get("weight_g"),
     )
+    if payload.get("inventory") is not None:
+        from ..inventory import log_adjustment
+        await log_adjustment(
+            conn, site_id=site["id"], product_id=row["id"], delta=payload["inventory"],
+            balance_after=payload["inventory"], reason="adjustment", note="Opening stock",
+        )
     # Its address on the store, /shop/<slug> (services/product_pages.py).
     await assign_slug(conn, site["id"], row["id"], payload["name"])
     await refresh_site_search(conn, site["id"])
@@ -588,13 +628,16 @@ SETUP_ACTIONS: tuple[SetupActionSpec, ...] = (
         gate=_gate_create_product,
         execute=_execute_create_product,
         summary=_summary_create_product,
-        prompt_shape='{"name":"<product name>","fulfillment":"physical"|"digital"|"service","price_cents":<int>,"description":"<optional>","digital_file_url":"<optional, digital only>","category":"<optional>"}',
+        prompt_shape='{"name":"<product name>","fulfillment":"physical"|"digital"|"service","price_cents":<int>,"description":"<optional>","digital_file_url":"<optional, digital only>","category":"<optional>","inventory":<int>|null,"sku":"<optional>","weight_g":<int, optional>}',
         prompt_rules=(
             "'service' fulfillment is for selling a session or appointment WITHOUT a booking calendar. "
             "Never use fulfillment='booking' here — use create_booking_type when the user wants real "
             "availability or scheduling.",
             "A digital product with no digital_file_url is created as a draft (nothing to deliver yet) — "
             "say so, and point them to Shop to attach the file.",
+            "For a physical product ask how many they have: 'inventory' is that number, or null when it's "
+            "made to order (unlimited). Leaving it out creates a draft — say so and point them to Shop to "
+            "set the stock. 'weight_g' (grams) is what delivery options price by.",
         ),
     ),
     SetupActionSpec(

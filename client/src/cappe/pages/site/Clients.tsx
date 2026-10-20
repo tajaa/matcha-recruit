@@ -101,7 +101,7 @@ export default function Clients() {
                     {c.orders_count > 0 && <span className="inline-flex items-center gap-1"><Receipt className="h-3 w-3" />{c.orders_count}</span>}
                     {c.bookings_count > 0 && <span className="inline-flex items-center gap-1"><Calendar className="h-3 w-3" />{c.bookings_count}</span>}
                     {c.is_subscriber && <span className="inline-flex items-center gap-1 text-lime-400"><Mail className="h-3 w-3" />subscribed</span>}
-                    {c.total_spent_cents > 0 && <span className="text-zinc-300">{centsToMoney(c.total_spent_cents)} spent</span>}
+                    {c.total_spent_cents > 0 && <span className="text-zinc-300">{centsToMoney(c.total_spent_cents, c.currency)} spent</span>}
                   </div>
                 </div>
                 <button onClick={() => message(c)} className="flex items-center gap-1.5 rounded-lg border border-zinc-700 px-3 py-1.5 text-xs font-medium text-zinc-200 hover:bg-zinc-800">

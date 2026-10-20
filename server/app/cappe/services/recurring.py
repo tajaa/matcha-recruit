@@ -518,7 +518,8 @@ async def _schedule_subscription_emails(background, row, invoice, *, order_id, s
 
     async with get_connection() as conn:
         info = await conn.fetchrow(
-            "SELECT s.name AS site_name, s.subdomain, s.custom_domain, a.email AS owner_email, a.name AS owner_name, "
+            "SELECT s.name AS site_name, s.subdomain, s.custom_domain, s.meta_config, "
+            "a.email AS owner_email, a.name AS owner_name, "
             "sh.email AS shopper_email, sh.name AS shopper_name "
             "FROM cappe_sites s JOIN cappe_accounts a ON a.id=s.account_id "
             "LEFT JOIN cappe_shoppers sh ON sh.id=$2 AND sh.site_id=s.id WHERE s.id=$1",
@@ -541,19 +542,22 @@ async def _schedule_subscription_emails(background, row, invoice, *, order_id, s
     # the card (it used to say "contact the store").
     origin = site_public_origin(info)
     account_url = f"{origin}/account" if origin else None
+    # Sent as the store; a reply reaches the store.
+    reply_to = mail.store_reply_to(info.get("meta_config"), info["owner_email"])
     if started:
         background.add_task(
             mail.send_cappe_subscription_started_email, shopper, info["shopper_name"], info["site_name"],
-            items, row["total_cents"], row["currency"], row["interval"], account_url,
+            items, row["total_cents"], row["currency"], row["interval"], account_url, reply_to=reply_to,
         )
     if failed:
         background.add_task(
             mail.send_cappe_subscription_payment_failed_email, shopper, info["shopper_name"], info["site_name"], items,
-            account_url,
+            account_url, reply_to=reply_to,
         )
     if cancelled:
         background.add_task(
             mail.send_cappe_subscription_cancelled_email, shopper, info["shopper_name"], info["site_name"], items,
+            reply_to=reply_to,
         )
 
 

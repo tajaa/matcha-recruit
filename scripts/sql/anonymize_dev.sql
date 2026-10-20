@@ -267,6 +267,34 @@ UPDATE cappe_orders SET
     stripe_session_id     = CASE WHEN stripe_session_id IS NOT NULL THEN 'cs_dev_' || replace(id::text,'-','') END,
     stripe_payment_intent = CASE WHEN stripe_payment_intent IS NOT NULL THEN 'pi_dev_' || replace(id::text,'-','') END,
     payment_ref           = CASE WHEN payment_ref IS NOT NULL THEN 'pi_dev_' || replace(id::text,'-','') END;
+-- The buyer's billing name, phone and address (zzzzcappe54); absent on a dump
+-- taken before that migration.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'cappe_orders' AND column_name = 'billing_address') THEN
+        UPDATE cappe_orders SET billing_address = NULL WHERE billing_address IS NOT NULL;
+    END IF;
+    -- The seller's identity on receipts: for a sole trader, their own name,
+    -- home address and tax number.
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'cappe_sites' AND column_name = 'business_address') THEN
+        UPDATE cappe_sites SET
+            legal_name       = CASE WHEN legal_name IS NOT NULL THEN 'Seller ' || left(replace(id::text,'-',''), 6) END,
+            business_address = CASE WHEN business_address IS NOT NULL THEN '1 Example Street' END,
+            tax_id           = CASE WHEN tax_id IS NOT NULL THEN 'TEST' || left(replace(id::text,'-',''), 8) END
+        WHERE legal_name IS NOT NULL OR business_address IS NOT NULL OR tax_id IS NOT NULL;
+    END IF;
+    -- The same identity as each numbered receipt froze it.
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'cappe_orders' AND column_name = 'seller_tax_id') THEN
+        UPDATE cappe_orders SET
+            seller_legal_name       = CASE WHEN seller_legal_name IS NOT NULL THEN 'Seller ' || left(replace(site_id::text,'-',''), 6) END,
+            seller_business_address = CASE WHEN seller_business_address IS NOT NULL THEN '1 Example Street' END,
+            seller_tax_id           = CASE WHEN seller_tax_id IS NOT NULL THEN 'TEST' || left(replace(site_id::text,'-',''), 8) END
+        WHERE seller_legal_name IS NOT NULL OR seller_business_address IS NOT NULL OR seller_tax_id IS NOT NULL;
+    END IF;
+END $$;
 UPDATE cappe_bookings SET
     customer_email = CASE WHEN customer_email IS NOT NULL THEN 'booking_' || replace(id::text,'-','') || '@example.com' END,
     customer_name  = CASE WHEN customer_name IS NOT NULL THEN 'Customer ' || left(replace(id::text,'-',''), 6) END,
