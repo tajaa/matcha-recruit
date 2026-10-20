@@ -82,6 +82,10 @@ class SqlConn:
     async def execute(self, sql, *args):
         self._answer(sql, args)
 
+    async def executemany(self, sql, rows):
+        for args in rows:
+            self._answer(sql, tuple(args))
+
     def transaction(self):
         return Ctx(self)
 
@@ -114,6 +118,23 @@ def test_an_address_the_owner_chose_is_theirs_or_refused():
     assert exc.value.status_code == 409 and conn.sql("UPDATE") == []
     conn = SqlConn([("SELECT slug FROM cappe_products", [])])
     assert asyncio.run(pp.assign_slug(conn, SITE, PRODUCT, "Tee", "summer-tee")) == "summer-tee"
+
+
+def test_an_address_taken_in_a_race_is_a_409_or_a_fresh_suffix():
+    from asyncpg.exceptions import UniqueViolationError
+
+    class Racing(SqlConn):
+        async def execute(self, sql, *args):
+            await super().execute(sql, *args)
+            if "SET slug" in sql and len(self.sql("SET slug")) == 1:
+                raise UniqueViolationError("uq_cappe_products_site_slug")
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(pp.assign_slug(Racing(), SITE, PRODUCT, "Tee", "summer-tee"))
+    assert exc.value.status_code == 409
+    conn = Racing()
+    slug = asyncio.run(pp.assign_slug(conn, SITE, PRODUCT, "Mug"))
+    assert re.fullmatch(r"mug-[0-9a-f]{6}", slug) and conn.sql("SET slug")[-1][1][0] == slug
 
 
 # ── what an owner may type ───────────────────────────────────────────────────
@@ -181,6 +202,8 @@ def test_an_app_that_only_knows_the_cover_still_keeps_the_list_true():
     assert conn.sql("UPDATE cappe_product_images SET url")[0][1] == ("https://c.example.com/new.jpg", first["id"])
     asyncio.run(pp.set_cover(conn, SITE, PRODUCT, None))
     assert conn.sql("DELETE FROM cappe_product_images")[0][1] == (first["id"],)
+    # The next picture becomes the cover, and the column says so.
+    assert "SELECT url FROM cappe_product_images" in conn.sql("UPDATE cappe_products SET image_url")[0][0]
     conn = SqlConn()
     asyncio.run(pp.set_cover(conn, SITE, PRODUCT, "/uploads/a.png"))
     assert conn.sql("INSERT INTO cappe_product_images")[0][1][2] == "/uploads/a.png"
@@ -247,6 +270,27 @@ def test_variants_priced_differently_make_a_price_range_and_all_out_is_out_of_st
     assert (ld["offers"]["lowPrice"], ld["offers"]["highPrice"]) == ("45.00", "55.00")   # disabled ignored
     assert ld["offers"]["availability"] == "https://schema.org/OutOfStock"
     assert "Sold out" in html and "image" not in ld and "cz-pd__thumbs" not in _media(html)
+
+
+def test_a_discount_prices_the_variants_too_and_a_price_nobody_pays_is_left_out():
+    variants = [{"status": "active", "price_cents": 6000, "inventory": 3},
+                {"status": "active", "price_cents": 8000, "inventory": 3}]
+    product = _product()
+    low, high = pp.price_range(product, variants, 2250, discount_percent=50)
+    assert (low, high) == (3000, 4000)       # not the discounted base, which no combination sells at
+    assert pp.price_range(product, [], 2250, discount_percent=50) == (2250, 2250)
+
+
+def test_a_picture_link_the_validator_never_saw_is_not_rendered():
+    html = _page(images=[{"url": "javascript:alert(1)", "alt": None}, {"url": "https://c.example.com/1.jpg", "alt": None}])
+    assert "javascript:" not in _media(html) and _ld(html)["image"] == ["https://c.example.com/1.jpg"]
+
+
+def test_home_is_the_page_slugged_home_wherever_it_sits():
+    from app.cappe.services.render.page import home_slug
+    assert home_slug([{"slug": "about"}, {"slug": "home"}]) == "home"
+    assert home_slug([{"slug": "about"}, {"slug": "menu"}]) == "about"
+    assert home_slug([]) == "home"
 
 
 def test_everything_the_owner_typed_is_escaped():
@@ -349,6 +393,14 @@ def test_a_store_has_its_own_robots_and_sitemap(monkeypatch):
     assert locs == ["https://bloom.gummfit.com/", "https://bloom.gummfit.com/p/about",
                     "https://bloom.gummfit.com/shop", "https://bloom.gummfit.com/shop/peony"]
     assert "<lastmod>2026-10-20</lastmod>" in xml
+
+
+def test_the_sitemap_lists_a_page_that_sits_before_home(monkeypatch):
+    _wire(monkeypatch, sells=frozenset({"physical"}),
+          pages=[{"slug": "about", "title": "About", "updated_at": NOW}, {"slug": "home", "title": "Home", "updated_at": NOW}])
+    xml = asyncio.run(render_mod.tenant_seo(_request("/sitemap.xml"), "sitemap")).body.decode()
+    locs = re.findall(r"<loc>(.*?)</loc>", xml)
+    assert locs[:2] == ["https://bloom.gummfit.com/p/about", "https://bloom.gummfit.com/"]
 
 
 def test_a_store_that_isnt_live_asks_not_to_be_indexed(monkeypatch):

@@ -22,12 +22,13 @@ export default function ProductImagesEditor({ siteId, images, onChange }: {
     next.splice(i + by, 0, row)
     onChange(next)
   }
-  const add = () => {
-    const url = adding.trim()
+  const append = (raw: string) => {
+    const url = raw.trim()
     if (!url || images.length >= MAX_IMAGES) return
     onChange([...images, { url, alt: '' }])
     setAdding('')
   }
+  const add = () => append(adding)
   return (
     <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
       <div className="mb-2 text-xs font-medium text-zinc-400">Pictures — the first is the cover</div>
@@ -48,7 +49,8 @@ export default function ProductImagesEditor({ siteId, images, onChange }: {
       )}
       {images.length < MAX_IMAGES ? (
         <div className="flex items-center gap-2">
-          <ImageUpload siteId={siteId} value={adding} onChange={setAdding} placeholder="Upload or paste a picture link" className="flex-1" />
+          {/* An uploaded file joins the list at once: left in the field, a save would drop it. */}
+          <ImageUpload siteId={siteId} value={adding} onChange={setAdding} onUploaded={append} placeholder="Upload or paste a picture link" className="flex-1" />
           <button type="button" onClick={add} disabled={!adding.trim()} className="rounded-lg border border-zinc-700 px-3 py-2 text-xs font-medium text-emerald-400 hover:bg-zinc-800 disabled:opacity-40">Add</button>
         </div>
       ) : (
