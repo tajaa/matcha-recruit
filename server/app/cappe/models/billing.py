@@ -110,6 +110,17 @@ class CappeSubscription(BaseModel):
     mailbox_quota: int = 0
 
 
+class CappeEntitlementsView(BaseModel):
+    """What this account's plan lets it do, for the dashboard to show instead
+    of hard-coding plan names (services/entitlements.py)."""
+    plan_code: str
+    plan_name: str
+    can_sell: bool
+    platform_fee_bps: int
+    allowed_fulfillment: list[str]
+    features: dict[str, Any] = {}
+
+
 class CappePlanCheckoutRequest(BaseModel):
     """Subscribe to a plan. Not `CappeCheckoutRequest`: that is the storefront's
     cart checkout (`models/shop.py`), and with both exported under one name
@@ -301,6 +312,7 @@ __all__ = [
     "CappePublicPricing",
     "CappeSubscriptionAddon",
     "CappeSubscription",
+    "CappeEntitlementsView",
     "CappePlanCheckoutRequest",
     "CappeCheckoutResponse",
     "CappePortalRequest",

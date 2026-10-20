@@ -9,6 +9,8 @@ vi.mock('../../api', async (importOriginal) => ({ ...(await importOriginal<objec
 vi.mock('../../components/TaxSettingsCard', () => ({ default: () => null }))
 vi.mock('../../components/ShippingSettingsCard', () => ({ default: () => null }))
 vi.mock('../../components/PromoCodesCard', () => ({ default: () => null }))
+vi.mock('../../components/PoliciesCard', () => ({ default: () => null }))
+vi.mock('../../components/BusinessIdentityCard', () => ({ default: () => null }))
 vi.mock('../../components/ImageUpload', () => ({ default: () => null }))
 
 const product = {
@@ -30,7 +32,11 @@ function renderShop() {
 let confirm: ReturnType<typeof vi.spyOn>
 beforeEach(() => {
   for (const fn of Object.values(api)) fn.mockReset()
-  api.get.mockImplementation((path: string) => Promise.resolve(path.endsWith('/products') ? [product] : []))
+  api.get.mockImplementation((path: string) => Promise.resolve(
+    path.endsWith('/products') ? [product]
+      : path === '/billing/entitlements' ? { plan_code: 'business', plan_name: 'Business', can_sell: true, platform_fee_bps: 150, allowed_fulfillment: ['booking', 'digital', 'physical', 'service'], features: {} }
+        : [],
+  ))
   confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
 })
 

@@ -52,6 +52,10 @@ export default function SetupGuide({ site, pages, publishing, onPublish, refresh
       case 'shop': return `/cappe/sites/${site.id}/shop`
       case 'pages': return homePageId ? `/cappe/sites/${site.id}/pages/${homePageId}` : `/cappe/sites/${site.id}`
       case 'settings': return `/cappe/sites/${site.id}`
+      // The commerce items: the Shop page's settings cards, and Orders for Stripe.
+      case 'policies': case 'shipping': case 'tax': case 'identity':
+        return `/cappe/sites/${site.id}/shop#${action}`
+      case 'payments': return `/cappe/sites/${site.id}/orders`
       default: return `/cappe/sites/${site.id}`
     }
   }

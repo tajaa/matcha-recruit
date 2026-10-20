@@ -196,7 +196,7 @@ async def test_subscription_checkout_uses_connected_customer_fee_and_app_callbac
         "custom_domain": "ahnimal.gummfit.com", "timezone": "UTC",
     }
     shopper = {"id": shopper_id, "site_id": site_id, "email": "buyer@example.com"}
-    product = {"id": product_id}
+    product = {"id": product_id, "fulfillment": "physical"}
     row = {
         "id": row_id, "checkout_token": "a" * 32, "stripe_account_id": "acct_owner",
         "site_id": site_id, "shopper_id": shopper_id, "status": "preparing",
@@ -210,17 +210,19 @@ async def test_subscription_checkout_uses_connected_customer_fee_and_app_callbac
         cancel_url="https://ahnimal.gummfit.com/__cappe/app-return",
     )
 
-    entitlement = SimpleNamespace(has=lambda key: key == "recurring_orders", platform_fee_bps=250)
+    entitlement = SimpleNamespace(has=lambda key: key == "recurring_orders", platform_fee_bps=250,
+                                  allowed_fulfillment=frozenset({"physical", "digital"}))
     monkeypatch.setattr(recurring, "get_connection", lambda: _Ctx(conn))
     monkeypatch.setattr(recurring, "resolve_entitlements", lambda *_args, **_kwargs: _async(entitlement))
     monkeypatch.setattr(recurring, "require_can_sell", lambda _ent: None)
     monkeypatch.setattr(recurring, "fetch_option_groups", lambda *_args: _async({}))
+    monkeypatch.setattr(recurring, "fetch_variants", lambda *_args: _async({}))
     monkeypatch.setattr(recurring, "build_subscription_lines", lambda *_args: (
         [{"price_data": {"unit_amount": 1000}}],
         [{"product_id": str(product_id), "title": "Soap", "quantity": 1,
           "unit_price_cents": 1000, "fulfillment": "physical"}],
         {"subtotal_cents": 1000, "tax_cents": 0, "shipping_cents": 0,
-         "total_cents": 1000, "currency": "USD"},
+         "total_cents": 1000, "currency": "USD", "tax_included": False, "shipping_tax_cents": 0},
     ))
     monkeypatch.setattr(recurring, "connected_customer", lambda *_args: _async("cus_buyer"))
     stripe_calls = []
@@ -273,15 +275,18 @@ async def test_subscription_checkout_charges_the_promotional_quote_amount(monkey
         success_url="https://ahnimal.gummfit.com/__cappe/app-return",
         cancel_url="https://ahnimal.gummfit.com/__cappe/app-return",
     )
-    entitlement = SimpleNamespace(has=lambda key: key == "recurring_orders", platform_fee_bps=250)
+    entitlement = SimpleNamespace(has=lambda key: key == "recurring_orders", platform_fee_bps=250,
+                                  allowed_fulfillment=frozenset({"physical", "digital"}))
     monkeypatch.setattr(public_shop, "get_connection", lambda: _Ctx(conn))
     monkeypatch.setattr(public_shop, "_published_site", lambda *_args: _async(site))
     monkeypatch.setattr(public_shop, "_read_rate_limit", lambda *_args: _async(None))
     monkeypatch.setattr(public_shop, "fetch_option_groups", lambda *_args: _async({}))
+    monkeypatch.setattr(public_shop, "fetch_variants", lambda *_args: _async({}))
     monkeypatch.setattr(recurring, "get_connection", lambda: _Ctx(conn))
     monkeypatch.setattr(recurring, "resolve_entitlements", lambda *_args, **_kwargs: _async(entitlement))
     monkeypatch.setattr(recurring, "require_can_sell", lambda _ent: None)
     monkeypatch.setattr(recurring, "fetch_option_groups", lambda *_args: _async({}))
+    monkeypatch.setattr(recurring, "fetch_variants", lambda *_args: _async({}))
     monkeypatch.setattr(recurring, "connected_customer", lambda *_args: _async("cus_buyer"))
     stripe_calls = []
 
@@ -310,13 +315,20 @@ async def test_subscription_checkout_charges_the_promotional_quote_amount(monkey
             "title": "Sale soap", "selected_option_ids": [],
         }],
         "subtotal_cents": 720, "tax_cents": 72, "shipping_cents": 500,
-        "total_cents": 1292, "currency": "USD",
+        "total_cents": 1292, "currency": "USD", "tax_included": False, "shipping_tax_cents": 0,
+        "tax_label": "Tax",
         # This test's fake connection answers None for the card-payments
         # lookup; the cart only uses the flag to decide whether to ask for an
         # address.
         "pays_by_card": False,
-        # Physical goods: where the bag ships. Subscriptions ship home only.
+        # Physical goods: where the bag ships. Subscriptions ship home only,
+        # at the home flat rate (the one option there is).
         "ship_country": "US", "home_country": "US", "ships_to": True, "ship_countries": ["US"],
+        "asks_postal_code": False,
+        "shipping_options": [{"id": "flat", "label": "Shipping", "method": "ship", "amount_cents": 500,
+                 "delivery_min_days": None, "delivery_max_days": None, "instructions": None}],
+        "shipping_option": {"id": "flat", "label": "Shipping", "method": "ship", "amount_cents": 500,
+                 "delivery_min_days": None, "delivery_max_days": None, "instructions": None},
     }
     billed = sum(
         line["price_data"]["unit_amount"] * line["quantity"]
@@ -359,11 +371,13 @@ async def test_checkout_compensates_cancellation_that_wins_during_stripe_creatio
         success_url="https://ahnimal.gummfit.com/__cappe/app-return",
         cancel_url="https://ahnimal.gummfit.com/__cappe/app-return",
     )
-    entitlement = SimpleNamespace(has=lambda key: key == "recurring_orders", platform_fee_bps=250)
+    entitlement = SimpleNamespace(has=lambda key: key == "recurring_orders", platform_fee_bps=250,
+                                  allowed_fulfillment=frozenset({"physical", "digital"}))
     monkeypatch.setattr(recurring, "get_connection", lambda: _Ctx(conn))
     monkeypatch.setattr(recurring, "resolve_entitlements", lambda *_args, **_kwargs: _async(entitlement))
     monkeypatch.setattr(recurring, "require_can_sell", lambda _ent: None)
     monkeypatch.setattr(recurring, "fetch_option_groups", lambda *_args: _async({}))
+    monkeypatch.setattr(recurring, "fetch_variants", lambda *_args: _async({}))
     monkeypatch.setattr(recurring, "connected_customer", lambda *_args: _async("cus_buyer"))
     expired = []
 
@@ -415,11 +429,13 @@ async def test_failed_checkout_compensation_keeps_session_retryable(monkeypatch)
         success_url="https://ahnimal.gummfit.com/__cappe/app-return",
         cancel_url="https://ahnimal.gummfit.com/__cappe/app-return",
     )
-    entitlement = SimpleNamespace(has=lambda key: key == "recurring_orders", platform_fee_bps=250)
+    entitlement = SimpleNamespace(has=lambda key: key == "recurring_orders", platform_fee_bps=250,
+                                  allowed_fulfillment=frozenset({"physical", "digital"}))
     monkeypatch.setattr(recurring, "get_connection", lambda: _Ctx(conn))
     monkeypatch.setattr(recurring, "resolve_entitlements", lambda *_args, **_kwargs: _async(entitlement))
     monkeypatch.setattr(recurring, "require_can_sell", lambda _ent: None)
     monkeypatch.setattr(recurring, "fetch_option_groups", lambda *_args: _async({}))
+    monkeypatch.setattr(recurring, "fetch_variants", lambda *_args: _async({}))
     monkeypatch.setattr(recurring, "connected_customer", lambda *_args: _async("cus_buyer"))
 
     class _Stripe:

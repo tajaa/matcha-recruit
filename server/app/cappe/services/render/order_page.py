@@ -129,7 +129,8 @@ def _totals_html(order: dict) -> str:
     if discount:
         code = order.get("promo_code")
         rows.append((f"Discount ({code})" if code else "Discount", -discount))
-    if order.get("tax_cents"):
+    included = bool(order.get("tax_included"))  # inside the prices: shown under the total
+    if order.get("tax_cents") and not included:
         rows.append((order.get("tax_label") or "Tax", order["tax_cents"]))
     if order.get("shipping_cents"):
         rows.append((order.get("shipping_label") or "Shipping", order["shipping_cents"]))
@@ -139,15 +140,40 @@ def _totals_html(order: dict) -> str:
     )
     total = order.get("total_cents") or order.get("subtotal_cents") or 0
     body += f'<div class="cz-order__total"><dt>Total</dt><dd>{escape(fmt_money(total, cur))}</dd></div>'
+    if included and order.get("tax_cents"):
+        body += (f"<div><dt>Includes {escape(order.get('tax_label') or 'Tax')}</dt>"
+                 f"<dd>{escape(fmt_money(order['tax_cents'], cur))}</dd></div>")
     if order.get("refunded_cents"):
         body += f"<div><dt>Refunded</dt><dd>−{escape(fmt_money(order['refunded_cents'], cur))}</dd></div>"
     return f'<dl class="cz-order__totals">{body}</dl>'
 
 
+def delivery_estimate(order: dict) -> str | None:
+    """"Arrives in 3–5 business days", from the option the buyer chose."""
+    low, high = order.get("delivery_min_days"), order.get("delivery_max_days")
+    if low is None and high is None:
+        return None
+    low, high = (low if low is not None else high), (high if high is not None else low)
+    span = f"{low}" if low == high else f"{low}–{high}"
+    unit = "business day" if high == 1 else "business days"
+    verb = "Ready for pickup in" if order.get("shipping_method") == "pickup" else "Arrives in"
+    return f"{verb} {span} {unit}"
+
+
 def _shipping_html(order: dict) -> str:
     parts = []
+    method = order.get("shipping_method") or "ship"
+    open_order = order.get("status") not in ("fulfilled", "cancelled", "refunded", "declined")
+    if method == "pickup":
+        where = order.get("shipping_instructions")
+        parts.append('<div><h2 class="cz-order__h">Pickup</h2><p>'
+                     + escape(str(where or "The store will tell you where and when to collect it."))
+                     + "</p></div>")
+    estimate = delivery_estimate(order) if open_order else None
+    if estimate:
+        parts.append(f'<div><h2 class="cz-order__h">When</h2><p>{escape(estimate)}</p></div>')
     ship = order.get("shipping_address") if isinstance(order.get("shipping_address"), dict) else None
-    if ship:
+    if ship and method != "pickup":
         addr = ship.get("address") if isinstance(ship.get("address"), dict) else {}
         lines = [ship.get("name"), addr.get("line1"), addr.get("line2"),
                  " ".join(x for x in (addr.get("city"), addr.get("state"), addr.get("postal_code")) if x),

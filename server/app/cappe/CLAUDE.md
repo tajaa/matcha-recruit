@@ -135,6 +135,34 @@ DB safety rules, test-data email domain rules, and deploy rules are in root `CLA
 - **One store, one currency** (`cappe_sites.currency`, two-decimal allowlist `SITE_CURRENCIES`,
   mirrored in the migration and `client/src/cappe/utils/countries.ts`). Products take it on create
   and follow it on change; a change is refused while subscriptions are billing.
+- **A destination may offer delivery options** (`cappe_shipping_rates`, `zzzzcappe52`, zone_id NULL =
+  home; same `shipping_zones` plan gate): `ship`, `pickup`, `local_delivery`, priced by
+  `shipping.rate_price` — amount + per extra item + the products' `shipping_surcharge_cents`, free
+  over an amount, offered only inside its value/weight bands. No rows = the flat rate, presented as
+  the one option `"flat"`; the first option is the default. **One rule for both:** the flat rate is
+  priced by the same `rate_price` (`compute_shipping_cents` is gone), so a quote and its order
+  cannot disagree. `ships_free` products never count; goods of 0 never pay delivery.
+- **The quote falls back to the default; the order refuses** (`choose_option(strict=True)`: 409 for
+  an option it no longer gets, 422 when none fits) — never a silent reprice. The order stores what
+  was chosen as it was (`shipping_rate_id` without FK, method, label, estimate, pickup
+  instructions); the order page, receipt and Pay now read those, not the live rate.
+- **Stripe asks for an address only for `ship`.** Pickup stores none; local delivery is offered
+  only once the bag sends a postal code (`postal_matches` is False without one, area or not), so its
+  typed address is the one priced, and Stripe gets the fee as a line item instead of a shipping
+  option. An app that sends no option and no address is therefore never defaulted onto one.
+- **Rates are saved with zones** (`PUT /sites/{id}/shipping-zones`, `rates` per zone + `home_rates`).
+  Zones are replaced as a set, so their ids change: options left out (`None`) are re-inserted, a
+  zone's by its name. Estimates are the store's `handling_days_*` plus each option's transit days.
+- **Tax is on top or inside the price, never both** (`cart.tax_in`, `zzzzcappe53`). The site's
+  `prices_include_tax` makes `tax_cents` the part of the price that is tax (`amount*bps//(10000+bps)`)
+  and the total subtotal + shipping; `tax_on_shipping` taxes shipping at the same rate
+  (`shipping_tax_cents`). A zone that charges tax uses its own `tax_rate_bps`, else the store's; one
+  that doesn't charges none, inclusive prices or not (the price stays as listed). Both flags ungated.
+- **An order and a subscription keep how they were priced** (`tax_included`, `shipping_tax_cents`;
+  renewals copy the subscription's). Everything that reads an order honours it: no Stripe tax line
+  when included (the lines are the total), the receipt, order page, owner view and bag say
+  "Includes VAT" under the total, and finances use `_GOODS_NET` / `_SHIPPING_NET` so goods + tax +
+  shipping = total. **The platform fee is on `cart.goods_net_cents`** — never the inclusive subtotal.
 
 - **A promo code applies to lines with no automatic discount, split pro rata before tax**
   (`promos.allocate`, each line's `promo_discount_cents`). `cappe_orders.subtotal_cents` is AFTER
@@ -162,7 +190,88 @@ DB safety rules, test-data email domain rules, and deploy rules are in root `CLA
   serve them. Purchases keep `published_shopper_site`. Codes go only to `subscribes_here` emails;
   `/auth/start` stays 204 either way.
 
-## Social growth (2026-10, `services/social/`, migration `zzzzcappe49`)
+## Variants and what a plan sells (2026-10, `services/variants.py`, `zzzzcappe50`)
+
+- **A variant is one option from each VARIANT GROUP — a required, single-pick group** (Size ×
+  Colour) — with its own stock, SKU, price and picture (`cappe_product_variants`, `option_ids`
+  sorted by uuid text). Optional groups and add-ons stay plain options. A selection with no variant
+  row behaves exactly as before variants existed.
+- **The stock rule every path follows** (checkout, `restock_order`, `retake_order_stock`, the bag's
+  availability): a matched variant owns the stock of the options it is made of — their own option
+  stock never moves for that sale; options outside it (an add-on) move theirs; the product's own
+  stock, when tracked, is the total. Use `variants.uncovered_option_ids`, never the raw selection.
+- **An order line records what it took**: `variant_id` (bought), `decremented_variant_id` (stock
+  taken, NULL = untracked), `sku` (sold under). A line with `stock_decremented` set is recorded; an
+  unrecorded one (a renewal line before `retake_order_stock`) has only `variant_id`, and its options
+  exclude the variant's (`inventory._line_option_ids` joins `variant_option_ids`).
+- **Lock order: products → variants → options**, each in id order (`inventory.lock_stock_rows`).
+- **A variant row's combination never changes.** `replace_variants` pairs by id only when the id
+  still names the same combination, else by combination; anything unclaimed is deleted, and
+  `prune_variants` drops every variant that no longer fits the groups an option save leaves (a
+  deleted option, a group made optional or pick-many, a variant group added since). The editor
+  sends `{group, option}` NAMES so options created in the same save can carry variants; `variants`
+  omitted = leave them, `[]` = none.
+- **Checkout asks the plan about every line** (`entitlements.sells`), not only the editor's create /
+  kind-change gate: a store whose plan stopped selling a kind (downgrade, lineup change) can't sell
+  it. The public listing and `/quote` drop those products. Since `zzzzcappe50` Free sells digital,
+  service and booking only; Creator sells all four. `GET /billing/entitlements` is what the
+  dashboard reads instead of hard-coding plan names.
+- **The Storefront app's required keys are a contract** — `tests/cappe/test_cappe_variants.py`
+  reads them out of `platforms/ios/Storefront/Sources/Models.swift`; add fields, never rename or null them.
+
+## Product pages and the store's own SEO (2026-10, `services/product_pages.py`, `zzzzcappe51`)
+
+- **A product lives at `/shop/<slug>` on its store** (`routes/render.py:product_page`,
+  `services/render/product_page.py`): server-rendered name, price, pictures, description, its own
+  title/canonical/Open Graph (`render_site_html(seo=…)` → `_head_seo` override) and Product
+  JSON-LD (`product_pages.product_ld`, Offer or AggregateOffer for differently priced variants).
+  store.js then fills the same panel in place (`data-product`). Active products the plan sells
+  only. `/shop` is the linked catalog crawlers read.
+- **The slug is made from the name once and survives renames** (`assign_slug`); only an owner's
+  explicit `slug` changes it, and a taken one is a 409, never a quiet `-2`. Every insert path must
+  call `assign_slug` (owner create, Merlin `create_product`); a NULL slug simply has no page.
+- **Pictures are `cappe_product_images` in order; `cappe_products.image_url` mirrors the first**
+  for everything that reads one column (both apps, receipts, directory). `images` sent →
+  `replace_images` decides the cover; only `image_url` sent (the apps, Merlin) → `set_cover`.
+- **JSON-LD escapes every `<`, `>`, `&`** (`\u003c`…), not just `</`: owner text with `<!--` +
+  `<script` would otherwise stop our real `</script>` from closing the element.
+- **Product pages, the catalog and the sitemap are cached per site** (`cappe:render:{site}:…`);
+  every product write calls `invalidate_site_render_cache`. Sales don't, so a page's stock and
+  availability can lag by the 300 s TTL.
+- **A store answers its own `/robots.txt` and `/sitemap.xml`** (`render.tenant_seo`). Matcha's SEO
+  routes (`core/routes/content/sitemap.py`) are mounted first and used to give every store
+  Matcha's files; they now ask `register_host_seo` hooks first, and `main.py` registers Cappe's.
+  A store that isn't published answers `Disallow: /`.
+
+## Policies, the seller on receipts, mail as the store (2026-10, `zzzzcappe54`)
+
+- **A store's policies are `cappe_site_policies`** (refund, shipping, terms, privacy; plain text,
+  `services/policies.py`), served at `/policies/<kind>`, linked from the footer (`_site_dict(site,
+  kinds)` → `site["policies"]`, also `window.__CAPPE__.policies` for the bag), the sitemap, the bag
+  and Stripe's page. No row = no page. Every write drops the store's render cache.
+- **Checkout points at the terms; it does not ask Stripe to collect consent.** Stripe's
+  `consent_collection.terms_of_service` refuses to open a page unless the CONNECTED account has its
+  own terms URL in its own Stripe settings — it would break a seller's checkout. The bag says "By
+  placing your order you agree to…" and Stripe's page shows `policies.checkout_note` as
+  `custom_text.submit`. `collect_phone` turns on `phone_number_collection`.
+- **Selling physical goods requires the refund and shipping policies to publish**
+  (`readiness`'s `policies` item, `policies.REQUIRED_FOR_PHYSICAL`). Payments, shipping, tax,
+  identity and product pictures are nudges, shown only when they apply.
+- **Receipts name the seller** (`legal_name`, `business_address`, `tax_id` → "VAT ID: …"), **frozen
+  onto the order when the receipt is numbered** (`cappe_orders.seller_*`, `assign_receipt_number`):
+  receipts render on demand, so without it an old receipt showed a changed VAT number. **And the
+  buyer's billing address** (`cappe_orders.billing_address`, from Stripe's `customer_details` in
+  `_mark_order_paid`; scrubbed by `anonymize_dev.sql`).
+- **Mail to a store's buyers is sent as the store and replies reach it**: `email.store_from_name`
+  ("Lumen via Gummfit", address-list characters stripped — it goes into a From header) and
+  `email.store_reply_to` (the store's `meta_config.contact_email`, else the owner's login), through
+  core's `send_email_with_fallback(reply_to=)` (Gmail `Reply-To` header, MailerSend `reply_to`;
+  `client.clean_reply_to` drops anything but one plain address). Orders, the paid receipt and
+  subscriptions do this; owner alerts stay "Gummfit". Booking mail to customers doesn't yet.
+- **Merlin's `create_product` takes `inventory`/`sku`/`weight_g`**; a physical product with no
+  `inventory` key (nobody said the stock) is created a draft — `null` means made to order.
+
+## Social growth (2026-10, `services/social/`, migration `cappesocial01`)
 
 Owners connect the Instagram business account and Facebook Page they already run, drop photos
 into a composer (one carousel post, or one post per photo spread across days), schedule or post

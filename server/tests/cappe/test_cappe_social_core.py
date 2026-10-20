@@ -916,8 +916,8 @@ def test_migration_seeds_both_scheduler_rows_and_the_plan_features():
     from app.workers.celery_app import _SCHEDULED_TASKS, celery_app
 
     root = pathlib.Path(__file__).resolve().parents[2]
-    migration = (root / "alembic" / "versions" / "zzzzcappe49_social_growth.py").read_text()
-    assert 'down_revision = "zzzzcappe48"' in migration
+    migration = (root / "alembic" / "versions" / "cappesocial01_social_growth.py").read_text()
+    assert 'down_revision = "zzzzcappe54"' in migration
     keys = {key for key, _, _ in _SCHEDULED_TASKS}
     for key in ("cappe_social_publisher", "cappe_social_metrics"):
         assert key in keys and f"('{key}'" in migration

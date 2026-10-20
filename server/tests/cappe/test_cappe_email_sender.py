@@ -8,6 +8,8 @@ import base64
 import logging
 import os
 from email import message_from_bytes
+from email.header import decode_header, make_header
+from email.utils import parseaddr
 
 os.environ.setdefault("LIVE_API", "test-key")
 os.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost/test")
@@ -134,3 +136,97 @@ def test_the_default_sender_name_is_unchanged(monkeypatch):
     svc = _service(monkeypatch, gmail=False)
     assert _send(svc) is True
     assert _HttpClient.posts[0][1]["from"]["name"] == "Matcha Recruit"
+
+
+# ── reply_to reaches both transports, and only as one plain address ──────────
+
+def test_reply_to_reaches_the_gmail_header(monkeypatch):
+    svc = _service(monkeypatch, gmail=True)
+    assert _send(svc, from_name="Lumen via Gummfit", reply_to="hello@lumen.test") is True
+    msg = message_from_bytes(base64.urlsafe_b64decode(_HttpClient.posts[0][1]["raw"]))
+    assert msg["Reply-To"] == "hello@lumen.test"
+    assert msg["From"] == "Lumen via Gummfit <sender@example.com>"
+
+
+def test_reply_to_reaches_the_mailersend_payload(monkeypatch):
+    svc = _service(monkeypatch, gmail=False)
+    assert _send(svc, reply_to="hello@lumen.test") is True
+    assert _HttpClient.posts[0][1]["reply_to"] == {"email": "hello@lumen.test"}
+
+
+def test_a_reply_to_that_isnt_one_plain_address_is_dropped(monkeypatch):
+    for bad in ("hello@lumen.test\r\nBcc: everyone@x.test", "Lumen <hello@lumen.test>", "a@b.test, c@d.test", "nope"):
+        svc = _service(monkeypatch, gmail=True)
+        assert _send(svc, reply_to=bad) is True
+        msg = message_from_bytes(base64.urlsafe_b64decode(_HttpClient.posts[0][1]["raw"]))
+        assert msg["Reply-To"] is None and msg["Bcc"] is None
+        svc = _service(monkeypatch, gmail=False)
+        assert _send(svc, reply_to=bad) is True
+        assert "reply_to" not in _HttpClient.posts[0][1]
+
+
+def test_without_reply_to_nothing_changes(monkeypatch):
+    svc = _service(monkeypatch, gmail=True)
+    assert _send(svc) is True
+    assert message_from_bytes(base64.urlsafe_b64decode(_HttpClient.posts[0][1]["raw"]))["Reply-To"] is None
+
+
+# ── a store's buyers get mail from the store ─────────────────────────────────
+
+def test_the_store_sends_as_itself():
+    assert email_mod.store_from_name("Lumen Candles") == "Lumen Candles via Gummfit"
+    # Nothing that could end the header or split the address list survives.
+    assert email_mod.store_from_name('Smith, Jones & Co. "<x>"\r\nBcc: y@z') == "Smith Jones & Co. x Bcc y z via Gummfit"
+    assert email_mod.store_from_name("  ") == "Gummfit"
+    assert len(email_mod.store_from_name("x" * 200)) == 60 + len(" via Gummfit")
+
+
+def test_a_reply_reaches_the_stores_contact_address_else_the_owner():
+    assert email_mod.store_reply_to({"contact_email": " hi@lumen.test "}, "owner@lumen.test") == "hi@lumen.test"
+    assert email_mod.store_reply_to('{"contact_email": "hi@lumen.test"}') == "hi@lumen.test"
+    assert email_mod.store_reply_to({}, "owner@lumen.test") == "owner@lumen.test"
+    assert email_mod.store_reply_to(None, None) is None
+    # A contact_email that isn't text falls back instead of raising inside a route.
+    assert email_mod.store_reply_to({"contact_email": ["hi@lumen.test"]}, "owner@lumen.test") == "owner@lumen.test"
+
+
+def test_a_non_ascii_store_or_buyer_name_keeps_its_address(monkeypatch):
+    svc = _service(monkeypatch, gmail=True)
+    assert asyncio.run(svc.send_email_with_fallback(
+        to_email="owner@example.com", to_name="José Pérez", subject="s", html_content="<p>h</p>",
+        from_name="Café Lumen via Gummfit")) is True
+    msg = message_from_bytes(base64.urlsafe_b64decode(_HttpClient.posts[0][1]["raw"]))
+    assert parseaddr(msg["From"])[1] == "sender@example.com"
+    assert str(make_header(decode_header(parseaddr(msg["From"])[0]))) == "Café Lumen via Gummfit"
+    assert parseaddr(msg["To"])[1] == "owner@example.com"
+
+
+def test_buyer_order_mail_is_sent_as_the_store(monkeypatch):
+    svc = _Svc(True)
+    monkeypatch.setattr(email_mod, "get_email_service", lambda: svc)
+    asyncio.run(email_mod.send_cappe_order_shipped_email(
+        "buyer@example.com", "B", "Lumen", "Candle × 1", "UPS", "1Z", None, True, reply_to="hi@lumen.test"))
+    asyncio.run(email_mod.send_cappe_order_declined_email("buyer@example.com", "B", "Lumen", "Candle", None))
+    assert [(c["from_name"], c.get("reply_to")) for c in svc.calls] == [
+        ("Lumen via Gummfit", "hi@lumen.test"), ("Lumen via Gummfit", None)]
+
+
+def test_owner_mail_is_still_from_gummfit(monkeypatch):
+    svc = _Svc(True)
+    monkeypatch.setattr(email_mod, "get_email_service", lambda: svc)
+    asyncio.run(email_mod.send_cappe_order_alert_email(
+        "owner@example.com", "Pat", "Lumen", "B", 1200, "USD", "https://example.com/o"))
+    assert svc.calls[0]["from_name"] == "Gummfit" and "reply_to" not in svc.calls[0]
+
+
+def test_the_paid_receipt_is_sent_as_the_store(monkeypatch):
+    from app.cappe.services import receipt
+    svc = _Svc(True)
+    monkeypatch.setattr(receipt, "get_email_service", lambda: svc)
+    order = {"customer_email": "buyer@example.com", "customer_name": "B", "receipt_number": "LUM-1",
+             "business_name": "Lumen", "total_cents": 1200, "currency": "USD", "access_token": None,
+             "meta_config": {"contact_email": "hi@lumen.test"}, "owner_email": "owner@lumen.test"}
+    asyncio.run(receipt.email_receipt(order, b"%PDF"))
+    [call] = svc.calls
+    # It used to go out under Matcha's display name, replying to us.
+    assert call["from_name"] == "Lumen via Gummfit" and call["reply_to"] == "hi@lumen.test"

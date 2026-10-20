@@ -4,12 +4,14 @@ import html
 import httpx
 import json
 import logging
+import re
 from dataclasses import dataclass
 from datetime import date, datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
+from email.utils import formataddr
 from pathlib import Path
 from typing import Optional
 
@@ -19,6 +21,16 @@ logger = logging.getLogger(__name__)
 
 GMAIL_TOKEN_URI = "https://oauth2.googleapis.com/token"
 GMAIL_SEND_URI = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send"
+
+# A Reply-To is one plain address: no display name, no list, and nothing that
+# could end the header (a CR/LF would let a stored value add headers of its own).
+_REPLY_TO_RE = re.compile(r"[^@\s<>,;\"']{1,64}@[^@\s<>,;\"']{1,255}")
+
+
+def clean_reply_to(value: Optional[str]) -> Optional[str]:
+    """`value` as a Reply-To, or None when it isn't one plain address."""
+    value = (value or "").strip()
+    return value if value and _REPLY_TO_RE.fullmatch(value) else None
 
 # Reserved-domain guard now lives in _shared.py. Re-imported here so the
 # in-file `if _is_reserved_test_domain(to_email):` call sites still resolve.
@@ -148,8 +160,12 @@ class EmailService(
         """The base64url RFC 822 message the Gmail API sends."""
         msg = MIMEMultipart("alternative") if not attachments else MIMEMultipart("mixed")
         msg["Subject"] = subject
-        msg["From"] = f"{from_name or self.from_name} <{self.from_email}>"
-        msg["To"] = f"{to_name} <{to_email}>" if to_name else to_email
+        # formataddr quotes and RFC 2047-encodes the display name on its own;
+        # a hand-built "<name> <addr>" with any non-ASCII character (a store
+        # called "Café Lumen", a buyer called José) gets encoded whole,
+        # address included, and the header no longer names an address.
+        msg["From"] = formataddr((from_name or self.from_name or "", self.from_email))
+        msg["To"] = formataddr((to_name, to_email)) if to_name else to_email
         if extra_headers:
             for name, value in extra_headers.items():
                 msg[name] = value
@@ -182,6 +198,7 @@ class EmailService(
         text_content: Optional[str] = None,
         attachments: Optional[list[dict]] = None,
         from_name: Optional[str] = None,
+        reply_to: Optional[str] = None,
     ) -> dict:
         """The MailerSend `/email` request body."""
         payload = {
@@ -191,6 +208,9 @@ class EmailService(
             "html": html_content,
             "text": text_content or "",
         }
+        reply_to = clean_reply_to(reply_to)
+        if reply_to:
+            payload["reply_to"] = {"email": reply_to}
         if attachments:
             # MailerSend expects {content: <base64>, filename, disposition} —
             # same shape callers already build for the Gmail MIME path.
@@ -344,13 +364,16 @@ class EmailService(
         text_content: Optional[str] = None,
         attachments: Optional[list[dict]] = None,
         from_name: Optional[str] = None,
+        reply_to: Optional[str] = None,
     ) -> bool:
         """Public send wrapper: Gmail first, MailerSend on Gmail failure.
 
         Use this for transactional emails where reliability matters. Both
         backends carry `attachments` (Gmail via MIME, MailerSend via its
-        `attachments` array); `extra_headers` like List-Unsubscribe still
-        require Gmail, so use `send_email` directly when you need those.
+        `attachments` array) and `reply_to` (a Reply-To header; MailerSend's
+        `reply_to` — for products that send on someone else's behalf, so a
+        reply reaches them, not us); `extra_headers` like List-Unsubscribe
+        still require Gmail, so use `send_email` directly when you need those.
 
         Same body as the legacy `_send_with_fallback` — kept under both
         names so existing internal callers in `email/auth.py` etc. keep
@@ -364,6 +387,7 @@ class EmailService(
             text_content=text_content,
             attachments=attachments,
             from_name=from_name,
+            reply_to=reply_to,
         )
 
     async def _send_with_fallback(
@@ -375,6 +399,7 @@ class EmailService(
         text_content: Optional[str] = None,
         attachments: Optional[list[dict]] = None,
         from_name: Optional[str] = None,
+        reply_to: Optional[str] = None,
     ) -> bool:
         """Send via Gmail first, fall back to MailerSend if Gmail fails."""
         # Reserved-domain guard must be transport-independent: the Gmail path
@@ -386,10 +411,12 @@ class EmailService(
         # Try Gmail first
         gmail_token = self._load_token()
         if gmail_token and gmail_token.get("refresh_token"):
+            reply = clean_reply_to(reply_to)
             sent = await self.send_email(
                 to_email=to_email, to_name=to_name, subject=subject,
                 html_content=html_content, text_content=text_content,
                 attachments=attachments, from_name=from_name,
+                **({"extra_headers": {"Reply-To": reply}} if reply else {}),
             )
             if sent:
                 return True
@@ -402,7 +429,7 @@ class EmailService(
 
         payload = self._mailersend_payload(
             to_email, to_name, subject, html_content, text_content,
-            attachments=attachments, from_name=from_name,
+            attachments=attachments, from_name=from_name, reply_to=reply_to,
         )
         try:
             async with httpx.AsyncClient() as client:

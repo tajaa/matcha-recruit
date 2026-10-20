@@ -17,7 +17,7 @@ from uuid import UUID
 
 from ...core.services.pdf import render_pdf
 from ...database import get_connection
-from .email import _email_shell, _send  # noqa: F401  (shell reused; _send kept for parity)
+from .email import _email_shell, _send, store_from_name, store_reply_to  # noqa: F401  (shell reused; _send kept for parity)
 from ...core.services.email.client import get_email_service
 
 logger = logging.getLogger("cappe.receipt")
@@ -38,6 +38,10 @@ async def assign_receipt_number(conn, order_id: UUID, site_id: UUID) -> str:
     concurrent callers (e.g. a retried/duplicate Stripe webhook) can't both read
     receipt_number=NULL, both bump the site sequence, and burn two numbers: the
     second caller blocks on the lock, then sees the number the first assigned.
+
+    The seller's legal name, address and tax id are frozen onto the order with
+    the number: the receipt is an invoice, and one re-downloaded after the
+    seller changes them must still say what it said when it was issued.
     """
     async with conn.transaction():
         existing = await conn.fetchval(
@@ -47,14 +51,15 @@ async def assign_receipt_number(conn, order_id: UUID, site_id: UUID) -> str:
             return existing
         row = await conn.fetchrow(
             "UPDATE cappe_sites SET receipt_seq = receipt_seq + 1 "
-            "WHERE id = $1 RETURNING receipt_seq, receipt_prefix",
+            "WHERE id = $1 RETURNING receipt_seq, receipt_prefix, legal_name, business_address, tax_id",
             site_id,
         )
         prefix = (row["receipt_prefix"] or "INV").strip() if row else "INV"
         number = f"{prefix}-{int(row['receipt_seq']):05d}"
         await conn.execute(
-            "UPDATE cappe_orders SET receipt_number = $1, updated_at = NOW() WHERE id = $2",
-            number, order_id,
+            "UPDATE cappe_orders SET receipt_number = $1, seller_legal_name = $3, "
+            "seller_business_address = $4, seller_tax_id = $5, updated_at = NOW() WHERE id = $2",
+            number, order_id, row["legal_name"], row["business_address"], row["tax_id"],
         )
         return number
 
@@ -86,31 +91,55 @@ def _items_rows_html(items: list[dict], currency: str) -> str:
     return "".join(out)
 
 
-def _ship_to_html(shipping_address) -> str:
-    """Render the Ship-to block from the persisted Stripe shipping_details.
-    Accepts str-or-dict (asyncpg JSONB); every field HTML-escaped."""
-    addr = shipping_address
+def _address_lines(stored, *, name: bool = True) -> list[str]:
+    """The lines of a stored Stripe-shaped address ({name, phone, address});
+    accepts str-or-dict (asyncpg JSONB). Plain text — callers escape."""
+    addr = stored
     if isinstance(addr, str):
         try:
             addr = json.loads(addr)
         except ValueError:
             addr = None
     if not isinstance(addr, dict):
-        return ""
+        return []
     a = addr.get("address")
     if not isinstance(a, dict):
         a = {}
     city_line = ", ".join(str(x) for x in [a.get("city"), a.get("state")] if x)
     if a.get("postal_code"):
         city_line = f"{city_line} {a['postal_code']}".strip()
-    lines = [addr.get("name"), a.get("line1"), a.get("line2"), city_line, a.get("country")]
-    rows = "".join(f"<div>{escape(str(x))}</div>" for x in lines if x)
+    lines = [addr.get("name") if name else None, a.get("line1"), a.get("line2"), city_line, a.get("country")]
+    return [str(x) for x in lines if x]
+
+
+def _ship_to_html(shipping_address) -> str:
+    """Render the Ship-to block from the persisted Stripe shipping_details.
+    Accepts str-or-dict (asyncpg JSONB); every field HTML-escaped."""
+    rows = "".join(f"<div>{escape(x)}</div>" for x in _address_lines(shipping_address))
     if not rows:
         return ""
     return (
         '<div style="margin:20px 0 8px;font-size:13px;color:#3f3f46;">'
         '<div style="color:#71717a;">Ship to</div>' + rows + "</div>"
     )
+
+
+def _seller_html(order: dict) -> str:
+    """Who sold it: the legal name (when it isn't the store's name), the
+    business address and its tax number — what makes a receipt a VAT invoice."""
+    rows = []
+    legal = (order.get("legal_name") or "").strip()
+    if legal and legal != (order.get("business_name") or "").strip():
+        rows.append(escape(legal))
+    address = (order.get("business_address") or "").strip()
+    if address:
+        rows += [escape(line.strip()) for line in address.splitlines() if line.strip()]
+    tax_id = (order.get("tax_id") or "").strip()
+    if tax_id:
+        rows.append(f"{escape(str(order.get('tax_label') or 'Tax'))} ID: {escape(tax_id)}")
+    if not rows:
+        return ""
+    return '<div style="color:#71717a;font-size:12px;margin-top:4px;line-height:1.5;">' + "<br>".join(rows) + "</div>"
 
 
 def build_receipt_html(order: dict, items: list[dict]) -> str:
@@ -126,7 +155,8 @@ def build_receipt_html(order: dict, items: list[dict]) -> str:
     subtotal = int(order.get("subtotal_cents") or 0) + discount   # before the promo code
     tax = int(order.get("tax_cents") or 0)
     shipping = int(order.get("shipping_cents") or 0)
-    total = int(order.get("total_cents") or (subtotal - discount + tax + shipping))
+    included = bool(order.get("tax_included"))  # the tax is inside the prices, not on top
+    total = int(order.get("total_cents") or (subtotal - discount + (0 if included else tax) + shipping))
     tax_label = escape(str(order.get("tax_label") or "Tax"))
     shipping_label = escape(str(order.get("shipping_label") or "Shipping"))
     pay_ref = escape(str(order.get("stripe_payment_intent") or order.get("payment_ref") or ""))
@@ -134,7 +164,12 @@ def build_receipt_html(order: dict, items: list[dict]) -> str:
     tax_row = (
         f'<tr><td style="padding:4px 0;text-align:right;color:#71717a;">{tax_label}</td>'
         f'<td style="padding:4px 0;text-align:right;width:120px;">{_fmt(tax, cur)}</td></tr>'
-        if tax > 0 else ""
+        if tax > 0 and not included else ""
+    )
+    included_row = (
+        f'<tr><td style="padding:4px 0;text-align:right;color:#71717a;">Includes {tax_label}</td>'
+        f'<td style="padding:4px 0;text-align:right;width:120px;color:#71717a;">{_fmt(tax, cur)}</td></tr>'
+        if tax > 0 and included else ""
     )
     shipping_row = (
         f'<tr><td style="padding:4px 0;text-align:right;color:#71717a;">{shipping_label}</td>'
@@ -148,13 +183,15 @@ def build_receipt_html(order: dict, items: list[dict]) -> str:
         if discount > 0 else ""
     )
     ship_to = _ship_to_html(order.get("shipping_address"))
+    seller = _seller_html(order)
+    billed = "".join(f"<div>{escape(x)}</div>" for x in _address_lines(order.get("billing_address"), name=False))
     return f"""\
 <!doctype html><html><head><meta charset="utf-8"><style>
   @page {{ size: A4; margin: 28mm 20mm; }}
   body {{ font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; color:#18181b; }}
 </style></head><body>
   <div style="display:flex;justify-content:space-between;align-items:flex-start;">
-    <div><div style="font-size:22px;font-weight:700;">{biz}</div>
+    <div><div style="font-size:22px;font-weight:700;">{biz}</div>{seller}
       <div style="color:#71717a;font-size:13px;margin-top:2px;">Receipt</div></div>
     <div style="text-align:right;font-size:13px;color:#3f3f46;">
       <div><b>{number}</b></div><div>{when_txt}</div>
@@ -163,6 +200,7 @@ def build_receipt_html(order: dict, items: list[dict]) -> str:
   <div style="margin:20px 0 8px;font-size:13px;color:#3f3f46;">
     <div style="color:#71717a;">Billed to</div><div>{cust}</div>
     {f'<div style="color:#71717a;">{cust_email}</div>' if cust and cust_email and cust != cust_email else ''}
+    {billed}
   </div>
   {ship_to}
   <table style="width:100%;border-collapse:collapse;font-size:14px;margin-top:8px;">
@@ -182,6 +220,7 @@ def build_receipt_html(order: dict, items: list[dict]) -> str:
     {shipping_row}
     <tr><td style="padding:8px 0;text-align:right;font-weight:700;border-top:2px solid #18181b;">Total</td>
       <td style="padding:8px 0;text-align:right;font-weight:700;border-top:2px solid #18181b;">{_fmt(total, cur)}</td></tr>
+    {included_row}
   </tbody></table>
   {f'<div style="margin-top:16px;font-size:12px;color:#a1a1aa;">Payment ref: {pay_ref}</div>' if pay_ref else ''}
   <div style="margin-top:28px;font-size:11px;color:#a1a1aa;text-align:center;">Powered by Gummfit</div>
@@ -194,11 +233,22 @@ async def render_order_receipt_pdf(conn, order_id: UUID) -> tuple[dict, bytes] |
     order = await conn.fetchrow(
         """SELECT o.id, o.customer_email, o.customer_name, o.currency, o.subtotal_cents,
                   o.promo_code, o.discount_cents,
-                  o.tax_cents, o.shipping_cents, o.shipping_address, o.total_cents,
+                  o.tax_cents, o.tax_included, o.shipping_cents, o.shipping_address, o.total_cents,
                   o.receipt_number, o.payment_ref,
                   o.stripe_payment_intent, o.paid_at, o.created_at, o.site_id, o.access_token,
-                  s.name AS business_name, s.tax_label, s.shipping_label, s.subdomain, s.custom_domain
+                  s.name AS business_name, s.tax_label,
+                  COALESCE(o.shipping_rate_label, s.shipping_label) AS shipping_label,
+                  s.subdomain, s.custom_domain, s.meta_config,
+                  -- The seller as the numbered receipt froze it; a receipt not
+                  -- yet numbered shows the store as it is now.
+                  CASE WHEN o.receipt_number IS NULL THEN s.legal_name ELSE o.seller_legal_name END AS legal_name,
+                  CASE WHEN o.receipt_number IS NULL THEN s.business_address
+                       ELSE o.seller_business_address END AS business_address,
+                  CASE WHEN o.receipt_number IS NULL THEN s.tax_id ELSE o.seller_tax_id END AS tax_id,
+                  o.billing_address,
+                  a.email AS owner_email
              FROM cappe_orders o JOIN cappe_sites s ON s.id = o.site_id
+             JOIN cappe_accounts a ON a.id = s.account_id
             WHERE o.id = $1""",
         order_id,
     )
@@ -244,10 +294,15 @@ async def email_receipt(order: dict, pdf: bytes) -> None:
         "disposition": "attachment",
     }]
     try:
+        # Sent as the store, and a reply reaches it. This one used to go out
+        # under Matcha's own display name.
+        reply_to = store_reply_to(order.get("meta_config"), order.get("owner_email"))
         await get_email_service().send_email_with_fallback(
             to_email=to_email, to_name=order.get("customer_name"),
             subject=f"Receipt {number} — {biz}",
             html_content=html, text_content=text, attachments=att,
+            from_name=store_from_name(order.get("business_name")),
+            **({"reply_to": reply_to} if reply_to else {}),
         )
     except Exception:
         logger.exception("Cappe receipt email failed for %s", to_email)

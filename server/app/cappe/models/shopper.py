@@ -68,6 +68,10 @@ class CartQuoteRequest(BaseModel):
     _ship_country = field_validator("ship_country")(country_code)
     # A promo code typed into the bag (case-blind).
     promo_code: str | None = Field(default=None, max_length=40)
+    # The delivery option picked (default: the store's first that fits), and
+    # the postal code a local delivery area is checked against.
+    shipping_rate_id: str | None = Field(default=None, max_length=64)
+    postal_code: str | None = Field(default=None, max_length=32)
 
 
 class SubscriptionCheckout(CartQuoteRequest):

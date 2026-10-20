@@ -12,8 +12,12 @@ from ...services.cart import price_cart, priceable_products
 from ...services.recurring import build_subscription_lines
 from ...services.common import receipt_filename as _receipt_filename
 from ...services.discounts import apply_discount_cents, best_discount_percent, fetch_active_discounts, site_today
-from ...services.entitlements import resolve_entitlements
-from ...services.shipping import Destination, home_country, load_zones, resolve_destination, ship_countries
+from ...services.variants import fetch_variants
+from ...services.product_pages import fetch_images, product_path
+from ...services.entitlements import resolve_entitlements, sells
+from ...services.shipping import (
+    Destination, home_country, load_rates, load_zones, resolve_destination, ship_countries,
+)
 from ...services.promos import find_code, normalize_code
 from .._shared import fetch_option_groups, loads_list
 from ._common import _published_site, _read_rate_limit, _reject_reserved
@@ -28,7 +32,7 @@ _PUBLIC_PRODUCT_COLS = (
     "subscription_intervals, subscription_discount_bps, "
     "id, site_id, name, description, price_cents, currency, image_url, sku, "
     "inventory, status, sort_order, fulfillment, booking_type_id, requires_approval, "
-    "intake_fields, category, created_at, updated_at"
+    "intake_fields, category, slug, brand, gtin, created_at, updated_at"
 )
 
 
@@ -44,7 +48,12 @@ async def public_products(slug: str, request: Request):
         )
         discounts = await fetch_active_discounts(conn, site["id"])
         now_utc = await conn.fetchval("SELECT NOW()")
+        # Only what the store's plan sells: checkout refuses the rest.
+        ent = await _site_entitlements(conn, site["id"])
+        rows = [r for r in rows if ent is None or sells(ent, r["fulfillment"])]
         groups = await fetch_option_groups(conn, [r["id"] for r in rows])
+        variants = await fetch_variants(conn, [r["id"] for r in rows])
+        images = await fetch_images(conn, [r["id"] for r in rows])
         subscribable = any(r["subscription_intervals"] for r in rows) and await _sells_subscriptions(conn, site["id"])
         ratings = {
             r["product_id"]: r for r in await conn.fetch(
@@ -66,10 +75,22 @@ async def public_products(slug: str, request: Request):
             "rating_avg": ratings[r["id"]]["avg"] if r["id"] in ratings else None,
             "intake_fields": loads_list(r["intake_fields"]),
             "option_groups": groups.get(r["id"], []),
+            "variants": variants.get(r["id"], []),
+            "images": images.get(r["id"], []),
+            "url": product_path(r["slug"]),
             "discount_percent": pct,
             "discounted_price_cents": apply_discount_cents(r["price_cents"], pct) if pct else None,
         })
     return out
+
+
+async def _site_entitlements(conn, site_id):
+    """The store owner's plan, as entitlements."""
+    plan = await conn.fetchval(
+        "SELECT a.plan FROM cappe_sites s JOIN cappe_accounts a ON a.id = s.account_id WHERE s.id = $1",
+        site_id,
+    )
+    return await resolve_entitlements(plan, conn=conn)
 
 
 async def _sells_subscriptions(conn, site_id) -> bool:
@@ -116,7 +137,8 @@ async def quote(slug: str, body: CartQuoteRequest, request: Request):
     async with get_connection() as conn:
         site = await _published_site(conn, slug)
         settings = await conn.fetchrow(
-            "SELECT tax_rate_bps,shipping_flat_cents,shipping_free_threshold_cents,home_country,currency "
+            "SELECT tax_rate_bps,shipping_flat_cents,shipping_free_threshold_cents,home_country,currency,"
+            "shipping_label,handling_days_min,handling_days_max,tax_label,prices_include_tax,tax_on_shipping "
             "FROM cappe_sites WHERE id=$1", site["id"],
         )
         # Whether checkout goes to a card payment page. The storefront cart
@@ -131,23 +153,23 @@ async def quote(slug: str, body: CartQuoteRequest, request: Request):
         # this used to quote them to anyone holding the product's id. A missing
         # product prices as an unavailable line, same as one that never existed.
         products = await conn.fetch("SELECT * FROM cappe_products WHERE site_id=$1 AND status='active' AND id=ANY($2::uuid[])", site["id"], [i.product_id for i in body.items])
+        ent = await _site_entitlements(conn, site["id"])
+        # What the plan doesn't sell prices as unavailable, as checkout refuses it.
+        products = [r for r in products if ent is None or sells(ent, r["fulfillment"])]
         groups = await fetch_option_groups(conn, [r["id"] for r in products])
+        variants = await fetch_variants(conn, [r["id"] for r in products])
         discounts = await fetch_active_discounts(conn, site["id"])
         today = site_today(await conn.fetchval("SELECT NOW()"), site["timezone"])
         ships = any(r["fulfillment"] == "physical" for r in products)
         code = normalize_code(body.promo_code)
         if code and body.interval:
             raise HTTPException(status_code=422, detail="Promo codes can't be used on subscriptions.")
-        zones, promo = [], None
-        plan = await conn.fetchval(
-            "SELECT a.plan FROM cappe_sites s JOIN cappe_accounts a ON a.id = s.account_id WHERE s.id = $1",
-            site["id"],
-        )
-        ent = await resolve_entitlements(plan, conn=conn)
+        zones, rates, promo = [], {}, None
         # Whether the bag offers a code box at all.
         takes_codes = ent is None or ent.has("promo_codes")
         if ships and not body.interval:
             zones = await load_zones(conn, site["id"], ent)
+            rates = await load_rates(conn, site["id"], ent)
         if code:
             promo = {
                 "code": code,
@@ -155,7 +177,10 @@ async def quote(slug: str, body: CartQuoteRequest, request: Request):
                 "reason": None if takes_codes else "This store doesn't take promo codes.",
             }
     settings = dict(settings)
-    products = priceable_products(products, groups, discounts, today)
+    # What the bag calls the tax ("VAT", "GST"); with `tax_included` it reads
+    # "Includes VAT" under the total instead of adding a line to it.
+    tax_label = settings.get("tax_label") or "Tax"
+    products = priceable_products(products, groups, discounts, today, variants)
     # Where the bag ships and what that costs. Subscriptions ship within the
     # home country only (their shipping is fixed into the Stripe price).
     shipping: dict = {}
@@ -163,10 +188,13 @@ async def quote(slug: str, body: CartQuoteRequest, request: Request):
     if ships:
         home = home_country(settings)
         country = body.ship_country or home
-        dest = resolve_destination(settings, zones, country)
+        dest = resolve_destination(settings, zones, country, rates)
         shipping = {
             "ship_country": country, "home_country": home, "ships_to": dest is not None,
             "ship_countries": ship_countries(settings, zones),
+            # Whether an option here is a local delivery: the bag then asks for
+            # a postal code, and shows the option once it fits.
+            "asks_postal_code": bool(dest and any(r.method == "local_delivery" for r in dest.rates)),
         }
         if dest is None:
             # Priced without shipping or tax so nothing misleading shows; the
@@ -181,9 +209,10 @@ async def quote(slug: str, body: CartQuoteRequest, request: Request):
         _stripe_lines, lines, totals = build_subscription_lines(
             products, body.items, body.interval, settings
         )
-        return {"lines": lines, **totals, "pays_by_card": pays_by_card, **shipping}
-    return {**price_cart(products, body.items, settings, dest, promo=promo, on_date=today),
-            "pays_by_card": pays_by_card, "promo_codes": bool(takes_codes), **shipping}
+        return {"lines": lines, **totals, "pays_by_card": pays_by_card, "tax_label": tax_label, **shipping}
+    return {**price_cart(products, body.items, settings, dest, promo=promo, on_date=today,
+                         rate_id=body.shipping_rate_id, postal_code=body.postal_code),
+            "pays_by_card": pays_by_card, "promo_codes": bool(takes_codes), "tax_label": tax_label, **shipping}
 
 
 @router.post("/public/orders/{token}/pay")
@@ -241,7 +270,8 @@ async def public_order_receipt(token: str, request: Request):
         order = await conn.fetchrow(
             "SELECT id, status, customer_email, customer_name, subtotal_cents, promo_code, discount_cents, "
             "tax_cents, shipping_cents, total_cents, carrier, tracking_number, currency, created_at, "
-            "requires_approval, approved_at, pay_by, stripe_session_id IS NOT NULL AS checkout_opened "
+            "requires_approval, approved_at, pay_by, stripe_session_id IS NOT NULL AS checkout_opened, "
+            "tax_included "
             "FROM cappe_orders WHERE access_token = $1",
             token,
         )
@@ -268,6 +298,7 @@ async def public_order_receipt(token: str, request: Request):
         discount_cents=order.get("discount_cents") or 0,
         currency=order["currency"],
         tax_cents=order["tax_cents"],
+        tax_included=bool(order.get("tax_included")),
         shipping_cents=order["shipping_cents"],
         total_cents=order["total_cents"],
         carrier=order["carrier"],

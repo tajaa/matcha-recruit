@@ -40,6 +40,8 @@ class _Conn:
 
     async def fetch(self, query, *args):
         self.calls.append((query, args))
+        if "cappe_shipping_" in query:
+            return []  # no zones, no delivery options: the home flat rate
         return [self.product] if self.product else []
 
     async def fetchval(self, query, *args):
@@ -69,6 +71,7 @@ async def test_public_quote_and_signed_order_use_authoritative_shopper(monkeypat
     monkeypatch.setattr(routes, "_read_rate_limit", lambda *_args: _async(None))
     monkeypatch.setattr(routes, "_published_site", lambda *_args: _async(site))
     monkeypatch.setattr(routes, "fetch_option_groups", lambda *_args: _async({product_id: []}))
+    monkeypatch.setattr(routes, "fetch_variants", lambda *_args: _async({}))
     monkeypatch.setattr(routes, "fetch_active_discounts", lambda *_args: _async([]))
     monkeypatch.setattr(routes, "resolve_entitlements", lambda *_args, **_kw: _async(None))
     monkeypatch.setattr(routes, "load_zones", lambda *_args: _async([]))

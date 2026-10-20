@@ -38,9 +38,13 @@ from ..services.email import (
     send_cappe_order_declined_email,
     send_cappe_order_refunded_email,
     send_cappe_order_shipped_email,
+    store_reply_to,
 )
 from ..services.directory import refresh_site_search
 from ..services.inventory import log_adjustment, release_order_bookings, restock_order
+from ..services.variants import fetch_variants, prune_variants, replace_variants
+from ..services.product_pages import assign_slug, fetch_images, product_path, replace_images, set_cover
+from ..services.render_cache import invalidate_site_render_cache
 from ..services.entitlements import require_fulfillment, resolve_entitlements
 from ..services.order_lifecycle import REFUNDABLE_STATUSES, transition_error
 from ..services.refunds import (
@@ -143,7 +147,8 @@ _PRODUCT_COLS = (
     "subscription_intervals, subscription_discount_bps, "
     "id, site_id, name, description, price_cents, currency, image_url, sku, "
     "inventory, low_stock_threshold, status, sort_order, fulfillment, digital_file_url, "
-    "booking_type_id, requires_approval, intake_fields, category, created_at, updated_at"
+    "booking_type_id, requires_approval, intake_fields, category, slug, brand, gtin, "
+    "weight_g, shipping_surcharge_cents, ships_free, created_at, updated_at"
 )
 _ORDER_COLS = (
     "subscription_id, "
@@ -153,20 +158,33 @@ _ORDER_COLS = (
     "currency, payment_ref, note, requires_approval, approved_at, decline_reason, "
     "refunded_at, refunded_cents, dispute_status, disputed_at, "
     "pay_by, shipped_notified_at, platform_fee_cents, ship_country, promo_code, discount_cents, "
+    "shipping_method, shipping_rate_label, delivery_min_days, delivery_max_days, shipping_instructions, "
+    "tax_included, shipping_tax_cents, "
     "metadata, created_at, updated_at"
 )
 _ITEM_COLS = (
     "id, product_id, title, unit_price_cents, quantity, fulfillment, "
     "intake_answers, selected_options, deliverable_url, booking_id, restocked_quantity, "
-    "promo_discount_cents"
+    "promo_discount_cents, variant_id, sku"
 )
 
 
-def _product_row(row, groups=None) -> dict:
+def _product_row(row, groups=None, variants=None, images=None) -> dict:
     d = dict(row)
     d["intake_fields"] = loads_list(row["intake_fields"])
     d["option_groups"] = groups or []
+    d["variants"] = variants or []
+    d["images"] = images or []
+    d["url"] = product_path(d.get("slug"))
     return d
+
+
+async def _product_out(conn, row) -> dict:
+    """One product as the dashboard shows it: options, variants and pictures."""
+    groups = await fetch_option_groups(conn, [row["id"]])
+    variants = await fetch_variants(conn, [row["id"]])
+    images = await fetch_images(conn, [row["id"]])
+    return _product_row(row, groups.get(row["id"]), variants.get(row["id"]), images.get(row["id"]))
 
 
 def _item_row(row) -> dict:
@@ -223,6 +241,8 @@ async def _replace_option_groups(conn, site_id, product_id, groups) -> None:
         options_by_group.setdefault(row["group_id"], []).append(row)
 
     group_pairs, groups_gone = match_prior_rows(list(prior_groups), groups)
+    # The groups as this save leaves them, for `prune_variants`.
+    written: list[dict] = []
     for gi, (g, was) in enumerate(zip(groups, group_pairs)):
         # Position is the order unless the caller pinned one: rows keep their
         # created_at now, so it can no longer stand in for "the order sent".
@@ -243,6 +263,9 @@ async def _replace_option_groups(conn, site_id, product_id, groups) -> None:
                 g.name, g.select_type, g.required, g_sort, gid,
             )
             stored = options_by_group.get(gid, [])
+        kept: list[dict] = []
+        written.append({"id": gid, "name": g.name, "select_type": g.select_type,
+                        "required": g.required, "options": kept})
 
         incoming = g.options or []
         option_pairs, options_gone = match_prior_rows(stored, incoming)
@@ -255,6 +278,7 @@ async def _replace_option_groups(conn, site_id, product_id, groups) -> None:
                        VALUES ($1, $2, $3, $4, $5, $6) RETURNING id""",
                     site_id, gid, o.name, o.price_delta_cents, o_sort, o.inventory,
                 )
+                kept.append({"id": new_oid, "name": o.name})
                 if o.inventory is not None:
                     await log_adjustment(
                         conn, site_id=site_id, product_id=product_id, option_id=new_oid,
@@ -262,6 +286,7 @@ async def _replace_option_groups(conn, site_id, product_id, groups) -> None:
                         reason="adjustment", note="Opening stock",
                     )
                 continue
+            kept.append({"id": owas["id"], "name": o.name})
             sets = "name = $1, price_delta_cents = $2, sort_order = $3"
             args = [o.name, o.price_delta_cents, o_sort]
             if "inventory" in o.model_fields_set and o.inventory != owas["inventory"]:
@@ -289,6 +314,8 @@ async def _replace_option_groups(conn, site_id, product_id, groups) -> None:
             "DELETE FROM cappe_product_option_groups WHERE id = ANY($1::uuid[]) AND site_id = $2",
             [row["id"] for row in groups_gone], site_id,
         )
+    # A combination that no longer fits these groups can never be picked again.
+    await prune_variants(conn, site_id, product_id, written)
 
 
 def _subscription_changed(body, existing) -> bool:
@@ -368,7 +395,9 @@ async def list_products(site_id: UUID, account: CappeAccount = Depends(require_c
             site_id,
         )
         groups = await fetch_option_groups(conn, [r["id"] for r in rows])
-    return [_product_row(r, groups.get(r["id"])) for r in rows]
+        variants = await fetch_variants(conn, [r["id"] for r in rows])
+        images = await fetch_images(conn, [r["id"] for r in rows])
+    return [_product_row(r, groups.get(r["id"]), variants.get(r["id"]), images.get(r["id"])) for r in rows]
 
 
 @router.post("/sites/{site_id}/products", response_model=CappeProduct, status_code=status.HTTP_201_CREATED)
@@ -391,18 +420,21 @@ async def create_product(
                 f"""INSERT INTO cappe_products
                         (site_id, name, description, price_cents, currency, image_url, sku, inventory,
                          low_stock_threshold, status, sort_order, fulfillment, digital_file_url,
-                         booking_type_id, requires_approval, intake_fields, category, subscription_intervals, subscription_discount_bps)
+                         booking_type_id, requires_approval, intake_fields, category, subscription_intervals,
+                         subscription_discount_bps, brand, gtin, weight_g, shipping_surcharge_cents, ships_free)
                     VALUES ($1, $2, $3, $4,
                             -- The store's currency, whatever the client sent:
                             -- one store, one currency (services/shipping.py).
                             COALESCE((SELECT currency FROM cappe_sites WHERE id = $1), $5),
-                            $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+                            $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21,
+                            $22, $23, $24)
                     RETURNING {_PRODUCT_COLS}""",
                 site_id, body.name, body.description, body.price_cents, body.currency.upper(),
                 body.image_url, body.sku, body.inventory, body.low_stock_threshold, body.status,
                 body.sort_order, body.fulfillment, body.digital_file_url, body.booking_type_id,
                 body.requires_approval, json.dumps(body.intake_fields), body.category,
-                body.subscription_intervals, body.subscription_discount_bps,
+                body.subscription_intervals, body.subscription_discount_bps, body.brand, body.gtin,
+                body.weight_g, body.shipping_surcharge_cents, body.ships_free,
             )
             if body.inventory is not None:
                 await log_adjustment(
@@ -410,11 +442,22 @@ async def create_product(
                     balance_after=body.inventory, reason="adjustment", note="Opening stock",
                 )
             await _replace_option_groups(conn, site_id, row["id"], body.option_groups)
-        groups = await fetch_option_groups(conn, [row["id"]])
+            await replace_variants(conn, site_id, row["id"], body.variants)
+            await assign_slug(conn, site_id, row["id"], body.name, body.slug)
+            if body.images is not None:
+                await replace_images(conn, site_id, row["id"], body.images)
+            elif body.image_url:
+                await set_cover(conn, site_id, row["id"], body.image_url)
+            row = await conn.fetchrow(
+                f"SELECT {_PRODUCT_COLS} FROM cappe_products WHERE id = $1 AND site_id = $2", row["id"], site_id,
+            )
+        out = await _product_out(conn, row)
         # Product names are indexed at weight D, so "cold brew" finds the cafe
         # that sells it even when its name and blurb say neither word.
         await refresh_site_search(conn, site_id)
-    return _product_row(row, groups.get(row["id"]))
+    # Its page and the store's sitemap are server-rendered and cached.
+    await invalidate_site_render_cache(site_id)
+    return out
 
 
 @router.get("/sites/{site_id}/products/{product_id}", response_model=CappeProduct)
@@ -429,8 +472,7 @@ async def get_product(
         )
         if row is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
-        groups = await fetch_option_groups(conn, [product_id])
-    return _product_row(row, groups.get(product_id))
+        return await _product_out(conn, row)
 
 
 @router.put("/sites/{site_id}/products/{product_id}", response_model=CappeProduct)
@@ -478,13 +520,16 @@ async def update_product(
             sets, args = build_patch(body, (
                 # No "currency": a product is priced in its store's currency,
                 # changed for every product at once in the store settings.
-                "name", "description", "price_cents", "image_url",
+                "name", "description", "price_cents",
+                # The pictures, when sent, decide the cover (replace_images).
+                *(() if "images" in body.model_fields_set else ("image_url",)),
                 "sku", "inventory", "low_stock_threshold", "status", "sort_order",
                 "fulfillment", "digital_file_url", "booking_type_id", "requires_approval",
-                "category",
+                "category", "brand", "gtin",
                 "subscription_intervals", "subscription_discount_bps",
+                "weight_g", "shipping_surcharge_cents", "ships_free",
             ), nullable={"description", "image_url", "sku", "inventory", "low_stock_threshold",
-                         "digital_file_url", "booking_type_id", "category"})
+                         "digital_file_url", "booking_type_id", "category", "brand", "gtin", "weight_g"})
             # intake_fields is JSONB NOT NULL DEFAULT '[]' — a `null` PATCH value
             # has no sensible SQL NULL to clear to, so this stays on the plain
             # `is not None` idiom rather than build_patch's model_fields_set.
@@ -515,9 +560,24 @@ async def update_product(
                     reason="adjustment", note="Set in the product editor",
                 )
             await _replace_option_groups(conn, site_id, product_id, body.option_groups)
-        groups = await fetch_option_groups(conn, [product_id])
+            await replace_variants(conn, site_id, product_id, body.variants)
+            if "images" in body.model_fields_set:
+                await replace_images(conn, site_id, product_id, body.images or [])
+            elif "image_url" in body.model_fields_set:
+                await set_cover(conn, site_id, product_id, body.image_url)
+            # Renaming keeps the address (shared links keep working); only a
+            # slug the owner sends, or a product that never had one, changes it.
+            if "slug" in body.model_fields_set and body.slug is not None:
+                await assign_slug(conn, site_id, product_id, row["name"], body.slug)
+            elif row["slug"] is None:
+                await assign_slug(conn, site_id, product_id, row["name"])
+            row = await conn.fetchrow(
+                f"SELECT {_PRODUCT_COLS} FROM cappe_products WHERE id = $1 AND site_id = $2", product_id, site_id,
+            )
+        out = await _product_out(conn, row)
         await refresh_site_search(conn, site_id)
-    return _product_row(row, groups.get(product_id))
+    await invalidate_site_render_cache(site_id)
+    return out
 
 
 @router.delete("/sites/{site_id}/products/{product_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -537,6 +597,7 @@ async def delete_product(
             await refresh_site_search(conn, site_id)
     if result.endswith(" 0"):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+    await invalidate_site_render_cache(site_id)
 
 
 @router.post("/sites/{site_id}/products/{product_id}/adjust", response_model=CappeProduct)
@@ -549,7 +610,29 @@ async def adjust_stock(
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
         async with conn.transaction():
-            if body.option_id is not None:
+            if body.variant_id is not None:
+                vrow = await conn.fetchrow(
+                    "SELECT id, inventory FROM cappe_product_variants "
+                    "WHERE id = $1 AND product_id = $2 AND site_id = $3 FOR UPDATE",
+                    body.variant_id, product_id, site_id,
+                )
+                if vrow is None:
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Variant not found")
+                if vrow["inventory"] is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="That variant isn't tracking stock — set a stock number on it first.",
+                    )
+                new_bal = max(0, vrow["inventory"] + body.delta)
+                await conn.execute(
+                    "UPDATE cappe_product_variants SET inventory = $1, updated_at = NOW() WHERE id = $2",
+                    new_bal, body.variant_id,
+                )
+                await log_adjustment(
+                    conn, site_id=site_id, product_id=product_id, variant_id=body.variant_id,
+                    delta=new_bal - vrow["inventory"], balance_after=new_bal, reason=body.reason, note=body.note,
+                )
+            elif body.option_id is not None:
                 vrow = await conn.fetchrow(
                     "SELECT o.id, o.inventory FROM cappe_product_options o "
                     "JOIN cappe_product_option_groups g ON g.id = o.group_id "
@@ -597,8 +680,10 @@ async def adjust_stock(
                 f"SELECT {_PRODUCT_COLS} FROM cappe_products WHERE id = $1 AND site_id = $2",
                 product_id, site_id,
             )
-        groups = await fetch_option_groups(conn, [product_id])
-    return _product_row(row, groups.get(product_id))
+        out = await _product_out(conn, row)
+    # Sold out or back in stock is on the product's cached page.
+    await invalidate_site_render_cache(site_id)
+    return out
 
 
 @router.get(
@@ -612,7 +697,7 @@ async def inventory_log(
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
         rows = await conn.fetch(
-            "SELECT id, product_id, option_id, delta, balance_after, reason, note, created_at "
+            "SELECT id, product_id, option_id, variant_id, delta, balance_after, reason, note, created_at "
             "FROM cappe_inventory_adjustments WHERE site_id = $1 AND product_id = $2 "
             "ORDER BY created_at DESC LIMIT 100",
             site_id, product_id,
@@ -802,6 +887,7 @@ async def update_order_status(
             _items_summary(items), order["carrier"], order["tracking_number"],
             order_page_url(site, await _order_token(order_id)),
             any(i["fulfillment"] == "physical" for i in items),
+            reply_to=store_reply_to(site.get("meta_config"), getattr(account, "email", None)),
         )
     from ..services.push import schedule_push
     body_fields = getattr(body, "model_fields_set", set())
@@ -983,7 +1069,7 @@ async def refund_order(
         view = await _order_view(conn, site_id, order_id)
         if background is not None and view.get("customer_email"):
             who = await conn.fetchrow(
-                "SELECT o.access_token, s.name, s.subdomain, s.custom_domain FROM cappe_orders o "
+                "SELECT o.access_token, s.name, s.subdomain, s.custom_domain, s.meta_config FROM cappe_orders o "
                 "JOIN cappe_sites s ON s.id = o.site_id WHERE o.id = $1",
                 order_id,
             )
@@ -992,6 +1078,7 @@ async def refund_order(
                     send_cappe_order_refunded_email, view["customer_email"], view.get("customer_name"),
                     who["name"], amount, view.get("currency") or "USD", amount >= left,
                     order_page_url(who, who["access_token"]),
+                    reply_to=store_reply_to(who.get("meta_config"), getattr(account, "email", None)),
                 )
     return view
 
@@ -1058,6 +1145,7 @@ async def accept_order(
             _items_summary(items), order["total_cents"] or order["subtotal_cents"], order["currency"],
             order_page_url(site, token),
             format_when(order["pay_by"], site["timezone"]) if order["pay_by"] else None,
+            reply_to=store_reply_to(site.get("meta_config"), getattr(account, "email", None)),
         )
     return _order_row(order, [_item_row(i) for i in items])
 
@@ -1098,7 +1186,7 @@ async def decline_order(
     if order.get("customer_email"):
         background.add_task(
             send_cappe_order_declined_email, order["customer_email"], order["customer_name"], site["name"],
-            _items_summary(items), body.reason,
+            _items_summary(items), body.reason, reply_to=store_reply_to(site.get("meta_config"), getattr(account, "email", None)),
         )
     return _order_row(order, [_item_row(i) for i in items])
 

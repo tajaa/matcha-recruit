@@ -6,12 +6,16 @@ import type { CappeSite } from '../types'
 
 // Compact tax + receipt-numbering settings for the storefront. Rate is stored in
 // basis points (875 = 8.75%); applied to physical lines at checkout and added to
-// the Stripe charge so it matches the receipt. Prefix seeds receipt numbers
-// (e.g. LUM → LUM-00042).
+// the Stripe charge so it matches the receipt — or, when the prices already
+// include it (VAT-style), shown as the part of the price that is tax. It can
+// cover shipping too. Prefix seeds receipt numbers (e.g. LUM → LUM-00042).
 export default function TaxSettingsCard({ siteId }: { siteId: string }) {
   const [rate, setRate] = useState('') // percent, as typed
   const [label, setLabel] = useState('Tax')
   const [prefix, setPrefix] = useState('')
+  const [included, setIncluded] = useState(false)
+  const [savedIncluded, setSavedIncluded] = useState(false)
+  const [onShipping, setOnShipping] = useState(false)
   const [loaded, setLoaded] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -27,6 +31,9 @@ export default function TaxSettingsCard({ siteId }: { siteId: string }) {
       setRate(s.tax_rate_bps ? (s.tax_rate_bps / 100).toString() : '')
       setLabel(s.tax_label || 'Tax')
       setPrefix(s.receipt_prefix || '')
+      setIncluded(!!s.prices_include_tax)
+      setSavedIncluded(!!s.prices_include_tax)
+      setOnShipping(!!s.tax_on_shipping)
       setLoaded(true)
     }).catch((e) => setLoadError(e instanceof Error ? e.message : 'Could not load these settings'))
   }, [siteId, attempt])
@@ -40,13 +47,22 @@ export default function TaxSettingsCard({ siteId }: { siteId: string }) {
     const parsed = rate.trim() === '' ? 0 : parsePercentBps(rate)
     if (parsed === null) { setError('Enter the rate as a plain number, e.g. 8.875'); return }
     const bps = Math.max(0, Math.min(10000, parsed))
+    // Every product keeps its number, so this changes what buyers pay.
+    const name = label.trim() || 'tax'
+    if (included !== savedIncluded && !window.confirm(included
+      ? `Your listed prices will include ${name} from now on: buyers pay a 20.00 price as 20.00, with the ${name} inside it instead of added at checkout. Review your prices after saving.`
+      : `${name} will be added on top of your listed prices from now on: a 20.00 price will cost buyers more at checkout. Review your prices after saving.`,
+    )) return
     setSaving(true)
     try {
       await cappeApi.put(`/sites/${siteId}`, {
         tax_rate_bps: bps,
         tax_label: label.trim() || 'Tax',
         receipt_prefix: prefix.trim().toUpperCase() || null,
+        prices_include_tax: included,
+        tax_on_shipping: onShipping,
       })
+      setSavedIncluded(included)
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)
     } catch (e) {
@@ -103,6 +119,21 @@ export default function TaxSettingsCard({ siteId }: { siteId: string }) {
           />
         </label>
       </div>
+      <div className="mt-3 space-y-1.5 text-xs text-zinc-300">
+        <label className="flex items-start gap-2">
+          <input type="checkbox" checked={included} onChange={(e) => setIncluded(e.target.checked)} className="mt-0.5" />
+          <span>
+            My prices already include {label.trim() || 'tax'}
+            <span className="block text-[11px] text-zinc-500">
+              Buyers pay the price you list, and the {label.trim() || 'tax'} inside it is shown on the bag and receipt. Off: it’s added at checkout.
+            </span>
+          </span>
+        </label>
+        <label className="flex items-start gap-2">
+          <input type="checkbox" checked={onShipping} onChange={(e) => setOnShipping(e.target.checked)} className="mt-0.5" />
+          <span>Charge {label.trim() || 'tax'} on shipping too</span>
+        </label>
+      </div>
       <div className="mt-3 flex items-center gap-3">
         <button
           onClick={save}
@@ -113,7 +144,7 @@ export default function TaxSettingsCard({ siteId }: { siteId: string }) {
         </button>
         {saved && <span className="text-xs text-lime-400">Saved</span>}
         {error && <span className="text-xs text-red-400">{error}</span>}
-        <span className="ml-auto text-[11px] text-zinc-500">Tax applies to physical products at checkout.</span>
+        <span className="ml-auto text-[11px] text-zinc-500">Tax applies to physical products within your country, and in shipping zones where you turn it on (each zone can set its own rate).</span>
       </div>
     </div>
   )

@@ -22,7 +22,8 @@ from fastapi import HTTPException, status
 
 from ...core.services.redis_cache import check_rate_limit
 from ...database import get_connection
-from .common import loads_list, order_page_url, site_origins, url_within_origins
+from .common import loads_list, order_page_url, site_origins, site_public_origin, url_within_origins
+from .policies import checkout_note
 from .discounts import apply_discount_cents, best_discount_percent, fetch_active_discounts, site_today
 from .email import (
     build_order_items_summary,
@@ -30,19 +31,26 @@ from .email import (
     send_cappe_low_stock_email,
     send_cappe_order_alert_email,
     send_cappe_order_receipt_email,
+    store_reply_to,
 )
 from .inventory import log_adjustment as _inv_log
 from .booking_lifecycle import booking_lock_key, lock_booking_resource
 from .inventory import lock_stock_rows, release_order_bookings, restock_order
-from .options import fetch_option_groups, validate_and_price_options
+from .options import fetch_option_groups
+from .variants import (
+    fetch_variants, match_variant, price_selection, uncovered_option_ids, variant_label,
+)
 from .entitlements import (
     fee_cents as entitlement_fee_cents,
     require_can_sell,
     resolve_entitlements,
+    sells,
 )
 from .stripe_connect import CONNECT_CHECKOUT_TTL_SECONDS, CappeStripeError, get_cappe_stripe
-from .cart import cart_totals
-from .shipping import home_country, load_zones, not_shippable, resolve_destination
+from .cart import cart_totals, goods_net_cents
+from .shipping import (
+    FLAT_RATE_ID, home_country, load_rates, load_zones, not_shippable, resolve_destination, ship_load,
+)
 from .promos import allocate as allocate_promo, evaluate as evaluate_promo, find_code, normalize_code
 from .promos import redeem as redeem_promo, refuse as refuse_promo, used_by as promo_used_by
 
@@ -86,13 +94,16 @@ def crossed_low_stock(before: int, after: int, threshold: Optional[int]) -> bool
 
 def build_stripe_line_items(
     line_rows: Iterable[tuple], currency: str, tax_cents: int, tax_label: str,
-    line_discounts: Optional[Sequence[int]] = None,
+    line_discounts: Optional[Sequence[int]] = None, shipping: Optional[tuple[str, int]] = None,
 ) -> list[dict]:
     """Cart lines as Stripe `price_data` line items, plus tax as its own line
     (shipping rides `shipping_options`, not a line item — see
-    build_shipping_options). Sum of these unit_amount×quantity equals
-    `subtotal_cents + tax_cents`; adding `shipping_cents` from
-    `shipping_options` brings the charge to `total_cents`.
+    build_shipping_options — except when Stripe isn't asked for an address:
+    pass `shipping` (label, cents) and it is a line too). Sum of these
+    unit_amount×quantity equals `subtotal_cents + tax_cents`; adding
+    `shipping_cents` from `shipping_options` brings the charge to `total_cents`.
+    For a tax-inclusive order the caller passes `tax_cents=0`: the tax is
+    already inside the lines (and the shipping).
 
     A line a promo code discounted is sent as ONE item at its discounted total
     ("Mug × 2"): its share doesn't always divide by the quantity, and Stripe
@@ -124,23 +135,16 @@ def build_stripe_line_items(
             },
             "quantity": 1,
         })
+    if shipping and shipping[1] > 0:
+        line_items.append({
+            "price_data": {
+                "currency": currency,
+                "unit_amount": int(shipping[1]),
+                "product_data": {"name": (shipping[0] or "Shipping")[:120]},
+            },
+            "quantity": 1,
+        })
     return line_items
-
-
-def compute_shipping_cents(
-    *, has_physical: bool, goods_subtotal_cents: int, flat_cents: int,
-    free_threshold_cents: int | None,
-) -> int:
-    """Flat per-site shipping for carts with a paid physical line; zero when the
-    free-shipping threshold is met. Both the gate and the threshold compare the
-    GOODS subtotal (physical lines, pre-tax) — the same base the tax math uses,
-    and what "free shipping over $50" means to a buyer. A goods subtotal of 0
-    (giveaway item, or a cart Stripe will never charge for) never ships paid."""
-    if not has_physical or flat_cents <= 0 or goods_subtotal_cents <= 0:
-        return 0
-    if free_threshold_cents is not None and goods_subtotal_cents >= free_threshold_cents:
-        return 0
-    return flat_cents
 
 
 def _minute_multiplier(
@@ -558,6 +562,7 @@ def bind_return_urls(success_url, cancel_url, site, token):
 async def open_order_checkout(
     *, order, line_rows, owner, owner_ent, success_url, cancel_url, email,
     shopper=None, has_physical, tax_label, shipping_label, line_discounts=None,
+    collect_phone=False, submit_note=None,
 ):
     """Open a Stripe Checkout page for an existing order and record it as the
     order's current page. Shared by order creation and by "Pay now" on an order
@@ -567,14 +572,25 @@ async def open_order_checkout(
     prices FROZEN on the order, never the live product. Raises
     CappeStripeError; holds no connection across the Stripe call.
     """
-    pay_total = order["subtotal_cents"]
     cur = (order["currency"] or "USD").lower()
-    # Per-plan take rate, computed ONCE here and handed to Stripe, so the number
-    # persisted on the order is the same number Stripe actually takes.
-    fee = entitlement_fee_cents(pay_total, owner_ent.platform_fee_bps)
-    # Tax as its own line so the charged amount equals the receipt total. The
-    # platform fee stays on the goods subtotal.
-    line_items = build_stripe_line_items(line_rows, cur, order["tax_cents"], tax_label, line_discounts)
+    # Per-plan take rate on the goods net of tax, computed ONCE here and handed
+    # to Stripe, so the number persisted on the order is the same number Stripe
+    # actually takes. A tax-inclusive subtotal would otherwise be fee'd on the
+    # tax inside it.
+    fee = entitlement_fee_cents(goods_net_cents(order), owner_ent.platform_fee_bps)
+    # What the buyer chose to get it by (an order from before delivery options
+    # was always shipped). Stripe asks for an address only for a shipped one:
+    # a pickup needs none, and a local delivery's was typed (and its postal
+    # code checked) before it was priced.
+    method = order.get("shipping_method") or "ship"
+    label = order.get("shipping_rate_label") or shipping_label
+    collect = has_physical and method == "ship"
+    # Tax as its own line so the charged amount equals the receipt total —
+    # unless the prices already include it: then the lines are the total.
+    line_items = build_stripe_line_items(
+        line_rows, cur, 0 if order.get("tax_included") else order["tax_cents"], tax_label, line_discounts,
+        shipping=(label, order["shipping_cents"]) if has_physical and not collect else None,
+    )
     customer_id = None
     if shopper:
         from .shopper_customers import connected_customer
@@ -589,17 +605,22 @@ async def open_order_checkout(
         metadata={"order_id": str(order["id"]), "platform_fee_cents": str(fee)},
         customer_email=email or None,
         **({"customer_id": customer_id} if customer_id else {}),
-        collect_shipping_address=has_physical,
+        collect_shipping_address=collect,
         # The country the order was priced for, and only that one: an address
         # anywhere else would ship somewhere the shipping and tax weren't for.
-        ship_countries=[order["ship_country"]] if has_physical and order.get("ship_country") else None,
+        ship_countries=[order["ship_country"]] if collect and order.get("ship_country") else None,
         expires_in_seconds=CONNECT_CHECKOUT_TTL_SECONDS,
+        # The store's own asks: a phone number, and what paying agrees to.
+        collect_phone=bool(collect_phone),
+        submit_note=submit_note,
         shipping_option=(
             {
-                "label": shipping_label if order["shipping_cents"] > 0 else "Free shipping",
+                "label": label if order["shipping_cents"] > 0 else "Free shipping",
                 "amount_cents": order["shipping_cents"],
+                # The estimate the bag showed, for Stripe's own delivery line.
+                **{k: order[k] for k in ("delivery_min_days", "delivery_max_days") if order.get(k) is not None},
             }
-            if has_physical else None
+            if collect else None
         ),
     )
     async with get_connection() as conn:
@@ -634,9 +655,12 @@ async def pay_for_order(token: str) -> dict:
                       o.subtotal_cents, o.tax_cents, o.shipping_cents, o.total_cents, o.currency,
                       o.customer_email, o.stripe_session_id, o.access_token,
                       COALESCE(o.ship_country, s.home_country) AS ship_country,
+                      o.shipping_method, o.shipping_rate_label, o.delivery_min_days, o.delivery_max_days,
+                      o.tax_included, o.shipping_tax_cents,
                       o.pay_by IS NOT NULL AND o.pay_by < NOW() AS overdue,
                       s.name AS site_name, s.slug, s.subdomain, s.custom_domain,
-                      s.tax_label, s.shipping_label,
+                      s.tax_label, s.shipping_label, s.collect_phone,
+                      ARRAY(SELECT kind FROM cappe_site_policies WHERE site_id = s.id) AS policy_kinds,
                       a.id AS owner_id, a.plan, a.status AS owner_status, a.email AS owner_email,
                       a.name AS owner_name, a.stripe_account_id, a.stripe_charges_enabled
                  FROM cappe_orders o
@@ -671,6 +695,9 @@ async def pay_for_order(token: str) -> dict:
             "FROM cappe_order_items WHERE order_id = $1 ORDER BY created_at",
             row["id"],
         )
+        blocked = next((it["title"] for it in items if not sells(owner_ent, it["fulfillment"])), None)
+        if blocked:
+            raise PayRefused(f"This store can't take payment for {blocked} right now. Contact the store.")
     if row["stripe_session_id"]:
         state = await get_cappe_stripe().expire_checkout_session(
             row["stripe_account_id"], row["stripe_session_id"],
@@ -687,6 +714,8 @@ async def pay_for_order(token: str) -> dict:
         has_physical=any(it["fulfillment"] == "physical" for it in items),
         tax_label=row["tax_label"] or "Tax", shipping_label=row["shipping_label"] or "Shipping",
         line_discounts=[int(it.get("promo_discount_cents") or 0) for it in items],
+        collect_phone=row.get("collect_phone"),
+        submit_note=checkout_note(row["site_name"], site_public_origin(site), row.get("policy_kinds")),
     )
     return {"checkout_url": sess.get("url")}
 
@@ -755,11 +784,20 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
             # (product_id, title, unit_price, qty, fulfillment, intake_answers, booking_id)
             line_rows = []
             on_sale: list[bool] = []  # per line: an automatic discount applied (no promo code on top)
+            carried: list = []  # (product row, qty) per physical line, for the delivery price
             # Batch-load option groups for every product in the cart once, instead
             # of one query per line item inside the loop below (N+1).
             opt_groups_by_product = await fetch_option_groups(
                 conn, [it.product_id for it in body.items]
             )
+            variants_by_product = await fetch_variants(conn, [it.product_id for it in body.items])
+            # The combination each line picked (services/variants.py), found
+            # before the locks so its row can be locked with the rest.
+            picked = [
+                match_variant(variants_by_product.get(it.product_id, []),
+                              opt_groups_by_product.get(it.product_id, []), it.selected_option_ids)
+                for it in body.items
+            ]
             # Take every stock lock up front, in id order. The per-line
             # `FOR UPDATE`s below then re-lock rows this transaction already
             # holds, so two carts listing the same products in opposite order
@@ -767,17 +805,49 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
             await lock_stock_rows(
                 conn, site_id=site["id"],
                 product_ids=[it.product_id for it in body.items],
-                option_ids=[oid for it in body.items for oid in (it.selected_option_ids or [])],
+                option_ids=[oid for it, v in zip(body.items, picked)
+                            for oid in uncovered_option_ids(it.selected_option_ids, v)],
+                variant_ids=[v["id"] for v in picked if v is not None],
             )
-            for item in body.items:
+            for item, picked_variant in zip(body.items, picked):
                 product = await conn.fetchrow(
                     "SELECT id, name, price_cents, currency, inventory, low_stock_threshold, "
-                    "status, fulfillment, booking_type_id, requires_approval, intake_fields "
+                    "status, fulfillment, booking_type_id, requires_approval, intake_fields, sku, "
+                    "weight_g, ships_free, shipping_surcharge_cents "
                     "FROM cappe_products WHERE id = $1 AND site_id = $2 FOR UPDATE",
                     item.product_id, site["id"],
                 )
                 if product is None or product["status"] != "active":
                     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Product unavailable")
+                # What the plan sells is checked on every line, not only when
+                # the product was made: a store on a plan that can't sell this
+                # kind of thing (it downgraded, or the lineup changed) doesn't.
+                if not sells(owner_ent, product["fulfillment"]):
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=f"{product['name']} isn't available right now.",
+                    )
+                groups = opt_groups_by_product.get(item.product_id, [])
+                # The combination, re-read under the lock taken above.
+                variant = None
+                if picked_variant is not None:
+                    vrow = await conn.fetchrow(
+                        "SELECT id, option_ids, sku, price_cents, inventory, status "
+                        "FROM cappe_product_variants WHERE id = $1 AND product_id = $2 FOR UPDATE",
+                        picked_variant["id"], item.product_id,
+                    )
+                    if vrow is None:
+                        raise HTTPException(
+                            status_code=status.HTTP_409_CONFLICT,
+                            detail=f"{product['name']} just changed. Reload the page and try again.",
+                        )
+                    variant = {**dict(vrow), "option_ids": list(vrow["option_ids"] or [])}
+                    if variant["status"] != "active":
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"That {product['name']} ({variant_label(groups, variant['option_ids'])}) "
+                                   "isn't available.",
+                        )
                 if order_currency is None:
                     order_currency = product["currency"]
                 elif product["currency"] != order_currency:
@@ -787,13 +857,18 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
 
                 f = product["fulfillment"]
                 qty = item.quantity
+                if f == "physical":
+                    carried.append((product, qty))
                 booking_id = None
-                intake = item.intake_answers or {}
+                # Questions are asked (and checked) only for services and
+                # bookings; answers sent with anything else are not kept.
+                intake = (item.intake_answers or {}) if f in ("service", "booking") else {}
                 # What this line takes off the shelf — written to the order line
                 # so a later restock credits exactly this and nothing else.
                 # None on non-physical lines: there is nothing to reverse.
                 stock_taken = False if f == "physical" else None
                 options_taken: list | None = [] if f == "physical" else None
+                variant_taken = None
 
                 if f == "physical":
                     thr = product["low_stock_threshold"]
@@ -815,8 +890,29 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
                         )
                         if crossed_low_stock(new_bal + qty, new_bal, thr):
                             low_stock_hits.append((product["name"], new_bal))
-                    # Per-variant stock: decrement each selected option that tracks it.
-                    for oid in (item.selected_option_ids or []):
+                    # A variant owns the stock of the options it is made of.
+                    if variant is not None and variant["inventory"] is not None:
+                        vinv = variant["inventory"]
+                        label = variant_label(groups, variant["option_ids"])
+                        if vinv < qty:
+                            raise HTTPException(
+                                status_code=status.HTTP_409_CONFLICT,
+                                detail=f"Insufficient stock for {product['name']} ({label})",
+                            )
+                        await conn.execute(
+                            "UPDATE cappe_product_variants SET inventory = $1, updated_at = NOW() WHERE id = $2",
+                            vinv - qty, variant["id"],
+                        )
+                        variant_taken = variant["id"]
+                        await _inv_log(
+                            conn, site_id=site["id"], product_id=item.product_id, variant_id=variant["id"],
+                            delta=-qty, balance_after=vinv - qty, reason="sale",
+                        )
+                        if crossed_low_stock(vinv, vinv - qty, thr):
+                            low_stock_hits.append((f"{product['name']} — {label}", vinv - qty))
+                    # Options outside the variant (or every option, without one):
+                    # decrement each selected option that tracks its own stock.
+                    for oid in uncovered_option_ids(item.selected_option_ids, variant):
                         opt = await conn.fetchrow(
                             "SELECT name, inventory FROM cappe_product_options "
                             "WHERE id = $1 AND site_id = $2 FOR UPDATE",
@@ -871,18 +967,20 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
                 # deltas into the unit price BEFORE the discount, snapshot the
                 # choice for the order line.
                 try:
-                    opt_delta, opt_snapshot = validate_and_price_options(
-                        opt_groups_by_product.get(item.product_id, []), item.selected_option_ids,
+                    base_price, opt_snapshot = price_selection(
+                        product["price_cents"], groups, item.selected_option_ids, variant,
                     )
                 except ValueError as exc:
                     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
                 dpct = best_discount_percent(
                     discounts, kind="product", target_id=str(item.product_id), on_date=today,
                 )
-                unit_price = apply_discount_cents(max(0, product["price_cents"] + opt_delta), dpct)
+                unit_price = apply_discount_cents(base_price, dpct)
                 line_rows.append(
                     (item.product_id, product["name"], unit_price, qty, f, intake, booking_id,
-                     opt_snapshot, item.selected_option_ids or [], stock_taken, options_taken)
+                     opt_snapshot, item.selected_option_ids or [], stock_taken, options_taken,
+                     variant["id"] if variant else None, (variant or {}).get("sku") or product["sku"],
+                     variant_taken)
                 )
                 on_sale.append(bool(dpct))
 
@@ -926,10 +1024,14 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
             # line item below so the charge matches the receipt total.
             tax_cfg = await conn.fetchrow(
                 "SELECT tax_rate_bps, tax_label, shipping_flat_cents, "
-                "shipping_free_threshold_cents, shipping_label, home_country "
+                "shipping_free_threshold_cents, shipping_label, home_country, "
+                "handling_days_min, handling_days_max, prices_include_tax, tax_on_shipping, collect_phone, "
+                "ARRAY(SELECT kind FROM cappe_site_policies WHERE site_id = $1) AS policy_kinds "
                 "FROM cappe_sites WHERE id = $1", site["id"]
             )
             cfg = dict(tax_cfg) if tax_cfg else {}
+            # What the payment page says paying agrees to (the store's policies).
+            submit_note = checkout_note(site.get("name"), site_public_origin(site), cfg.get("policy_kinds"))
             tax_label = cfg.get("tax_label") or "Tax"
             shipping_label = cfg.get("shipping_label") or "Shipping"
             has_physical = any(f == "physical" for (_p, _t, _u, _q, f, *_r) in line_rows)
@@ -939,14 +1041,23 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
                 ship_country = _order_ship_country(body, address, cfg)
                 destination = resolve_destination(
                     cfg, await load_zones(conn, site["id"], owner_ent), ship_country,
+                    await load_rates(conn, site["id"], owner_ent),
                 )
                 if destination is None:
                     raise not_shippable(ship_country)
             totals = cart_totals([
                 {"unit_price_cents": unit, "quantity": qty, "fulfillment": fulfillment, "promo_discount_cents": share}
                 for (_pid, _title, unit, qty, fulfillment, *_rest), share in zip(line_rows, shares)
-            ], cfg, destination)
+            ], cfg, destination,
+                load=ship_load(carried, address.postal_code if address is not None else None),
+                rate_id=getattr(body, "shipping_rate_id", None), strict=True)
             tax_cents, shipping_cents, total_cents = totals["tax_cents"], totals["shipping_cents"], totals["total_cents"]
+            # A local delivery was only offered for the typed address's postal
+            # code (shipping.postal_matches), so it always has its address.
+            option = totals["shipping_option"] or {}
+            method = option.get("method") or "ship"
+            if method == "pickup":
+                address = None  # nothing is sent anywhere
             # Nothing to pay (a code that takes it all off, or free items) and
             # no approval to wait for: the order is settled now. Left pending,
             # nothing would ever settle it — Pay now refuses a zero total — and
@@ -956,11 +1067,16 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
                 """INSERT INTO cappe_orders
                        (site_id, customer_email, customer_name, status, subtotal_cents, tax_cents,
                         shipping_cents, total_cents, currency, note, requires_approval, shipping_address,
-                        ship_country, promo_code, discount_cents, paid_at)
+                        ship_country, promo_code, discount_cents, paid_at,
+                        shipping_rate_id, shipping_method, shipping_rate_label, delivery_min_days,
+                        delivery_max_days, shipping_instructions, tax_included, shipping_tax_cents)
                    VALUES ($1, $2, $3, CASE WHEN $15 THEN 'paid' ELSE 'pending' END, $4, $5, $6, $7, $8, $9,
-                           $10, $11::jsonb, $12, $13, $14, CASE WHEN $15 THEN NOW() END)
+                           $10, $11::jsonb, $12, $13, $14, CASE WHEN $15 THEN NOW() END,
+                           $16::uuid, $17, $18, $19, $20, $21, $22, $23)
                    RETURNING id, status, subtotal_cents, tax_cents, shipping_cents, total_cents,
-                             currency, access_token, requires_approval, ship_country""",
+                             currency, access_token, requires_approval, ship_country,
+                             shipping_method, shipping_rate_label, delivery_min_days, delivery_max_days,
+                             tax_included, shipping_tax_cents""",
                 site["id"], email, body.customer_name, subtotal, tax_cents, shipping_cents,
                 total_cents, order_currency or "USD", body.note, order_requires_approval,
                 # The buyer's address, when the storefront asked for it (a
@@ -969,6 +1085,13 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
                 # Stored in Stripe's shape so the dashboard reads one format.
                 json.dumps(address.as_stripe_shape(ship_country)) if address is not None else None,
                 ship_country, promo_code if promo else None, discount, settled,
+                # What the buyer chose, kept as it was (the rate can be edited
+                # or deleted later). The flat rate has no row of its own.
+                option.get("id") if option.get("id") not in (None, FLAT_RATE_ID) else None,
+                method, option.get("label") if has_physical else None,
+                option.get("delivery_min_days"), option.get("delivery_max_days"), option.get("instructions"),
+                # How the tax was priced: inside the prices, or on top of them.
+                totals["tax_included"], totals["shipping_tax_cents"],
             )
             if promo:
                 await redeem_promo(
@@ -979,16 +1102,18 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
                 await conn.execute("UPDATE cappe_orders SET shopper_id=$1 WHERE id=$2 AND site_id=$3",
                                    shopper["id"], order["id"], site["id"])
             for (product_id, title, unit_price, qty, f, intake, booking_id, opt_snapshot, sel_ids,
-                 stock_taken, options_taken), share in zip(line_rows, shares):
+                 stock_taken, options_taken, variant_id, sku, variant_taken), share in zip(line_rows, shares):
                 await conn.execute(
                     """INSERT INTO cappe_order_items
                            (order_id, site_id, product_id, title, unit_price_cents, quantity,
                             fulfillment, intake_answers, selected_options, booking_id, selected_option_ids,
-                            stock_decremented, decremented_option_ids, promo_discount_cents)
-                       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::uuid[], $14)""",
+                            stock_decremented, decremented_option_ids, promo_discount_cents,
+                            variant_id, sku, decremented_variant_id)
+                       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::uuid[], $14,
+                               $15, $16, $17)""",
                     order["id"], site["id"], product_id, title, unit_price, qty,
                     f, json.dumps(intake), json.dumps(opt_snapshot), booking_id, sel_ids,
-                    stock_taken, options_taken, share,
+                    stock_taken, options_taken, share, variant_id, sku, variant_taken,
                 )
 
     # Low-stock alert to the owner (stock was decremented at order creation,
@@ -1031,7 +1156,7 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
                 order=order, line_rows=line_rows, owner=owner, owner_ent=owner_ent,
                 success_url=success_url, cancel_url=cancel_url, email=email, shopper=shopper,
                 has_physical=has_physical, tax_label=tax_label, shipping_label=shipping_label,
-                line_discounts=shares,
+                line_discounts=shares, collect_phone=cfg.get("collect_phone"), submit_note=submit_note,
             )
             checkout_url = sess.get("url")
         except CappeStripeError as exc:
@@ -1067,6 +1192,7 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
                 order_page_url(site, order["access_token"]),
                 # Who settles the money next, which the email has to say.
                 "free" if order["subtotal_cents"] <= 0 else ("card_after_approval" if takes_cards else "store"),
+                reply_to=store_reply_to(site.get("meta_config"), owner["email"] if owner else None),
             )
         if owner and owner["email"]:
             background.add_task(

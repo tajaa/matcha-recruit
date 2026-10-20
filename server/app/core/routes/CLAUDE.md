@@ -57,7 +57,7 @@ Every moved file uses **absolute** imports (`from app.core.services.X import …
 | `content/` | `blog`→blog_router, `hr_news`→hr_news_router + hr_news_public_router, `newsletter`→newsletter_public_router + newsletter_admin_router, `landing_media`→landing_media_public_router + landing_media_admin_router, `sitemap`→sitemap_router, `expert_advice`→expert_advice_router, `posters`→posters_router, `contact`→contact_router |
 | `telemetry/` | `client_errors`→client_errors_router, `server_errors`→server_errors_router, `traffic`→traffic_router, `usage`→usage_router |
 
-`stripe_webhook` and `sitemap` are also imported directly by `app/main.py` (bypassing the `core_router` aggregator — Stripe dashboard needs `/api/webhooks/stripe` exactly, sitemap needs no `/api` prefix for crawlers). If you move either again, update `main.py`'s two direct imports.
+`stripe_webhook` and `sitemap` are also imported directly by `app/main.py` (bypassing the `core_router` aggregator — Stripe dashboard needs `/api/webhooks/stripe` exactly, sitemap needs no `/api` prefix for crawlers). If you move either again, update `main.py`'s two direct imports. `sitemap` also exposes `register_host_seo`: a hook answers `/sitemap.xml` / `/robots.txt` for hosts it owns (main.py registers Cappe's, for store hosts) — so core never imports a product package.
 
 ## Mounting convention
 

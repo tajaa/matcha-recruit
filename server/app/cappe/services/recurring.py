@@ -7,12 +7,13 @@ from urllib.parse import urlsplit
 from fastapi import HTTPException
 
 from app.database import get_connection
-from .cart import cart_totals, price_cart, priceable_products
+from .cart import cart_totals, goods_net_cents, price_cart, priceable_products
 from .common import loads_list, site_origins, site_public_origin, url_within_origins
 from .discounts import fetch_active_discounts, site_today
-from .entitlements import resolve_entitlements, require_can_sell
+from .entitlements import resolve_entitlements, require_can_sell, sells
 from .options import fetch_option_groups
-from .shipping import home_country
+from .variants import fetch_variants, match_variant
+from .shipping import home_country, ship_load
 from .shopper_customers import connected_customer
 from .stripe_connect import get_cappe_stripe, CappeStripeError
 
@@ -50,7 +51,13 @@ def build_subscription_lines(products, items, interval, site):
         unit = line["unit_price_cents"] * (10000 - product["subscription_discount_bps"]) // 10000
         snapshot.append({**line, "unit_price_cents": unit,
                          "selected_option_ids": [str(v) for v in item.selected_option_ids]})
-    totals = cart_totals(snapshot, site)
+    # What the physical lines weigh and count, as a one-off order prices
+    # them: a product that ships free adds nothing here either.
+    load = ship_load(
+        (products.get(item.product_id), item.quantity)
+        for item, row in zip(items, snapshot) if row["fulfillment"] == "physical"
+    )
+    totals = cart_totals(snapshot, site, load=load)
     if totals["total_cents"] <= 0:
         raise HTTPException(422, "Subscriptions must have a positive total")
     currency = quoted["currency"]
@@ -59,8 +66,11 @@ def build_subscription_lines(products, items, interval, site):
                                "recurring": {"interval": interval}, "product_data": {"name": name[:250]}},
                 "quantity": quantity}
     lines = [stripe_line(row["title"], row["unit_price_cents"], row["quantity"]) for row in snapshot]
-    for label, key in (("Tax", "tax_cents"), ("Shipping", "shipping_cents")):
-        if totals[key]:
+    # The store's own name for its tax ("VAT"), as the bag and receipt show it.
+    tax_label = (site.get("tax_label") or "Tax")[:120]
+    for label, key in ((tax_label, "tax_cents"), ("Shipping", "shipping_cents")):
+        # Tax the prices already include is in the lines above, not on top.
+        if totals[key] and not (key == "tax_cents" and totals["tax_included"]):
             lines.append(stripe_line(label, totals[key], 1))
     if len(lines) > 20:
         raise HTTPException(422, "Subscriptions support at most 20 billed line items")
@@ -201,10 +211,13 @@ async def checkout(site, shopper, body):
         if not owner or not owner["stripe_account_id"] or not owner["stripe_charges_enabled"]:
             raise HTTPException(409, "This store has not enabled card payments")
         product_rows = await conn.fetch("SELECT * FROM cappe_products WHERE site_id=$1 AND id=ANY($2::uuid[])", site["id"], [i.product_id for i in body.items])
+        # What the plan doesn't sell is unavailable here too, as at one-off checkout.
+        product_rows = [r for r in product_rows if sells(ent, r["fulfillment"])]
         groups = await fetch_option_groups(conn, [r["id"] for r in product_rows])
+        variants = await fetch_variants(conn, [r["id"] for r in product_rows])
         discounts = await fetch_active_discounts(conn, site["id"])
         today = site_today(await conn.fetchval("SELECT NOW()"), site.get("timezone"))
-        products = priceable_products(product_rows, groups, discounts, today)
+        products = priceable_products(product_rows, groups, discounts, today, variants)
         stripe_lines, snapshot, totals = build_subscription_lines(
             products, body.items, body.interval, site,
         )
@@ -221,10 +234,11 @@ async def checkout(site, shopper, body):
         if pending >= 10:
             raise HTTPException(409, "Too many pending checkouts; cancel an existing checkout first")
         row = await conn.fetchrow(
-            "INSERT INTO cappe_shopper_subscriptions(site_id,shopper_id,stripe_account_id,status,interval,items,subtotal_cents,tax_cents,shipping_cents,total_cents,currency) "
-            "VALUES($1,$2,$3,'preparing',$4,$5::jsonb,$6,$7,$8,$9,$10) RETURNING *",
+            "INSERT INTO cappe_shopper_subscriptions(site_id,shopper_id,stripe_account_id,status,interval,items,subtotal_cents,tax_cents,shipping_cents,total_cents,currency,tax_included,shipping_tax_cents) "
+            "VALUES($1,$2,$3,'preparing',$4,$5::jsonb,$6,$7,$8,$9,$10,$11,$12) RETURNING *",
             site["id"], shopper["id"], owner["stripe_account_id"], body.interval, json.dumps(snapshot),
             totals["subtotal_cents"], totals["tax_cents"], totals["shipping_cents"], totals["total_cents"], totals["currency"],
+            totals["tax_included"], totals["shipping_tax_cents"],
         )
     def callback(url, result):
         parsed = urlsplit(url)
@@ -235,7 +249,7 @@ async def checkout(site, shopper, body):
         session = await get_cappe_stripe().create_subscription_checkout(
             account_id=owner["stripe_account_id"], customer_id=customer_id, line_items=stripe_lines,
             application_fee_percent=goods_fee_percent(
-                ent.platform_fee_bps, totals["subtotal_cents"], totals["total_cents"],
+                ent.platform_fee_bps, goods_net_cents(totals), totals["total_cents"],
             ),
             success_url=callback(success, "success"), cancel_url=callback(cancel, "cancel"),
             metadata={"cappe_shopper_subscription_id": str(row["id"]), "site_id": str(site["id"])},
@@ -326,24 +340,43 @@ async def record_invoice_order(conn, row, invoice, payment_intent=None):
     order = await conn.fetchrow(
         "INSERT INTO cappe_orders(site_id,shopper_id,subscription_id,stripe_invoice_id,status,paid_at,customer_email,customer_name,"
         "subtotal_cents,tax_cents,shipping_cents,total_cents,currency,shipping_address,"
-        "stripe_payment_intent,payment_ref,platform_fee_cents) "
-        "VALUES($1,$2,$3,$4,'paid',NOW(),$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$13,$14) "
+        "stripe_payment_intent,payment_ref,platform_fee_cents,tax_included,shipping_tax_cents) "
+        "VALUES($1,$2,$3,$4,'paid',NOW(),$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$13,$14,$15,$16) "
         "ON CONFLICT(stripe_invoice_id) WHERE stripe_invoice_id IS NOT NULL DO NOTHING RETURNING id",
         row["site_id"], row["shopper_id"], row["id"], invoice["id"],
         shopper["email"] if shopper else None, shopper["name"] if shopper else None,
         row["subtotal_cents"], row["tax_cents"], row["shipping_cents"], invoice.get("total", row["total_cents"]),
         row["currency"], json.dumps(shipping) if shipping else None,
         payment_intent, int(fee) if isinstance(fee, int) else None,
+        # A renewal is priced as its subscription was.
+        bool(row.get("tax_included")), int(row.get("shipping_tax_cents") or 0),
     )
     if not order:
         return None, False
     for item in loads_list(row["items"]):
-        pid = await conn.fetchval("SELECT id FROM cappe_products WHERE id=$1 AND site_id=$2", UUID(item["product_id"]), row["site_id"])
+        selected = [UUID(v) for v in item.get("selected_option_ids", [])]
+        product = await conn.fetchrow(
+            "SELECT id, sku FROM cappe_products WHERE id=$1 AND site_id=$2", UUID(item["product_id"]), row["site_id"],
+        )
+        # The combination as the store has it today, matched exactly as
+        # checkout matches it (services/variants.py) — not remembered, because
+        # the one subscribed to may since have been removed.
+        variant = None
+        if product and selected:
+            pid = product["id"]
+            variant = match_variant(
+                (await fetch_variants(conn, [pid])).get(pid, []),
+                (await fetch_option_groups(conn, [pid])).get(pid, []),
+                selected,
+            )
         await conn.execute(
-            "INSERT INTO cappe_order_items(order_id,site_id,product_id,title,unit_price_cents,quantity,fulfillment,selected_options,selected_option_ids) "
-            "VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::uuid[])",
-            order["id"], row["site_id"], pid, item["title"], item["unit_price_cents"], item["quantity"], item["fulfillment"],
-            json.dumps(item.get("selected_options", [])), [UUID(v) for v in item.get("selected_option_ids", [])],
+            "INSERT INTO cappe_order_items(order_id,site_id,product_id,title,unit_price_cents,quantity,fulfillment,"
+            "selected_options,selected_option_ids,variant_id,sku) "
+            "VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::uuid[],$10,$11)",
+            order["id"], row["site_id"], product["id"] if product else None, item["title"], item["unit_price_cents"],
+            item["quantity"], item["fulfillment"], json.dumps(item.get("selected_options", [])), selected,
+            variant["id"] if variant else None,
+            (variant["sku"] if variant else None) or (product["sku"] if product else None),
         )
     # Paid goods are owed even when stock is short. Match Cappe's existing late
     # payment recovery: negative inventory records the debt and refunds reverse
@@ -353,7 +386,8 @@ async def record_invoice_order(conn, row, invoice, payment_intent=None):
     short = await conn.fetchval(
         "SELECT EXISTS(SELECT 1 FROM cappe_order_items i LEFT JOIN cappe_products p ON p.id=i.product_id "
         "WHERE i.order_id=$1 AND i.fulfillment='physical' AND (p.id IS NULL OR p.inventory<0 "
-        "OR EXISTS(SELECT 1 FROM cappe_product_options o WHERE o.id=ANY(i.selected_option_ids) AND o.inventory<0)))", order["id"],
+        "OR EXISTS(SELECT 1 FROM cappe_product_variants v WHERE v.id=i.decremented_variant_id AND v.inventory<0) "
+        "OR EXISTS(SELECT 1 FROM cappe_product_options o WHERE o.id=ANY(i.decremented_option_ids) AND o.inventory<0)))", order["id"],
     )
     await conn.execute("UPDATE cappe_orders SET metadata=metadata || $2::jsonb WHERE id=$1", order["id"],
                        json.dumps({"stock_shortfall": bool(short), "invoice_total_changed": invoice.get("total", row["total_cents"]) != row["total_cents"]}))
@@ -450,8 +484,10 @@ async def handle_event(etype, obj, event, background):
                     "SELECT COALESCE(p.name,i.title) AS name,COALESCE(p.inventory,-1) AS balance "
                     "FROM cappe_order_items i LEFT JOIN cappe_products p ON p.id=i.product_id "
                     "WHERE i.order_id=$1 AND i.fulfillment='physical' AND (p.id IS NULL OR p.inventory<0 "
+                    "OR EXISTS(SELECT 1 FROM cappe_product_variants v "
+                    "WHERE v.id=i.decremented_variant_id AND v.inventory<0) "
                     "OR EXISTS(SELECT 1 FROM cappe_product_options o "
-                    "WHERE o.id=ANY(i.selected_option_ids) AND o.inventory<0))",
+                    "WHERE o.id=ANY(i.decremented_option_ids) AND o.inventory<0))",
                     order_id,
                 )
             if owner and owner["email"]:
@@ -482,7 +518,8 @@ async def _schedule_subscription_emails(background, row, invoice, *, order_id, s
 
     async with get_connection() as conn:
         info = await conn.fetchrow(
-            "SELECT s.name AS site_name, s.subdomain, s.custom_domain, a.email AS owner_email, a.name AS owner_name, "
+            "SELECT s.name AS site_name, s.subdomain, s.custom_domain, s.meta_config, "
+            "a.email AS owner_email, a.name AS owner_name, "
             "sh.email AS shopper_email, sh.name AS shopper_name "
             "FROM cappe_sites s JOIN cappe_accounts a ON a.id=s.account_id "
             "LEFT JOIN cappe_shoppers sh ON sh.id=$2 AND sh.site_id=s.id WHERE s.id=$1",
@@ -505,19 +542,22 @@ async def _schedule_subscription_emails(background, row, invoice, *, order_id, s
     # the card (it used to say "contact the store").
     origin = site_public_origin(info)
     account_url = f"{origin}/account" if origin else None
+    # Sent as the store; a reply reaches the store.
+    reply_to = mail.store_reply_to(info.get("meta_config"), info["owner_email"])
     if started:
         background.add_task(
             mail.send_cappe_subscription_started_email, shopper, info["shopper_name"], info["site_name"],
-            items, row["total_cents"], row["currency"], row["interval"], account_url,
+            items, row["total_cents"], row["currency"], row["interval"], account_url, reply_to=reply_to,
         )
     if failed:
         background.add_task(
             mail.send_cappe_subscription_payment_failed_email, shopper, info["shopper_name"], info["site_name"], items,
-            account_url,
+            account_url, reply_to=reply_to,
         )
     if cancelled:
         background.add_task(
             mail.send_cappe_subscription_cancelled_email, shopper, info["shopper_name"], info["site_name"], items,
+            reply_to=reply_to,
         )
 
 

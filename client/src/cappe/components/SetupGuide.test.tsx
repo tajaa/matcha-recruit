@@ -1,5 +1,5 @@
-import { render, screen, waitFor } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { EditorHeader } from '../pages/CappeSiteEditor/EditorHeader'
 import type { CappeReadiness, CappeSite } from '../types'
@@ -60,5 +60,26 @@ describe('EditorHeader', () => {
 
     rerender(<EditorHeader site={site} publicUrl="corner-bakery.gummfit.com" publishing={false} onPublish={vi.fn()} />)
     expect(screen.getByRole('button', { name: /Publish/ })).toBeEnabled()
+  })
+
+  it.each([
+    ['policies', '/cappe/sites/site-1/shop#policies'],
+    ['identity', '/cappe/sites/site-1/shop#identity'],
+    ['payments', '/cappe/sites/site-1/orders'],
+  ])('takes the %s step to where it is done', async (action, where) => {
+    api.get.mockResolvedValue({ ready: false, items: [
+      { key: action, required: action === 'policies', done: false, action, label: `Do ${action}`, hint: 'Hint.' },
+    ] })
+    function Where() {
+      const l = useLocation()
+      return <p data-testid="where">{l.pathname + l.hash}</p>
+    }
+    render(
+      <MemoryRouter initialEntries={['/cappe/sites/site-1']}>
+        <Routes><Route path="*" element={<><SetupGuide site={site} pages={[]} publishing={false} onPublish={vi.fn()} /><Where /></>} /></Routes>
+      </MemoryRouter>,
+    )
+    fireEvent.click(await screen.findByRole('button', { name: /Do this/ }))
+    expect(screen.getByTestId('where')).toHaveTextContent(where)
   })
 })

@@ -289,6 +289,11 @@ export default function Orders() {
                   </div>
                 </div>
                 <div className="text-sm font-medium text-zinc-300">{centsToMoney(o.total_cents ?? o.subtotal_cents, o.currency)}</div>
+                {o.shipping_method && o.shipping_method !== 'ship' && (
+                  <span className="rounded-full bg-violet-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase text-violet-300">
+                    {o.shipping_method === 'pickup' ? 'pickup' : 'local delivery'}
+                  </span>
+                )}
                 {o.requires_approval && o.status === 'pending' && (
                   <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase text-amber-400"><Clock className="h-3 w-3" /> needs approval</span>
                 )}
@@ -359,9 +364,18 @@ export default function Orders() {
                       <p className="whitespace-pre-wrap">{o.note}</p>
                     </div>
                   )}
+                  {o.shipping_method === 'pickup' && (
+                    <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-3 text-xs text-zinc-300">
+                      <div className="mb-1 font-medium text-zinc-400">Pickup{o.shipping_rate_label && o.shipping_rate_label !== 'Pickup' ? ` — ${o.shipping_rate_label}` : ''}</div>
+                      <p className="whitespace-pre-wrap">{o.shipping_instructions || 'The customer collects it from you. Tell them where and when.'}</p>
+                    </div>
+                  )}
                   {o.shipping_address && (
                     <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-3 text-xs text-zinc-300">
-                      <div className="mb-1 flex items-center gap-1.5 font-medium text-zinc-400"><Truck className="h-3.5 w-3.5" /> Ship to</div>
+                      <div className="mb-1 flex items-center gap-1.5 font-medium text-zinc-400">
+                        <Truck className="h-3.5 w-3.5" /> {o.shipping_method === 'local_delivery' ? 'Deliver to' : 'Ship to'}
+                        {o.shipping_rate_label && o.shipping_method !== 'pickup' ? <span className="font-normal text-zinc-500">· {o.shipping_rate_label}</span> : null}
+                      </div>
                       {o.shipping_address.name && <div>{o.shipping_address.name}</div>}
                       {o.shipping_address.address?.line1 && <div>{o.shipping_address.address.line1}</div>}
                       {o.shipping_address.address?.line2 && <div>{o.shipping_address.address.line2}</div>}
@@ -466,8 +480,9 @@ function Totals({ order: o }: { order: CappeOrder }) {
   const discount = o.discount_cents ?? 0
   const rows: [string, number][] = [['Subtotal', o.subtotal_cents + discount]]
   if (discount) rows.push([o.promo_code ? `Discount (${o.promo_code})` : 'Discount', -discount])
-  if (o.tax_cents) rows.push(['Tax', o.tax_cents])
-  if (o.shipping_cents) rows.push(['Shipping', o.shipping_cents])
+  // Tax the prices already included is shown under the total, not added to it.
+  if (o.tax_cents && !o.tax_included) rows.push(['Tax', o.tax_cents])
+  if (o.shipping_cents) rows.push([o.shipping_rate_label || 'Shipping', o.shipping_cents])
   return (
     <dl className="ml-auto max-w-xs space-y-0.5 pt-1 text-xs">
       {rows.map(([label, cents]) => (
@@ -476,6 +491,9 @@ function Totals({ order: o }: { order: CappeOrder }) {
       <div className="flex justify-between gap-6 border-t border-zinc-800 pt-1 font-medium text-zinc-200">
         <dt>Total</dt><dd>{centsToMoney(o.total_cents ?? o.subtotal_cents, o.currency)}</dd>
       </div>
+      {o.tax_included && o.tax_cents > 0 && (
+        <div className="flex justify-between gap-6 text-zinc-500"><dt>Includes tax</dt><dd>{centsToMoney(o.tax_cents, o.currency)}</dd></div>
+      )}
       {(o.refunded_cents ?? 0) > 0 && (
         <div className="flex justify-between gap-6 text-red-300"><dt>Refunded</dt><dd>−{centsToMoney(o.refunded_cents ?? 0, o.currency)}</dd></div>
       )}

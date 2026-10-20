@@ -38,13 +38,13 @@ ON (it is idle without a connected account and a due post); metrics seeded off.
 
 Additive + idempotent. The downgrade drops the tables and both features.
 
-Revision ID: zzzzcappe49
-Revises: zzzzcappe48
+Revision ID: cappesocial01
+Revises: zzzzcappe54
 """
 from alembic import op
 
-revision = "zzzzcappe49"
-down_revision = "zzzzcappe48"
+revision = "cappesocial01"
+down_revision = "zzzzcappe54"
 branch_labels = None
 depends_on = None
 

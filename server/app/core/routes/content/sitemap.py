@@ -14,6 +14,25 @@ from app.database import get_connection
 
 router = APIRouter()
 
+# Hosts that answer /sitemap.xml and /robots.txt themselves — a Cappe store's
+# subdomain or custom domain. Each hook takes (request, "sitemap" | "robots")
+# and returns a Response for its own hosts, None for any other. main.py
+# registers them, so core never imports a product package. Without this, these
+# routes (mounted before the store renderer) gave every store Matcha's files.
+_HOST_HOOKS: list = []
+
+
+def register_host_seo(hook) -> None:
+    _HOST_HOOKS.append(hook)
+
+
+async def _host_answer(request: Request, kind: str):
+    for hook in _HOST_HOOKS:
+        answer = await hook(request, kind)
+        if answer is not None:
+            return answer
+    return None
+
 CANONICAL_HOST = "hey-matcha.com"
 
 
@@ -110,6 +129,9 @@ def _xml_url(loc: str, lastmod: str, changefreq: str, priority: float) -> str:
 
 @router.get("/sitemap.xml")
 async def sitemap(request: Request):
+    hosted = await _host_answer(request, "sitemap")
+    if hosted is not None:
+        return hosted
     base = _canonical_base(request)
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
@@ -165,6 +187,9 @@ async def sitemap(request: Request):
 
 @router.get("/robots.txt", response_class=PlainTextResponse)
 async def robots(request: Request):
+    hosted = await _host_answer(request, "robots")
+    if hosted is not None:
+        return hosted
     base = _canonical_base(request)
     return (
         "User-agent: *\n"

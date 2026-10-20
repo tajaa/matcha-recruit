@@ -107,6 +107,9 @@ export type CappeSite = {
   is_multi_location: boolean
   tax_rate_bps?: number | null
   tax_label?: string | null
+  /** The listed prices already include the tax (VAT-style); shipping is taxed too. */
+  prices_include_tax?: boolean
+  tax_on_shipping?: boolean
   receipt_prefix?: string | null
   shipping_flat_cents?: number | null
   shipping_free_threshold_cents?: number | null
@@ -115,6 +118,14 @@ export type CappeSite = {
   home_country?: string
   /** What the store charges in; every product follows it. */
   currency?: string
+  /** Business days to get an order out of the door, added to each delivery estimate. */
+  handling_days_min?: number | null
+  handling_days_max?: number | null
+  /** Who is selling, on every receipt; and whether Stripe asks buyers for a phone. */
+  legal_name?: string | null
+  business_address?: string | null
+  tax_id?: string | null
+  collect_phone?: boolean
   listed?: boolean
   directory_category?: string | null
   directory_tags?: string[]
@@ -176,6 +187,16 @@ export type CappePublicPlan = {
 }
 
 // --- Billing (authenticated) --------------------------------------------------
+
+/** What the account's plan allows (GET /billing/entitlements). */
+export type CappeEntitlements = {
+  plan_code: string
+  plan_name: string
+  can_sell: boolean
+  platform_fee_bps: number
+  allowed_fulfillment: CappeFulfillment[]
+  features: Record<string, unknown>
+}
 
 export type CappeBillingInterval = 'month' | 'year'
 
@@ -416,10 +437,41 @@ export type CappeProductOptionInput = {
   expected_inventory?: number | null
 }
 
+export type CappeProductImage = { id: string; url: string; alt: string | null; sort_order: number }
+
+// One combination of a product's required pick-one groups (Size × Colour) with
+// its own stock, SKU, price and picture (server: services/variants.py).
+// `price_cents` null = the product price plus the options' changes;
+// `inventory` null = not tracked on the variant.
+export type CappeProductVariant = {
+  id: string
+  option_ids: string[]
+  sku: string | null
+  price_cents: number | null
+  inventory: number | null
+  image_url: string | null
+  status: 'active' | 'disabled'
+  sort_order: number
+}
+// The editor names a combination by group and option NAME, so options created
+// in the same save can carry variants too. Stock is tri-state on an existing
+// variant, like option stock.
+export type CappeProductVariantInput = {
+  id?: string
+  options: { group: string; option: string }[]
+  sku: string | null
+  price_cents: number | null
+  image_url: string | null
+  status: 'active' | 'disabled'
+  inventory?: number | null
+  expected_inventory?: number | null
+}
+
 export type CappeInventoryAdjustment = {
   id: string
   product_id: string
   option_id: string | null
+  variant_id?: string | null
   delta: number
   balance_after: number | null
   reason: string
@@ -457,6 +509,19 @@ export type CappeProduct = {
   intake_fields: CappeFormField[]
   category: string | null
   option_groups: CappeProductOptionGroup[]
+  variants?: CappeProductVariant[]
+  /** The product's address on its store, /shop/<slug>. */
+  slug?: string | null
+  brand?: string | null
+  /** Barcode: 8, 12, 13 or 14 digits (EAN/UPC/GTIN). */
+  gtin?: string | null
+  /** Pictures in order; the first is the cover `image_url` mirrors. */
+  images?: CappeProductImage[]
+  /** What a delivery option prices: grams per unit, an extra per unit, or never counted. */
+  weight_g?: number | null
+  shipping_surcharge_cents?: number
+  ships_free?: boolean
+  url?: string | null
   created_at: string
   updated_at: string
   discount_percent?: number
@@ -480,6 +545,14 @@ export type CappeProductInput = {
   intake_fields?: CappeFormField[]
   category?: string | null
   option_groups?: CappeProductOptionGroupInput[]
+  variants?: CappeProductVariantInput[]
+  slug?: string
+  brand?: string | null
+  gtin?: string | null
+  images?: { url: string; alt: string | null }[]
+  weight_g?: number | null
+  shipping_surcharge_cents?: number
+  ships_free?: boolean
 }
 
 export type CappeOrderItem = {
@@ -497,6 +570,9 @@ export type CappeOrderItem = {
   restocked_quantity?: number
   /** This line's share of a promo code's discount. */
   promo_discount_cents?: number
+  /** The combination bought, and the SKU it sold under. */
+  variant_id?: string | null
+  sku?: string | null
 }
 
 /** One refund in an order's ledger. */
@@ -546,6 +622,17 @@ export type CappeOrder = {
   shipping_address?: CappeShippingAddress | null
   /** Where a physical order was priced to ship. */
   ship_country?: string | null
+  /** How the buyer chose to get it, that option's name and estimate then,
+   *  and pickup's where-and-when. Orders from before delivery options shipped. */
+  shipping_method?: CappeShippingMethod
+  shipping_rate_label?: string | null
+  delivery_min_days?: number | null
+  delivery_max_days?: number | null
+  shipping_instructions?: string | null
+  /** The prices included the tax: `tax_cents` is inside the subtotal (and
+   *  `shipping_tax_cents` of it inside the shipping), not on top. */
+  tax_included?: boolean
+  shipping_tax_cents?: number
   /** The refund ledger (detail view only). */
   refunds?: CappeOrderRefund[]
   /** The promo code the buyer used and what it took off (subtotal is after it). */
@@ -932,6 +1019,8 @@ export type CappeClient = {
   has_thread: boolean
   is_imported?: boolean
   total_spent_cents: number
+  /** What total_spent_cents is in: the store's currency. */
+  currency?: string
   last_activity: string | null
   location_id?: string | null
   location_name?: string | null
@@ -1320,7 +1409,49 @@ export type EarningsRow = {
   paid_at: string | null
 }
 
+// --- Store policies --------------------------------------------------------------
+
+export type CappePolicy = {
+  kind: 'refund' | 'shipping' | 'terms' | 'privacy'
+  title: string
+  /** On the store: /policies/<kind>. */
+  path: string
+  /** Our starting text — a prompt to edit, not legal advice. */
+  starter: string
+  /** null = not published. */
+  body: string | null
+  updated_at: string | null
+}
+
+export type CappePolicies = { policies: CappePolicy[] }
+
 // --- Shipping zones ------------------------------------------------------------
+
+export type CappeShippingMethod = 'ship' | 'pickup' | 'local_delivery'
+
+/** One way to get an order: shipped, picked up, or delivered locally. The
+ *  first of a destination's options is the bag's default. */
+export type CappeShippingRateInput = {
+  name: string
+  method: CappeShippingMethod
+  amount_cents: number
+  /** Added for each item after the first (not for pickup). */
+  per_item_cents: number
+  min_subtotal_cents: number | null
+  max_subtotal_cents: number | null
+  min_weight_g: number | null
+  max_weight_g: number | null
+  free_over_cents: number | null
+  /** Business days in transit, on top of the store's handling time. */
+  delivery_min_days: number | null
+  delivery_max_days: number | null
+  /** Local delivery: postal codes (prefixes) it covers; empty = anywhere. */
+  postal_codes: string[]
+  /** Pickup: where and when. */
+  instructions: string | null
+}
+
+export type CappeShippingRate = CappeShippingRateInput & { id: string; sort_order: number }
 
 /** A destination beyond the store's home country, with its own rates. */
 export type CappeShippingZoneInput = {
@@ -1330,11 +1461,14 @@ export type CappeShippingZoneInput = {
   rest_of_world: boolean
   flat_cents: number
   free_threshold_cents: number | null
-  /** Charge the store's tax rate on goods shipped here. */
+  /** Charge tax on goods shipped here — at `tax_rate_bps` when set, else the store's rate. */
   charge_tax: boolean
+  tax_rate_bps?: number | null
+  /** The zone's delivery options; omitted = keep what it had. */
+  rates?: CappeShippingRateInput[]
 }
 
-export type CappeShippingZone = CappeShippingZoneInput & { id: string; sort_order: number }
+export type CappeShippingZone = CappeShippingZoneInput & { id: string; sort_order: number; rates: CappeShippingRate[] }
 
 export type CappeShippingZones = {
   /** Whether the plan includes zones; saved zones are paused when it doesn't. */
@@ -1344,6 +1478,8 @@ export type CappeShippingZones = {
   /** Every country a zone can name. */
   countries: string[]
   zones: CappeShippingZone[]
+  /** The home country's delivery options. */
+  home_rates: CappeShippingRate[]
 }
 
 // --- Finances ------------------------------------------------------------------

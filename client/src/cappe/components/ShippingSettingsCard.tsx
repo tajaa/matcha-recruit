@@ -2,10 +2,13 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Loader2, Check, Truck, Plus, X } from 'lucide-react'
 import { cappeApi } from '../api'
-import { parseMoneyCents } from '../utils/money'
+import { parseMoneyCents, parsePercentBps } from '../utils/money'
 import { STORE_CURRENCIES, countryName } from '../utils/countries'
+import { weightUnit, type WeightUnit } from '../utils/weight'
 import { BILLING_PATH } from '../pages/CappeBilling/paths'
-import type { CappeShippingZoneInput, CappeShippingZones, CappeSite } from '../types'
+import DeliveryOptionsEditor from './DeliveryOptionsEditor'
+import { rateBodies, rateRow, type RateRow } from '../utils/deliveryOptions'
+import type { CappeShippingRateInput, CappeShippingZoneInput, CappeShippingZones, CappeSite } from '../types'
 
 // Where the store is based, what it charges in, and where it ships.
 //
@@ -14,17 +17,28 @@ import type { CappeShippingZoneInput, CappeShippingZones, CappeSite } from '../t
 // each with its own rates; without any, the store ships within its home country
 // only — Stripe's payment page then accepts an address there and nowhere else.
 // The buyer picks the country in the bag and is priced for it.
+//
+// Every destination may also have delivery options (DeliveryOptionsEditor):
+// pickup, local delivery, express… The bag offers them; without any, the
+// destination's flat rate is the one option. They come with zones' plan.
 
-type ZoneRow = { key: number; name: string; countries: string[]; rest: boolean; flat: string; freeOver: string; tax: boolean }
+type ZoneRow = {
+  key: number; name: string; countries: string[]; rest: boolean; flat: string; freeOver: string; tax: boolean
+  /** The zone's own tax rate, percent as typed; '' = the store's rate. */
+  taxRate: string
+  rates: RateRow[]
+}
 
 let nextKey = 0
 const dollars = (cents: number | null | undefined) => (cents ? (cents / 100).toString() : '')
 const field = 'mt-1 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-lime-500'
 
-export default function ShippingSettingsCard({ siteId, onCurrencyChange }: {
+export default function ShippingSettingsCard({ siteId, onCurrencyChange, onHomeCountryChange }: {
   siteId: string
   /** Called with the store's currency once loaded, and again when it changes. */
   onCurrencyChange?: (currency: string) => void
+  /** Called with the store's country once loaded and after a save (it sets the weight unit). */
+  onHomeCountryChange?: (country: string) => void
 }) {
   const [home, setHome] = useState('US')
   const [currency, setCurrency] = useState('USD')
@@ -33,6 +47,12 @@ export default function ShippingSettingsCard({ siteId, onCurrencyChange }: {
   const [freeOver, setFreeOver] = useState('') // '' = no threshold
   const [label, setLabel] = useState('Shipping')
   const [zones, setZones] = useState<ZoneRow[]>([])
+  const [homeRates, setHomeRates] = useState<RateRow[]>([])
+  const [handlingMin, setHandlingMin] = useState('')
+  const [handlingMax, setHandlingMax] = useState('')
+  // Weights are typed in the unit of the country the store was in when this
+  // loaded, so a country change before saving can't re-read them.
+  const [unit, setUnit] = useState<WeightUnit>('lb')
   const [zonesEnabled, setZonesEnabled] = useState(false)
   const [zonesCleared, setZonesCleared] = useState(false)
   const [countries, setCountries] = useState<string[]>([])
@@ -51,7 +71,14 @@ export default function ShippingSettingsCard({ siteId, onCurrencyChange }: {
       cappeApi.get<CappeSite>(`/sites/${siteId}`),
       cappeApi.get<CappeShippingZones>(`/sites/${siteId}/shipping-zones`),
     ]).then(([s, z]) => {
-      setHome(s.home_country || z.home_country || 'US')
+      const country = s.home_country || z.home_country || 'US'
+      const u = weightUnit(country)
+      setHome(country)
+      setUnit(u)
+      onHomeCountryChange?.(country)
+      setHandlingMin(s.handling_days_min != null ? String(s.handling_days_min) : '')
+      setHandlingMax(s.handling_days_max != null ? String(s.handling_days_max) : '')
+      setHomeRates((z.home_rates || []).map((r) => rateRow(r, u)))
       setCurrency(s.currency || 'USD')
       setSavedCurrency(s.currency || 'USD')
       onCurrencyChange?.(s.currency || 'USD')
@@ -65,6 +92,8 @@ export default function ShippingSettingsCard({ siteId, onCurrencyChange }: {
         flat: dollars(zone.flat_cents),
         freeOver: zone.free_threshold_cents != null ? (zone.free_threshold_cents / 100).toString() : '',
         tax: zone.charge_tax,
+        taxRate: zone.tax_rate_bps != null ? String(zone.tax_rate_bps / 100) : '',
+        rates: (zone.rates || []).map((r) => rateRow(r, u)),
       })))
       setLoaded(true)
     }).catch((e) => setLoadError(e instanceof Error ? e.message : 'Could not load these settings'))
@@ -77,7 +106,7 @@ export default function ShippingSettingsCard({ siteId, onCurrencyChange }: {
     setZones((zs) => zs.map((z) => (z.key === key ? { ...z, ...patch } : z)))
   const addZone = () => setZones((zs) => [...zs, {
     key: nextKey++, name: zs.length ? `Zone ${zs.length + 1}` : 'International', countries: [],
-    rest: false, flat: '', freeOver: '', tax: false,
+    rest: false, flat: '', freeOver: '', tax: false, taxRate: '', rates: [],
   }])
   // A country is in one zone at most, and never the home country.
   const taken = new Set(zones.flatMap((z) => z.countries))
@@ -96,9 +125,15 @@ export default function ShippingSettingsCard({ siteId, onCurrencyChange }: {
       if (flatCents === null) return `Enter the rate for “${name}” as a plain amount, e.g. 15`
       const freeCents = z.freeOver.trim() === '' ? null : parseMoneyCents(z.freeOver)
       if (z.freeOver.trim() !== '' && freeCents === null) return `Enter the free-shipping amount for “${name}” as a plain amount, e.g. 100`
+      const rates = rateBodies(z.rates, unit)
+      if (typeof rates === 'string') return rates
+      const taxBps = z.tax && z.taxRate.trim() !== '' ? parsePercentBps(z.taxRate) : null
+      if (z.tax && z.taxRate.trim() !== '' && (taxBps === null || taxBps > 10000)) {
+        return `Enter the tax rate for “${name}” as a plain number, e.g. 20 (or leave it blank for your own rate)`
+      }
       out.push({
         name, countries: z.rest ? [] : z.countries, rest_of_world: z.rest,
-        flat_cents: flatCents, free_threshold_cents: freeCents, charge_tax: z.tax,
+        flat_cents: flatCents, free_threshold_cents: freeCents, charge_tax: z.tax, tax_rate_bps: taxBps, rates,
       })
     }
     return out
@@ -115,9 +150,20 @@ export default function ShippingSettingsCard({ siteId, onCurrencyChange }: {
       setError('Enter the free-shipping threshold as a plain amount, e.g. 50')
       return
     }
+    const handling = [handlingMin, handlingMax].map((t) => (t.trim() === '' ? null : Number(t)))
+    if (handling.some((d) => d !== null && !(Number.isInteger(d) && d >= 0 && d <= 60))) {
+      setError('Enter the handling time in whole business days (0–60).')
+      return
+    }
+    if (handling[0] !== null && handling[1] !== null && handling[0] > handling[1]) {
+      setError('The handling time’s first number is above its second.')
+      return
+    }
     const sendZones = zonesEnabled || zonesCleared
     const bodies = sendZones ? zoneBodies() : []
     if (typeof bodies === 'string') { setError(bodies); return }
+    const homeBodies: CappeShippingRateInput[] | string = sendZones ? rateBodies(homeRates, unit) : []
+    if (typeof homeBodies === 'string') { setError(homeBodies); return }
     if (currency !== savedCurrency && !window.confirm(
       `Charge in ${currency} from now on? Every product keeps its number — a ${savedCurrency} 20 price becomes ${currency} 20 — `
       + 'so review your prices after switching. Orders already placed keep their currency.',
@@ -131,13 +177,16 @@ export default function ShippingSettingsCard({ siteId, onCurrencyChange }: {
         shipping_flat_cents: Math.max(0, flatCents),
         shipping_free_threshold_cents: freeCents === null ? null : Math.max(0, freeCents),
         shipping_label: label.trim() || 'Shipping',
+        handling_days_min: handling[0],
+        handling_days_max: handling[1],
       })
+      onHomeCountryChange?.(home)
       if (currency !== savedCurrency) {
         setSavedCurrency(currency)
         onCurrencyChange?.(currency)
       }
       if (sendZones) {
-        await cappeApi.put(`/sites/${siteId}/shipping-zones`, { zones: bodies })
+        await cappeApi.put(`/sites/${siteId}/shipping-zones`, { zones: bodies, home_rates: homeBodies })
         setZonesCleared(false)
       }
       setSaved(true)
@@ -200,24 +249,41 @@ export default function ShippingSettingsCard({ siteId, onCurrencyChange }: {
           <input value={label} onChange={(e) => setLabel(e.target.value)} maxLength={40} placeholder="Shipping" className={field} />
         </label>
       </div>
+      <label className="mt-3 block text-xs text-zinc-400">
+        Handling time — business days to get an order out of the door (shown to buyers with each delivery estimate)
+        <span className="mt-1 flex max-w-[14rem] items-center gap-1">
+          <input value={handlingMin} onChange={(e) => setHandlingMin(e.target.value)} inputMode="numeric" placeholder="1" aria-label="Fewest handling days" className={`${field} mt-0`} />
+          –
+          <input value={handlingMax} onChange={(e) => setHandlingMax(e.target.value)} inputMode="numeric" placeholder="2" aria-label="Most handling days" className={`${field} mt-0`} />
+        </span>
+      </label>
+      {zonesEnabled && (
+        <>
+          <div className="mt-4 text-xs font-medium uppercase tracking-wide text-zinc-500">Delivery options within {homeName}</div>
+          <DeliveryOptionsEditor rows={homeRates} onChange={setHomeRates} currency={currency} unit={unit}
+            flatLabel={`the flat rate above (“${label.trim() || 'Shipping'}”)`} />
+        </>
+      )}
 
       <div className="mt-4 text-xs font-medium uppercase tracking-wide text-zinc-500">Other countries</div>
-      {!zonesEnabled && zones.length === 0 && (
+      {!zonesEnabled && zones.length === 0 && homeRates.length === 0 && (
         <p className="mt-1 text-xs text-zinc-400">
-          You ship within {homeName} only. Shipping to other countries comes with the Business plan and up.{' '}
+          You ship within {homeName} only, at one flat rate. Shipping to other countries, and offering pickup, local
+          delivery or faster shipping, come with the Business plan and up.{' '}
           <Link to={BILLING_PATH} className="text-lime-400 hover:underline">See plans</Link>
         </p>
       )}
-      {!zonesEnabled && zones.length > 0 && (
+      {!zonesEnabled && (zones.length > 0 || homeRates.length > 0) && (
         <div className="mt-1 text-xs text-amber-300">
-          Your plan doesn’t include shipping to other countries, so these zones are paused and you ship within {homeName} only:
-          {' '}{zones.map((z) => z.name).join(', ')}.{' '}
-          <button type="button" onClick={() => { setZones([]); setZonesCleared(true) }} className="underline hover:text-amber-200">Remove them</button>
+          Your plan doesn’t include shipping zones or delivery options, so these are paused and buyers in {homeName} get
+          your flat rate only:
+          {' '}{[...zones.map((z) => z.name), ...homeRates.map((r) => r.name)].join(', ')}.{' '}
+          <button type="button" onClick={() => { setZones([]); setHomeRates([]); setZonesCleared(true) }} className="underline hover:text-amber-200">Remove them</button>
           {' '}or <Link to={BILLING_PATH} className="underline hover:text-amber-200">upgrade</Link>.
         </div>
       )}
       {!zonesEnabled && zonesCleared && (
-        <p className="mt-1 text-xs text-zinc-400">The paused zones will be removed when you save.</p>
+        <p className="mt-1 text-xs text-zinc-400">The paused zones and options will be removed when you save.</p>
       )}
       {zonesEnabled && (
         <div className="mt-2 space-y-3">
@@ -265,9 +331,19 @@ export default function ShippingSettingsCard({ siteId, onCurrencyChange }: {
                 </label>
                 <label className="flex items-end gap-2 pb-2 text-xs text-zinc-300">
                   <input type="checkbox" checked={z.tax} onChange={(e) => setZone(z.key, { tax: e.target.checked })} />
-                  Charge my tax rate here
+                  Charge tax here
                 </label>
               </div>
+              {z.tax && (
+                <label className="mt-2 block max-w-xs text-xs text-zinc-400">
+                  Tax rate here (%)
+                  <input value={z.taxRate} onChange={(e) => setZone(z.key, { taxRate: e.target.value })} inputMode="decimal"
+                    placeholder="Blank = your own rate" aria-label={`Tax rate for ${z.name || 'this zone'}`} className={field} />
+                </label>
+              )}
+              <div className="mt-3 text-[11px] font-medium uppercase tracking-wide text-zinc-500">Delivery options</div>
+              <DeliveryOptionsEditor rows={z.rates} onChange={(rates) => setZone(z.key, { rates })} currency={currency} unit={unit}
+                flatLabel="this zone’s flat rate" />
             </fieldset>
           ))}
           {zones.length < 20 && (
@@ -288,7 +364,7 @@ export default function ShippingSettingsCard({ siteId, onCurrencyChange }: {
         </button>
         {saved && <span className="text-xs text-lime-400">Saved</span>}
         {error && <span role="alert" className="text-xs text-red-400">{error}</span>}
-        <span className="ml-auto text-[11px] text-zinc-500">Once per order with a physical item. The buyer picks the country in their bag; tax is charged within {homeName} and in zones where you turn it on.</span>
+        <span className="ml-auto text-[11px] text-zinc-500">Once per order with a physical item. The buyer picks the country and the delivery option in their bag; tax is charged within {homeName} and in zones where you turn it on.</span>
       </div>
     </div>
   )

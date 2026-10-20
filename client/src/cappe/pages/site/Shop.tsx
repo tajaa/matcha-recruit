@@ -1,15 +1,25 @@
 import { useEffect, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useLocation, useParams } from 'react-router-dom'
 import { Loader2, Plus, Trash2, Package, SlidersHorizontal, AlertTriangle, Pencil, Search } from 'lucide-react'
 import { cappeApi, CappeApiError } from '../../api'
 import SurfaceShell, { centsToMoney } from '../../components/SurfaceShell'
 import TaxSettingsCard from '../../components/TaxSettingsCard'
 import ShippingSettingsCard from '../../components/ShippingSettingsCard'
+import PoliciesCard from '../../components/PoliciesCard'
+import BusinessIdentityCard from '../../components/BusinessIdentityCard'
 import PromoCodesCard from '../../components/PromoCodesCard'
 import StockAdjustModal from '../../components/StockAdjustModal'
 import ImageUpload from '../../components/ImageUpload'
-import type { CappeBookingType, CappeFulfillment, CappeProduct, CappeProductOptionGroupInput } from '../../types'
+import ProductImagesEditor, { type ImageRow } from '../../components/ProductImagesEditor'
+import UpgradeNotice from '../../components/UpgradeNotice'
+import VariantsEditor from '../../components/VariantsEditor'
+import type {
+  CappeBookingType, CappeEntitlements, CappeFulfillment, CappeProduct, CappeProductOptionGroupInput,
+  CappeProductVariantInput,
+} from '../../types'
 import { parseMoneyCents, parseSignedMoneyCents } from '../../utils/money'
+import { gramsFromText, textFromGrams, weightUnit, type WeightUnit } from '../../utils/weight'
+import { combinations, isVariantGroup, rowsFromProduct, variantPayload, type VariantRow } from '../../utils/variants'
 
 const STATUSES = ['active', 'draft', 'archived'] as const
 const FIELD_TYPES = ['text', 'email', 'textarea', 'number', 'tel', 'date', 'select']
@@ -41,7 +51,7 @@ type IntakeRow = { label: string; type: string; required: boolean; choices: stri
 // keeps option ids stable across a save (orders and the stock ledger point at them).
 type OptRow = { id?: string; name: string; price: string; stock: string }
 type OptGroupRow = { id?: string; name: string; select_type: 'single' | 'multi'; required: boolean; options: OptRow[] }
-const EMPTY = { name: '', description: '', price: '', sku: '', inventory: '', low_stock_threshold: '', image_url: '', digital_file_url: '', booking_type_id: '', category: '' }
+const EMPTY = { name: '', description: '', price: '', sku: '', inventory: '', low_stock_threshold: '', digital_file_url: '', booking_type_id: '', category: '', slug: '', brand: '', gtin: '', weight: '', surcharge: '' }
 
 const stockText = (value: number | null | undefined) => (value == null ? '' : String(value))
 const sameSet = (a: string[], b: string[]) => [...a].sort().join() === [...b].sort().join()
@@ -53,10 +63,20 @@ export default function Shop() {
   const [currency, setCurrency] = useState('USD')
   // null until the shipping card reports the store's currency.
   const [siteCurrency, setSiteCurrency] = useState<string | null>(null)
+  // Where the store is based (Shipping & currency card): weights are typed in its unit.
+  const [homeCountry, setHomeCountry] = useState<string | null>(null)
+  // The unit the form's weight was shown or first typed in, pinned so the
+  // store's country arriving (or changing) later can't re-read that text in
+  // another unit. null = nothing typed yet: follow the store.
+  const [formUnit, setFormUnit] = useState<WeightUnit | null>(null)
+  const unit = formUnit ?? weightUnit(homeCountry)
+  const [shipsFree, setShipsFree] = useState(false)
   const [bookingTypes, setBookingTypes] = useState<CappeBookingType[]>([])
   const [error, setError] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
-  const [fulfillment, setFulfillment] = useState<CappeFulfillment>('physical')
+  // The kind picked for this product; null = not picked yet (a new product),
+  // which shows the first kind the plan sells (`fulfillment` below).
+  const [chosenFulfillment, setFulfillment] = useState<CappeFulfillment | null>(null)
   const [requireApproval, setRequireApproval] = useState(false)
   const [intervals, setIntervals] = useState<('week' | 'month')[]>([])
   const [subscriptionDiscount, setSubscriptionDiscount] = useState('0')
@@ -67,12 +87,28 @@ export default function Shop() {
   const [editing, setEditing] = useState<CappeProduct | null>(null)
   const [publish, setPublish] = useState(true)
   const [query, setQuery] = useState('')
+  // Per-combination stock/SKU/price, keyed by combination (utils/variants.ts).
+  const [variantRows, setVariantRows] = useState<Record<string, VariantRow>>({})
+  // The product's pictures in order; the first is the cover.
+  const [images, setImages] = useState<ImageRow[]>([])
+  const [useVariants, setUseVariants] = useState(false)
+  // What the plan sells. null until known (or unreadable): the server enforces
+  // it either way, this only keeps the form from offering what it refuses.
+  const [plan, setPlan] = useState<CappeEntitlements | null>(null)
+  const canSell = (f: CappeFulfillment) => !plan || plan.allowed_fulfillment.includes(f)
+  const firstSellable = () => FULFILLMENTS.find((f) => canSell(f.value))?.value ?? 'service'
+  const fulfillment: CappeFulfillment = chosenFulfillment ?? firstSellable()
+
 
   // The product's own count, or any variant's, at or under the alert level.
   const isLowStock = (p: CappeProduct) => {
     if (p.fulfillment !== 'physical' || p.low_stock_threshold == null) return false
     const limit = p.low_stock_threshold
-    const counts = [p.inventory, ...p.option_groups.flatMap((g) => g.options.map((o) => o.inventory))]
+    const counts = [
+      p.inventory,
+      ...p.option_groups.flatMap((g) => g.options.map((o) => o.inventory)),
+      ...(p.variants || []).map((v) => v.inventory),
+    ]
     return counts.some((n) => n != null && n <= limit)
   }
 
@@ -86,15 +122,33 @@ export default function Shop() {
     cappeApi.get<CappeProduct[]>(`/sites/${siteId}/products`).then(setProducts)
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load products'))
     cappeApi.get<CappeBookingType[]>(`/sites/${siteId}/booking-types`).then(setBookingTypes).catch(() => {})
+    cappeApi.get<CappeEntitlements>('/billing/entitlements').then(setPlan).catch(() => setPlan(null))
   }, [siteId])
+
+  // The setup guide links straight to a settings card (#policies, #tax, …);
+  // the cards load their own data, so scroll once they have had a moment to.
+  const { hash } = useLocation()
+  useEffect(() => {
+    const id = hash.slice(1)
+    if (!id) return
+    const t = setTimeout(() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 400)
+    return () => clearTimeout(t)
+  }, [hash])
+
+  const { combos, tooMany } = combinations(optionGroups)
 
   const wantsIntake = fulfillment === 'service' || fulfillment === 'booking'
 
   function resetForm() {
     setForm(EMPTY)
+    setFormUnit(null)
+    setShipsFree(false)
     setIntake([])
     setOptionGroups([])
-    setFulfillment('physical')
+    setVariantRows({})
+    setUseVariants(false)
+    setImages([])
+    setFulfillment(null)
     setRequireApproval(false)
     setIntervals([])
     setSubscriptionDiscount('0')
@@ -112,6 +166,10 @@ export default function Shop() {
       ...g,
       options: g.options.map((o) => (o.id && shelf.has(o.id) ? { ...o, stock: stockText(shelf.get(o.id)) } : o)),
     })))
+    const saved = rowsFromProduct(product)
+    setVariantRows((rows) => Object.fromEntries(Object.entries({ ...saved, ...rows }).map(([key, row]) => [
+      key, saved[key] ? { ...row, id: saved[key].id, stock: saved[key].stock } : row,
+    ])))
   }
 
   function editProduct(product: CappeProduct) {
@@ -123,12 +181,18 @@ export default function Shop() {
       sku: product.sku || '',
       inventory: stockText(product.inventory),
       low_stock_threshold: product.low_stock_threshold == null ? '' : String(product.low_stock_threshold),
-      image_url: product.image_url || '',
+      slug: product.slug || '',
+      brand: product.brand || '',
+      gtin: product.gtin || '',
+      weight: textFromGrams(product.weight_g, unit),
+      surcharge: product.shipping_surcharge_cents ? String(product.shipping_surcharge_cents / 100) : '',
       digital_file_url: product.digital_file_url || '',
       booking_type_id: product.booking_type_id || '',
       category: product.category || '',
     })
     setFulfillment(product.fulfillment)
+    setShipsFree(!!product.ships_free)
+    setFormUnit(unit)
     setRequireApproval(product.requires_approval)
     setIntervals(product.subscription_intervals || [])
     setSubscriptionDiscount(String((product.subscription_discount_bps || 0) / 100))
@@ -147,6 +211,11 @@ export default function Shop() {
         stock: stockText(option.inventory),
       })),
     })))
+    setVariantRows(rowsFromProduct(product))
+    setUseVariants(!!product.variants?.length)
+    setImages(product.images?.length
+      ? product.images.map((img) => ({ url: img.url, alt: img.alt || '' }))
+      : product.image_url ? [{ url: product.image_url, alt: '' }] : [])
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
@@ -160,6 +229,16 @@ export default function Shop() {
     const priceCents = form.price.trim() === '' ? 0 : parseMoneyCents(form.price)
     if (priceCents === null) {
       setError('Enter the price as a plain amount, e.g. 29 or 29.99')
+      setAdding(false)
+      return
+    }
+    // What a delivery option prices this product by (physical only).
+    const weightG = gramsFromText(form.weight, unit)
+    const surchargeCents = form.surcharge.trim() === '' ? 0 : parseMoneyCents(form.surcharge)
+    if (fulfillment === 'physical' && (weightG === undefined || surchargeCents === null)) {
+      setError(weightG === undefined
+        ? `Enter the weight in ${unit} as a plain number, e.g. 1.5`
+        : 'Enter the extra shipping as a plain amount, e.g. 2 or 2.50')
       setAdding(false)
       return
     }
@@ -184,7 +263,10 @@ export default function Shop() {
         price_cents: priceCents,
         sku: form.sku.trim() || null,
         low_stock_threshold: physical && form.low_stock_threshold !== '' ? parseInt(form.low_stock_threshold, 10) : null,
-        image_url: form.image_url.trim() || null,
+        // The pictures decide the cover the apps and receipts read.
+        images: images.filter((img) => img.url.trim()).map((img) => ({ url: img.url.trim(), alt: img.alt.trim() || null })),
+        brand: form.brand.trim() || null,
+        gtin: form.gtin.trim() || null,
         digital_file_url: fulfillment === 'digital' ? form.digital_file_url.trim() || null : null,
         booking_type_id: fulfillment === 'booking' ? form.booking_type_id || null : null,
         requires_approval: requireApproval,
@@ -197,11 +279,23 @@ export default function Shop() {
             }))
           : [],
         category: form.category.trim() || null,
+        ...(physical ? { weight_g: weightG ?? null, shipping_surcharge_cents: surchargeCents ?? 0, ships_free: shipsFree } : {}),
       }
       const emptySelect = wantsIntake
         ? intake.find((f) => f.label.trim() && f.type === 'select' && !f.choices.split(',').some((c) => c.trim()))
         : undefined
       if (emptySelect) throw new Error(`"${emptySelect.label.trim()}" is a dropdown — add at least one choice for it`)
+      // Variants are sent whole when they're on; turning them off removes the
+      // ones the product had. Untouched otherwise.
+      let variantsBody: { variants?: CappeProductVariantInput[] } = {}
+      if (physical && useVariants) {
+        if (tooMany) throw new Error('That makes more than 100 combinations. Remove some options, or make a group optional.')
+        const built = variantPayload(combos, variantRows, editing)
+        if ('error' in built) throw new Error(built.error)
+        variantsBody = { variants: built.variants }
+      } else if (editing?.variants?.length) {
+        variantsBody = { variants: [] }
+      }
       // Stock is sent only when this save is changing it, with the count the
       // form was showing: a save that isn't about stock must not write a stale
       // number over sales made since the form loaded.
@@ -238,6 +332,9 @@ export default function Shop() {
         const updated = await cappeApi.put<CappeProduct>(`/sites/${siteId}/products/${editing.id}`, {
           ...details,
           option_groups: groupsFor(editing),
+          ...variantsBody,
+          // The address changes only when the owner changes it: a rename keeps it.
+          ...(form.slug.trim() && form.slug.trim() !== (editing.slug || '') ? { slug: form.slug.trim().toLowerCase() } : {}),
           ...(fulfillment !== editing.fulfillment ? { fulfillment } : {}),
           ...(nextStock !== editing.inventory ? { inventory: nextStock, expected_inventory: editing.inventory } : {}),
           ...(subscriptionChanged ? { subscription_intervals: subIntervals, subscription_discount_bps: subDiscount } : {}),
@@ -250,6 +347,8 @@ export default function Shop() {
           status: publish ? 'active' : 'draft',
           inventory: stock(form.inventory),
           option_groups: groupsFor(null),
+          ...variantsBody,
+          ...(form.slug.trim() ? { slug: form.slug.trim().toLowerCase() } : {}),
           subscription_intervals: subIntervals,
           subscription_discount_bps: subDiscount,
         })
@@ -328,9 +427,12 @@ export default function Shop() {
   return (
     <SurfaceShell title="Shop" subtitle="Anything you sell — goods, downloads, services, or bookable sessions.">
       {error && <p className="mb-4 text-sm text-red-400">{error}</p>}
-      <TaxSettingsCard siteId={siteId || ''} />
+      {/* The ids are the setup guide's deep links (#policies, #tax, …). */}
+      <div id="tax"><TaxSettingsCard siteId={siteId || ''} /></div>
+      <div id="shipping">
       <ShippingSettingsCard
         siteId={siteId || ''}
+        onHomeCountryChange={setHomeCountry}
         onCurrencyChange={(c) => {
           setCurrency(c)
           setSiteCurrency(c)
@@ -338,7 +440,15 @@ export default function Shop() {
           setProducts((ps) => (ps && ps.some((p) => p.currency !== c) ? ps.map((p) => ({ ...p, currency: c })) : ps))
         }}
       />
+      </div>
+      <div id="policies"><PoliciesCard siteId={siteId || ''} /></div>
+      <div id="identity"><BusinessIdentityCard siteId={siteId || ''} /></div>
       <PromoCodesCard siteId={siteId || ''} currency={siteCurrency} />
+      {plan && (products || []).some((p) => p.status === 'active' && !canSell(p.fulfillment)) && (
+        <UpgradeNotice message={`Your ${plan.plan_name} plan doesn't sell ${
+          [...new Set((products || []).filter((p) => !canSell(p.fulfillment)).map((p) => p.fulfillment))].join(' or ')
+        } products, so shoppers can't buy the ones marked below.`} />
+      )}
 
       <form onSubmit={saveProduct} className="mb-6 space-y-3 rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
         <div className="flex items-center justify-between gap-3">
@@ -354,6 +464,14 @@ export default function Shop() {
           <input value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} placeholder="Category — e.g. Drinks, Pastries (optional, groups your storefront)" className={`sm:col-span-2 ${input}`} />
           <input value={form.sku} onChange={(e) => setForm({ ...form, sku: e.target.value })} placeholder="SKU (optional)" maxLength={120} className={input} />
         </div>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <label className="flex items-center rounded-lg border border-zinc-700 bg-zinc-950 pl-3 text-sm text-zinc-500 focus-within:border-emerald-500">
+            /shop/
+            <input value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value })} placeholder={editing ? '' : 'made from the name'} maxLength={72} aria-label="Web address" className="w-full bg-transparent px-1 py-2 text-zinc-100 placeholder:text-zinc-500 outline-none" />
+          </label>
+          <input value={form.brand} onChange={(e) => setForm({ ...form, brand: e.target.value })} placeholder="Brand (optional)" maxLength={120} className={input} />
+          <input value={form.gtin} onChange={(e) => setForm({ ...form, gtin: e.target.value })} placeholder="Barcode — UPC / EAN (optional)" inputMode="numeric" maxLength={20} className={input} />
+        </div>
 
         {/* fulfillment */}
         <div>
@@ -363,6 +481,7 @@ export default function Shop() {
               <button
                 key={f.value}
                 type="button"
+                disabled={!canSell(f.value) && fulfillment !== f.value}
                 onClick={() => {
                   setFulfillment(f.value)
                   if (!['physical', 'digital'].includes(f.value)) {
@@ -370,14 +489,14 @@ export default function Shop() {
                     setSubscriptionDiscount('0')
                   }
                 }}
-                className={`rounded-lg border px-3 py-2 text-left text-sm transition ${
+                className={`rounded-lg border px-3 py-2 text-left text-sm transition disabled:cursor-not-allowed disabled:opacity-50 ${
                   fulfillment === f.value
                     ? 'border-emerald-500 bg-emerald-500/10 text-emerald-300'
                     : 'border-zinc-700 text-zinc-300 hover:bg-zinc-800'
                 }`}
               >
                 <div className="font-medium">{f.label}</div>
-                <div className="text-[11px] text-zinc-500">{f.hint}</div>
+                <div className="text-[11px] text-zinc-500">{canSell(f.value) ? f.hint : `Not on the ${plan?.plan_name} plan`}</div>
               </button>
             ))}
           </div>
@@ -388,6 +507,12 @@ export default function Shop() {
           <div className="grid gap-3 sm:grid-cols-2">
             <input value={form.inventory} onChange={(e) => setForm({ ...form, inventory: e.target.value })} placeholder="Stock (blank = unlimited)" type="number" min="0" className={input} />
             <input value={form.low_stock_threshold} onChange={(e) => setForm({ ...form, low_stock_threshold: e.target.value })} placeholder="Low-stock alert at… (optional)" type="number" min="0" className={input} />
+            <input value={form.weight} onChange={(e) => { setFormUnit(unit); setForm({ ...form, weight: e.target.value }) }} placeholder={`Weight per item, ${unit} (optional)`} aria-label={`Weight per item (${unit})`} inputMode="decimal" disabled={shipsFree} className={input} />
+            <input value={form.surcharge} onChange={(e) => setForm({ ...form, surcharge: e.target.value })} placeholder={`Extra shipping per item, ${currency} (optional)`} aria-label={`Extra shipping per item (${currency})`} inputMode="decimal" disabled={shipsFree} className={input} />
+            <label className="flex items-center gap-2 text-xs text-zinc-300 sm:col-span-2">
+              <input type="checkbox" checked={shipsFree} onChange={(e) => setShipsFree(e.target.checked)} />
+              Ships free — never adds to the shipping cost (the weight and extra above are ignored)
+            </label>
             {editing && (
               <p className="text-xs text-zinc-500 sm:col-span-2">
                 Changing a stock number here is recorded in the product&apos;s stock history. For a delivery, damage or a
@@ -499,8 +624,8 @@ export default function Shop() {
                     <div key={oi} className="flex items-center gap-2">
                       <input value={o.name} onChange={(e) => setOpt(gi, oi, { name: e.target.value })} placeholder="Option (e.g. Large)" className={`flex-1 ${input}`} />
                       <input value={o.price} onChange={(e) => setOpt(gi, oi, { price: e.target.value })} placeholder="+$0.00" type="number" step="0.01" className={`w-24 ${input}`} />
-                      {fulfillment === 'physical' && (
-                        <input value={o.stock} onChange={(e) => setOpt(gi, oi, { stock: e.target.value })} placeholder="stock" type="number" min="0" title="Per-variant stock (blank = untracked)" className={`w-20 ${input}`} />
+                      {fulfillment === 'physical' && !(useVariants && isVariantGroup(g)) && (
+                        <input value={o.stock} onChange={(e) => setOpt(gi, oi, { stock: e.target.value })} placeholder="stock" type="number" min="0" title="This option's own stock (blank = untracked)" className={`w-20 ${input}`} />
                       )}
                       <button type="button" onClick={() => setGroup(gi, { options: g.options.filter((_, k) => k !== oi) })} className="text-zinc-500 hover:text-red-400"><Trash2 className="h-4 w-4" /></button>
                     </div>
@@ -513,7 +638,20 @@ export default function Shop() {
           </div>
         </div>
 
-        <ImageUpload siteId={siteId || ''} value={form.image_url} onChange={(url) => setForm({ ...form, image_url: url })} placeholder="Cover image URL (optional)" />
+        {fulfillment === 'physical' && (
+          <VariantsEditor
+            combos={combos}
+            tooMany={tooMany}
+            rows={variantRows}
+            onRow={(key, row) => setVariantRows((rows) => ({ ...rows, [key]: row }))}
+            enabled={useVariants}
+            onEnabled={setUseVariants}
+            currency={currency}
+            images={images.map((img) => img.url).filter(Boolean)}
+          />
+        )}
+
+        <ProductImagesEditor siteId={siteId || ''} images={images} onChange={setImages} />
 
         <label className="flex items-center gap-2 text-sm text-zinc-300">
           <input
@@ -568,6 +706,9 @@ export default function Shop() {
                 <div className="flex items-center gap-2">
                   <span className="truncate font-medium text-zinc-100">{p.name}</span>
                   <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${fulfillBadge[p.fulfillment] || fulfillBadge.physical}`}>{p.fulfillment}</span>
+                  {!canSell(p.fulfillment) && (
+                    <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-[10px] font-semibold uppercase text-zinc-400">not on your plan</span>
+                  )}
                   {isLowStock(p) && (
                     <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase text-amber-400"><AlertTriangle className="h-3 w-3" /> low stock</span>
                   )}
@@ -575,6 +716,7 @@ export default function Shop() {
                 <div className="text-xs text-zinc-500">
                   {p.category ? `${p.category} · ` : ''}{centsToMoney(p.price_cents, p.currency)} · {meta(p)}{p.sku ? ` · SKU ${p.sku}` : ''}
                   {p.option_groups?.length ? ` · ${p.option_groups.length} option${p.option_groups.length > 1 ? 's' : ''}` : ''}
+                  {p.variants?.length ? ` · ${p.variants.length} variant${p.variants.length > 1 ? 's' : ''}` : ''}
                 </div>
               </div>
               {p.fulfillment === 'physical' && (

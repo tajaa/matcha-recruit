@@ -77,20 +77,27 @@ CONNECT_CHECKOUT_TTL_SECONDS = 31 * 60
 
 
 def build_shipping_options(shipping_option: Optional[dict], currency: str) -> Optional[list[dict]]:
-    """Translate {label, amount_cents} into Stripe's shipping_options shape.
-    A 0-amount option is still emitted so the buyer sees the 'Free shipping' row."""
+    """Translate {label, amount_cents, delivery_min_days?, delivery_max_days?}
+    into Stripe's shipping_options shape. A 0-amount option is still emitted so
+    the buyer sees the 'Free shipping' row; the estimate is business days."""
     if shipping_option is None:
         return None
-    return [{
-        "shipping_rate_data": {
-            "type": "fixed_amount",
-            "display_name": (shipping_option.get("label") or "Shipping")[:100],
-            "fixed_amount": {
-                "amount": max(0, int(shipping_option["amount_cents"])),
-                "currency": (currency or "usd").lower(),
-            },
-        }
-    }]
+    rate: dict[str, Any] = {
+        "type": "fixed_amount",
+        "display_name": (shipping_option.get("label") or "Shipping")[:100],
+        "fixed_amount": {
+            "amount": max(0, int(shipping_option["amount_cents"])),
+            "currency": (currency or "usd").lower(),
+        },
+    }
+    estimate = {
+        end: {"unit": "business_day", "value": int(shipping_option[key])}
+        for end, key in (("minimum", "delivery_min_days"), ("maximum", "delivery_max_days"))
+        if shipping_option.get(key) is not None and int(shipping_option[key]) > 0
+    }
+    if estimate:
+        rate["delivery_estimate"] = estimate
+    return [{"shipping_rate_data": rate}]
 
 
 class CappeStripe:
@@ -168,6 +175,8 @@ class CappeStripe:
         shipping_option: Optional[dict] = None,
         expires_in_seconds: Optional[int] = None,
         ship_countries: Optional[list[str]] = None,
+        collect_phone: bool = False,
+        submit_note: Optional[str] = None,
     ):
         """Create a Checkout Session ON the connected account (direct charge),
         taking a platform `application_fee_amount`. Returns the Session.
@@ -182,13 +191,17 @@ class CappeStripe:
         With `collect_shipping_address`, Stripe collects the buyer's address
         in one of `ship_countries` (the country the order was priced for) and
         `shipping_option` renders as a real shipping row included in
-        amount_total; the fee stays on the goods subtotal.
+        amount_total; the fee stays on the goods net of tax (`cart.goods_net_cents`).
 
         `expires_in_seconds` shortens Stripe's default 24h session lifetime. The
         order behind a session holds stock from the moment it is created, so an
         abandoned page would otherwise keep those units off the shelf for a day.
         Stripe refuses anything under 30 minutes; `CONNECT_CHECKOUT_TTL_SECONDS`
         leaves a minute of clock-skew margin above that.
+
+        `collect_phone` asks the buyer for a phone number (the store's
+        `collect_phone`); `submit_note` is the line above the pay button —
+        what paying agrees to (services/policies.checkout_note).
         """
         self._ensure_key()
         fee = max(0, int(application_fee_cents))
@@ -212,6 +225,10 @@ class CappeStripe:
                 extra["expires_at"] = int(time.time()) + max(
                     CONNECT_CHECKOUT_TTL_SECONDS, int(expires_in_seconds)
                 )
+            if collect_phone:
+                extra["phone_number_collection"] = {"enabled": True}
+            if submit_note:
+                extra["custom_text"] = {"submit": {"message": submit_note[:1200]}}
             return stripe.checkout.Session.create(
                 mode="payment",
                 success_url=success_url,

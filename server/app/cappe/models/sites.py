@@ -142,6 +142,10 @@ class CappeSiteUpdate(_SnapshotSizeLimit):
     is_multi_location: Optional[bool] = None
     tax_rate_bps: Optional[int] = Field(default=None, ge=0, le=10000)
     tax_label: Optional[str] = Field(default=None, max_length=40)
+    # The listed prices already include the tax (VAT-style), and shipping is
+    # taxed too (services/cart.py:cart_totals).
+    prices_include_tax: Optional[bool] = None
+    tax_on_shipping: Optional[bool] = None
     shipping_flat_cents: Optional[int] = Field(default=None, ge=0)
     # Explicit null clears the threshold (model_fields_set gate in the route).
     shipping_free_threshold_cents: Optional[int] = Field(default=None, ge=0)
@@ -150,6 +154,17 @@ class CappeSiteUpdate(_SnapshotSizeLimit):
     # the rates for this country (services/shipping.py).
     home_country: Optional[str] = Field(default=None, max_length=2)
     _home = field_validator("home_country")(country_code)
+    # Business days to get an order out of the door, added to each delivery
+    # option's time in transit. Explicit null clears (model_fields_set gate).
+    handling_days_min: Optional[int] = Field(default=None, ge=0, le=60)
+    handling_days_max: Optional[int] = Field(default=None, ge=0, le=60)
+    # Who is selling, on every receipt (an EU/UK VAT invoice needs all three).
+    # Explicit null or "" clears (model_fields_set gate in the route).
+    legal_name: Optional[str] = Field(default=None, max_length=200)
+    business_address: Optional[str] = Field(default=None, max_length=500)
+    tax_id: Optional[str] = Field(default=None, max_length=64)
+    # Stripe's payment page asks the buyer for a phone number.
+    collect_phone: Optional[bool] = None
     # What the store charges in. Products follow it; see routes/sites.py.
     currency: Optional[str] = Field(default=None, max_length=3)
     _currency = field_validator("currency")(store_currency)
@@ -195,10 +210,18 @@ class CappeSite(BaseModel):
     is_multi_location: bool = False
     tax_rate_bps: int = 0
     tax_label: str = "Tax"
+    prices_include_tax: bool = False
+    tax_on_shipping: bool = False
     shipping_flat_cents: int = 0
     shipping_free_threshold_cents: Optional[int] = None
     shipping_label: str = "Shipping"
     home_country: str = "US"
+    handling_days_min: Optional[int] = None
+    handling_days_max: Optional[int] = None
+    legal_name: Optional[str] = None
+    business_address: Optional[str] = None
+    tax_id: Optional[str] = None
+    collect_phone: bool = False
     currency: str = "USD"
     receipt_prefix: Optional[str] = None
     # Discover directory. `listed` is the tenant's own opt-out; the platform-side

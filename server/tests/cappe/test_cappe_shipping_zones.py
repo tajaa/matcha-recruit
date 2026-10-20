@@ -55,6 +55,7 @@ from app.cappe.routes.public import bookings as public_bookings  # noqa: E402
 from app.cappe.routes.public import shop as public_shop  # noqa: E402
 from app.cappe.services import cart, commerce, entitlements, recurring, shipping  # noqa: E402
 from app.cappe.services import stripe_connect  # noqa: E402
+from app.cappe.services.entitlements import ALL_FULFILLMENT  # noqa: E402
 
 SITE, ORDER = uuid4(), uuid4()
 TOKEN = "cd" * 16
@@ -68,8 +69,8 @@ CANADA = {"id": uuid4(), "name": "North America", "countries": ["CA", "MX"], "re
           "flat_cents": 1500, "free_threshold_cents": None, "charge_tax": False}
 WORLD = {"id": uuid4(), "name": "Everywhere else", "countries": [], "rest_of_world": True,
          "flat_cents": 3000, "free_threshold_cents": 20000, "charge_tax": False}
-ZONES_ON = SimpleNamespace(platform_fee_bps=200, has=lambda f: f == "shipping_zones")
-ZONES_OFF = SimpleNamespace(platform_fee_bps=200, has=lambda _f: False)
+ZONES_ON = SimpleNamespace(platform_fee_bps=200, allowed_fulfillment=ALL_FULFILLMENT, has=lambda f: f == "shipping_zones")
+ZONES_OFF = SimpleNamespace(platform_fee_bps=200, allowed_fulfillment=ALL_FULFILLMENT, has=lambda _f: False)
 
 
 class Tx:
@@ -184,14 +185,23 @@ LINES = [{"unit_price_cents": 2000, "quantity": 1, "fulfillment": "physical"},
          {"unit_price_cents": 500, "quantity": 1, "fulfillment": "digital"}]
 
 
+MONEY = ("subtotal_cents", "tax_cents", "shipping_cents", "total_cents")
+
+
+def _money(out):
+    return {k: out[k] for k in MONEY}
+
+
 def test_home_charges_tax_on_goods_and_the_flat_rate():
     out = cart.cart_totals(LINES, HOME)
-    assert out == {"subtotal_cents": 2500, "tax_cents": 200, "shipping_cents": 600, "total_cents": 3300}
+    assert _money(out) == {"subtotal_cents": 2500, "tax_cents": 200, "shipping_cents": 600, "total_cents": 3300}
+    # The flat rate is the destination's one delivery option.
+    assert [o["id"] for o in out["shipping_options"]] == ["flat"] and out["shipping_option"]["amount_cents"] == 600
 
 
 def test_a_zone_charges_its_rate_and_no_tax_unless_it_says_so():
     ca = shipping.resolve_destination(HOME, [CANADA], "CA")
-    assert cart.cart_totals(LINES, HOME, ca) == {
+    assert _money(cart.cart_totals(LINES, HOME, ca)) == {
         "subtotal_cents": 2500, "tax_cents": 0, "shipping_cents": 1500, "total_cents": 4000}
     taxed = shipping.resolve_destination(HOME, [{**CANADA, "charge_tax": True}], "CA")
     assert cart.cart_totals(LINES, HOME, taxed)["tax_cents"] == 200
@@ -339,6 +349,7 @@ def _wire_quote(monkeypatch, *, fulfillment="physical", ent=ZONES_ON, zones=(CAN
     monkeypatch.setattr(public_shop, "_read_rate_limit", AsyncMock())
     monkeypatch.setattr(public_shop, "_published_site", AsyncMock(return_value={"id": SITE, "timezone": "UTC"}))
     monkeypatch.setattr(public_shop, "fetch_option_groups", AsyncMock(return_value={}))
+    monkeypatch.setattr(public_shop, "fetch_variants", AsyncMock(return_value={}))
     monkeypatch.setattr(public_shop, "fetch_active_discounts", AsyncMock(return_value=[]))
     monkeypatch.setattr(public_shop, "resolve_entitlements", AsyncMock(return_value=ent))
     return conn, product
@@ -447,7 +458,7 @@ class OrderConn:
 def _wire_order(monkeypatch, *, fulfillment="physical", ent=ZONES_ON, cards=True, **body_kw):
     product = {"id": uuid4(), "name": "Mug", "price_cents": 2000, "currency": "USD", "inventory": None,
                "low_stock_threshold": None, "status": "active", "fulfillment": fulfillment,
-               "booking_type_id": None, "requires_approval": False, "intake_fields": "[]"}
+               "booking_type_id": None, "requires_approval": False, "intake_fields": "[]", "sku": None}
     conn = OrderConn(product)
     owner = {"plan": "business", "status": "active", "email": "owner@example.com", "name": "Owner",
              "stripe_account_id": "acct_1" if cards else None, "stripe_charges_enabled": cards}
@@ -455,6 +466,7 @@ def _wire_order(monkeypatch, *, fulfillment="physical", ent=ZONES_ON, cards=True
     monkeypatch.setattr(commerce, "get_connection", lambda: conn)
     monkeypatch.setattr(commerce, "fetch_active_discounts", AsyncMock(return_value=[]))
     monkeypatch.setattr(commerce, "fetch_option_groups", AsyncMock(return_value={}))
+    monkeypatch.setattr(commerce, "fetch_variants", AsyncMock(return_value={}))
     monkeypatch.setattr(commerce, "lock_stock_rows", AsyncMock())
     monkeypatch.setattr(commerce, "fetch_site_owner", AsyncMock(return_value=owner))
     monkeypatch.setattr(commerce, "resolve_entitlements", AsyncMock(return_value=ent))
@@ -622,7 +634,7 @@ def test_a_product_is_priced_in_its_stores_currency():
     create_src = inspect.getsource(shop_routes.create_product)
     assert "COALESCE((SELECT currency FROM cappe_sites WHERE id = $1), $5)" in create_src
     update_src = inspect.getsource(shop_routes.update_product)
-    assert '"price_cents", "image_url"' in update_src and '"currency", "image_url"' not in update_src
+    assert '"name", "description", "price_cents",' in update_src and '"currency", "image_url"' not in update_src
     from app.cappe.services.merlin import setup_actions
     assert "SELECT currency FROM cappe_sites WHERE id = $1" in inspect.getsource(setup_actions)
 

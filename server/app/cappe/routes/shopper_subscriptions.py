@@ -15,7 +15,7 @@ from .public._body_limit import limited_public_router
 
 router = limited_public_router(65536)
 PREFIX = "/public/sites/{slug}/shopper/me/subscriptions"
-COLS = "id,site_id,shopper_id,status,interval,items,subtotal_cents,tax_cents,shipping_cents,total_cents,currency,current_period_end,cancel_at_period_end,created_at"
+COLS = "id,site_id,shopper_id,status,interval,items,subtotal_cents,tax_cents,tax_included,shipping_cents,total_cents,currency,current_period_end,cancel_at_period_end,created_at"
 # Checkouts that were opened and never finished. Hidden from the owner's list
 # by default — they are not subscriptions, and they used to fill the page.
 _ABANDONED = ("preparing", "incomplete", "cancel_requested", "incomplete_expired")
