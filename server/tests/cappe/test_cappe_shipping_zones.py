@@ -185,14 +185,23 @@ LINES = [{"unit_price_cents": 2000, "quantity": 1, "fulfillment": "physical"},
          {"unit_price_cents": 500, "quantity": 1, "fulfillment": "digital"}]
 
 
+MONEY = ("subtotal_cents", "tax_cents", "shipping_cents", "total_cents")
+
+
+def _money(out):
+    return {k: out[k] for k in MONEY}
+
+
 def test_home_charges_tax_on_goods_and_the_flat_rate():
     out = cart.cart_totals(LINES, HOME)
-    assert out == {"subtotal_cents": 2500, "tax_cents": 200, "shipping_cents": 600, "total_cents": 3300}
+    assert _money(out) == {"subtotal_cents": 2500, "tax_cents": 200, "shipping_cents": 600, "total_cents": 3300}
+    # The flat rate is the destination's one delivery option.
+    assert [o["id"] for o in out["shipping_options"]] == ["flat"] and out["shipping_option"]["amount_cents"] == 600
 
 
 def test_a_zone_charges_its_rate_and_no_tax_unless_it_says_so():
     ca = shipping.resolve_destination(HOME, [CANADA], "CA")
-    assert cart.cart_totals(LINES, HOME, ca) == {
+    assert _money(cart.cart_totals(LINES, HOME, ca)) == {
         "subtotal_cents": 2500, "tax_cents": 0, "shipping_cents": 1500, "total_cents": 4000}
     taxed = shipping.resolve_destination(HOME, [{**CANADA, "charge_tax": True}], "CA")
     assert cart.cart_totals(LINES, HOME, taxed)["tax_cents"] == 200

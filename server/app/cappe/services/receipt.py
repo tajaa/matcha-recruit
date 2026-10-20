@@ -197,7 +197,9 @@ async def render_order_receipt_pdf(conn, order_id: UUID) -> tuple[dict, bytes] |
                   o.tax_cents, o.shipping_cents, o.shipping_address, o.total_cents,
                   o.receipt_number, o.payment_ref,
                   o.stripe_payment_intent, o.paid_at, o.created_at, o.site_id, o.access_token,
-                  s.name AS business_name, s.tax_label, s.shipping_label, s.subdomain, s.custom_domain
+                  s.name AS business_name, s.tax_label,
+                  COALESCE(o.shipping_rate_label, s.shipping_label) AS shipping_label,
+                  s.subdomain, s.custom_domain
              FROM cappe_orders o JOIN cappe_sites s ON s.id = o.site_id
             WHERE o.id = $1""",
         order_id,

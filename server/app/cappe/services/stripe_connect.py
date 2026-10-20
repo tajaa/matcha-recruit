@@ -77,20 +77,27 @@ CONNECT_CHECKOUT_TTL_SECONDS = 31 * 60
 
 
 def build_shipping_options(shipping_option: Optional[dict], currency: str) -> Optional[list[dict]]:
-    """Translate {label, amount_cents} into Stripe's shipping_options shape.
-    A 0-amount option is still emitted so the buyer sees the 'Free shipping' row."""
+    """Translate {label, amount_cents, delivery_min_days?, delivery_max_days?}
+    into Stripe's shipping_options shape. A 0-amount option is still emitted so
+    the buyer sees the 'Free shipping' row; the estimate is business days."""
     if shipping_option is None:
         return None
-    return [{
-        "shipping_rate_data": {
-            "type": "fixed_amount",
-            "display_name": (shipping_option.get("label") or "Shipping")[:100],
-            "fixed_amount": {
-                "amount": max(0, int(shipping_option["amount_cents"])),
-                "currency": (currency or "usd").lower(),
-            },
-        }
-    }]
+    rate: dict[str, Any] = {
+        "type": "fixed_amount",
+        "display_name": (shipping_option.get("label") or "Shipping")[:100],
+        "fixed_amount": {
+            "amount": max(0, int(shipping_option["amount_cents"])),
+            "currency": (currency or "usd").lower(),
+        },
+    }
+    estimate = {
+        end: {"unit": "business_day", "value": int(shipping_option[key])}
+        for end, key in (("minimum", "delivery_min_days"), ("maximum", "delivery_max_days"))
+        if shipping_option.get(key) is not None and int(shipping_option[key]) > 0
+    }
+    if estimate:
+        rate["delivery_estimate"] = estimate
+    return [{"shipping_rate_data": rate}]
 
 
 class CappeStripe:

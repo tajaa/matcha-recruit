@@ -15,7 +15,9 @@ from ...services.discounts import apply_discount_cents, best_discount_percent, f
 from ...services.variants import fetch_variants
 from ...services.product_pages import fetch_images, product_path
 from ...services.entitlements import resolve_entitlements, sells
-from ...services.shipping import Destination, home_country, load_zones, resolve_destination, ship_countries
+from ...services.shipping import (
+    Destination, home_country, load_rates, load_zones, resolve_destination, ship_countries,
+)
 from ...services.promos import find_code, normalize_code
 from .._shared import fetch_option_groups, loads_list
 from ._common import _published_site, _read_rate_limit, _reject_reserved
@@ -135,8 +137,8 @@ async def quote(slug: str, body: CartQuoteRequest, request: Request):
     async with get_connection() as conn:
         site = await _published_site(conn, slug)
         settings = await conn.fetchrow(
-            "SELECT tax_rate_bps,shipping_flat_cents,shipping_free_threshold_cents,home_country,currency "
-            "FROM cappe_sites WHERE id=$1", site["id"],
+            "SELECT tax_rate_bps,shipping_flat_cents,shipping_free_threshold_cents,home_country,currency,"
+            "shipping_label,handling_days_min,handling_days_max FROM cappe_sites WHERE id=$1", site["id"],
         )
         # Whether checkout goes to a card payment page. The storefront cart
         # asks for a shipping address itself only when it does NOT (Stripe
@@ -161,11 +163,12 @@ async def quote(slug: str, body: CartQuoteRequest, request: Request):
         code = normalize_code(body.promo_code)
         if code and body.interval:
             raise HTTPException(status_code=422, detail="Promo codes can't be used on subscriptions.")
-        zones, promo = [], None
+        zones, rates, promo = [], {}, None
         # Whether the bag offers a code box at all.
         takes_codes = ent is None or ent.has("promo_codes")
         if ships and not body.interval:
             zones = await load_zones(conn, site["id"], ent)
+            rates = await load_rates(conn, site["id"], ent)
         if code:
             promo = {
                 "code": code,
@@ -181,10 +184,13 @@ async def quote(slug: str, body: CartQuoteRequest, request: Request):
     if ships:
         home = home_country(settings)
         country = body.ship_country or home
-        dest = resolve_destination(settings, zones, country)
+        dest = resolve_destination(settings, zones, country, rates)
         shipping = {
             "ship_country": country, "home_country": home, "ships_to": dest is not None,
             "ship_countries": ship_countries(settings, zones),
+            # Whether an option here is a local delivery: the bag then asks for
+            # a postal code, and shows the option once it fits.
+            "asks_postal_code": bool(dest and any(r.method == "local_delivery" for r in dest.rates)),
         }
         if dest is None:
             # Priced without shipping or tax so nothing misleading shows; the
@@ -200,7 +206,8 @@ async def quote(slug: str, body: CartQuoteRequest, request: Request):
             products, body.items, body.interval, settings
         )
         return {"lines": lines, **totals, "pays_by_card": pays_by_card, **shipping}
-    return {**price_cart(products, body.items, settings, dest, promo=promo, on_date=today),
+    return {**price_cart(products, body.items, settings, dest, promo=promo, on_date=today,
+                         rate_id=body.shipping_rate_id, postal_code=body.postal_code),
             "pays_by_card": pays_by_card, "promo_codes": bool(takes_codes), **shipping}
 
 

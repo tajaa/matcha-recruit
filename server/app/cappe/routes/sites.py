@@ -56,7 +56,7 @@ _SITE_COLS = (
     "template_id, template_slug, status, theme_config, meta_config, timezone, is_multi_location, "
     "tax_rate_bps, tax_label, "
     "shipping_flat_cents, shipping_free_threshold_cents, shipping_label, "
-    "home_country, currency, "
+    "home_country, currency, handling_days_min, handling_days_max, "
     "receipt_prefix, "
     "listed, directory_category, directory_tags, directory_blurb, directory_confirmed_at, "
     "published_at, created_at, updated_at"
@@ -446,6 +446,9 @@ async def update_site(
             add("shipping_label", body.shipping_label.strip() or "Shipping")
         if body.home_country is not None:
             add("home_country", body.home_country)
+        for key in ("handling_days_min", "handling_days_max"):
+            if key in body.model_fields_set:  # explicit null clears
+                add(key, getattr(body, key))
         new_currency = None
         if body.currency is not None and body.currency != await conn.fetchval(
             "SELECT currency FROM cappe_sites WHERE id = $1", site_id,

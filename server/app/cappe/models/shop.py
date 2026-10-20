@@ -182,6 +182,11 @@ class CappeProductCreate(BaseModel):
     gtin: Optional[str] = Field(default=None, max_length=20)
     # The pictures in order. Omitted = `image_url` alone, as before.
     images: Optional[list[CappeProductImageInput]] = Field(default=None, max_length=20)
+    # What a delivery option prices (services/shipping.py): grams per unit, an
+    # amount per unit on top of a carried rate, or never counted at all.
+    weight_g: Optional[int] = Field(default=None, ge=0, le=1_000_000)
+    shipping_surcharge_cents: int = Field(default=0, ge=0, le=1_000_000)
+    ships_free: bool = False
     _slug = field_validator("slug")(_clean_slug)
     _gtin = field_validator("gtin")(_clean_gtin)
 
@@ -219,6 +224,10 @@ class CappeProductUpdate(BaseModel):
     brand: Optional[str] = Field(default=None, max_length=120)
     gtin: Optional[str] = Field(default=None, max_length=20)
     images: Optional[list[CappeProductImageInput]] = Field(default=None, max_length=20)
+    # Explicit null clears the weight (model_fields_set gate in the route).
+    weight_g: Optional[int] = Field(default=None, ge=0, le=1_000_000)
+    shipping_surcharge_cents: Optional[int] = Field(default=None, ge=0, le=1_000_000)
+    ships_free: Optional[bool] = None
     _slug = field_validator("slug")(_clean_slug)
     _gtin = field_validator("gtin")(_clean_gtin)
     # The stock the editor was showing when `inventory` was typed. Sent with a
@@ -261,6 +270,9 @@ class CappeProduct(BaseModel):
     brand: Optional[str] = None
     gtin: Optional[str] = None
     images: list[CappeProductImage] = Field(default_factory=list)
+    weight_g: Optional[int] = None
+    shipping_surcharge_cents: int = 0
+    ships_free: bool = False
     # The product's page on its store, `/shop/<slug>`.
     url: Optional[str] = None
     # Public storefront pricing. Owner responses default to the undiscounted
@@ -348,6 +360,14 @@ class CappeOrder(BaseModel):
     promo_code: Optional[str] = None
     discount_cents: int = 0
     ship_country: Optional[str] = None
+    # How the buyer chose to get it (services/shipping.py): ship | pickup |
+    # local_delivery, the option's name and estimate then, and pickup's
+    # where-and-when. An order from before delivery options was shipped.
+    shipping_method: str = "ship"
+    shipping_rate_label: Optional[str] = None
+    delivery_min_days: Optional[int] = None
+    delivery_max_days: Optional[int] = None
+    shipping_instructions: Optional[str] = None
     # The refund ledger (detail view and refund responses only).
     refunds: list[CappeOrderRefund] = Field(default_factory=list)
     carrier: Optional[str] = None
@@ -514,6 +534,10 @@ class CappeCheckoutRequest(BaseModel):
     _ship_country = field_validator("ship_country")(country_code)
     # A promo code (case-blind). Refused with the reason if it can't be used.
     promo_code: Optional[str] = Field(default=None, max_length=40)
+    # The delivery option picked in the bag (a quote's `shipping_options[].id`).
+    # Omitted = the store's first option for the order. One the order no longer
+    # gets is refused (409), never swapped for another price.
+    shipping_rate_id: Optional[str] = Field(default=None, max_length=64)
 
 
 # Buyer-facing receipt (resolved by the order's unguessable access_token).
@@ -589,6 +613,73 @@ class CappeDiscount(BaseModel):
 
 # --- Shipping zones (services/shipping.py) -----------------------------------
 
+ShippingMethod = Literal["ship", "pickup", "local_delivery"]
+
+
+class CappeShippingRateInput(BaseModel):
+    """One delivery option for a destination: shipped, picked up, or delivered
+    locally, priced by what is in the bag."""
+    name: str = Field(min_length=1, max_length=80)
+    method: ShippingMethod = "ship"
+    amount_cents: int = Field(default=0, ge=0, le=1_000_000)
+    # Added for each item after the first (not for pickup).
+    per_item_cents: int = Field(default=0, ge=0, le=1_000_000)
+    # Offered only for an order inside these bands (goods value, total weight).
+    min_subtotal_cents: Optional[int] = Field(default=None, ge=0, le=99_999_999)
+    max_subtotal_cents: Optional[int] = Field(default=None, ge=0, le=99_999_999)
+    min_weight_g: Optional[int] = Field(default=None, ge=0, le=100_000_000)
+    max_weight_g: Optional[int] = Field(default=None, ge=0, le=100_000_000)
+    free_over_cents: Optional[int] = Field(default=None, ge=0, le=99_999_999)
+    # Business days in transit, added to the store's handling time.
+    delivery_min_days: Optional[int] = Field(default=None, ge=0, le=90)
+    delivery_max_days: Optional[int] = Field(default=None, ge=0, le=90)
+    # Local delivery: the postal codes (prefixes) it covers; empty = anywhere.
+    postal_codes: list[str] = Field(default_factory=list, max_length=200)
+    # Pickup: where and when.
+    instructions: Optional[str] = Field(default=None, max_length=500)
+
+    @field_validator("name")
+    @classmethod
+    def _name(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Give the delivery option a name")
+        return v.strip()
+
+    @field_validator("postal_codes")
+    @classmethod
+    def _postal_codes(cls, v: list[str]) -> list[str]:
+        out: list[str] = []
+        for code in v:
+            code = "".join(str(code).split()).upper()
+            if not code:
+                continue
+            if len(code) > 12 or not code.replace("-", "").isalnum():
+                raise ValueError(f"“{code[:20]}” isn't a postal code")
+            if code not in out:
+                out.append(code)
+        return out
+
+    @field_validator("instructions")
+    @classmethod
+    def _instructions(cls, v: Optional[str]) -> Optional[str]:
+        return (v or "").strip() or None
+
+    @model_validator(mode="after")
+    def _by_method(self):
+        if self.method != "local_delivery":
+            self.postal_codes = []
+        if self.method == "pickup":
+            self.per_item_cents = 0
+        else:
+            self.instructions = None
+        return self
+
+
+class CappeShippingRate(CappeShippingRateInput):
+    id: UUID
+    sort_order: int = 0
+
+
 class CappeShippingZoneInput(BaseModel):
     """A destination beyond the store's home country, with its own rates."""
     name: str = Field(min_length=1, max_length=80)
@@ -618,6 +709,11 @@ class CappeShippingZoneInput(BaseModel):
                 out.append(code)
         return out
 
+    # The zone's delivery options, in the order the bag offers them (the first
+    # is the default). None = keep what the zone of this name had; [] = none,
+    # the flat rate above alone.
+    rates: Optional[list[CappeShippingRateInput]] = Field(default=None, max_length=10)
+
     @model_validator(mode="after")
     def _rest_has_no_list(self):
         if self.rest_of_world:
@@ -628,10 +724,13 @@ class CappeShippingZoneInput(BaseModel):
 class CappeShippingZone(CappeShippingZoneInput):
     id: UUID
     sort_order: int = 0
+    rates: list[CappeShippingRate] = Field(default_factory=list)
 
 
 class CappeShippingZonesReplace(BaseModel):
     zones: list[CappeShippingZoneInput] = Field(default_factory=list, max_length=20)
+    # The home country's delivery options. None = keep them; [] = none.
+    home_rates: Optional[list[CappeShippingRateInput]] = Field(default=None, max_length=10)
 
 
 class CappeShippingZones(BaseModel):
@@ -643,6 +742,7 @@ class CappeShippingZones(BaseModel):
     # Every country a zone can name (Stripe's list), for the picker.
     countries: list[str]
     zones: list[CappeShippingZone] = Field(default_factory=list)
+    home_rates: list[CappeShippingRate] = Field(default_factory=list)
 
 
 # --- Finances -------------------------------------------------------------------
@@ -766,6 +866,9 @@ __all__ = [
     "CappeDiscountInput",
     "CappeDiscountReplace",
     "CappeDiscount",
+    "ShippingMethod",
+    "CappeShippingRateInput",
+    "CappeShippingRate",
     "CappeShippingZoneInput",
     "CappeShippingZone",
     "CappeShippingZonesReplace",

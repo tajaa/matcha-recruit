@@ -146,7 +146,8 @@ _PRODUCT_COLS = (
     "subscription_intervals, subscription_discount_bps, "
     "id, site_id, name, description, price_cents, currency, image_url, sku, "
     "inventory, low_stock_threshold, status, sort_order, fulfillment, digital_file_url, "
-    "booking_type_id, requires_approval, intake_fields, category, slug, brand, gtin, created_at, updated_at"
+    "booking_type_id, requires_approval, intake_fields, category, slug, brand, gtin, "
+    "weight_g, shipping_surcharge_cents, ships_free, created_at, updated_at"
 )
 _ORDER_COLS = (
     "subscription_id, "
@@ -156,6 +157,7 @@ _ORDER_COLS = (
     "currency, payment_ref, note, requires_approval, approved_at, decline_reason, "
     "refunded_at, refunded_cents, dispute_status, disputed_at, "
     "pay_by, shipped_notified_at, platform_fee_cents, ship_country, promo_code, discount_cents, "
+    "shipping_method, shipping_rate_label, delivery_min_days, delivery_max_days, shipping_instructions, "
     "metadata, created_at, updated_at"
 )
 _ITEM_COLS = (
@@ -414,18 +416,20 @@ async def create_product(
                         (site_id, name, description, price_cents, currency, image_url, sku, inventory,
                          low_stock_threshold, status, sort_order, fulfillment, digital_file_url,
                          booking_type_id, requires_approval, intake_fields, category, subscription_intervals,
-                         subscription_discount_bps, brand, gtin)
+                         subscription_discount_bps, brand, gtin, weight_g, shipping_surcharge_cents, ships_free)
                     VALUES ($1, $2, $3, $4,
                             -- The store's currency, whatever the client sent:
                             -- one store, one currency (services/shipping.py).
                             COALESCE((SELECT currency FROM cappe_sites WHERE id = $1), $5),
-                            $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+                            $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21,
+                            $22, $23, $24)
                     RETURNING {_PRODUCT_COLS}""",
                 site_id, body.name, body.description, body.price_cents, body.currency.upper(),
                 body.image_url, body.sku, body.inventory, body.low_stock_threshold, body.status,
                 body.sort_order, body.fulfillment, body.digital_file_url, body.booking_type_id,
                 body.requires_approval, json.dumps(body.intake_fields), body.category,
                 body.subscription_intervals, body.subscription_discount_bps, body.brand, body.gtin,
+                body.weight_g, body.shipping_surcharge_cents, body.ships_free,
             )
             if body.inventory is not None:
                 await log_adjustment(
@@ -518,8 +522,9 @@ async def update_product(
                 "fulfillment", "digital_file_url", "booking_type_id", "requires_approval",
                 "category", "brand", "gtin",
                 "subscription_intervals", "subscription_discount_bps",
+                "weight_g", "shipping_surcharge_cents", "ships_free",
             ), nullable={"description", "image_url", "sku", "inventory", "low_stock_threshold",
-                         "digital_file_url", "booking_type_id", "category", "brand", "gtin"})
+                         "digital_file_url", "booking_type_id", "category", "brand", "gtin", "weight_g"})
             # intake_fields is JSONB NOT NULL DEFAULT '[]' — a `null` PATCH value
             # has no sensible SQL NULL to clear to, so this stays on the plain
             # `is not None` idiom rather than build_patch's model_fields_set.
