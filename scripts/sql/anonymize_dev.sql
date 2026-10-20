@@ -285,6 +285,15 @@ BEGIN
             tax_id           = CASE WHEN tax_id IS NOT NULL THEN 'TEST' || left(replace(id::text,'-',''), 8) END
         WHERE legal_name IS NOT NULL OR business_address IS NOT NULL OR tax_id IS NOT NULL;
     END IF;
+    -- The same identity as each numbered receipt froze it.
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'cappe_orders' AND column_name = 'seller_tax_id') THEN
+        UPDATE cappe_orders SET
+            seller_legal_name       = CASE WHEN seller_legal_name IS NOT NULL THEN 'Seller ' || left(replace(site_id::text,'-',''), 6) END,
+            seller_business_address = CASE WHEN seller_business_address IS NOT NULL THEN '1 Example Street' END,
+            seller_tax_id           = CASE WHEN seller_tax_id IS NOT NULL THEN 'TEST' || left(replace(site_id::text,'-',''), 8) END
+        WHERE seller_legal_name IS NOT NULL OR seller_business_address IS NOT NULL OR seller_tax_id IS NOT NULL;
+    END IF;
 END $$;
 UPDATE cappe_bookings SET
     customer_email = CASE WHEN customer_email IS NOT NULL THEN 'booking_' || replace(id::text,'-','') || '@example.com' END,

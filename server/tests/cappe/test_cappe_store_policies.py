@@ -378,7 +378,52 @@ def test_a_receipt_without_them_is_as_before():
 def test_the_receipt_query_reads_them():
     from app.cappe.services import receipt
     src = inspect.getsource(receipt.render_order_receipt_pdf)
-    assert "s.legal_name, s.business_address, s.tax_id, o.billing_address" in src
+    # A numbered receipt shows the seller as it was frozen; one not numbered
+    # yet shows the store as it is now.
+    for col in ("legal_name", "business_address", "tax_id"):
+        assert re.search(rf"CASE WHEN o\.receipt_number IS NULL THEN s\.{col}\s+ELSE o\.seller_{col} END AS {col}", src)
+    assert "o.billing_address" in src
+
+
+class _NumberingConn:
+    """Just enough connection for `assign_receipt_number`."""
+
+    def __init__(self, existing=None, site=None):
+        self.existing, self.site, self.writes = existing, site, []
+
+    def transaction(self):
+        class _Tx:
+            async def __aenter__(self):
+                return None
+
+            async def __aexit__(self, *exc):
+                return False
+        return _Tx()
+
+    async def fetchval(self, sql, *args):
+        return self.existing
+
+    async def fetchrow(self, sql, *args):
+        assert "RETURNING receipt_seq, receipt_prefix, legal_name, business_address, tax_id" in sql
+        return self.site
+
+    async def execute(self, sql, *args):
+        self.writes.append((sql, args))
+
+
+def test_numbering_a_receipt_freezes_the_seller_on_the_order():
+    from app.cappe.services.receipt import assign_receipt_number
+    order_id, site_id = uuid4(), uuid4()
+    conn = _NumberingConn(site={"receipt_seq": 7, "receipt_prefix": "LUM", "legal_name": "Lumen Ltd",
+                                "business_address": "12 Market St", "tax_id": "GB123"})
+    assert asyncio.run(assign_receipt_number(conn, order_id, site_id)) == "LUM-00007"
+    (sql, args), = conn.writes
+    assert "seller_legal_name = $3" in sql and "seller_business_address = $4" in sql and "seller_tax_id = $5" in sql
+    assert args == ("LUM-00007", order_id, "Lumen Ltd", "12 Market St", "GB123")
+    # Already numbered: nothing is re-frozen, so a later change can't reach it.
+    conn = _NumberingConn(existing="LUM-00007")
+    assert asyncio.run(assign_receipt_number(conn, order_id, site_id)) == "LUM-00007"
+    assert conn.writes == []
 
 
 def test_the_store_takes_who_it_is():
@@ -514,7 +559,8 @@ def test_the_migration_chains_and_adds_everything_it_says():
     assert 'revision = "zzzzcappe54"' in src and 'down_revision = "zzzzcappe53"' in src
     assert "CREATE TABLE IF NOT EXISTS cappe_site_policies" in src and "PRIMARY KEY (site_id, kind)" in src
     assert "CHECK (kind IN ('refund', 'shipping', 'terms', 'privacy'))" in src
-    for col in ("legal_name", "business_address", "tax_id", "collect_phone", "billing_address"):
+    for col in ("legal_name", "business_address", "tax_id", "collect_phone", "billing_address",
+                "seller_legal_name", "seller_business_address", "seller_tax_id"):
         assert f"ADD COLUMN IF NOT EXISTS {col}" in src and f"DROP COLUMN IF EXISTS {col}" in src
 
 
@@ -523,3 +569,6 @@ def test_dev_refreshes_scrub_billing_addresses():
     assert "UPDATE cappe_orders SET billing_address = NULL WHERE billing_address IS NOT NULL" in sql
     assert "column_name = 'billing_address'" in sql
     assert "UPDATE cappe_sites SET" in sql and "tax_id           = CASE WHEN tax_id IS NOT NULL" in sql
+    # ...and the copy each numbered receipt froze.
+    assert "column_name = 'seller_tax_id'" in sql
+    assert "seller_tax_id           = CASE WHEN seller_tax_id IS NOT NULL" in sql

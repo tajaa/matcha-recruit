@@ -17,6 +17,11 @@ number (couriers want one).
 `cappe_orders.billing_address` — the buyer's name, phone and billing address
 as Stripe collected them (Stripe's `customer_details`), for the receipt.
 
+`cappe_orders.seller_legal_name`, `seller_business_address`, `seller_tax_id` —
+the seller's identity as it stood when the receipt was numbered, so a receipt
+re-downloaded after the seller changes address or VAT number still matches the
+invoice issued at the time of sale.
+
 Additive; the downgrade drops the table and the columns.
 
 Revision ID: zzzzcappe54
@@ -46,11 +51,17 @@ _UPGRADE = [
     "ADD COLUMN IF NOT EXISTS business_address VARCHAR(500), "
     "ADD COLUMN IF NOT EXISTS tax_id VARCHAR(64), "
     "ADD COLUMN IF NOT EXISTS collect_phone BOOLEAN NOT NULL DEFAULT false",
-    "ALTER TABLE cappe_orders ADD COLUMN IF NOT EXISTS billing_address JSONB",
+    "ALTER TABLE cappe_orders "
+    "ADD COLUMN IF NOT EXISTS billing_address JSONB, "
+    "ADD COLUMN IF NOT EXISTS seller_legal_name VARCHAR(200), "
+    "ADD COLUMN IF NOT EXISTS seller_business_address VARCHAR(500), "
+    "ADD COLUMN IF NOT EXISTS seller_tax_id VARCHAR(64)",
 ]
 
 _DOWNGRADE = [
-    "ALTER TABLE cappe_orders DROP COLUMN IF EXISTS billing_address",
+    "ALTER TABLE cappe_orders DROP COLUMN IF EXISTS seller_tax_id, "
+    "DROP COLUMN IF EXISTS seller_business_address, DROP COLUMN IF EXISTS seller_legal_name, "
+    "DROP COLUMN IF EXISTS billing_address",
     "ALTER TABLE cappe_sites DROP COLUMN IF EXISTS collect_phone, DROP COLUMN IF EXISTS tax_id, "
     "DROP COLUMN IF EXISTS business_address, DROP COLUMN IF EXISTS legal_name",
     "DROP TABLE IF EXISTS cappe_site_policies",

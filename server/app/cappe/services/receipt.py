@@ -38,6 +38,10 @@ async def assign_receipt_number(conn, order_id: UUID, site_id: UUID) -> str:
     concurrent callers (e.g. a retried/duplicate Stripe webhook) can't both read
     receipt_number=NULL, both bump the site sequence, and burn two numbers: the
     second caller blocks on the lock, then sees the number the first assigned.
+
+    The seller's legal name, address and tax id are frozen onto the order with
+    the number: the receipt is an invoice, and one re-downloaded after the
+    seller changes them must still say what it said when it was issued.
     """
     async with conn.transaction():
         existing = await conn.fetchval(
@@ -47,14 +51,15 @@ async def assign_receipt_number(conn, order_id: UUID, site_id: UUID) -> str:
             return existing
         row = await conn.fetchrow(
             "UPDATE cappe_sites SET receipt_seq = receipt_seq + 1 "
-            "WHERE id = $1 RETURNING receipt_seq, receipt_prefix",
+            "WHERE id = $1 RETURNING receipt_seq, receipt_prefix, legal_name, business_address, tax_id",
             site_id,
         )
         prefix = (row["receipt_prefix"] or "INV").strip() if row else "INV"
         number = f"{prefix}-{int(row['receipt_seq']):05d}"
         await conn.execute(
-            "UPDATE cappe_orders SET receipt_number = $1, updated_at = NOW() WHERE id = $2",
-            number, order_id,
+            "UPDATE cappe_orders SET receipt_number = $1, seller_legal_name = $3, "
+            "seller_business_address = $4, seller_tax_id = $5, updated_at = NOW() WHERE id = $2",
+            number, order_id, row["legal_name"], row["business_address"], row["tax_id"],
         )
         return number
 
@@ -234,7 +239,13 @@ async def render_order_receipt_pdf(conn, order_id: UUID) -> tuple[dict, bytes] |
                   s.name AS business_name, s.tax_label,
                   COALESCE(o.shipping_rate_label, s.shipping_label) AS shipping_label,
                   s.subdomain, s.custom_domain, s.meta_config,
-                  s.legal_name, s.business_address, s.tax_id, o.billing_address,
+                  -- The seller as the numbered receipt froze it; a receipt not
+                  -- yet numbered shows the store as it is now.
+                  CASE WHEN o.receipt_number IS NULL THEN s.legal_name ELSE o.seller_legal_name END AS legal_name,
+                  CASE WHEN o.receipt_number IS NULL THEN s.business_address
+                       ELSE o.seller_business_address END AS business_address,
+                  CASE WHEN o.receipt_number IS NULL THEN s.tax_id ELSE o.seller_tax_id END AS tax_id,
+                  o.billing_address,
                   a.email AS owner_email
              FROM cappe_orders o JOIN cappe_sites s ON s.id = o.site_id
              JOIN cappe_accounts a ON a.id = s.account_id

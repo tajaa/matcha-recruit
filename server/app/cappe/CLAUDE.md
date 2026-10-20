@@ -257,7 +257,9 @@ DB safety rules, test-data email domain rules, and deploy rules are in root `CLA
 - **Selling physical goods requires the refund and shipping policies to publish**
   (`readiness`'s `policies` item, `policies.REQUIRED_FOR_PHYSICAL`). Payments, shipping, tax,
   identity and product pictures are nudges, shown only when they apply.
-- **Receipts name the seller** (`legal_name`, `business_address`, `tax_id` → "VAT ID: …") **and the
+- **Receipts name the seller** (`legal_name`, `business_address`, `tax_id` → "VAT ID: …"), **frozen
+  onto the order when the receipt is numbered** (`cappe_orders.seller_*`, `assign_receipt_number`):
+  receipts render on demand, so without it an old receipt showed a changed VAT number. **And the
   buyer's billing address** (`cappe_orders.billing_address`, from Stripe's `customer_details` in
   `_mark_order_paid`; scrubbed by `anonymize_dev.sql`).
 - **Mail to a store's buyers is sent as the store and replies reach it**: `email.store_from_name`
