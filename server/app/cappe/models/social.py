@@ -1,0 +1,271 @@
+"""Pydantic shapes — Cappe social growth (connected accounts, scheduled posts,
+the reply inbox, caption drafting, per-site settings)."""
+from datetime import datetime
+from typing import Any, Literal, Optional
+from uuid import UUID
+
+from pydantic import BaseModel, Field, field_validator
+
+from ._validators import https_url
+
+SocialNetwork = Literal["instagram", "facebook"]
+SocialPostStatus = Literal["draft", "scheduled", "publishing", "published", "partial", "failed", "cancelled"]
+SocialAutoreplyMode = Literal["off", "review", "auto"]
+SocialTone = Literal["friendly", "professional", "playful", "minimal"]
+
+# Instagram's caption limit; Facebook allows more, but one composer, one cap.
+MAX_CAPTION_CHARS = 2200
+# Instagram carousels take up to 10 items.
+MAX_MEDIA_ITEMS = 10
+MAX_HASHTAGS = 30
+
+
+class CappeSocialConnection(BaseModel):
+    """A connected account. The access token is never in a response."""
+    id: UUID
+    platform: str
+    external_id: str
+    handle: Optional[str] = None
+    display_name: Optional[str] = None
+    avatar_url: Optional[str] = None
+    status: str
+    last_error: Optional[str] = None
+    followers_count: Optional[int] = None
+    metrics: dict[str, Any] = Field(default_factory=dict)
+    metrics_at: Optional[datetime] = None
+    token_expires_at: Optional[datetime] = None
+    connected_at: datetime
+
+
+class CappeSocialConnections(BaseModel):
+    # False until the Meta app is configured on this server: the page shows a
+    # setup note instead of a Connect button that 503s.
+    configured: bool
+    connections: list[CappeSocialConnection] = Field(default_factory=list)
+
+
+class CappeSocialConnectStart(BaseModel):
+    authorize_url: str
+
+
+class CappeSocialMediaItem(BaseModel):
+    url: str = Field(min_length=8, max_length=1000)
+    kind: Literal["image", "video"] = "image"
+    alt: Optional[str] = Field(default=None, max_length=500)
+
+    _url_https = field_validator("url")(https_url)
+
+
+def _clean_hashtags(tags: Optional[list[str]]) -> Optional[list[str]]:
+    """`#Tag` or `tag` → `#tag`, letters/digits/underscore only, de-duplicated."""
+    if tags is None:
+        return None
+    out: list[str] = []
+    for raw in tags:
+        word = "".join(ch for ch in str(raw).strip().lstrip("#") if ch.isalnum() or ch == "_")
+        if not word:
+            continue
+        tag = f"#{word.lower()}"
+        if tag not in out:
+            out.append(tag)
+    return out[:MAX_HASHTAGS]
+
+
+class CappeSocialUpload(BaseModel):
+    """A dropped photo after normalization. `padded` is true when bars were
+    added to fit Instagram's 4:5–1.91:1 range."""
+    url: str
+    width: int
+    height: int
+    padded: bool
+
+
+class CappeSocialPostInput(BaseModel):
+    """A new post. With `scheduled_at` it is queued for then; without, it is a
+    draft the owner publishes from the queue (or `POST …/publish`)."""
+    caption: str = Field(default="", max_length=MAX_CAPTION_CHARS)
+    media: list[CappeSocialMediaItem] = Field(default_factory=list, max_length=MAX_MEDIA_ITEMS)
+    link_url: Optional[str] = Field(default=None, max_length=1000)
+    product_id: Optional[UUID] = None
+    connection_ids: list[UUID] = Field(default_factory=list, max_length=20)
+    scheduled_at: Optional[datetime] = None
+    alt_text: Optional[str] = Field(default=None, max_length=500)
+
+    _link_https = field_validator("link_url")(https_url)
+
+
+class CappeSocialPostUpdate(BaseModel):
+    caption: Optional[str] = Field(default=None, max_length=MAX_CAPTION_CHARS)
+    media: Optional[list[CappeSocialMediaItem]] = Field(default=None, max_length=MAX_MEDIA_ITEMS)
+    link_url: Optional[str] = Field(default=None, max_length=1000)
+    product_id: Optional[UUID] = None
+    connection_ids: Optional[list[UUID]] = Field(default=None, max_length=20)
+    scheduled_at: Optional[datetime] = None
+    alt_text: Optional[str] = Field(default=None, max_length=500)
+
+    _link_https = field_validator("link_url")(https_url)
+
+
+class CappeSocialTarget(BaseModel):
+    """The post on one connection."""
+    id: UUID
+    connection_id: UUID
+    platform: str
+    handle: Optional[str] = None
+    status: str
+    external_post_id: Optional[str] = None
+    permalink: Optional[str] = None
+    error: Optional[str] = None
+    attempts: int = 0
+    published_at: Optional[datetime] = None
+    metrics: dict[str, Any] = Field(default_factory=dict)
+
+
+class CappeSocialPost(BaseModel):
+    id: UUID
+    site_id: UUID
+    caption: str
+    media: list[CappeSocialMediaItem] = Field(default_factory=list)
+    link_url: Optional[str] = None
+    product_id: Optional[UUID] = None
+    status: str
+    scheduled_at: Optional[datetime] = None
+    published_at: Optional[datetime] = None
+    ai_meta: dict[str, Any] = Field(default_factory=dict)
+    targets: list[CappeSocialTarget] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+
+
+class CappeSocialCaptionRequest(BaseModel):
+    """Ask for caption options for the media in the composer."""
+    media: list[CappeSocialMediaItem] = Field(default_factory=list, max_length=4)
+    product_id: Optional[UUID] = None
+    brief: Optional[str] = Field(default=None, max_length=500)
+    tone: Optional[SocialTone] = None
+
+
+class CappeSocialCaptionOption(BaseModel):
+    text: str = Field(max_length=MAX_CAPTION_CHARS)
+    hashtags: list[str] = Field(default_factory=list, max_length=MAX_HASHTAGS)
+
+    _tags = field_validator("hashtags")(_clean_hashtags)
+
+
+class CappeSocialCaptions(BaseModel):
+    options: list[CappeSocialCaptionOption] = Field(default_factory=list)
+    alt_text: Optional[str] = None
+    model: str
+
+
+class CappeSocialSettings(BaseModel):
+    autoreply_mode: SocialAutoreplyMode = "off"
+    reply_to_comments: bool = True
+    reply_to_messages: bool = True
+    tone: SocialTone = "friendly"
+    # The owner's own notes: shipping times, return policy, what's not on the
+    # site. The one thing the model may say beyond the catalog.
+    business_facts: str = Field(default="", max_length=4000)
+    signature: Optional[str] = Field(default=None, max_length=120)
+    default_hashtags: list[str] = Field(default_factory=list, max_length=MAX_HASHTAGS)
+    max_auto_per_hour: int = Field(default=20, ge=0, le=200)
+    # Words that always route to the owner, on top of the built-in list.
+    escalate_words: list[str] = Field(default_factory=list, max_length=50)
+    # Whether this plan may turn the AI inbox on (`social_autoreply`).
+    autoreply_available: bool = True
+    ai_available: bool = True
+
+    _tags = field_validator("default_hashtags")(_clean_hashtags)
+
+    @field_validator("escalate_words")
+    @classmethod
+    def _trim_words(cls, v: list[str]) -> list[str]:
+        return [w.strip().lower()[:60] for w in v if w and w.strip()]
+
+
+class CappeSocialSettingsUpdate(BaseModel):
+    autoreply_mode: Optional[SocialAutoreplyMode] = None
+    reply_to_comments: Optional[bool] = None
+    reply_to_messages: Optional[bool] = None
+    tone: Optional[SocialTone] = None
+    business_facts: Optional[str] = Field(default=None, max_length=4000)
+    signature: Optional[str] = Field(default=None, max_length=120)
+    default_hashtags: Optional[list[str]] = Field(default=None, max_length=MAX_HASHTAGS)
+    max_auto_per_hour: Optional[int] = Field(default=None, ge=0, le=200)
+    escalate_words: Optional[list[str]] = Field(default=None, max_length=50)
+
+    _tags = field_validator("default_hashtags")(_clean_hashtags)
+
+    @field_validator("escalate_words")
+    @classmethod
+    def _trim_words(cls, v: Optional[list[str]]) -> Optional[list[str]]:
+        if v is None:
+            return None
+        return [w.strip().lower()[:60] for w in v if w and w.strip()]
+
+
+class CappeSocialReply(BaseModel):
+    id: UUID
+    body: str
+    mode: str
+    status: str
+    model: Optional[str] = None
+    grounding: dict[str, Any] = Field(default_factory=dict)
+    external_reply_id: Optional[str] = None
+    error: Optional[str] = None
+    created_at: datetime
+    sent_at: Optional[datetime] = None
+
+
+class CappeSocialInboxItem(BaseModel):
+    id: UUID
+    connection_id: UUID
+    platform: str
+    handle: Optional[str] = None
+    kind: str
+    external_id: str
+    external_parent_id: Optional[str] = None
+    author_name: Optional[str] = None
+    text: str
+    received_at: datetime
+    status: str
+    classification: dict[str, Any] = Field(default_factory=dict)
+    replies: list[CappeSocialReply] = Field(default_factory=list)
+
+
+class CappeSocialReplyInput(BaseModel):
+    """Send a reply: the owner's own words, or an approved draft (`reply_id`)
+    possibly edited."""
+    body: str = Field(min_length=1, max_length=2000)
+    reply_id: Optional[UUID] = None
+
+
+class CappeSocialFollowers(BaseModel):
+    platform: str
+    handle: Optional[str] = None
+    followers_count: Optional[int] = None
+
+
+class CappeSocialOverview(BaseModel):
+    connections: int
+    scheduled: int
+    published_30d: int
+    inbox_new: int
+    drafts_waiting: int
+    followers: list[CappeSocialFollowers] = Field(default_factory=list)
+    autoreply_mode: str
+    meta_configured: bool
+    ai_available: bool
+
+
+__all__ = [
+    "SocialNetwork", "SocialPostStatus", "SocialAutoreplyMode", "SocialTone",
+    "MAX_CAPTION_CHARS", "MAX_MEDIA_ITEMS", "MAX_HASHTAGS",
+    "CappeSocialConnection", "CappeSocialConnections", "CappeSocialConnectStart",
+    "CappeSocialMediaItem", "CappeSocialUpload", "CappeSocialPostInput", "CappeSocialPostUpdate",
+    "CappeSocialTarget", "CappeSocialPost",
+    "CappeSocialCaptionRequest", "CappeSocialCaptionOption", "CappeSocialCaptions",
+    "CappeSocialSettings", "CappeSocialSettingsUpdate",
+    "CappeSocialReply", "CappeSocialInboxItem", "CappeSocialReplyInput",
+    "CappeSocialFollowers", "CappeSocialOverview",
+]

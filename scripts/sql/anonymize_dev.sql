@@ -336,6 +336,23 @@ BEGIN
             email = CASE WHEN email IS NOT NULL THEN 'grant_' || replace(id::text,'-','') || '@example.com' END,
             created_by_email = CASE WHEN created_by_email IS NOT NULL THEN 'admin@example.com' END;
     END IF;
+    -- Social growth (zzzzcappe49). A connected account's token is a live Meta
+    -- Page token on prod (it can post and reply as that business): every one
+    -- becomes dev_<id> and the account reads as revoked, so dev never calls
+    -- Meta with it. Inbox rows name a member of the public and carry their
+    -- Meta user id and the raw webhook payload; the comment text stays, as
+    -- review bodies do.
+    IF to_regclass('public.cappe_social_connections') IS NOT NULL THEN
+        UPDATE cappe_social_connections SET
+            access_token_enc = 'dev_' || replace(id::text, '-', ''),
+            status = 'revoked';
+    END IF;
+    IF to_regclass('public.cappe_social_inbox') IS NOT NULL THEN
+        UPDATE cappe_social_inbox SET
+            author_name = CASE WHEN author_name IS NOT NULL THEN 'Visitor ' || left(replace(id::text,'-',''), 6) END,
+            author_external_id = NULL,
+            raw = '{}'::jsonb;
+    END IF;
     -- Matcha-admin audit rows name the account acted on (`email`, e.g. a
     -- suspension). The admin's own address (`admin_email`) is kept.
     IF to_regclass('public.cappe_admin_audit') IS NOT NULL THEN

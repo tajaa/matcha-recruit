@@ -324,6 +324,14 @@ else
             GRANT_LEAK=$(ddev -tA -d "$DB_NAME" -c "SELECT count(*) FROM cappe_signup_grants WHERE (email IS NOT NULL AND email NOT LIKE '%@example.com') OR (created_by_email IS NOT NULL AND created_by_email NOT LIKE '%@example.com') OR token NOT LIKE 'dev\_%';")
             [[ "$GRANT_LEAK" == "0" ]] || { echo "${RED}PII LEAK DETECTED — signup-grant emails or live tokens remain.${NC}"; exit 1; }
         fi
+        HAS_SOCIAL=$(ddev -tA -d "$DB_NAME" -c "SELECT to_regclass('public.cappe_social_connections') IS NOT NULL;")
+        if [[ "$HAS_SOCIAL" == "t" ]]; then
+            # A prod Page token can post and reply as that business: every one
+            # must be the anonymizer's dev_<id>, and no inbox row may still
+            # carry a Meta user id or raw payload.
+            SOCIAL_LEAK=$(ddev -tA -d "$DB_NAME" -c "SELECT (SELECT count(*) FROM cappe_social_connections WHERE access_token_enc NOT LIKE 'dev\_%' OR status <> 'revoked') + (SELECT count(*) FROM cappe_social_inbox WHERE author_external_id IS NOT NULL OR raw <> '{}'::jsonb);")
+            [[ "$SOCIAL_LEAK" == "0" ]] || { echo "${RED}SECRET LEAK DETECTED — cappe social tokens or inbox identities remain.${NC}"; exit 1; }
+        fi
         HAS_AUDIT=$(ddev -tA -d "$DB_NAME" -c "SELECT to_regclass('public.cappe_admin_audit') IS NOT NULL;")
         if [[ "$HAS_AUDIT" == "t" ]]; then
             AUDIT_LEAK=$(ddev -tA -d "$DB_NAME" -c "SELECT count(*) FROM cappe_admin_audit WHERE payload ? 'email';")

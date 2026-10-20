@@ -162,6 +162,63 @@ DB safety rules, test-data email domain rules, and deploy rules are in root `CLA
   serve them. Purchases keep `published_shopper_site`. Codes go only to `subscribes_here` emails;
   `/auth/start` stays 204 either way.
 
+## Social growth (2026-10, `services/social/`, migration `zzzzcappe49`)
+
+Owners connect the Instagram business account and Facebook Page they already run, drop photos
+into a composer (one carousel post, or one post per photo spread across days), schedule or post
+now, and answer comments/DMs from an inbox where Claude Haiku 5.5 drafts replies. Owner routes
+`routes/social.py` (`/sites/{id}/social/*`); Meta's OAuth callback + webhook are public in
+`routes/public/social_meta.py`; page `client/src/cappe/pages/site/Social/`.
+
+- **One Meta app, two networks.** Facebook Login yields a Page token per Page; the Page's
+  Instagram account is addressed with the same token. `providers/meta.py` is the only module that
+  speaks Graph; everything else uses `providers/base.py` shapes. A new network is a new provider
+  module plus one line in `providers/__init__.py:_PROVIDERS`.
+- **Tokens are Fernet-encrypted at rest** (`core.services.secret_crypto`) and decrypted only by
+  `connections.credentials()` for a call about to be made. `PUBLIC_COLUMNS` never includes
+  `access_token_enc`. A Graph token error (190/102) marks the connection `expired` ("reconnect").
+- **Connect is bound to the browser that started it.** The OAuth `state` is HMAC-signed (JWT
+  secret), expires in 15 min, and carries a nonce the start response sets as an HttpOnly,
+  `SameSite=Lax` cookie scoped to the callback path. Without the cookie match, an owner could send
+  someone the Facebook link and land that person's Pages on their own site. The cookie is set on
+  the host the dashboard calls and the redirect URI is built from `CAPPE_BASE_DOMAIN`, so Connect
+  works only from a dashboard served on that host (the same assumption `dashboard_url` makes).
+- **Publishing is per target.** A post is the composition; a target is that post on one
+  connection. `cappe_social_publisher` sweeps every minute (self-re-enqueue + `last_run_at` claim,
+  the `schedule_break_reminders` shape) and claims due targets `FOR UPDATE SKIP LOCKED`; "Post now"
+  dispatches `run_cappe_social_publish_post` for one post. Retryable failures back off
+  2/10/30 min, three attempts; the post's status rolls up from its targets
+  (`posts.rollup_status`). Instagram is photo-only here (no video yet).
+- **Replies: deterministic first, model second, owner's mode last** (`autoreply.py`). The
+  hard-stop list (refunds, disputes, legal, injury/allergy) and the owner's escalate words run
+  before any model call and can only ever escalate. The draft is grounded ONLY on the store's
+  active catalog, contact details and the owner's notes, and must set `needs_human` rather than
+  guess. `auto` sends by itself only for plain-question intents at confidence ≥ 0.75 under the
+  hourly cap; everything else is a draft to approve. Before an automatic send, `reply_guard`
+  (deterministic, after the model) holds any reply with a link off the store's own site, contact
+  details that aren't the store's, or a hard-stop subject — a commenter can't plant one through
+  the prompt. A partial post's "Post now" re-tries only its unpublished targets. The reply row is
+  written before the network call. The inbound worker re-checks the plan (`social_autoreply`) before running the model — a
+  downgrade keeps the stored mode, the plan decides.
+- **Models.** Admin → Settings → AI models row `gummfit.social`; default Claude Haiku 5.5 with an
+  Anthropic key, nothing without one (no Gemini fallback for words sent under the owner's name).
+  Every call counts in the `anthropic` bucket via `social/ai.py`; a full bucket means "not now".
+- **No pooled connection is held across a model or network call** in the routes (draft, reply).
+- **Plan features:** `social` (posting, scheduling, captions) on every plan; `social_autoreply`
+  (the AI inbox) on business / pro / creator. Both 402 at the route.
+- **Consumer data:** `scripts/sql/anonymize_dev.sql` turns every token into `dev_<id>` (connection
+  `revoked`) and strips inbox author ids/raw payloads; `refresh-dev-from-prod.sh` gates on both.
+
+**Meta setup (once, before "Connect" works):** create a Meta app (Business type) with Facebook
+Login for Business, Instagram Graph API and Messenger; add the redirect URI
+`https://<CAPPE_BASE_DOMAIN>/api/cappe/public/social/meta/callback`; subscribe the app's webhooks
+for `page` (feed, messages) and `instagram` (comments, messages) to
+`https://<CAPPE_BASE_DOMAIN>/api/cappe/public/social/meta/webhook` with the verify token; then
+set `CAPPE_META_APP_ID`, `CAPPE_META_APP_SECRET`, `CAPPE_META_VERIFY_TOKEN` (optional
+`CAPPE_META_GRAPH_VERSION`, default v21.0) in `~/matcha/.env.backend`. Outside development mode
+the permissions in `meta.SCOPES` need Meta App Review and business verification. Unset ⇒ Connect
+and Publish 503 with a setup message; the composer and queue still work.
+
 ## Site templates (`services/site_templates/`)
 
 - **The catalog is code, not the `cappe_templates` table.** One `SiteTemplate` per entry, one module
