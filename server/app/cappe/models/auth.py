@@ -1,10 +1,15 @@
 """Pydantic shapes — Cappe auth (signup/login/tokens/account)."""
+from datetime import datetime
 from typing import Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field
 
 # --- Auth -------------------------------------------------------------------
+
+# A signup-grant link's secret (`services/signup_grants.new_token` makes 32 of
+# these characters). The signup page's copy is in pages/CappeSignup.tsx.
+GRANT_TOKEN_PATTERN = r"^[A-Za-z0-9_-]{16,64}$"
 
 class CappeSignup(BaseModel):
     email: EmailStr
@@ -20,6 +25,18 @@ class CappeSignup(BaseModel):
     # nothing by itself.
     intended_plan: Optional[str] = Field(default=None, max_length=40, pattern=r"^[a-z0-9_]+$")
     intended_interval: Optional[Literal["month", "year"]] = None
+    # The secret from a signup-grant link (/cappe/signup?grant=…): the plan it
+    # names is given free, for its days, once the email is confirmed.
+    grant_token: Optional[str] = Field(default=None, pattern=GRANT_TOKEN_PATTERN)
+
+
+class CappeSignupGrantInfo(BaseModel):
+    """What a signup-grant link offers, for the signup page to say so."""
+    plan_code: str
+    plan_name: str
+    days: int
+    # Only one address can use it; the page doesn't learn which.
+    email_locked: bool
 
 
 class CappeLogin(BaseModel):
@@ -72,9 +89,18 @@ class CappeSignupResponse(BaseModel):
 
 class CappeVerifyResponse(CappeTokenResponse):
     """A fresh session plus the plan picked at signup, when there was one, so
-    the client can continue to checkout. Returned once: confirming clears it."""
+    the client can continue to checkout. Returned once: confirming clears it.
+
+    `granted_*` is the plan a signup-grant link gave instead, free until
+    `granted_until`; there is then no intended plan, as nothing is owed yet.
+    `grant_refused` says why a link's plan was NOT given (used up meanwhile,
+    revoked, the account already had a plan), so nobody is left wondering."""
     intended_plan: Optional[str] = None
     intended_interval: Optional[str] = None
+    granted_plan: Optional[str] = None
+    granted_plan_name: Optional[str] = None
+    granted_until: Optional[datetime] = None
+    grant_refused: Optional[str] = None
 
 
 class CappeVerifyRequest(BaseModel):
@@ -97,6 +123,7 @@ class CappeResetPasswordRequest(BaseModel):
 
 __all__ = [
     "CappeSignup",
+    "CappeSignupGrantInfo",
     "CappeLogin",
     "CappeRefreshRequest",
     "CappeAccount",

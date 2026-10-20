@@ -27,13 +27,25 @@ from app.cappe.services import email as email_mod  # noqa: E402
 from app.cappe.services.auth import hash_reset_token, make_reset_token  # noqa: E402
 
 
+class _Tx:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args):
+        return False
+
+
 class _Conn:
-    def __init__(self, *, row=None, updated=True):
+    def __init__(self, *, row=None, updated=True, grant_waiting=False):
         self.row = row
         self.updated = updated
+        self.grant_waiting = grant_waiting
         self.selects = []
         self.executed = []
         self.updates = []
+
+    def transaction(self):
+        return _Tx()
 
     async def fetchrow(self, sql, *args):
         self.selects.append((sql, args))
@@ -44,7 +56,8 @@ class _Conn:
 
     async def fetchval(self, sql, *args):
         self.updates.append((sql, args))
-        return self.row["id"] if self.updated else None
+        # The UPDATE returns whether a signup grant is waiting; None = no row.
+        return self.grant_waiting if self.updated else None
 
 
 class _ConnCtx:
@@ -173,6 +186,31 @@ async def test_reset_sets_the_password_revokes_sessions_and_confirms_the_email(w
         "AND password_reset_token_hash = $3",        # two racing requests can't both win
     ):
         assert clause in sql
+
+
+@pytest.mark.asyncio
+async def test_a_reset_that_confirms_the_account_gives_its_waiting_signup_grant(wired, monkeypatch):
+    """Someone whose confirmation email never came resets their password
+    instead; that clears verification_token, so /auth/verify never runs for
+    them and the grant has to be redeemed here."""
+    from app.cappe.services import signup_grants
+
+    redeemed = []
+
+    async def _redeem(_conn, *, account_id):
+        redeemed.append(account_id)
+
+    monkeypatch.setattr(signup_grants, "redeem", _redeem)
+    row = _pending()
+    conn = wired["use"](_Conn(row=row, grant_waiting=True))
+    assert await _reset() is None
+    assert redeemed == [row["id"]]
+    assert "RETURNING signup_grant_id IS NOT NULL" in conn.updates[0][0]
+
+    redeemed.clear()
+    wired["use"](_Conn(row=_pending(), grant_waiting=False))
+    await _reset()
+    assert redeemed == []
 
 
 @pytest.mark.asyncio

@@ -57,10 +57,18 @@ function planPoints(plan: CappeBillingPlan): string[] {
 function statusLine(sub: CappeSubscription | null): string {
   if (!sub) return 'No paid subscription. Pick a plan below when you’re ready.'
   if (sub.source !== 'stripe') {
-    return sub.comped_until ? `Provided by Gummfit until ${day(sub.comped_until)}.` : 'Provided by Gummfit.'
+    if (!sub.comped_until) return 'Provided by Gummfit.'
+    if (new Date(sub.comped_until) <= new Date()) return 'Your free plan from Gummfit has ended. Subscribe below to keep it.'
+    // The server says when a subscription bought now would first bill; only
+    // promise free time it will actually give.
+    return sub.comp_bills_from
+      ? `Free from Gummfit until ${day(sub.comped_until)}. Subscribe below to keep it: your card is first charged on ${day(sub.comp_bills_from)}.`
+      : `Free from Gummfit until ${day(sub.comped_until)}. Subscribe below to keep it.`
   }
   if (sub.cancel_at_period_end) return `Cancels on ${day(sub.current_period_end)}. You keep the plan until then.`
-  if (sub.status === 'trialing') return `Intro period until ${day(sub.trial_end ?? sub.current_period_end)}, then billed ${sub.interval}ly.`
+  // A trial is the $1 intro or free time carried over from a plan we gave; both
+  // first bill the full price when it ends.
+  if (sub.status === 'trialing') return `First full charge on ${day(sub.trial_end ?? sub.current_period_end)}, then billed ${sub.interval}ly.`
   if (sub.status === 'active') return `Billed ${sub.interval}ly. Renews on ${day(sub.current_period_end)}.`
   return 'There’s a problem with your last payment. Update your card under “Manage billing”.'
 }
@@ -203,6 +211,11 @@ export default function CappeBilling() {
 
   const loaded = catalog !== null && sub !== undefined
   const subscribed = sub?.source === 'stripe'
+  // A plan given free with an end date (a signup grant, an admin comp) can be
+  // subscribed to before it ends. Only that plan keeps the free time, and only
+  // when the server says so (comp_bills_from); any other plan bills as usual.
+  const compPlan = sub?.source === 'comp' && sub.comped_until ? sub.plan_code : null
+  const billsFrom = sub?.comp_bills_from ?? null
   const currentCode = sub?.plan_code ?? account?.plan ?? 'free'
   const currentName = sub?.plan_name ?? catalog?.plans.find((p) => p.code === currentCode)?.name ?? currentCode
   const hasYearly = catalog?.plans.some((p) => priceFor(p, 'year')) ?? false
@@ -283,8 +296,9 @@ export default function CappeBilling() {
             {catalog.plans.map((plan) => {
               const at = buyable(plan, interval)
               const price = at ? priceFor(plan, at) : undefined
-              const isCurrent = plan.code === currentCode && (!subscribed || !at || sub?.interval === at)
-              const intro = !subscribed && catalog.intro_available && plan.intro_price_cents !== null && plan.intro_days
+              const keepsFreeTime = plan.code === compPlan && billsFrom !== null
+              const isCurrent = plan.code === currentCode && !(compPlan === plan.code && at) && (!subscribed || !at || sub?.interval === at)
+              const intro = !subscribed && !keepsFreeTime && catalog.intro_available && plan.intro_price_cents !== null && plan.intro_days
               return (
                 <article
                   key={plan.code}
@@ -301,6 +315,9 @@ export default function CappeBilling() {
                     <p className="mt-1 text-xs font-medium text-lime-300">
                       {formatCents(plan.intro_price_cents ?? 0)} for your first {plan.intro_days} days
                     </p>
+                  )}
+                  {keepsFreeTime && at && (
+                    <p className="mt-1 text-xs font-medium text-lime-300">Free until {day(billsFrom)}, then billed</p>
                   )}
                   <ul className="mt-4 flex-1 space-y-1.5 text-xs text-zinc-300">
                     {planPoints(plan).map((point) => (
@@ -325,7 +342,7 @@ export default function CappeBilling() {
                         className={`w-full ${ui.btnPrimary}`}
                       >
                         {busy === plan.code && <Loader2 className="h-4 w-4 animate-spin" />}
-                        {subscribed ? `Switch to ${plan.name}` : `Choose ${plan.name}`}
+                        {subscribed ? `Switch to ${plan.name}` : plan.code === compPlan ? `Keep ${plan.name}` : `Choose ${plan.name}`}
                       </button>
                     )}
                   </div>

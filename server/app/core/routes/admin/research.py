@@ -2101,6 +2101,8 @@ async def admin_list_cappe_accounts():
             """
             SELECT a.id, a.email, a.name, a.plan, a.status, a.account_type,
                    a.email_verified_at, a.created_at,
+                   sub.source AS subscription_source, sub.status AS subscription_status,
+                   sub.comped_until,
                    (SELECT COUNT(*) FROM cappe_collab_campaigns c
                      WHERE c.brand_account_id = a.id) AS campaign_count,
                    (SELECT COUNT(*) FROM cappe_collab_offers o
@@ -2113,7 +2115,17 @@ async def admin_list_cappe_accounts():
                       JOIN cappe_collab_offers o ON o.id = p.offer_id
                      WHERE o.brand_account_id = a.id AND p.status = 'paid') AS collab_spend_cents
             FROM cappe_accounts a
-            ORDER BY created_at DESC
+            -- The live subscription, if any: a paying one, or a comp (a plan
+            -- given by an admin or a signup grant) with the date it ends.
+            LEFT JOIN LATERAL (
+                SELECT s.source, s.status, s.comped_until
+                  FROM cappe_subscriptions s
+                 WHERE s.account_id = a.id
+                   AND s.status IN ('trialing','active','past_due','incomplete','unpaid','paused')
+                 ORDER BY s.created_at DESC
+                 LIMIT 1
+            ) sub ON true
+            ORDER BY a.created_at DESC
             """,
             ["sent", "negotiating", "accepted", "active"],
         )
@@ -2165,6 +2177,9 @@ async def admin_list_cappe_accounts():
             "account_type": a["account_type"],
             "email_verified_at": a["email_verified_at"].isoformat() if a["email_verified_at"] else None,
             "created_at": a["created_at"].isoformat() if a["created_at"] else None,
+            "subscription_source": a["subscription_source"],
+            "subscription_status": a["subscription_status"],
+            "comped_until": a["comped_until"].isoformat() if a["comped_until"] else None,
             "campaign_count": a["campaign_count"],
             "offers_sent": a["offers_sent"],
             "active_collabs": a["active_collabs"],

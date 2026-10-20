@@ -17,7 +17,7 @@ from ..models.cappe import (
     CappeCancelRequest,
     CappeChangePlanRequest,
     CappeCatalog,
-    CappeCheckoutRequest,
+    CappePlanCheckoutRequest,
     CappeCheckoutResponse,
     CappePortalRequest,
     CappePortalResponse,
@@ -75,6 +75,7 @@ async def _subscription_response(account_id) -> CappeSubscription | None:
         trial_end=sub["trial_end"],
         cancel_at_period_end=sub["cancel_at_period_end"],
         comped_until=sub["comped_until"],
+        comp_bills_from=billing_svc.comp_trial_end(sub, sub["plan_code"]),
         mailbox_quota=quota,
         addons=[
             CappeSubscriptionAddon(
@@ -128,7 +129,7 @@ def _raise_if_change_pending(subscription) -> None:
 
 @router.post("/billing/checkout", response_model=CappeCheckoutResponse)
 async def start_checkout(
-    body: CappeCheckoutRequest, account: CappeAccount = Depends(require_cappe_account)
+    body: CappePlanCheckoutRequest, account: CappeAccount = Depends(require_cappe_account)
 ):
     """Subscribe to a plan. The $1 intro is applied by the SERVER when the
     account has never had a subscription — never on client request."""
@@ -168,7 +169,11 @@ async def start_checkout(
         intro_applied = False
         intro_price_id = None
         intro_days = None
-        if await billing_svc.intro_eligible(conn, account.id):
+        # Keeping a plan we gave free (an admin comp, a signup grant) keeps
+        # its free days: the subscription bills from the day it ends, with no
+        # intro. Only for that plan; any other bills as it always did.
+        trial_end = billing_svc.comp_trial_end(existing, body.plan_code)
+        if trial_end is None and await billing_svc.intro_eligible(conn, account.id):
             intro = await billing_svc.resolve_price(
                 conn, body.plan_code, "once", role="intro"
             )
@@ -188,6 +193,7 @@ async def start_checkout(
             price_id=price["stripe_price_id"],
             intro_price_id=intro_price_id,
             trial_days=intro_days,
+            trial_end=trial_end,
             success_url=_billing_return_url(body.success_url),
             cancel_url=_billing_return_url(body.cancel_url),
             metadata={
@@ -381,6 +387,13 @@ async def change_plan(
         stripe_sub_id = sub["stripe_subscription_id"]
         interval_changed = sub["interval"] != body.interval
         was_trialing = sub["status"] == "trialing"
+        # Free days carried over from a comp belong to that plan: switching
+        # its interval keeps them, switching tier ends them like the intro.
+        keep_trial = (
+            was_trialing
+            and sub["plan_code"] == body.plan_code
+            and await billing_svc.trial_is_from_comp(conn, stripe_sub_id)
+        )
 
     try:
         await get_cappe_stripe().change_subscription_price(
@@ -389,11 +402,14 @@ async def change_plan(
             new_price_id=price["stripe_price_id"],
             # Re-anchor only when the billing cadence itself changed; a same-
             # interval tier change should keep the customer's existing renewal
-            # date rather than silently moving it.
-            anchor_now=interval_changed,
+            # date rather than silently moving it. A kept trial is never
+            # re-anchored: its first bill is already set for the trial's end.
+            anchor_now=interval_changed and not keep_trial,
             # Someone upgrading mid-intro starts paying now rather than riding
             # the $1 trial at the higher tier.
-            end_trial=was_trialing,
+            end_trial=was_trialing and not keep_trial,
+            # Nothing has been billed during a trial, so nothing to prorate.
+            proration_behavior="none" if keep_trial else "always_invoice",
         )
         fresh = await get_cappe_stripe().retrieve_subscription(stripe_sub_id)
     except CappeStripeError as exc:

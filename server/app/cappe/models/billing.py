@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Any, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import AwareDatetime, BaseModel, EmailStr, Field
 
 BillingInterval = Literal["month", "year"]
 
@@ -100,13 +100,21 @@ class CappeSubscription(BaseModel):
     trial_end: Optional[datetime] = None
     cancel_at_period_end: bool = False
     comped_until: Optional[datetime] = None
+    # For a comp: the day a subscription to the same plan, bought now, would
+    # first bill (`billing.comp_trial_end`). None = it would bill at checkout.
+    # The page reads this rather than re-deriving Stripe's trial window.
+    comp_bills_from: Optional[datetime] = None
     addons: list[CappeSubscriptionAddon] = Field(default_factory=list)
     # Plan allowance + purchased add-on units, so the UI can show what the
     # account is actually entitled to provision.
     mailbox_quota: int = 0
 
 
-class CappeCheckoutRequest(BaseModel):
+class CappePlanCheckoutRequest(BaseModel):
+    """Subscribe to a plan. Not `CappeCheckoutRequest`: that is the storefront's
+    cart checkout (`models/shop.py`), and with both exported under one name
+    the `models.cappe` shim handed THIS route the cart model, so every plan
+    checkout failed validation for want of `items` and `customer_email`."""
     plan_code: str = Field(max_length=40)
     interval: BillingInterval = "month"
     success_url: str = Field(max_length=2000)
@@ -226,6 +234,62 @@ class CappePlatformAdminRequest(BaseModel):
     is_platform_admin: bool
 
 
+# --- Matcha admin (/admin/cappe): plan changes + signup grants ---------------
+
+class CappeAdminPlanChange(BaseModel):
+    """A Matcha admin putting an account on a plan by hand. Anything but free
+    is a comp, so the account is never charged for it."""
+    plan_code: str = Field(max_length=40, pattern=r"^[a-z0-9_]+$")
+    # When the comp ends and the account drops to free; None = until changed.
+    # Must carry a timezone: a bare "2026-12-01T00:00" is ambiguous, and is
+    # refused with 422 rather than guessed at.
+    until: Optional[AwareDatetime] = None
+    reason: Optional[str] = Field(default=None, max_length=500)
+
+
+class CappeSignupGrantCreate(BaseModel):
+    plan_code: str = Field(max_length=40, pattern=r"^[a-z0-9_]+$")
+    # How long the plan is free, counted from when the email is confirmed.
+    days: int = Field(default=30, ge=1, le=366)
+    max_redemptions: int = Field(default=1, ge=1, le=1000)
+    # Only this address may use the link.
+    email: Optional[EmailStr] = None
+    note: Optional[str] = Field(default=None, max_length=500)
+    # How long the link takes signups; None = until revoked.
+    link_valid_days: Optional[int] = Field(default=30, ge=1, le=365)
+
+
+class CappeSignupGrantAccount(BaseModel):
+    id: UUID
+    email: str
+    plan: str
+    signed_up_at: datetime
+    email_verified_at: Optional[datetime] = None
+    # Set when the plan was given; `refused` says why it wasn't. Neither, on a
+    # confirmed account, means redeeming it failed (logged).
+    redeemed_at: Optional[datetime] = None
+    refused: Optional[str] = None
+
+
+class CappeAdminSignupGrant(BaseModel):
+    id: UUID
+    plan_code: str
+    plan_name: str
+    days: int
+    max_redemptions: int
+    redeemed_count: int
+    email: Optional[str] = None
+    note: Optional[str] = None
+    expires_at: Optional[datetime] = None
+    revoked_at: Optional[datetime] = None
+    created_by_email: Optional[str] = None
+    created_at: datetime
+    signup_url: str
+    # Everyone who signed up through it; `accounts` is the latest few of them.
+    signup_count: int = 0
+    accounts: list[CappeSignupGrantAccount] = []
+
+
 __all__ = [
     "BillingInterval",
     "CappePlanPrice",
@@ -237,7 +301,7 @@ __all__ = [
     "CappePublicPricing",
     "CappeSubscriptionAddon",
     "CappeSubscription",
-    "CappeCheckoutRequest",
+    "CappePlanCheckoutRequest",
     "CappeCheckoutResponse",
     "CappePortalRequest",
     "CappePortalResponse",
@@ -251,4 +315,8 @@ __all__ = [
     "CappeAdminAccount",
     "CappeCompRequest",
     "CappePlatformAdminRequest",
+    "CappeAdminPlanChange",
+    "CappeSignupGrantCreate",
+    "CappeSignupGrantAccount",
+    "CappeAdminSignupGrant",
 ]

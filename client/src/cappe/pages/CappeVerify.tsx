@@ -18,6 +18,8 @@ export default function CappeVerify() {
   const token = params.get('token')
   const [state, setState] = useState<'verifying' | 'ok' | 'expired' | 'error'>(token ? 'verifying' : 'error')
   const [message, setMessage] = useState(token ? '' : 'This confirmation link is missing its token.')
+  const [granted, setGranted] = useState<string | null>(null)
+  const [grantRefused, setGrantRefused] = useState<string | null>(null)
   const ran = useRef(false)
 
   useEffect(() => {
@@ -29,11 +31,20 @@ export default function CappeVerify() {
         setCappeTokens(res.access_token, res.refresh_token)
         invalidateCappeMeCache()
         setState('ok')
+        if (res.granted_plan) {
+          const until = res.granted_until
+            ? new Date(res.granted_until).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })
+            : null
+          setGranted(`${res.granted_plan_name ?? res.granted_plan} is yours free${until ? ` until ${until}` : ''}.`)
+        } else if (res.grant_refused) {
+          setGrantRefused(`${res.grant_refused} You're on the Free plan.`)
+        }
         // A plan picked on the pricing page continues into checkout.
         const next = res.intended_plan && res.account?.account_type !== 'creator'
           ? billingStartPath(res.intended_plan, res.intended_interval)
           : postAuthHome(res.account?.account_type)
-        setTimeout(() => navigate(next, { replace: true }), 900)
+        // Long enough to read the free-plan line when there is one.
+        setTimeout(() => navigate(next, { replace: true }), res.granted_plan || res.grant_refused ? 3500 : 900)
       })
       .catch((err) => {
         // An expired link belongs to a real, still-unconfirmed account, so the
@@ -57,6 +68,8 @@ export default function CappeVerify() {
           <>
             <CheckCircle2 className="mx-auto h-10 w-10 text-lime-400" />
             <h1 className="mt-4 text-2xl font-semibold tracking-tight text-zinc-50">You're in</h1>
+            {granted && <p className="mt-1 text-sm text-lime-300">{granted}</p>}
+            {grantRefused && <p className="mt-1 text-sm text-amber-300">{grantRefused}</p>}
             <p className="mt-1 text-sm text-zinc-400">Taking you to your dashboard…</p>
           </>
         )}

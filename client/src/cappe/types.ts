@@ -51,10 +51,24 @@ export type CappeSignupResponse = {
 }
 
 // Email confirmation: a session, plus the plan picked on the pricing page at
-// signup (returned once) so the flow can continue into checkout.
+// signup (returned once) so the flow can continue into checkout. Or, when the
+// signup came through a grant link, the plan it gave free until granted_until.
 export type CappeVerifyResponse = CappeTokenResponse & {
   intended_plan?: string | null
   intended_interval?: string | null
+  granted_plan?: string | null
+  granted_plan_name?: string | null
+  granted_until?: string | null
+  /** Why a grant link's plan was NOT given (used up meanwhile, revoked, …). */
+  grant_refused?: string | null
+}
+
+// What a signup-grant link (/signup?grant=…) offers.
+export type CappeSignupGrantInfo = {
+  plan_code: string
+  plan_name: string
+  days: number
+  email_locked: boolean
 }
 
 export type CappeReadinessItem = {
@@ -184,6 +198,9 @@ export type CappeSubscription = {
   trial_end: string | null
   cancel_at_period_end: boolean
   comped_until: string | null
+  /** For a plan given free: the day subscribing to it now would first bill.
+   *  null = it would bill at checkout (no end date, or it ends too soon). */
+  comp_bills_from?: string | null
 }
 
 export type CappePublicAddon = {

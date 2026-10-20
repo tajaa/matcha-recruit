@@ -1,12 +1,12 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { Loader2, Store, User, Sparkles, MailCheck } from 'lucide-react'
-import { cappePublicPost, setCappeTokens } from '../api'
+import { Loader2, Store, User, Sparkles, MailCheck, Gift } from 'lucide-react'
+import { CappeApiError, cappePublicGet, cappePublicPost, setCappeTokens } from '../api'
 import { invalidateCappeMeCache } from '../hooks/useCappeMe'
 import { creatorPaths } from '../creators/creatorPaths'
 import ResendVerification from '../components/ResendVerification'
 import { billingStartPath } from './CappeBilling/paths'
-import type { CappeAccountType, CappeSignupResponse } from '../types'
+import type { CappeAccountType, CappeSignupGrantInfo, CappeSignupResponse } from '../types'
 
 const postAuthHome = (t?: string) => (t === 'creator' ? creatorPaths.home : '/cappe/sites')
 
@@ -51,8 +51,27 @@ export default function CappeSignup({ creatorOnly = false, brandOnly = false }: 
   const [sentTo, setSentTo] = useState<string | null>(null)
   // A paid plan picked on the pricing cards. The server keeps it across the
   // email-confirmation hop; creators and brands have their own signup pages.
-  const plan = !creatorOnly && !brandOnly && /^[a-z0-9_]{1,40}$/.test(params.get('plan') ?? '') ? params.get('plan') : null
+  // A grant link (/signup?grant=…) gives a paid plan free for a while, so it
+  // replaces any plan picked on the pricing cards: there is nothing to pay.
+  // The pattern mirrors the server's GRANT_TOKEN_PATTERN (models/auth.py).
+  const grantToken = !creatorOnly && !brandOnly && /^[A-Za-z0-9_-]{16,64}$/.test(params.get('grant') ?? '') ? params.get('grant') : null
+  const [grant, setGrant] = useState<CappeSignupGrantInfo | null>(null)
+  // Set only when the SERVER says the link can't be used. Until then the token
+  // is sent with the signup even if the lookup hasn't answered (or failed for
+  // a passing reason), and the server decides: a promised plan is never
+  // dropped because the page was quick or the network slow.
+  const [grantDead, setGrantDead] = useState<string | null>(null)
+  const plan = !grantToken && !creatorOnly && !brandOnly && /^[a-z0-9_]{1,40}$/.test(params.get('plan') ?? '') ? params.get('plan') : null
   const interval = params.get('interval') === 'year' ? 'year' : 'month'
+
+  useEffect(() => {
+    if (!grantToken) return
+    cappePublicGet<CappeSignupGrantInfo>(`/auth/signup-grants/${grantToken}`)
+      .then(setGrant)
+      .catch((err) => {
+        if (err instanceof CappeApiError && err.code === 'grant_invalid') setGrantDead(err.message)
+      })
+  }, [grantToken])
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -69,6 +88,7 @@ export default function CappeSignup({ creatorOnly = false, brandOnly = false }: 
         password,
         account_type: accountType,
         ...(plan ? { intended_plan: plan, intended_interval: interval } : {}),
+        ...(grantToken && !grantDead ? { grant_token: grantToken } : {}),
       })
       if (res.verification_required) {
         // No tokens yet — account is live only after the email link is clicked.
@@ -89,7 +109,15 @@ export default function CappeSignup({ creatorOnly = false, brandOnly = false }: 
         )
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong.')
+      if (err instanceof CappeApiError && err.code === 'grant_invalid') {
+        // The link stopped working while the form was open (used up, revoked).
+        // Say so, and let the next press sign up without it.
+        setGrant(null)
+        setGrantDead(err.message)
+        setError('Press “Create account” again to sign up without the invite.')
+      } else {
+        setError(err instanceof Error ? err.message : 'Something went wrong.')
+      }
     } finally {
       setSubmitting(false)
     }
@@ -210,6 +238,22 @@ export default function CappeSignup({ creatorOnly = false, brandOnly = false }: 
             />
             <p id="cappe-signup-password-hint" className="mt-1 text-xs text-zinc-500">At least 8 characters.</p>
           </div>
+
+          {grant && !grantDead && (
+            <p className="flex gap-2 rounded-lg border border-lime-400/20 bg-lime-300/[0.06] px-3 py-2 text-xs leading-relaxed text-zinc-300">
+              <Gift className="mt-0.5 h-3.5 w-3.5 shrink-0 text-lime-300" />
+              <span>
+                You've been given <span className="font-semibold text-lime-300">{grant.plan_name}</span> free for{' '}
+                {grant.days} days. No card needed: it starts when you confirm your email. After that, pick a plan to keep it.
+                {grant.email_locked && ' Sign up with the email address the invite was sent to.'}
+              </span>
+            </p>
+          )}
+          {grantDead && (
+            <p className="rounded-lg border border-amber-500/30 bg-amber-500/[0.06] px-3 py-2 text-xs leading-relaxed text-amber-300">
+              {grantDead} You can still create a free account.
+            </p>
+          )}
 
           {plan && (
             <p className="rounded-lg border border-lime-400/20 bg-lime-300/[0.06] px-3 py-2 text-xs leading-relaxed text-zinc-300">
