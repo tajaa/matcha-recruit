@@ -50,18 +50,21 @@ def _kept(rows) -> list[CappeShippingRateInput]:
 
 
 async def _insert_rates(conn, site_id, zone_id, rates) -> None:
-    for i, rate in enumerate(rates):
-        await conn.execute(
-            """INSERT INTO cappe_shipping_rates
-                   (site_id, zone_id, name, method, amount_cents, per_item_cents, min_subtotal_cents,
-                    max_subtotal_cents, min_weight_g, max_weight_g, free_over_cents, delivery_min_days,
-                    delivery_max_days, postal_codes, instructions, sort_order)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::text[], $15, $16)""",
-            site_id, zone_id, rate.name, rate.method, rate.amount_cents, rate.per_item_cents,
-            rate.min_subtotal_cents, rate.max_subtotal_cents, rate.min_weight_g, rate.max_weight_g,
-            rate.free_over_cents, rate.delivery_min_days, rate.delivery_max_days, rate.postal_codes,
-            rate.instructions, i,
-        )
+    if not rates:
+        return
+    # One round trip per destination, not per option: this runs under the
+    # store's FOR UPDATE lock.
+    await conn.executemany(
+        """INSERT INTO cappe_shipping_rates
+               (site_id, zone_id, name, method, amount_cents, per_item_cents, min_subtotal_cents,
+                max_subtotal_cents, min_weight_g, max_weight_g, free_over_cents, delivery_min_days,
+                delivery_max_days, postal_codes, instructions, sort_order)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::text[], $15, $16)""",
+        [(site_id, zone_id, rate.name, rate.method, rate.amount_cents, rate.per_item_cents,
+          rate.min_subtotal_cents, rate.max_subtotal_cents, rate.min_weight_g, rate.max_weight_g,
+          rate.free_over_cents, rate.delivery_min_days, rate.delivery_max_days, rate.postal_codes,
+          rate.instructions, i) for i, rate in enumerate(rates)],
+    )
 
 
 @router.get("/sites/{site_id}/shipping-zones", response_model=CappeShippingZones)
@@ -108,6 +111,12 @@ async def replace_shipping_zones(
             home_rates = body.home_rates if body.home_rates is not None else _kept(
                 r for r in old if r["zone_id"] is None
             )
+            # A zone's kept options by its old name, each set handed out once:
+            # two zones sharing a name must not both inherit (and double) them.
+            kept_by_name: dict = {}
+            for r in old:
+                if r["zone_id"] is not None:
+                    kept_by_name.setdefault(r["zone_name"], []).append(r)
             # Zone rates go with their zones (ON DELETE CASCADE).
             await conn.execute("DELETE FROM cappe_shipping_rates WHERE site_id = $1", site_id)
             await conn.execute("DELETE FROM cappe_shipping_zones WHERE site_id = $1", site_id)
@@ -120,9 +129,7 @@ async def replace_shipping_zones(
                     site_id, zone.name, zone.countries, zone.rest_of_world, zone.flat_cents,
                     zone.free_threshold_cents, zone.charge_tax, i,
                 )
-                rates = zone.rates if zone.rates is not None else _kept(
-                    r for r in old if r["zone_id"] is not None and r["zone_name"] == zone.name
-                )
+                rates = zone.rates if zone.rates is not None else _kept(kept_by_name.pop(zone.name, []))
                 await _insert_rates(conn, site_id, zone_id, rates)
             await _insert_rates(conn, site_id, None, home_rates)
             zones = await load_zones(conn, site_id, None)

@@ -89,7 +89,8 @@ var span=a===b?String(a):a+'–'+b,unit=b===1?' business day':' business days';r
 // mustn't vanish under the buyer who just typed in it).
 function paintRates(){if(!quote)return;var opts=quote.shipping_options,c=chosen();
 postEl.hidden=!quote.asks_postal_code;
-if(!opts||quote.ships_to===false){ratesWrap.hidden=true;return;}
+// Nothing to deliver (a digital-only bag prices with no options): no block.
+if(!opts||quote.ships_to===false||!items.some(function(i){return i.fulfillment==='physical';})){ratesWrap.hidden=true;return;}
 var plain=opts.length===1&&opts[0].id==='flat'&&!days(opts[0]);
 ratesWrap.hidden=plain&&postEl.hidden;
 rateNote.hidden=!!opts.length;
@@ -141,8 +142,9 @@ noticeEl.className='cz-msg'+(noShip?' err':'');
 noticeEl.textContent=noShip?'This store doesn’t ship to '+countryName(quote.ship_country)+'. Choose another country.':
 (approval?'Something in your bag needs the store’s approval first. You won’t be charged now — if they accept, you’ll get an email with a link to pay.':'');
 addrEl.hidden=!needsAddress();
-// The delivery postal code above is the address's postal code.
-addrEl.querySelector('[data-a="postal_code"]').hidden=!postEl.hidden;
+// A local delivery's postal code is the one typed above (it was priced);
+// any other address keeps its own postal code field.
+addrEl.querySelector('[data-a="postal_code"]').hidden=method()==='local_delivery';
 addrEl.querySelector('legend').textContent=method()==='local_delivery'?'Delivery address':'Shipping address';
 var noRate=!!(quote&&quote.shipping_options&&!quote.shipping_options.length&&!noShip&&items.some(function(i){return i.fulfillment==='physical';}));
 var blocked=!quote||noShip||noRate||(quote.lines||[]).some(function(l){return l.available===false;});
@@ -183,7 +185,7 @@ if(quote&&quote.ship_country)body.ship_country=quote.ship_country;
 // Only a code the quote accepted: an invalid one would refuse the whole order.
 if(quote&&quote.promo&&quote.promo.valid)body.promo_code=quote.promo.code;
 if(needsAddress()){var a={};addrEl.querySelectorAll('[data-a]').forEach(function(el){a[el.getAttribute('data-a')]=el.value.trim();});
-if(!postEl.hidden)a.postal_code=postal;
+if(method()==='local_delivery')a.postal_code=postal;
 if(!a.line1||!a.city){msgEl.textContent='Add your '+(method()==='local_delivery'?'delivery':'shipping')+' address (at least the address and city).';return;}
 a.country=quote.ship_country;a.name=name||null;body.shipping_address=a;}
 busy=true;render();msgEl.className='cz-msg';msgEl.textContent='';

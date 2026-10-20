@@ -313,15 +313,19 @@ def _rate(row: Any) -> ShipRate:
     )
 
 
+async def _fetch_rate_rows(conn, site_id):
+    return await conn.fetch(
+        f"SELECT {_RATE_COLS} FROM cappe_shipping_rates WHERE site_id = $1 ORDER BY sort_order, created_at",
+        site_id,
+    )
+
+
 async def load_rates(conn, site_id, ent) -> dict:
     """{zone id (str) or None for home: [ShipRate]} — empty without the plan
     feature, so a downgraded store is back to one flat rate (its rates kept)."""
     if ent is not None and not ent.has("shipping_zones"):
         return {}
-    rows = await conn.fetch(
-        f"SELECT {_RATE_COLS} FROM cappe_shipping_rates WHERE site_id = $1 ORDER BY sort_order, created_at",
-        site_id,
-    )
+    rows = await _fetch_rate_rows(conn, site_id)
     out: dict = {}
     for r in rows:
         out.setdefault(str(r["zone_id"]) if r["zone_id"] else None, []).append(_rate(r))
@@ -330,10 +334,7 @@ async def load_rates(conn, site_id, ent) -> dict:
 
 async def load_rate_rows(conn, site_id) -> list[dict]:
     """Every saved rate as a row, for the settings page."""
-    rows = await conn.fetch(
-        f"SELECT {_RATE_COLS} FROM cappe_shipping_rates WHERE site_id = $1 ORDER BY sort_order, created_at",
-        site_id,
-    )
+    rows = await _fetch_rate_rows(conn, site_id)
     return [{**dict(r), "postal_codes": list(r["postal_codes"] or [])} for r in rows]
 
 

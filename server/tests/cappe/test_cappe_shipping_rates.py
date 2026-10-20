@@ -329,6 +329,10 @@ class ZonesConn:
     async def execute(self, sql, *args):
         self.calls.append(("execute", sql, args))
 
+    async def executemany(self, sql, rows):
+        for args in rows:
+            self.calls.append(("execute", sql, tuple(args)))
+
     def transaction(self):
         return Tx()
 
@@ -377,6 +381,19 @@ def test_a_save_that_leaves_options_out_keeps_them(monkeypatch):
     inserts = [(c[2][1], c[2][2]) for c in conn.sql("INSERT INTO cappe_shipping_rates")]
     # The Canada zone's option follows it to its new id; home keeps its own.
     assert inserts == [(conn.zone_ids[0], "Tracked"), (None, "Pickup")]
+
+
+def test_zones_sharing_a_name_dont_both_inherit_its_options(monkeypatch):
+    conn = ZonesConn(old_rates=[
+        {**rate_row("Tracked", zone_id=uuid4(), amount_cents=2000), "zone_name": "Europe"},
+    ])
+    account = _wire_zones(monkeypatch, ZONES_ON, conn)
+    body = CappeShippingZonesReplace(zones=[{"name": "Europe", "countries": ["FR"]},
+                                            {"name": "Europe", "countries": ["DE"]}])
+    asyncio.run(zones_routes.replace_shipping_zones(SITE, body, account))
+    inserts = [(c[2][1], c[2][2]) for c in conn.sql("INSERT INTO cappe_shipping_rates")]
+    # Kept once, by the first zone of that name — not doubled.
+    assert inserts == [(conn.zone_ids[0], "Tracked")]
 
 
 def test_options_need_the_plan_but_clearing_them_does_not(monkeypatch):
@@ -712,6 +729,13 @@ def test_the_bag_offers_the_options_and_sends_the_one_it_priced():
     assert "method()==='local_delivery'" in js                     # a local delivery always does
     assert "quote.asks_postal_code" in js
     assert "body.note=note.slice(0,1000)" in js                    # the note box finally sends
+    # A digital-only bag has nothing to deliver: no Delivery block, no "nothing fits" note.
+    assert "quote.ships_to===false||!items.some(function(i){return i.fulfillment==='physical';})" in js
+    # Only a local delivery takes its postal code from the box above; a shipped
+    # address keeps (and sends) its own.
+    assert "[data-a=\"postal_code\"]').hidden=method()==='local_delivery'" in js
+    assert "if(method()==='local_delivery')a.postal_code=postal" in js
+    assert "if(!postEl.hidden)a.postal_code=postal" not in js
     assert ".cz-bag__rate{" in (ASSETS / "base.css").read_text()
 
 
