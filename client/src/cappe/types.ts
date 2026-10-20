@@ -177,6 +177,16 @@ export type CappePublicPlan = {
 
 // --- Billing (authenticated) --------------------------------------------------
 
+/** What the account's plan allows (GET /billing/entitlements). */
+export type CappeEntitlements = {
+  plan_code: string
+  plan_name: string
+  can_sell: boolean
+  platform_fee_bps: number
+  allowed_fulfillment: CappeFulfillment[]
+  features: Record<string, unknown>
+}
+
 export type CappeBillingInterval = 'month' | 'year'
 
 export type CappeBillingPlan = CappePublicPlan & { status: string; can_sell: boolean }
@@ -416,10 +426,39 @@ export type CappeProductOptionInput = {
   expected_inventory?: number | null
 }
 
+// One combination of a product's required pick-one groups (Size × Colour) with
+// its own stock, SKU, price and picture (server: services/variants.py).
+// `price_cents` null = the product price plus the options' changes;
+// `inventory` null = not tracked on the variant.
+export type CappeProductVariant = {
+  id: string
+  option_ids: string[]
+  sku: string | null
+  price_cents: number | null
+  inventory: number | null
+  image_url: string | null
+  status: 'active' | 'disabled'
+  sort_order: number
+}
+// The editor names a combination by group and option NAME, so options created
+// in the same save can carry variants too. Stock is tri-state on an existing
+// variant, like option stock.
+export type CappeProductVariantInput = {
+  id?: string
+  options: { group: string; option: string }[]
+  sku: string | null
+  price_cents: number | null
+  image_url: string | null
+  status: 'active' | 'disabled'
+  inventory?: number | null
+  expected_inventory?: number | null
+}
+
 export type CappeInventoryAdjustment = {
   id: string
   product_id: string
   option_id: string | null
+  variant_id?: string | null
   delta: number
   balance_after: number | null
   reason: string
@@ -457,6 +496,7 @@ export type CappeProduct = {
   intake_fields: CappeFormField[]
   category: string | null
   option_groups: CappeProductOptionGroup[]
+  variants?: CappeProductVariant[]
   created_at: string
   updated_at: string
   discount_percent?: number
@@ -480,6 +520,7 @@ export type CappeProductInput = {
   intake_fields?: CappeFormField[]
   category?: string | null
   option_groups?: CappeProductOptionGroupInput[]
+  variants?: CappeProductVariantInput[]
 }
 
 export type CappeOrderItem = {
@@ -497,6 +538,9 @@ export type CappeOrderItem = {
   restocked_quantity?: number
   /** This line's share of a promo code's discount. */
   promo_discount_cents?: number
+  /** The combination bought, and the SKU it sold under. */
+  variant_id?: string | null
+  sku?: string | null
 }
 
 /** One refund in an order's ledger. */

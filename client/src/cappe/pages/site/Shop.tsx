@@ -8,8 +8,14 @@ import ShippingSettingsCard from '../../components/ShippingSettingsCard'
 import PromoCodesCard from '../../components/PromoCodesCard'
 import StockAdjustModal from '../../components/StockAdjustModal'
 import ImageUpload from '../../components/ImageUpload'
-import type { CappeBookingType, CappeFulfillment, CappeProduct, CappeProductOptionGroupInput } from '../../types'
+import UpgradeNotice from '../../components/UpgradeNotice'
+import VariantsEditor from '../../components/VariantsEditor'
+import type {
+  CappeBookingType, CappeEntitlements, CappeFulfillment, CappeProduct, CappeProductOptionGroupInput,
+  CappeProductVariantInput,
+} from '../../types'
 import { parseMoneyCents, parseSignedMoneyCents } from '../../utils/money'
+import { combinations, isVariantGroup, rowsFromProduct, variantPayload, type VariantRow } from '../../utils/variants'
 
 const STATUSES = ['active', 'draft', 'archived'] as const
 const FIELD_TYPES = ['text', 'email', 'textarea', 'number', 'tel', 'date', 'select']
@@ -56,7 +62,9 @@ export default function Shop() {
   const [bookingTypes, setBookingTypes] = useState<CappeBookingType[]>([])
   const [error, setError] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
-  const [fulfillment, setFulfillment] = useState<CappeFulfillment>('physical')
+  // The kind picked for this product; null = not picked yet (a new product),
+  // which shows the first kind the plan sells (`fulfillment` below).
+  const [chosenFulfillment, setFulfillment] = useState<CappeFulfillment | null>(null)
   const [requireApproval, setRequireApproval] = useState(false)
   const [intervals, setIntervals] = useState<('week' | 'month')[]>([])
   const [subscriptionDiscount, setSubscriptionDiscount] = useState('0')
@@ -67,12 +75,26 @@ export default function Shop() {
   const [editing, setEditing] = useState<CappeProduct | null>(null)
   const [publish, setPublish] = useState(true)
   const [query, setQuery] = useState('')
+  // Per-combination stock/SKU/price, keyed by combination (utils/variants.ts).
+  const [variantRows, setVariantRows] = useState<Record<string, VariantRow>>({})
+  const [useVariants, setUseVariants] = useState(false)
+  // What the plan sells. null until known (or unreadable): the server enforces
+  // it either way, this only keeps the form from offering what it refuses.
+  const [plan, setPlan] = useState<CappeEntitlements | null>(null)
+  const canSell = (f: CappeFulfillment) => !plan || plan.allowed_fulfillment.includes(f)
+  const firstSellable = () => FULFILLMENTS.find((f) => canSell(f.value))?.value ?? 'service'
+  const fulfillment: CappeFulfillment = chosenFulfillment ?? firstSellable()
+
 
   // The product's own count, or any variant's, at or under the alert level.
   const isLowStock = (p: CappeProduct) => {
     if (p.fulfillment !== 'physical' || p.low_stock_threshold == null) return false
     const limit = p.low_stock_threshold
-    const counts = [p.inventory, ...p.option_groups.flatMap((g) => g.options.map((o) => o.inventory))]
+    const counts = [
+      p.inventory,
+      ...p.option_groups.flatMap((g) => g.options.map((o) => o.inventory)),
+      ...(p.variants || []).map((v) => v.inventory),
+    ]
     return counts.some((n) => n != null && n <= limit)
   }
 
@@ -86,7 +108,10 @@ export default function Shop() {
     cappeApi.get<CappeProduct[]>(`/sites/${siteId}/products`).then(setProducts)
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load products'))
     cappeApi.get<CappeBookingType[]>(`/sites/${siteId}/booking-types`).then(setBookingTypes).catch(() => {})
+    cappeApi.get<CappeEntitlements>('/billing/entitlements').then(setPlan).catch(() => setPlan(null))
   }, [siteId])
+
+  const { combos, tooMany } = combinations(optionGroups)
 
   const wantsIntake = fulfillment === 'service' || fulfillment === 'booking'
 
@@ -94,7 +119,9 @@ export default function Shop() {
     setForm(EMPTY)
     setIntake([])
     setOptionGroups([])
-    setFulfillment('physical')
+    setVariantRows({})
+    setUseVariants(false)
+    setFulfillment(null)
     setRequireApproval(false)
     setIntervals([])
     setSubscriptionDiscount('0')
@@ -112,6 +139,10 @@ export default function Shop() {
       ...g,
       options: g.options.map((o) => (o.id && shelf.has(o.id) ? { ...o, stock: stockText(shelf.get(o.id)) } : o)),
     })))
+    const saved = rowsFromProduct(product)
+    setVariantRows((rows) => Object.fromEntries(Object.entries({ ...saved, ...rows }).map(([key, row]) => [
+      key, saved[key] ? { ...row, id: saved[key].id, stock: saved[key].stock } : row,
+    ])))
   }
 
   function editProduct(product: CappeProduct) {
@@ -147,6 +178,8 @@ export default function Shop() {
         stock: stockText(option.inventory),
       })),
     })))
+    setVariantRows(rowsFromProduct(product))
+    setUseVariants(!!product.variants?.length)
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
@@ -202,6 +235,17 @@ export default function Shop() {
         ? intake.find((f) => f.label.trim() && f.type === 'select' && !f.choices.split(',').some((c) => c.trim()))
         : undefined
       if (emptySelect) throw new Error(`"${emptySelect.label.trim()}" is a dropdown — add at least one choice for it`)
+      // Variants are sent whole when they're on; turning them off removes the
+      // ones the product had. Untouched otherwise.
+      let variantsBody: { variants?: CappeProductVariantInput[] } = {}
+      if (physical && useVariants) {
+        if (tooMany) throw new Error('That makes more than 100 combinations. Remove some options, or make a group optional.')
+        const built = variantPayload(combos, variantRows, editing)
+        if ('error' in built) throw new Error(built.error)
+        variantsBody = { variants: built.variants }
+      } else if (editing?.variants?.length) {
+        variantsBody = { variants: [] }
+      }
       // Stock is sent only when this save is changing it, with the count the
       // form was showing: a save that isn't about stock must not write a stale
       // number over sales made since the form loaded.
@@ -238,6 +282,7 @@ export default function Shop() {
         const updated = await cappeApi.put<CappeProduct>(`/sites/${siteId}/products/${editing.id}`, {
           ...details,
           option_groups: groupsFor(editing),
+          ...variantsBody,
           ...(fulfillment !== editing.fulfillment ? { fulfillment } : {}),
           ...(nextStock !== editing.inventory ? { inventory: nextStock, expected_inventory: editing.inventory } : {}),
           ...(subscriptionChanged ? { subscription_intervals: subIntervals, subscription_discount_bps: subDiscount } : {}),
@@ -250,6 +295,7 @@ export default function Shop() {
           status: publish ? 'active' : 'draft',
           inventory: stock(form.inventory),
           option_groups: groupsFor(null),
+          ...variantsBody,
           subscription_intervals: subIntervals,
           subscription_discount_bps: subDiscount,
         })
@@ -339,6 +385,11 @@ export default function Shop() {
         }}
       />
       <PromoCodesCard siteId={siteId || ''} currency={siteCurrency} />
+      {plan && (products || []).some((p) => p.status === 'active' && !canSell(p.fulfillment)) && (
+        <UpgradeNotice message={`Your ${plan.plan_name} plan doesn't sell ${
+          [...new Set((products || []).filter((p) => !canSell(p.fulfillment)).map((p) => p.fulfillment))].join(' or ')
+        } products, so shoppers can't buy the ones marked below.`} />
+      )}
 
       <form onSubmit={saveProduct} className="mb-6 space-y-3 rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
         <div className="flex items-center justify-between gap-3">
@@ -363,6 +414,7 @@ export default function Shop() {
               <button
                 key={f.value}
                 type="button"
+                disabled={!canSell(f.value) && fulfillment !== f.value}
                 onClick={() => {
                   setFulfillment(f.value)
                   if (!['physical', 'digital'].includes(f.value)) {
@@ -370,14 +422,14 @@ export default function Shop() {
                     setSubscriptionDiscount('0')
                   }
                 }}
-                className={`rounded-lg border px-3 py-2 text-left text-sm transition ${
+                className={`rounded-lg border px-3 py-2 text-left text-sm transition disabled:cursor-not-allowed disabled:opacity-50 ${
                   fulfillment === f.value
                     ? 'border-emerald-500 bg-emerald-500/10 text-emerald-300'
                     : 'border-zinc-700 text-zinc-300 hover:bg-zinc-800'
                 }`}
               >
                 <div className="font-medium">{f.label}</div>
-                <div className="text-[11px] text-zinc-500">{f.hint}</div>
+                <div className="text-[11px] text-zinc-500">{canSell(f.value) ? f.hint : `Not on the ${plan?.plan_name} plan`}</div>
               </button>
             ))}
           </div>
@@ -499,8 +551,8 @@ export default function Shop() {
                     <div key={oi} className="flex items-center gap-2">
                       <input value={o.name} onChange={(e) => setOpt(gi, oi, { name: e.target.value })} placeholder="Option (e.g. Large)" className={`flex-1 ${input}`} />
                       <input value={o.price} onChange={(e) => setOpt(gi, oi, { price: e.target.value })} placeholder="+$0.00" type="number" step="0.01" className={`w-24 ${input}`} />
-                      {fulfillment === 'physical' && (
-                        <input value={o.stock} onChange={(e) => setOpt(gi, oi, { stock: e.target.value })} placeholder="stock" type="number" min="0" title="Per-variant stock (blank = untracked)" className={`w-20 ${input}`} />
+                      {fulfillment === 'physical' && !(useVariants && isVariantGroup(g)) && (
+                        <input value={o.stock} onChange={(e) => setOpt(gi, oi, { stock: e.target.value })} placeholder="stock" type="number" min="0" title="This option's own stock (blank = untracked)" className={`w-20 ${input}`} />
                       )}
                       <button type="button" onClick={() => setGroup(gi, { options: g.options.filter((_, k) => k !== oi) })} className="text-zinc-500 hover:text-red-400"><Trash2 className="h-4 w-4" /></button>
                     </div>
@@ -512,6 +564,18 @@ export default function Shop() {
             <button type="button" onClick={() => setOptionGroups((gs) => [...gs, { name: '', select_type: 'single', required: false, options: [{ name: '', price: '', stock: '' }] }])} className="text-xs font-medium text-emerald-400 hover:text-emerald-300">+ Add option group</button>
           </div>
         </div>
+
+        {fulfillment === 'physical' && (
+          <VariantsEditor
+            combos={combos}
+            tooMany={tooMany}
+            rows={variantRows}
+            onRow={(key, row) => setVariantRows((rows) => ({ ...rows, [key]: row }))}
+            enabled={useVariants}
+            onEnabled={setUseVariants}
+            currency={currency}
+          />
+        )}
 
         <ImageUpload siteId={siteId || ''} value={form.image_url} onChange={(url) => setForm({ ...form, image_url: url })} placeholder="Cover image URL (optional)" />
 
@@ -568,6 +632,9 @@ export default function Shop() {
                 <div className="flex items-center gap-2">
                   <span className="truncate font-medium text-zinc-100">{p.name}</span>
                   <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${fulfillBadge[p.fulfillment] || fulfillBadge.physical}`}>{p.fulfillment}</span>
+                  {!canSell(p.fulfillment) && (
+                    <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-[10px] font-semibold uppercase text-zinc-400">not on your plan</span>
+                  )}
                   {isLowStock(p) && (
                     <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase text-amber-400"><AlertTriangle className="h-3 w-3" /> low stock</span>
                   )}
@@ -575,6 +642,7 @@ export default function Shop() {
                 <div className="text-xs text-zinc-500">
                   {p.category ? `${p.category} · ` : ''}{centsToMoney(p.price_cents, p.currency)} · {meta(p)}{p.sku ? ` · SKU ${p.sku}` : ''}
                   {p.option_groups?.length ? ` · ${p.option_groups.length} option${p.option_groups.length > 1 ? 's' : ''}` : ''}
+                  {p.variants?.length ? ` · ${p.variants.length} variant${p.variants.length > 1 ? 's' : ''}` : ''}
                 </div>
               </div>
               {p.fulfillment === 'physical' && (

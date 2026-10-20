@@ -38,6 +38,7 @@ from app.cappe.routes import promo_codes as promo_routes  # noqa: E402
 from app.cappe.routes.public import shop as public_shop  # noqa: E402
 from app.cappe.services import cart, commerce, inventory, promos, recurring, receipt  # noqa: E402
 from app.cappe.services.render import order_page  # noqa: E402
+from app.cappe.services.entitlements import ALL_FULFILLMENT  # noqa: E402
 
 SITE, ORDER = uuid4(), uuid4()
 TOKEN = "ef" * 16
@@ -45,8 +46,8 @@ NOW = datetime(2026, 10, 6, 12, 0, tzinfo=timezone.utc)
 TODAY = date(2026, 10, 6)
 ASSETS = pathlib.Path(commerce.__file__).parent / "render" / "assets"
 MIGRATION = pathlib.Path(__file__).resolve().parents[2] / "alembic" / "versions" / "zzzzcappe45_promo_codes.py"
-CODES_ON = SimpleNamespace(platform_fee_bps=200, has=lambda f: f == "promo_codes")
-CODES_OFF = SimpleNamespace(platform_fee_bps=200, has=lambda _f: False)
+CODES_ON = SimpleNamespace(platform_fee_bps=200, allowed_fulfillment=ALL_FULFILLMENT, has=lambda f: f == "promo_codes")
+CODES_OFF = SimpleNamespace(platform_fee_bps=200, allowed_fulfillment=ALL_FULFILLMENT, has=lambda _f: False)
 
 
 def code(**over):
@@ -205,6 +206,7 @@ def _wire_quote(monkeypatch, ent=CODES_ON, row=None):
     monkeypatch.setattr(public_shop, "_read_rate_limit", AsyncMock())
     monkeypatch.setattr(public_shop, "_published_site", AsyncMock(return_value={"id": SITE, "timezone": "UTC"}))
     monkeypatch.setattr(public_shop, "fetch_option_groups", AsyncMock(return_value={}))
+    monkeypatch.setattr(public_shop, "fetch_variants", AsyncMock(return_value={}))
     monkeypatch.setattr(public_shop, "fetch_active_discounts", AsyncMock(return_value=[]))
     monkeypatch.setattr(public_shop, "resolve_entitlements", AsyncMock(return_value=ent))
     return conn, pid
@@ -296,7 +298,7 @@ class OrderConn:
 def _wire_order(monkeypatch, *, promo=code(), ent=CODES_ON, used=False, sale=0, quantity=2, promo_code="save10"):
     product = {"id": uuid4(), "name": "Mug", "price_cents": 1000, "currency": "USD", "inventory": None,
                "low_stock_threshold": None, "status": "active", "fulfillment": "digital",
-               "booking_type_id": None, "requires_approval": False, "intake_fields": "[]"}
+               "booking_type_id": None, "requires_approval": False, "intake_fields": "[]", "sku": None}
     conn = OrderConn(product, promo=promo, used=used)
     owner = {"plan": "business", "status": "active", "email": "owner@example.com", "name": "Owner",
              "stripe_account_id": "acct_1", "stripe_charges_enabled": True}
@@ -306,6 +308,7 @@ def _wire_order(monkeypatch, *, promo=code(), ent=CODES_ON, used=False, sale=0, 
     monkeypatch.setattr(commerce, "get_connection", lambda: conn)
     monkeypatch.setattr(commerce, "fetch_active_discounts", AsyncMock(return_value=discounts))
     monkeypatch.setattr(commerce, "fetch_option_groups", AsyncMock(return_value={}))
+    monkeypatch.setattr(commerce, "fetch_variants", AsyncMock(return_value={}))
     monkeypatch.setattr(commerce, "lock_stock_rows", AsyncMock())
     monkeypatch.setattr(commerce, "fetch_site_owner", AsyncMock(return_value=owner))
     monkeypatch.setattr(commerce, "resolve_entitlements", AsyncMock(return_value=ent))
@@ -326,7 +329,7 @@ def test_an_order_with_a_code_records_it_counts_it_and_charges_the_discounted_li
     asyncio.run(commerce.create_public_order(site, body, BackgroundTasks()))
     # 15% of 3000 = 450 off; the order's subtotal is what the goods now cost.
     assert (conn.order["promo_code"], conn.order["discount_cents"], conn.order["subtotal_cents"]) == ("SAVE10", 450, 2550)
-    assert conn.items[0][-1] == 450                           # the line's share
+    assert conn.items[0][13] == 450                           # the line's share
     redemption = [a for sql, a in conn.executed if "INSERT INTO cappe_promo_redemptions" in sql]
     assert redemption == [(promo["id"], SITE, ORDER, "buyer@example.com", 450)]
     assert any("redemption_count = redemption_count + 1" in sql for sql, _a in conn.executed)
@@ -487,7 +490,7 @@ def test_the_migration_chains_and_gates_the_feature():
 
 def test_shares_are_stored_with_each_line():
     src = inspect.getsource(commerce.create_public_order)
-    assert "stock_decremented, decremented_option_ids, promo_discount_cents)" in src
+    assert "stock_decremented, decremented_option_ids, promo_discount_cents," in src
     assert json.dumps(0) == "0"
 
 

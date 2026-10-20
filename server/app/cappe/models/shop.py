@@ -62,6 +62,44 @@ class CappeProductOptionGroup(BaseModel):
     options: list[CappeProductOption] = Field(default_factory=list)
 
 
+# A variant is one combination of a product's VARIANT GROUPS — its required
+# single-pick groups (Size × Colour) — with its own stock, SKU, price and
+# picture. Optional groups and add-ons stay plain options with their own stock.
+# The editor names the combination by group and option NAME, so a product whose
+# options are created in the same save can carry its variants too; the server
+# resolves the names to option ids after it has written the options.
+class CappeVariantOptionRef(BaseModel):
+    group: str = Field(min_length=1, max_length=120)
+    option: str = Field(min_length=1, max_length=120)
+
+
+class CappeProductVariantInput(BaseModel):
+    # An existing variant's id keeps its row (order lines and the stock ledger
+    # point at it). Omitted → matched by its combination, else created.
+    id: Optional[UUID] = None
+    options: list[CappeVariantOptionRef] = Field(min_length=1, max_length=10)
+    sku: Optional[str] = Field(default=None, max_length=120)
+    # None = the product's price plus the options' price changes.
+    price_cents: Optional[int] = Field(default=None, ge=0)
+    # Tri-state on an existing variant, like option stock: omitted leaves it,
+    # a number sets it, null stops tracking. A new variant with none is untracked.
+    inventory: Optional[int] = Field(default=None, ge=0)
+    expected_inventory: Optional[int] = None
+    image_url: Optional[str] = None
+    status: Literal["active", "disabled"] = "active"
+
+
+class CappeProductVariant(BaseModel):
+    id: UUID
+    option_ids: list[UUID]
+    sku: Optional[str] = None
+    price_cents: Optional[int] = None
+    inventory: Optional[int] = None
+    image_url: Optional[str] = None
+    status: str = "active"
+    sort_order: int = 0
+
+
 class CappeProductCreate(BaseModel):
     subscription_intervals: list[Literal["week", "month"]] = Field(default_factory=list, max_length=2)
     subscription_discount_bps: int = Field(default=0, ge=0, le=5000)
@@ -86,6 +124,8 @@ class CappeProductCreate(BaseModel):
     category: Optional[str] = Field(default=None, max_length=120)
     # None = leave option groups untouched; [] = clear them.
     option_groups: Optional[list[CappeProductOptionGroupInput]] = None
+    # None = leave variants untouched; [] = remove them all. At most 100.
+    variants: Optional[list[CappeProductVariantInput]] = Field(default=None, max_length=100)
 
     @field_validator("subscription_intervals")
     @classmethod
@@ -116,6 +156,7 @@ class CappeProductUpdate(BaseModel):
     intake_fields: Optional[list[dict[str, Any]]] = None
     category: Optional[str] = Field(default=None, max_length=120)
     option_groups: Optional[list[CappeProductOptionGroupInput]] = None
+    variants: Optional[list[CappeProductVariantInput]] = Field(default=None, max_length=100)
     # The stock the editor was showing when `inventory` was typed. Sent with a
     # stock change so a sale made in between is a 409 instead of being
     # overwritten. Not a column — never written.
@@ -151,6 +192,7 @@ class CappeProduct(BaseModel):
     intake_fields: list[dict[str, Any]] = Field(default_factory=list)
     category: Optional[str] = None
     option_groups: list[CappeProductOptionGroup] = Field(default_factory=list)
+    variants: list[CappeProductVariant] = Field(default_factory=list)
     # Public storefront pricing. Owner responses default to the undiscounted
     # shape; public routes populate these from the active promotion calendar.
     discount_percent: int = 0
@@ -163,15 +205,23 @@ class CappeProduct(BaseModel):
 class CappeStockAdjust(BaseModel):
     """Manual stock change from the owner (restock, damage, correction, …)."""
     delta: int                                   # signed; new balance clamped at 0
-    option_id: Optional[UUID] = None             # adjust a variant instead of the product
+    option_id: Optional[UUID] = None             # adjust one option's own stock
+    variant_id: Optional[UUID] = None            # adjust a variant (combination)
     reason: Literal["manual", "restock", "damage", "return", "adjustment"] = "manual"
     note: Optional[str] = Field(default=None, max_length=1000)
+
+    @model_validator(mode="after")
+    def one_target(self):
+        if self.option_id is not None and self.variant_id is not None:
+            raise ValueError("Adjust an option or a variant, not both")
+        return self
 
 
 class CappeInventoryAdjustment(BaseModel):
     id: UUID
     product_id: UUID
     option_id: Optional[UUID] = None
+    variant_id: Optional[UUID] = None
     delta: int
     balance_after: Optional[int] = None
     reason: str
@@ -194,6 +244,8 @@ class CappeOrderItem(BaseModel):
     restocked_quantity: int = 0
     # This line's share of a promo code's discount.
     promo_discount_cents: int = 0
+    variant_id: Optional[UUID] = None
+    sku: Optional[str] = None
 
 
 class CappeOrderRefund(BaseModel):

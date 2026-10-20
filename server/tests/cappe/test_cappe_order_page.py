@@ -46,6 +46,7 @@ from app.cappe.services import email as mail  # noqa: E402
 from app.cappe.services.common import order_page_url, site_public_origin  # noqa: E402
 from app.cappe.services.render import order_page as page_mod  # noqa: E402
 from app.cappe.services.stripe_connect import CappeStripeError  # noqa: E402
+from app.cappe.services.entitlements import ALL_FULFILLMENT  # noqa: E402
 
 SITE, ORDER = uuid4(), uuid4()
 TOKEN = "ab" * 16
@@ -183,7 +184,7 @@ def _wire_checkout(monkeypatch, *, requires_approval, fulfillment="digital", str
     from app.cappe.models.shop import CappeCartItem, CappeCheckoutRequest
     product = {"id": uuid4(), "name": "Mug", "price_cents": 1500, "currency": "USD", "inventory": None,
                "low_stock_threshold": None, "status": "active", "fulfillment": fulfillment,
-               "booking_type_id": None, "requires_approval": requires_approval, "intake_fields": "[]"}
+               "booking_type_id": None, "requires_approval": requires_approval, "intake_fields": "[]", "sku": None}
     conn = CheckoutConn(product)
     owner = {"plan": "business", "status": "active", "email": "owner@example.com", "name": "Owner",
              "stripe_account_id": "acct_1" if owner_cards else None, "stripe_charges_enabled": owner_cards}
@@ -191,9 +192,10 @@ def _wire_checkout(monkeypatch, *, requires_approval, fulfillment="digital", str
     monkeypatch.setattr(commerce, "get_connection", lambda: conn)
     monkeypatch.setattr(commerce, "fetch_active_discounts", AsyncMock(return_value=[]))
     monkeypatch.setattr(commerce, "fetch_option_groups", AsyncMock(return_value={}))
+    monkeypatch.setattr(commerce, "fetch_variants", AsyncMock(return_value={}))
     monkeypatch.setattr(commerce, "lock_stock_rows", AsyncMock())
     monkeypatch.setattr(commerce, "fetch_site_owner", AsyncMock(return_value=owner))
-    monkeypatch.setattr(commerce, "resolve_entitlements", AsyncMock(return_value=SimpleNamespace(platform_fee_bps=200, has=lambda _f: False)))
+    monkeypatch.setattr(commerce, "resolve_entitlements", AsyncMock(return_value=SimpleNamespace(platform_fee_bps=200, allowed_fulfillment=ALL_FULFILLMENT, has=lambda _f: False)))
     monkeypatch.setattr(commerce, "require_can_sell", lambda _: None)
     monkeypatch.setattr(commerce, "check_recipient_send_ok", AsyncMock(return_value=True))
     monkeypatch.setattr(commerce, "get_cappe_stripe", lambda: stripe)
@@ -293,7 +295,7 @@ def _wire_pay(monkeypatch, row, stripe=None):
     stripe = stripe or PayStripe()
     monkeypatch.setattr(commerce, "get_connection", lambda: Ctx(conn))
     monkeypatch.setattr(commerce, "get_cappe_stripe", lambda: stripe)
-    monkeypatch.setattr(commerce, "resolve_entitlements", AsyncMock(return_value=SimpleNamespace(platform_fee_bps=200, has=lambda _f: False)))
+    monkeypatch.setattr(commerce, "resolve_entitlements", AsyncMock(return_value=SimpleNamespace(platform_fee_bps=200, allowed_fulfillment=ALL_FULFILLMENT, has=lambda _f: False)))
     monkeypatch.setattr(commerce, "require_can_sell", lambda _: None)
     return conn, stripe
 
@@ -311,6 +313,17 @@ def test_pay_now_charges_what_the_order_says_and_returns_to_its_page(monkeypatch
     assert kw["shipping_option"] == {"label": "Shipping", "amount_cents": 600}
     assert kw["metadata"]["order_id"] == str(ORDER) and kw["application_fee_cents"] == 60
     assert "checkout_opened_at = NOW()" in conn.sql("SET stripe_session_id")[0][1]
+
+
+def test_pay_now_refuses_what_the_stores_plan_no_longer_sells(monkeypatch):
+    """The plan is asked again at payment: approval can come long after the order."""
+    _conn, stripe = _wire_pay(monkeypatch, _pay_row())
+    monkeypatch.setattr(commerce, "resolve_entitlements", AsyncMock(return_value=SimpleNamespace(
+        platform_fee_bps=200, allowed_fulfillment=frozenset({"digital", "service", "booking"}), has=lambda _f: False)))
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(commerce.pay_for_order(TOKEN))
+    assert exc.value.status_code == 409 and "can't take payment for Beans" in exc.value.detail
+    assert stripe.opened == []
 
 
 def test_pay_now_closes_the_previous_page_first(monkeypatch):
@@ -700,6 +713,7 @@ async def test_the_quote_says_whether_checkout_takes_cards(monkeypatch, cards):
     monkeypatch.setattr(public_shop, "_read_rate_limit", AsyncMock())
     monkeypatch.setattr(public_shop, "_published_site", AsyncMock(return_value={"id": SITE, "timezone": "UTC"}))
     monkeypatch.setattr(public_shop, "fetch_option_groups", AsyncMock(return_value={}))
+    monkeypatch.setattr(public_shop, "fetch_variants", AsyncMock(return_value={}))
     monkeypatch.setattr(public_shop, "fetch_active_discounts", AsyncMock(return_value=[]))
     out = await public_shop.quote("shop", CartQuoteRequest(items=[{"product_id": str(uuid4()), "quantity": 1}]), request=None)
     assert out["pays_by_card"] is cards

@@ -55,6 +55,7 @@ from app.cappe.routes.public import bookings as public_bookings  # noqa: E402
 from app.cappe.routes.public import shop as public_shop  # noqa: E402
 from app.cappe.services import cart, commerce, entitlements, recurring, shipping  # noqa: E402
 from app.cappe.services import stripe_connect  # noqa: E402
+from app.cappe.services.entitlements import ALL_FULFILLMENT  # noqa: E402
 
 SITE, ORDER = uuid4(), uuid4()
 TOKEN = "cd" * 16
@@ -68,8 +69,8 @@ CANADA = {"id": uuid4(), "name": "North America", "countries": ["CA", "MX"], "re
           "flat_cents": 1500, "free_threshold_cents": None, "charge_tax": False}
 WORLD = {"id": uuid4(), "name": "Everywhere else", "countries": [], "rest_of_world": True,
          "flat_cents": 3000, "free_threshold_cents": 20000, "charge_tax": False}
-ZONES_ON = SimpleNamespace(platform_fee_bps=200, has=lambda f: f == "shipping_zones")
-ZONES_OFF = SimpleNamespace(platform_fee_bps=200, has=lambda _f: False)
+ZONES_ON = SimpleNamespace(platform_fee_bps=200, allowed_fulfillment=ALL_FULFILLMENT, has=lambda f: f == "shipping_zones")
+ZONES_OFF = SimpleNamespace(platform_fee_bps=200, allowed_fulfillment=ALL_FULFILLMENT, has=lambda _f: False)
 
 
 class Tx:
@@ -339,6 +340,7 @@ def _wire_quote(monkeypatch, *, fulfillment="physical", ent=ZONES_ON, zones=(CAN
     monkeypatch.setattr(public_shop, "_read_rate_limit", AsyncMock())
     monkeypatch.setattr(public_shop, "_published_site", AsyncMock(return_value={"id": SITE, "timezone": "UTC"}))
     monkeypatch.setattr(public_shop, "fetch_option_groups", AsyncMock(return_value={}))
+    monkeypatch.setattr(public_shop, "fetch_variants", AsyncMock(return_value={}))
     monkeypatch.setattr(public_shop, "fetch_active_discounts", AsyncMock(return_value=[]))
     monkeypatch.setattr(public_shop, "resolve_entitlements", AsyncMock(return_value=ent))
     return conn, product
@@ -447,7 +449,7 @@ class OrderConn:
 def _wire_order(monkeypatch, *, fulfillment="physical", ent=ZONES_ON, cards=True, **body_kw):
     product = {"id": uuid4(), "name": "Mug", "price_cents": 2000, "currency": "USD", "inventory": None,
                "low_stock_threshold": None, "status": "active", "fulfillment": fulfillment,
-               "booking_type_id": None, "requires_approval": False, "intake_fields": "[]"}
+               "booking_type_id": None, "requires_approval": False, "intake_fields": "[]", "sku": None}
     conn = OrderConn(product)
     owner = {"plan": "business", "status": "active", "email": "owner@example.com", "name": "Owner",
              "stripe_account_id": "acct_1" if cards else None, "stripe_charges_enabled": cards}
@@ -455,6 +457,7 @@ def _wire_order(monkeypatch, *, fulfillment="physical", ent=ZONES_ON, cards=True
     monkeypatch.setattr(commerce, "get_connection", lambda: conn)
     monkeypatch.setattr(commerce, "fetch_active_discounts", AsyncMock(return_value=[]))
     monkeypatch.setattr(commerce, "fetch_option_groups", AsyncMock(return_value={}))
+    monkeypatch.setattr(commerce, "fetch_variants", AsyncMock(return_value={}))
     monkeypatch.setattr(commerce, "lock_stock_rows", AsyncMock())
     monkeypatch.setattr(commerce, "fetch_site_owner", AsyncMock(return_value=owner))
     monkeypatch.setattr(commerce, "resolve_entitlements", AsyncMock(return_value=ent))

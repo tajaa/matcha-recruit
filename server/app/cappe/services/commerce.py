@@ -34,11 +34,15 @@ from .email import (
 from .inventory import log_adjustment as _inv_log
 from .booking_lifecycle import booking_lock_key, lock_booking_resource
 from .inventory import lock_stock_rows, release_order_bookings, restock_order
-from .options import fetch_option_groups, validate_and_price_options
+from .options import fetch_option_groups
+from .variants import (
+    fetch_variants, match_variant, price_selection, uncovered_option_ids, variant_label,
+)
 from .entitlements import (
     fee_cents as entitlement_fee_cents,
     require_can_sell,
     resolve_entitlements,
+    sells,
 )
 from .stripe_connect import CONNECT_CHECKOUT_TTL_SECONDS, CappeStripeError, get_cappe_stripe
 from .cart import cart_totals
@@ -671,6 +675,9 @@ async def pay_for_order(token: str) -> dict:
             "FROM cappe_order_items WHERE order_id = $1 ORDER BY created_at",
             row["id"],
         )
+        blocked = next((it["title"] for it in items if not sells(owner_ent, it["fulfillment"])), None)
+        if blocked:
+            raise PayRefused(f"This store can't take payment for {blocked} right now. Contact the store.")
     if row["stripe_session_id"]:
         state = await get_cappe_stripe().expire_checkout_session(
             row["stripe_account_id"], row["stripe_session_id"],
@@ -760,6 +767,14 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
             opt_groups_by_product = await fetch_option_groups(
                 conn, [it.product_id for it in body.items]
             )
+            variants_by_product = await fetch_variants(conn, [it.product_id for it in body.items])
+            # The combination each line picked (services/variants.py), found
+            # before the locks so its row can be locked with the rest.
+            picked = [
+                match_variant(variants_by_product.get(it.product_id, []),
+                              opt_groups_by_product.get(it.product_id, []), it.selected_option_ids)
+                for it in body.items
+            ]
             # Take every stock lock up front, in id order. The per-line
             # `FOR UPDATE`s below then re-lock rows this transaction already
             # holds, so two carts listing the same products in opposite order
@@ -767,17 +782,48 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
             await lock_stock_rows(
                 conn, site_id=site["id"],
                 product_ids=[it.product_id for it in body.items],
-                option_ids=[oid for it in body.items for oid in (it.selected_option_ids or [])],
+                option_ids=[oid for it, v in zip(body.items, picked)
+                            for oid in uncovered_option_ids(it.selected_option_ids, v)],
+                variant_ids=[v["id"] for v in picked if v is not None],
             )
-            for item in body.items:
+            for item, picked_variant in zip(body.items, picked):
                 product = await conn.fetchrow(
                     "SELECT id, name, price_cents, currency, inventory, low_stock_threshold, "
-                    "status, fulfillment, booking_type_id, requires_approval, intake_fields "
+                    "status, fulfillment, booking_type_id, requires_approval, intake_fields, sku "
                     "FROM cappe_products WHERE id = $1 AND site_id = $2 FOR UPDATE",
                     item.product_id, site["id"],
                 )
                 if product is None or product["status"] != "active":
                     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Product unavailable")
+                # What the plan sells is checked on every line, not only when
+                # the product was made: a store on a plan that can't sell this
+                # kind of thing (it downgraded, or the lineup changed) doesn't.
+                if not sells(owner_ent, product["fulfillment"]):
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=f"{product['name']} isn't available right now.",
+                    )
+                groups = opt_groups_by_product.get(item.product_id, [])
+                # The combination, re-read under the lock taken above.
+                variant = None
+                if picked_variant is not None:
+                    vrow = await conn.fetchrow(
+                        "SELECT id, option_ids, sku, price_cents, inventory, status "
+                        "FROM cappe_product_variants WHERE id = $1 AND product_id = $2 FOR UPDATE",
+                        picked_variant["id"], item.product_id,
+                    )
+                    if vrow is None:
+                        raise HTTPException(
+                            status_code=status.HTTP_409_CONFLICT,
+                            detail=f"{product['name']} just changed. Reload the page and try again.",
+                        )
+                    variant = {**dict(vrow), "option_ids": list(vrow["option_ids"] or [])}
+                    if variant["status"] != "active":
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"That {product['name']} ({variant_label(groups, variant['option_ids'])}) "
+                                   "isn't available.",
+                        )
                 if order_currency is None:
                     order_currency = product["currency"]
                 elif product["currency"] != order_currency:
@@ -788,12 +834,15 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
                 f = product["fulfillment"]
                 qty = item.quantity
                 booking_id = None
-                intake = item.intake_answers or {}
+                # Questions are asked (and checked) only for services and
+                # bookings; answers sent with anything else are not kept.
+                intake = (item.intake_answers or {}) if f in ("service", "booking") else {}
                 # What this line takes off the shelf — written to the order line
                 # so a later restock credits exactly this and nothing else.
                 # None on non-physical lines: there is nothing to reverse.
                 stock_taken = False if f == "physical" else None
                 options_taken: list | None = [] if f == "physical" else None
+                variant_taken = None
 
                 if f == "physical":
                     thr = product["low_stock_threshold"]
@@ -815,8 +864,29 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
                         )
                         if crossed_low_stock(new_bal + qty, new_bal, thr):
                             low_stock_hits.append((product["name"], new_bal))
-                    # Per-variant stock: decrement each selected option that tracks it.
-                    for oid in (item.selected_option_ids or []):
+                    # A variant owns the stock of the options it is made of.
+                    if variant is not None and variant["inventory"] is not None:
+                        vinv = variant["inventory"]
+                        label = variant_label(groups, variant["option_ids"])
+                        if vinv < qty:
+                            raise HTTPException(
+                                status_code=status.HTTP_409_CONFLICT,
+                                detail=f"Insufficient stock for {product['name']} ({label})",
+                            )
+                        await conn.execute(
+                            "UPDATE cappe_product_variants SET inventory = $1, updated_at = NOW() WHERE id = $2",
+                            vinv - qty, variant["id"],
+                        )
+                        variant_taken = variant["id"]
+                        await _inv_log(
+                            conn, site_id=site["id"], product_id=item.product_id, variant_id=variant["id"],
+                            delta=-qty, balance_after=vinv - qty, reason="sale",
+                        )
+                        if crossed_low_stock(vinv, vinv - qty, thr):
+                            low_stock_hits.append((f"{product['name']} — {label}", vinv - qty))
+                    # Options outside the variant (or every option, without one):
+                    # decrement each selected option that tracks its own stock.
+                    for oid in uncovered_option_ids(item.selected_option_ids, variant):
                         opt = await conn.fetchrow(
                             "SELECT name, inventory FROM cappe_product_options "
                             "WHERE id = $1 AND site_id = $2 FOR UPDATE",
@@ -871,18 +941,20 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
                 # deltas into the unit price BEFORE the discount, snapshot the
                 # choice for the order line.
                 try:
-                    opt_delta, opt_snapshot = validate_and_price_options(
-                        opt_groups_by_product.get(item.product_id, []), item.selected_option_ids,
+                    base_price, opt_snapshot = price_selection(
+                        product["price_cents"], groups, item.selected_option_ids, variant,
                     )
                 except ValueError as exc:
                     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
                 dpct = best_discount_percent(
                     discounts, kind="product", target_id=str(item.product_id), on_date=today,
                 )
-                unit_price = apply_discount_cents(max(0, product["price_cents"] + opt_delta), dpct)
+                unit_price = apply_discount_cents(base_price, dpct)
                 line_rows.append(
                     (item.product_id, product["name"], unit_price, qty, f, intake, booking_id,
-                     opt_snapshot, item.selected_option_ids or [], stock_taken, options_taken)
+                     opt_snapshot, item.selected_option_ids or [], stock_taken, options_taken,
+                     variant["id"] if variant else None, (variant or {}).get("sku") or product["sku"],
+                     variant_taken)
                 )
                 on_sale.append(bool(dpct))
 
@@ -979,16 +1051,18 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
                 await conn.execute("UPDATE cappe_orders SET shopper_id=$1 WHERE id=$2 AND site_id=$3",
                                    shopper["id"], order["id"], site["id"])
             for (product_id, title, unit_price, qty, f, intake, booking_id, opt_snapshot, sel_ids,
-                 stock_taken, options_taken), share in zip(line_rows, shares):
+                 stock_taken, options_taken, variant_id, sku, variant_taken), share in zip(line_rows, shares):
                 await conn.execute(
                     """INSERT INTO cappe_order_items
                            (order_id, site_id, product_id, title, unit_price_cents, quantity,
                             fulfillment, intake_answers, selected_options, booking_id, selected_option_ids,
-                            stock_decremented, decremented_option_ids, promo_discount_cents)
-                       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::uuid[], $14)""",
+                            stock_decremented, decremented_option_ids, promo_discount_cents,
+                            variant_id, sku, decremented_variant_id)
+                       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::uuid[], $14,
+                               $15, $16, $17)""",
                     order["id"], site["id"], product_id, title, unit_price, qty,
                     f, json.dumps(intake), json.dumps(opt_snapshot), booking_id, sel_ids,
-                    stock_taken, options_taken, share,
+                    stock_taken, options_taken, share, variant_id, sku, variant_taken,
                 )
 
     # Low-stock alert to the owner (stock was decremented at order creation,

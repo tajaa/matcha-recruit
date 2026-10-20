@@ -5,13 +5,26 @@ function field(f){var req=f.required?' required':'';var l='<label class="cz-labe
 if(f.type==='textarea')return '<div>'+l+'<textarea class="cz-field" data-k="'+RT.esc(f.key)+'"'+req+'></textarea></div>';
 if(f.type==='select'){var o=(f.options||[]).map(function(x){return '<option>'+RT.esc(x)+'</option>';}).join('');return '<div>'+l+'<select class="cz-field" data-k="'+RT.esc(f.key)+'"'+req+'>'+o+'</select></div>';}
 var ty=(['email','number','tel','date'].indexOf(f.type)>=0)?f.type:'text';return '<div>'+l+'<input class="cz-field" type="'+ty+'" data-k="'+RT.esc(f.key)+'"'+req+' /></div>';}
+// A variant is one pick from each required pick-one group, with its own stock,
+// price and picture (server: services/variants.py). Without a row, a pick is
+// priced and stocked by its options, as before variants existed.
+function axes(p){return (p.option_groups||[]).filter(function(g){return g.select_type==='single'&&g.required;});}
+function variantFor(p,ids){var ax=axes(p);if(!ax.length||!(p.variants||[]).length)return null;var picks=[];
+for(var i=0;i<ax.length;i++){var hit=(ax[i].options||[]).filter(function(o){return ids.indexOf(String(o.id))>=0;});if(hit.length!==1)return null;picks.push(String(hit[0].id));}
+var key=picks.sort().join();for(var j=0;j<p.variants.length;j++){if((p.variants[j].option_ids||[]).map(String).sort().join()===key)return p.variants[j];}return null;}
+function live(p){return (p.variants||[]).filter(function(v){return v.status==='active';});}
+// An option is sold out when it has run out itself, or when every combination
+// it is part of has.
+function optGone(p,g,o){if(p.fulfillment!=='physical')return false;var vs=live(p).filter(function(v){return (v.option_ids||[]).map(String).indexOf(String(o.id))>=0;});
+if(vs.length&&axes(p).indexOf(g)>=0)return vs.every(function(v){return out(v.inventory);});return out(o.inventory);}
 function optsHtml(p){return (p.option_groups||[]).map(function(g){
 return '<div class="cz-opt-group" data-group="'+RT.esc(g.id)+'" data-single="'+(g.select_type==='single'?'1':'')+'" data-required="'+(g.required?'1':'')+'"><label class="cz-label">'+RT.esc(g.name)+(g.required?' *':'')+'</label><div class="cz-opts">'+
 (g.options||[]).map(function(o){var dc=o.price_delta_cents||0;var d=dc?(' '+(dc>0?'+':'−')+RT.money(Math.abs(dc),p.currency)):'';
-var gone=p.fulfillment==='physical'&&out(o.inventory);
+var gone=optGone(p,g,o);
 return '<button type="button" class="cz-opt" data-opt="'+RT.esc(o.id)+'" data-delta="'+dc+'"'+(gone?' disabled':'')+'>'+RT.esc(o.name)+d+(gone?' · sold out':'')+'</button>';}).join('')+'</div></div>';}).join('');}
 function out(v){return v!=null&&v<=0;}
-function soldOut(p){return p.fulfillment==='physical'&&out(p.inventory);}
+function soldOut(p){if(p.fulfillment!=='physical')return false;if(out(p.inventory))return true;
+var vs=live(p);return !!(vs.length&&axes(p).length&&vs.every(function(v){return out(v.inventory);}));}
 function stars(n){n=Math.round(n||0);var s='';for(var i=1;i<=5;i++)s+=(i<=n?'★':'☆');return s;}
 var REVIEWS=[],rseq=0;
 // One shared product-detail overlay (acts like a product page).
@@ -43,8 +56,9 @@ return '<div class="cz-pd__sub"><label class="cz-label" for="cz-every">Or subscr
 '<select class="cz-field" id="cz-every" data-every>'+iv.map(function(i){return '<option value="'+i+'">Every '+i+'</option>';}).join('')+'</select>'+
 '<button type="button" class="cz-btn cz-btn--ghost" data-sub>Subscribe</button></div></div>';}
 function openDetail(p){
-var iu=RT.url(p.image_url);
-ov.querySelector('[data-media]').innerHTML=iu?'<img src="'+RT.esc(iu)+'" alt="" />':'<div class="cz-pd__noimg"></div>';
+var shownImg;function showImg(u){if(u===shownImg)return;shownImg=u;
+ov.querySelector('[data-media]').innerHTML=u?'<img src="'+RT.esc(u)+'" alt="" />':'<div class="cz-pd__noimg"></div>';}
+showImg(RT.url(p.image_url));
 var priceHtml;if(p.discount_percent&&p.discounted_price_cents!=null){priceHtml='<span class="cz-pd__was">'+RT.money(p.price_cents,p.currency)+'</span>'+RT.money(p.discounted_price_cents,p.currency)+'<span class="cz-pd__off">'+p.discount_percent+'% off</span>';}else{priceHtml=p.price_cents?RT.money(p.price_cents,p.currency):'Free';}
 var booking=p.fulfillment==='booking';
 var info=ov.querySelector('[data-info]');
@@ -53,7 +67,7 @@ info.innerHTML=(p.category?'<div class="cz-eyebrow">'+RT.esc(p.category)+'</div>
 '<div class="cz-pd__price">'+priceHtml+'</div>'+
 (p.description?'<p class="cz-pd__desc">'+RT.esc(p.description)+'</p>':'')+
 
-optsHtml(p)+(p.intake_fields||[]).map(field).join('')+
+optsHtml(p)+((p.fulfillment==='service'||booking)?(p.intake_fields||[]).map(field).join(''):'')+
 (booking?'<div><label class="cz-label">Preferred time</label><input class="cz-field" type="datetime-local" data-when /></div>':'')+
 '<div class="cz-pd__buy"><label class="cz-label">Quantity</label><input class="cz-field cz-pd__qty" type="number" min="1" value="1"'+((p.fulfillment==='physical'&&p.inventory>0)?' max="'+p.inventory+'"':'')+' data-qty />'+
 (booking?'<input class="cz-field" type="email" data-email placeholder="Your email" /><input class="cz-field" type="text" data-name placeholder="Your name" />':'')+
@@ -62,7 +76,10 @@ subHtml(p);
 var sb=info.querySelector('[data-go]'),msg=info.querySelector('[data-status]'),gone=soldOut(p);
 // Local estimate only: same half-up integer math as the server's apply_discount_cents,
 // so it agrees to the cent. The authoritative figure is the server quote below.
-function unit(){var s=p.price_cents||0;info.querySelectorAll('.cz-opt--on').forEach(function(b){s+=parseInt(b.getAttribute('data-delta'),10)||0;});s=Math.max(0,s);if(p.discount_percent)s=Math.floor((s*(100-p.discount_percent)+50)/100);return s;}
+// A variant's own price replaces the product price and its options' changes.
+function unit(){var v=variantFor(p,chosen()),own=v&&v.price_cents!=null,cov=own?(v.option_ids||[]).map(String):[];
+var s=own?v.price_cents:(p.price_cents||0);info.querySelectorAll('.cz-opt--on').forEach(function(b){if(cov.indexOf(b.getAttribute('data-opt'))<0)s+=parseInt(b.getAttribute('data-delta'),10)||0;});
+s=Math.max(0,s);if(p.discount_percent)s=Math.floor((s*(100-p.discount_percent)+50)/100);return s;}
 function qn(){return Math.max(1,parseInt(info.querySelector('[data-qty]').value,10)||1);}
 function verb(){return booking?'Request — ':'Add to bag — ';}
 function chosen(){var ids=[];info.querySelectorAll('.cz-opt--on').forEach(function(b){ids.push(b.getAttribute('data-opt'));});return ids;}
@@ -80,7 +97,13 @@ if(q.shipping_cents>0)parts.push('Shipping '+RT.money(q.shipping_cents,cur));
 sb.textContent=verb()+RT.money(q.total_cents,cur);
 if(qbox)qbox.textContent=parts.length?('Subtotal '+RT.money(q.subtotal_cents,cur)+' · '+parts.join(' · ')):'';
 }).catch(function(){});}
-function refresh(){if(gone){sb.disabled=true;sb.textContent='Sold out';return;}sb.disabled=false;sb.textContent=verb()+RT.money(unit()*qn(),p.currency);if(qbox)qbox.textContent='';clearTimeout(qtimer);qtimer=setTimeout(quote,250);}
+function refresh(){var v=variantFor(p,chosen()),phys=p.fulfillment==='physical';
+showImg(RT.url((v&&v.image_url)||p.image_url));
+if(v&&v.status!=='active'){sb.disabled=true;sb.textContent='Unavailable';if(qbox)qbox.textContent='We don\u2019t sell that combination.';return;}
+if(gone||(phys&&v&&out(v.inventory))){sb.disabled=true;sb.textContent='Sold out';if(qbox)qbox.textContent='';return;}
+var qi=info.querySelector('[data-qty]'),cap=phys?((v&&v.inventory>0)?v.inventory:(p.inventory>0?p.inventory:null)):null;
+if(cap)qi.max=cap;else qi.removeAttribute('max');
+sb.disabled=false;sb.textContent=verb()+RT.money(unit()*qn(),p.currency);if(qbox)qbox.textContent='';clearTimeout(qtimer);qtimer=setTimeout(quote,250);}
 info.querySelectorAll('.cz-opt-group').forEach(function(g){var single=g.getAttribute('data-single')==='1';g.querySelectorAll('.cz-opt').forEach(function(o){o.addEventListener('click',function(){if(single){g.querySelectorAll('.cz-opt').forEach(function(x){x.classList.remove('cz-opt--on');});o.classList.add('cz-opt--on');}else o.classList.toggle('cz-opt--on');refresh();});});});
 info.querySelector('[data-qty]').addEventListener('input',refresh);refresh();
 sb.addEventListener('click',function(){

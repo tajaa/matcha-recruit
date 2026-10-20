@@ -215,6 +215,7 @@ async def test_subscription_checkout_uses_connected_customer_fee_and_app_callbac
     monkeypatch.setattr(recurring, "resolve_entitlements", lambda *_args, **_kwargs: _async(entitlement))
     monkeypatch.setattr(recurring, "require_can_sell", lambda _ent: None)
     monkeypatch.setattr(recurring, "fetch_option_groups", lambda *_args: _async({}))
+    monkeypatch.setattr(recurring, "fetch_variants", lambda *_args: _async({}))
     monkeypatch.setattr(recurring, "build_subscription_lines", lambda *_args: (
         [{"price_data": {"unit_amount": 1000}}],
         [{"product_id": str(product_id), "title": "Soap", "quantity": 1,
@@ -278,10 +279,12 @@ async def test_subscription_checkout_charges_the_promotional_quote_amount(monkey
     monkeypatch.setattr(public_shop, "_published_site", lambda *_args: _async(site))
     monkeypatch.setattr(public_shop, "_read_rate_limit", lambda *_args: _async(None))
     monkeypatch.setattr(public_shop, "fetch_option_groups", lambda *_args: _async({}))
+    monkeypatch.setattr(public_shop, "fetch_variants", lambda *_args: _async({}))
     monkeypatch.setattr(recurring, "get_connection", lambda: _Ctx(conn))
     monkeypatch.setattr(recurring, "resolve_entitlements", lambda *_args, **_kwargs: _async(entitlement))
     monkeypatch.setattr(recurring, "require_can_sell", lambda _ent: None)
     monkeypatch.setattr(recurring, "fetch_option_groups", lambda *_args: _async({}))
+    monkeypatch.setattr(recurring, "fetch_variants", lambda *_args: _async({}))
     monkeypatch.setattr(recurring, "connected_customer", lambda *_args: _async("cus_buyer"))
     stripe_calls = []
 
@@ -364,6 +367,7 @@ async def test_checkout_compensates_cancellation_that_wins_during_stripe_creatio
     monkeypatch.setattr(recurring, "resolve_entitlements", lambda *_args, **_kwargs: _async(entitlement))
     monkeypatch.setattr(recurring, "require_can_sell", lambda _ent: None)
     monkeypatch.setattr(recurring, "fetch_option_groups", lambda *_args: _async({}))
+    monkeypatch.setattr(recurring, "fetch_variants", lambda *_args: _async({}))
     monkeypatch.setattr(recurring, "connected_customer", lambda *_args: _async("cus_buyer"))
     expired = []
 
@@ -420,6 +424,7 @@ async def test_failed_checkout_compensation_keeps_session_retryable(monkeypatch)
     monkeypatch.setattr(recurring, "resolve_entitlements", lambda *_args, **_kwargs: _async(entitlement))
     monkeypatch.setattr(recurring, "require_can_sell", lambda _ent: None)
     monkeypatch.setattr(recurring, "fetch_option_groups", lambda *_args: _async({}))
+    monkeypatch.setattr(recurring, "fetch_variants", lambda *_args: _async({}))
     monkeypatch.setattr(recurring, "connected_customer", lambda *_args: _async("cus_buyer"))
 
     class _Stripe:

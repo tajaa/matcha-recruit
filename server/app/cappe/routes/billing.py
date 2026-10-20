@@ -19,6 +19,7 @@ from ..models.cappe import (
     CappeCatalog,
     CappePlanCheckoutRequest,
     CappeCheckoutResponse,
+    CappeEntitlementsView,
     CappePortalRequest,
     CappePortalResponse,
     CappeSubscription,
@@ -27,7 +28,7 @@ from ..models.cappe import (
 from ..services import billing as billing_svc
 from ..services.catalog import build_catalog
 from ..services.email import dashboard_url
-from ..services.entitlements import mailbox_quota
+from ..services.entitlements import mailbox_quota, resolve_entitlements
 from ..services.stripe_connect import CappeStripeError, get_cappe_stripe
 from .payments import _own_dashboard_url
 
@@ -54,6 +55,19 @@ async def get_catalog(account: CappeAccount = Depends(require_cappe_account)):
         plans, addons = await build_catalog(conn)
         intro_ok = await billing_svc.intro_eligible(conn, account.id)
     return CappeCatalog(plans=plans, addons=addons, intro_available=intro_ok)
+
+
+@router.get("/billing/entitlements", response_model=CappeEntitlementsView)
+async def get_entitlements(account: CappeAccount = Depends(require_cappe_account)):
+    """What the account's current plan allows — which kinds of products it may
+    sell, its fee and its features."""
+    async with get_connection() as conn:
+        ent = await resolve_entitlements(account.plan, conn=conn)
+    return CappeEntitlementsView(
+        plan_code=ent.plan_code, plan_name=ent.plan_name, can_sell=ent.can_sell,
+        platform_fee_bps=ent.platform_fee_bps, allowed_fulfillment=sorted(ent.allowed_fulfillment),
+        features=dict(ent.features),
+    )
 
 
 async def _subscription_response(account_id) -> CappeSubscription | None:

@@ -162,6 +162,33 @@ DB safety rules, test-data email domain rules, and deploy rules are in root `CLA
   serve them. Purchases keep `published_shopper_site`. Codes go only to `subscribes_here` emails;
   `/auth/start` stays 204 either way.
 
+## Variants and what a plan sells (2026-10, `services/variants.py`, `zzzzcappe50`)
+
+- **A variant is one option from each VARIANT GROUP — a required, single-pick group** (Size ×
+  Colour) — with its own stock, SKU, price and picture (`cappe_product_variants`, `option_ids`
+  sorted by uuid text). Optional groups and add-ons stay plain options. A selection with no variant
+  row behaves exactly as before variants existed.
+- **The stock rule every path follows** (checkout, `restock_order`, `retake_order_stock`, the bag's
+  availability): a matched variant owns the stock of the options it is made of — their own option
+  stock never moves for that sale; options outside it (an add-on) move theirs; the product's own
+  stock, when tracked, is the total. Use `variants.uncovered_option_ids`, never the raw selection.
+- **An order line records what it took**: `variant_id` (bought), `decremented_variant_id` (stock
+  taken, NULL = untracked), `sku` (sold under). A line with `stock_decremented` set is recorded; an
+  unrecorded one (a renewal line before `retake_order_stock`) has only `variant_id`, and its options
+  exclude the variant's (`inventory._line_option_ids` joins `variant_option_ids`).
+- **Lock order: products → variants → options**, each in id order (`inventory.lock_stock_rows`).
+- **A variant row's combination never changes.** `replace_variants` pairs by id only when the id
+  still names the same combination, else by combination; anything unclaimed is deleted, and
+  `prune_variants` drops variants of a deleted option. The editor sends `{group, option}` NAMES so
+  options created in the same save can carry variants; `variants` omitted = leave them, `[]` = none.
+- **Checkout asks the plan about every line** (`entitlements.sells`), not only the editor's create /
+  kind-change gate: a store whose plan stopped selling a kind (downgrade, lineup change) can't sell
+  it. The public listing and `/quote` drop those products. Since `zzzzcappe50` Free sells digital,
+  service and booking only; Creator sells all four. `GET /billing/entitlements` is what the
+  dashboard reads instead of hard-coding plan names.
+- **The Storefront app's required keys are a contract** — `tests/cappe/test_cappe_variants.py`
+  reads them out of `platforms/ios/Storefront/Sources/Models.swift`; add fields, never rename or null them.
+
 ## Site templates (`services/site_templates/`)
 
 - **The catalog is code, not the `cappe_templates` table.** One `SiteTemplate` per entry, one module

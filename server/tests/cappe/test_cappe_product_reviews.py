@@ -423,8 +423,8 @@ def test_the_migration_chains():
 def test_the_product_list_carries_each_products_rating(monkeypatch):
     from app.cappe.routes.public import shop as public_shop
     a, b = uuid4(), uuid4()
-    rows = [{"id": a, "subscription_intervals": [], "price_cents": 1000, "intake_fields": "[]"},
-            {"id": b, "subscription_intervals": [], "price_cents": 500, "intake_fields": "[]"}]
+    rows = [{"id": a, "subscription_intervals": [], "price_cents": 1000, "intake_fields": "[]", "fulfillment": "physical"},
+            {"id": b, "subscription_intervals": [], "price_cents": 500, "intake_fields": "[]", "fulfillment": "physical"}]
 
     async def _fetch(sql, *args):
         if "FROM cappe_reviews" in sql:
@@ -439,6 +439,7 @@ def test_the_product_list_carries_each_products_rating(monkeypatch):
     monkeypatch.setattr(public_shop, "_published_site", AsyncMock(return_value={"id": SITE, "timezone": "UTC"}))
     monkeypatch.setattr(public_shop, "fetch_active_discounts", AsyncMock(return_value=[]))
     monkeypatch.setattr(public_shop, "fetch_option_groups", AsyncMock(return_value={}))
+    monkeypatch.setattr(public_shop, "fetch_variants", AsyncMock(return_value={}))
     monkeypatch.setattr(public_shop, "site_today", lambda *_a: None)
     rated, unrated = asyncio.run(public_shop.public_products("shop", _request()))
     assert (rated["rating_count"], rated["rating_avg"]) == (3, 4.7)
