@@ -426,6 +426,8 @@ export type CappeProductOptionInput = {
   expected_inventory?: number | null
 }
 
+export type CappeProductImage = { id: string; url: string; alt: string | null; sort_order: number }
+
 // One combination of a product's required pick-one groups (Size × Colour) with
 // its own stock, SKU, price and picture (server: services/variants.py).
 // `price_cents` null = the product price plus the options' changes;
@@ -497,6 +499,14 @@ export type CappeProduct = {
   category: string | null
   option_groups: CappeProductOptionGroup[]
   variants?: CappeProductVariant[]
+  /** The product's address on its store, /shop/<slug>. */
+  slug?: string | null
+  brand?: string | null
+  /** Barcode: 8, 12, 13 or 14 digits (EAN/UPC/GTIN). */
+  gtin?: string | null
+  /** Pictures in order; the first is the cover `image_url` mirrors. */
+  images?: CappeProductImage[]
+  url?: string | null
   created_at: string
   updated_at: string
   discount_percent?: number
@@ -521,6 +531,10 @@ export type CappeProductInput = {
   category?: string | null
   option_groups?: CappeProductOptionGroupInput[]
   variants?: CappeProductVariantInput[]
+  slug?: string
+  brand?: string | null
+  gtin?: string | null
+  images?: { url: string; alt: string | null }[]
 }
 
 export type CappeOrderItem = {

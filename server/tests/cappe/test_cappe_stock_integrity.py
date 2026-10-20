@@ -316,8 +316,8 @@ def _wire_update(monkeypatch, *, shelf):
     conn = SqlConn([
         ("SELECT * FROM cappe_products", _existing()),
         ("SELECT inventory FROM cappe_products", None if shelf is ... else {"inventory": shelf}),
-        ("UPDATE cappe_products SET", {"id": PRODUCT}),
-        ("SELECT subscription_intervals", {"id": PRODUCT}),
+        ("UPDATE cappe_products SET", {"id": PRODUCT, "name": "Mug", "slug": "mug"}),
+        ("SELECT subscription_intervals", {"id": PRODUCT, "name": "Mug", "slug": "mug"}),
     ])
     validated = AsyncMock()
     monkeypatch.setattr(shop_mod, "get_connection", lambda: Ctx(conn))
@@ -400,7 +400,8 @@ def test_resending_unchanged_subscription_settings_is_not_a_change(monkeypatch, 
 
 def test_creating_a_tracked_product_logs_its_opening_stock(monkeypatch):
     from app.cappe.models.shop import CappeProductCreate
-    conn = SqlConn([("INSERT INTO cappe_products", {"id": PRODUCT})])
+    conn = SqlConn([("INSERT INTO cappe_products", {"id": PRODUCT}),
+                    ("SELECT subscription_intervals", {"id": PRODUCT, "slug": "mug"})])
     monkeypatch.setattr(shop_mod, "get_connection", lambda: Ctx(conn))
     monkeypatch.setattr(shop_mod, "get_owned_site", AsyncMock())
     monkeypatch.setattr(shop_mod, "require_fulfillment", lambda *_a: None)

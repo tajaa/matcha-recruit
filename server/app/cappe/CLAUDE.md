@@ -189,6 +189,30 @@ DB safety rules, test-data email domain rules, and deploy rules are in root `CLA
 - **The Storefront app's required keys are a contract** — `tests/cappe/test_cappe_variants.py`
   reads them out of `platforms/ios/Storefront/Sources/Models.swift`; add fields, never rename or null them.
 
+## Product pages and the store's own SEO (2026-10, `services/product_pages.py`, `zzzzcappe51`)
+
+- **A product lives at `/shop/<slug>` on its store** (`routes/render.py:product_page`,
+  `services/render/product_page.py`): server-rendered name, price, pictures, description, its own
+  title/canonical/Open Graph (`render_site_html(seo=…)` → `_head_seo` override) and Product
+  JSON-LD (`product_pages.product_ld`, Offer or AggregateOffer for differently priced variants).
+  store.js then fills the same panel in place (`data-product`). Active products the plan sells
+  only. `/shop` is the linked catalog crawlers read.
+- **The slug is made from the name once and survives renames** (`assign_slug`); only an owner's
+  explicit `slug` changes it, and a taken one is a 409, never a quiet `-2`. Every insert path must
+  call `assign_slug` (owner create, Merlin `create_product`); a NULL slug simply has no page.
+- **Pictures are `cappe_product_images` in order; `cappe_products.image_url` mirrors the first**
+  for everything that reads one column (both apps, receipts, directory). `images` sent →
+  `replace_images` decides the cover; only `image_url` sent (the apps, Merlin) → `set_cover`.
+- **JSON-LD escapes every `<`, `>`, `&`** (`\u003c`…), not just `</`: owner text with `<!--` +
+  `<script` would otherwise stop our real `</script>` from closing the element.
+- **Product pages, the catalog and the sitemap are cached per site** (`cappe:render:{site}:…`);
+  every product write calls `invalidate_site_render_cache`. Sales don't, so a page's stock and
+  availability can lag by the 300 s TTL.
+- **A store answers its own `/robots.txt` and `/sitemap.xml`** (`render.tenant_seo`). Matcha's SEO
+  routes (`core/routes/content/sitemap.py`) are mounted first and used to give every store
+  Matcha's files; they now ask `register_host_seo` hooks first, and `main.py` registers Cappe's.
+  A store that isn't published answers `Disallow: /`.
+
 ## Site templates (`services/site_templates/`)
 
 - **The catalog is code, not the `cappe_templates` table.** One `SiteTemplate` per entry, one module

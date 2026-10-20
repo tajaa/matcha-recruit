@@ -19,17 +19,22 @@ import re
 from html import escape
 
 from fastapi import APIRouter, HTTPException, Request, status
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
 
 from ...core.services.redis_cache import cache_get, cache_set, check_rate_limit, client_ip, get_redis_cache
 from ...database import get_connection
 from ..models._validators import is_app_url_scheme
 from ..services.booking_suggestion_access import canonical_suggestion_host
 from ..services.commerce import release_abandoned_checkout
-from ..services.common import normalize_host_header
+from ..services.common import normalize_host_header, site_public_origin
+from ..services.discounts import apply_discount_cents, best_discount_percent, fetch_active_discounts, site_today
+from ..services.entitlements import resolve_entitlements, sells
+from ..services.product_pages import SLUG_RE, fetch_images, product_path
 from ..services.render import render_site_html
 from ..services.render.account_page import render_account_page
 from ..services.render.order_page import render_order_page
+from ..services.render.product_page import render_catalog_page, render_product_page
+from ..services.variants import fetch_variants
 from ..services.render_cache import invalidate_site_render_cache
 from ..services.stripe_connect import CappeStripeError
 from ._shared import RESERVED_SUBDOMAINS, loads, loads_list
@@ -264,18 +269,17 @@ async def is_registered_custom_domain(host: str | None) -> bool:
 async def _resolve_published_site(conn, host: str | None):
     """Host header → published site row, by subdomain or custom domain."""
     sub = subdomain_from_host(host)
+    cols = "id, name, slug, subdomain, custom_domain, theme_config, meta_config, timezone, account_id"
     if sub:
         return await conn.fetchrow(
-            "SELECT id, name, slug, subdomain, custom_domain, theme_config, meta_config FROM cappe_sites "
-            "WHERE subdomain = $1 AND status = 'published'",
+            f"SELECT {cols} FROM cappe_sites WHERE subdomain = $1 AND status = 'published'",
             sub,
         )
     candidates = _custom_domain_candidates(host)
     if not candidates:
         return None
     return await conn.fetchrow(
-        "SELECT id, name, slug, subdomain, custom_domain, theme_config, meta_config FROM cappe_sites "
-        "WHERE custom_domain = ANY($1::text[]) AND status = 'published'",
+        f"SELECT {cols} FROM cappe_sites WHERE custom_domain = ANY($1::text[]) AND status = 'published'",
         candidates,
     )
 
@@ -379,6 +383,201 @@ async def render_home(request: Request):
 @router.get("/p/{page_slug}", response_class=HTMLResponse)
 async def render_page(page_slug: str, request: Request):
     return await _render(request, page_slug)
+
+
+# --- Product pages, the catalog, and the store's own sitemap/robots ----------
+
+def _is_tenant_host(host: str | None) -> bool:
+    return subdomain_from_host(host) is not None or bool(_custom_domain_candidates(host))
+
+
+async def _nav(conn, site_id) -> list[dict]:
+    rows = await conn.fetch(
+        "SELECT title, slug FROM cappe_pages WHERE site_id = $1 AND status = 'published' "
+        "ORDER BY sort_order, created_at",
+        site_id,
+    )
+    return [{"slug": r["slug"], "title": r["title"]} for r in rows]
+
+
+async def _plan_sells(conn, site):
+    """What the store's plan sells (services/entitlements.py `sells`)."""
+    plan = await conn.fetchval("SELECT plan FROM cappe_accounts WHERE id = $1", site["account_id"])
+    return await resolve_entitlements(plan, conn=conn)
+
+
+_PAGE_COLS = ("id, name, description, price_cents, currency, image_url, sku, inventory, status, fulfillment, "
+              "category, slug, brand, gtin, updated_at")
+
+
+async def _back_link(conn, site_id, nav: list[dict]) -> tuple[str, str]:
+    """Where "back" goes from a product: the store's own page with a shop on it,
+    else the catalog."""
+    page = await conn.fetchrow(
+        "SELECT slug, title FROM cappe_pages WHERE site_id = $1 AND status = 'published' "
+        """AND jsonb_path_exists(content, '$.blocks[*] ? (@.type == "store")') """
+        "ORDER BY sort_order, created_at LIMIT 1",
+        site_id,
+    )
+    if page is None:
+        return "/shop", "All products"
+    home = nav[0]["slug"] if nav else "home"
+    return ("/" if page["slug"] in ("home", home) else f"/p/{page['slug']}"), page["title"]
+
+
+@router.get("/shop/{product_slug}", response_class=HTMLResponse)
+async def product_page(product_slug: str, request: Request):
+    """A product's own page (services/render/product_page.py). Active products
+    the store's plan sells only; cached like any page, and dropped from the
+    cache by every product write."""
+    host = request.headers.get("host")
+    if not _is_tenant_host(host):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    if len(product_slug) > 80 or not SLUG_RE.match(product_slug):
+        return _not_found_html("Product not found")
+    redis = get_redis_cache()
+    async with get_connection() as conn:
+        site = await _resolve_published_site(conn, host)
+        if site is None:
+            return _not_found_html("Site not found")
+        cache_key = f"cappe:render:{site['id']}:__product__:{product_slug}"
+        if redis:
+            cached = await cache_get(redis, cache_key)
+            if isinstance(cached, str):
+                return HTMLResponse(cached, headers=tenant_security_headers())
+        nav = await _nav(conn, site["id"])
+        if not nav:
+            return _not_found_html("Site not found")
+        product = await conn.fetchrow(
+            f"SELECT {_PAGE_COLS} FROM cappe_products WHERE site_id = $1 AND slug = $2 AND status = 'active'",
+            site["id"], product_slug,
+        )
+        if product is None or not sells(await _plan_sells(conn, site), product["fulfillment"]):
+            return _not_found_html("Product not found")
+        images = (await fetch_images(conn, [product["id"]])).get(product["id"], [])
+        variants = (await fetch_variants(conn, [product["id"]])).get(product["id"], [])
+        discounts = await fetch_active_discounts(conn, site["id"])
+        today = site_today(await conn.fetchval("SELECT NOW()"), site["timezone"])
+        rating = await conn.fetchrow(
+            "SELECT COUNT(*) AS count, ROUND(AVG(rating)::numeric, 1)::float AS avg FROM cappe_reviews "
+            "WHERE site_id = $1 AND product_id = $2 AND status = 'approved' AND rating IS NOT NULL",
+            site["id"], product["id"],
+        )
+        back_href, back_label = await _back_link(conn, site["id"], nav)
+    pct = best_discount_percent(discounts, kind="product", target_id=str(product["id"]), on_date=today)
+    html = render_product_page(
+        _site_dict(site), nav, dict(product), images=images, variants=variants,
+        price_cents=apply_discount_cents(product["price_cents"], pct) if pct else product["price_cents"],
+        discount_percent=pct, origin=site_public_origin(site) or f"https://{_norm_host(host)}",
+        rating=dict(rating) if rating else None, back_href=back_href, back_label=back_label,
+    )
+    if redis:
+        await cache_set(redis, cache_key, html, ttl=_RENDER_TTL)
+    return HTMLResponse(html, headers=tenant_security_headers())
+
+
+async def _sellable_products(conn, site) -> list:
+    ent = await _plan_sells(conn, site)
+    rows = await conn.fetch(
+        "SELECT id, name, slug, fulfillment, updated_at FROM cappe_products "
+        "WHERE site_id = $1 AND status = 'active' AND slug IS NOT NULL ORDER BY sort_order, created_at",
+        site["id"],
+    )
+    return [r for r in rows if sells(ent, r["fulfillment"])]
+
+
+@router.get("/shop", response_class=HTMLResponse)
+async def catalog_page(request: Request):
+    """Every product the store sells, linked — the page crawlers read them from."""
+    host = request.headers.get("host")
+    if not _is_tenant_host(host):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    redis = get_redis_cache()
+    async with get_connection() as conn:
+        site = await _resolve_published_site(conn, host)
+        if site is None:
+            return _not_found_html("Site not found")
+        cache_key = f"cappe:render:{site['id']}:__catalog__"
+        if redis:
+            cached = await cache_get(redis, cache_key)
+            if isinstance(cached, str):
+                return HTMLResponse(cached, headers=tenant_security_headers())
+        nav = await _nav(conn, site["id"])
+        if not nav:
+            return _not_found_html("Site not found")
+        products = await _sellable_products(conn, site)
+    html = render_catalog_page(_site_dict(site), nav, [dict(r) for r in products],
+                               origin=site_public_origin(site) or f"https://{_norm_host(host)}")
+    if redis:
+        await cache_set(redis, cache_key, html, ttl=_RENDER_TTL)
+    return HTMLResponse(html, headers=tenant_security_headers())
+
+
+def _robots(origin: str) -> str:
+    return (
+        "User-agent: *\n"
+        "Allow: /\n"
+        # Order pages and the account page are a buyer's own, by token.
+        "Disallow: /order/\n"
+        "Disallow: /account\n"
+        "Disallow: /__cappe/\n"
+        f"Sitemap: {origin}/sitemap.xml\n"
+    )
+
+
+def _sitemap_xml(urls: list[tuple[str, str | None]]) -> str:
+    rows = "".join(
+        f"  <url><loc>{escape(loc)}</loc>{f'<lastmod>{lastmod}</lastmod>' if lastmod else ''}</url>\n"
+        for loc, lastmod in urls
+    )
+    return ('<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' + rows + "</urlset>\n")
+
+
+async def tenant_seo(request: Request, kind: str):
+    """`/robots.txt` and `/sitemap.xml` for a store's own host, or None for
+    any other host. Registered with Matcha's SEO routes by main.py: those are
+    mounted first and used to answer every store with Matcha's own files —
+    a sitemap of hey-matcha.com pages and a robots.txt pointing at it."""
+    host = request.headers.get("host")
+    if not _is_tenant_host(host):
+        return None
+    async with get_connection() as conn:
+        site = await _resolve_published_site(conn, host)
+        if site is None:
+            if kind == "robots":
+                # Not live: nothing here to index yet.
+                return PlainTextResponse("User-agent: *\nDisallow: /\n")
+            return Response(status_code=status.HTTP_404_NOT_FOUND)
+        origin = site_public_origin(site) or f"https://{_norm_host(host)}"
+        if kind == "robots":
+            return PlainTextResponse(_robots(origin), headers={"Cache-Control": "public, max-age=3600"})
+        redis = get_redis_cache()
+        cache_key = f"cappe:render:{site['id']}:__sitemap__"
+        if redis:
+            cached = await cache_get(redis, cache_key)
+            if isinstance(cached, str):
+                return Response(cached, media_type="application/xml", headers={"Cache-Control": "public, max-age=3600"})
+        pages = await conn.fetch(
+            "SELECT slug, updated_at FROM cappe_pages WHERE site_id = $1 AND status = 'published' "
+            "ORDER BY sort_order, created_at",
+            site["id"],
+        )
+        products = await _sellable_products(conn, site)
+
+    def day(ts):
+        return ts.strftime("%Y-%m-%d") if ts else None
+
+    home = pages[0]["slug"] if pages else "home"
+    urls = [(f"{origin}/" if r["slug"] in ("home", home) else f"{origin}/p/{r['slug']}", day(r["updated_at"]))
+            for r in pages]
+    if products:
+        urls.append((f"{origin}/shop", day(max(r["updated_at"] for r in products))))
+        urls += [(f"{origin}{product_path(r['slug'])}", day(r["updated_at"])) for r in products]
+    xml = _sitemap_xml(urls)
+    if redis:
+        await cache_set(redis, cache_key, xml, ttl=_RENDER_TTL)
+    return Response(xml, media_type="application/xml", headers={"Cache-Control": "public, max-age=3600"})
 
 
 async def _resolve_site_any_status(conn, host: str | None):

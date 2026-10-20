@@ -677,6 +677,10 @@ app.include_router(sitemap_router, tags=["seo"])
 # so /health, /sitemap.xml, /api/* etc. are unaffected.
 from .cappe.routes.render import router as cappe_render_router
 app.include_router(cappe_render_router, tags=["cappe-render"])
+# A store's own /sitemap.xml and /robots.txt (the SEO routes above match first).
+from .core.routes.content.sitemap import register_host_seo
+from .cappe.routes.render import tenant_seo as cappe_tenant_seo
+register_host_seo(cappe_tenant_seo)
 
 
 # Serve locally-uploaded files (logos, resumes, etc.) when S3 is not configured

@@ -625,7 +625,7 @@ def test_a_product_is_priced_in_its_stores_currency():
     create_src = inspect.getsource(shop_routes.create_product)
     assert "COALESCE((SELECT currency FROM cappe_sites WHERE id = $1), $5)" in create_src
     update_src = inspect.getsource(shop_routes.update_product)
-    assert '"price_cents", "image_url"' in update_src and '"currency", "image_url"' not in update_src
+    assert '"name", "description", "price_cents",' in update_src and '"currency", "image_url"' not in update_src
     from app.cappe.services.merlin import setup_actions
     assert "SELECT currency FROM cappe_sites WHERE id = $1" in inspect.getsource(setup_actions)
 

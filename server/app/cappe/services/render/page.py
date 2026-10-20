@@ -22,23 +22,32 @@ _SOCIAL_LABELS = [
 ]
 
 
-def _head_seo(site: dict, page: dict, meta: dict) -> tuple[str, str]:
+def _head_seo(site: dict, page: dict, meta: dict, override: dict | None = None) -> tuple[str, str]:
     """Return (title_text, extra_head_html) from meta_config.seo + favicon_url.
-    Falls back to "{site} — {page}" when no SEO title is set."""
+    Falls back to "{site} — {page}" when no SEO title is set.
+
+    `override` is a page that describes one thing of its own (a product):
+    {title, description, image, type, url}. Its values win over the site's,
+    so every product doesn't share the store's title and picture."""
     seo = meta.get("seo") if isinstance(meta.get("seo"), dict) else {}
-    title = (seo.get("title") or "").strip() or f"{site.get('name')} — {page.get('title')}"
-    desc = (seo.get("description") or "").strip()
-    og_img = _safe_image(seo.get("og_image"))
+    o = override or {}
+    title = (o.get("title") or (seo.get("title") or "").strip()
+             or f"{site.get('name')} — {page.get('title')}")
+    desc = (o.get("description") or seo.get("description") or "").strip()
+    og_img = _safe_image(o.get("image")) or _safe_image(seo.get("og_image"))
     favicon = _safe_image(meta.get("favicon_url"))
     parts = []
     if desc:
         parts.append(f'<meta name="description" content="{_esc(desc)}" />')
-    parts.append(f'<meta property="og:title" content="{_esc((seo.get("title") or site.get("name")))}" />')
+    parts.append(f'<meta property="og:title" content="{_esc(o.get("title") or seo.get("title") or site.get("name"))}" />')
     if desc:
         parts.append(f'<meta property="og:description" content="{_esc(desc)}" />')
     if og_img:
         parts.append(f'<meta property="og:image" content="{_esc(og_img)}" />')
-    parts.append('<meta property="og:type" content="website" />')
+    parts.append(f'<meta property="og:type" content="{_esc(o.get("type") or "website")}" />')
+    if o.get("url"):
+        parts.append(f'<meta property="og:url" content="{_esc(o["url"])}" />')
+        parts.append(f'<link rel="canonical" href="{_esc(o["url"])}" />')
     if favicon:
         parts.append(f'<link rel="icon" href="{_esc(favicon)}" />')
 
@@ -200,10 +209,12 @@ def _promos(meta: dict, t: dict) -> tuple[str, str, str]:
 
 def render_site_html(site: dict, page: dict, nav_pages: list[dict], preview: bool = False, editable: bool = False,
                      locations: list[dict] | None = None, block_anchors: bool = False,
-                     body_override: str | None = None, extra_head: str = "", extra_body_end: str = "") -> str:
+                     body_override: str | None = None, extra_head: str = "", extra_body_end: str = "",
+                     seo: dict | None = None) -> str:
     """Render a page in the site's theme. `body_override` replaces the page's
     blocks with server-built HTML (the order page) — already escaped by its
-    caller; `extra_head` / `extra_body_end` add our own tags around it."""
+    caller; `extra_head` / `extra_body_end` add our own tags around it; `seo`
+    is the page's own title/description/picture (`_head_seo`)."""
     t = _tokens(site.get("theme_config"))
     c = t["colors"]
     slug = site.get("slug") or ""
@@ -297,7 +308,7 @@ def render_site_html(site: dict, page: dict, nav_pages: list[dict], preview: boo
     _anim_cls = f"cz-h-{_hero_anim}" if _hero_anim in ("rise", "shimmer") else ""
 
     meta_dict = meta if isinstance(meta, dict) else {}
-    head_title, head_seo = _head_seo(site, page, meta_dict)
+    head_title, head_seo = _head_seo(site, page, meta_dict, seo)
     needs_motion = t["premium"] or any(_block_has_motion(b) for b in blocks)
     body_cls = " ".join(filter(None, [
         "cz-premium" if t["premium"] else "",

@@ -16,6 +16,7 @@ What each block pins:
 Run from server/:  ./venv/bin/python -m pytest tests/cappe/test_cappe_product_reviews.py -q
 """
 import asyncio
+import inspect
 import os
 import pathlib
 from types import SimpleNamespace
@@ -399,7 +400,12 @@ def test_the_scripts_send_the_order_token_honour_the_setting_and_trap_bots():
     store = (ASSETS / "store.js").read_text()
     assert "RT.get('/reviews?product_id='" in store and "Verified purchase" in store
     # Product structured data, with `<` escaped so a product name can't close the script.
-    assert "'@type':'Product'" in store and "aggregateRating" in store and "replace(/</g,'\\\\u003c')" in store
+    # A list page links its products; each product page carries its own
+    # Product data, rating included (services/product_pages.py).
+    assert "'@type':'ItemList'" in store and "url:location.origin+p.url" in store
+    assert "replace(/</g,'\\\\u003c')" in store
+    from app.cappe.services import product_pages
+    assert '"aggregateRating"' in inspect.getsource(product_pages.product_ld)
 
 
 def test_the_product_panel_shows_its_own_reviews_and_rating():
@@ -423,8 +429,8 @@ def test_the_migration_chains():
 def test_the_product_list_carries_each_products_rating(monkeypatch):
     from app.cappe.routes.public import shop as public_shop
     a, b = uuid4(), uuid4()
-    rows = [{"id": a, "subscription_intervals": [], "price_cents": 1000, "intake_fields": "[]", "fulfillment": "physical"},
-            {"id": b, "subscription_intervals": [], "price_cents": 500, "intake_fields": "[]", "fulfillment": "physical"}]
+    rows = [{"id": a, "subscription_intervals": [], "price_cents": 1000, "intake_fields": "[]", "fulfillment": "physical", "slug": "a"},
+            {"id": b, "subscription_intervals": [], "price_cents": 500, "intake_fields": "[]", "fulfillment": "physical", "slug": "b"}]
 
     async def _fetch(sql, *args):
         if "FROM cappe_reviews" in sql:
@@ -440,6 +446,7 @@ def test_the_product_list_carries_each_products_rating(monkeypatch):
     monkeypatch.setattr(public_shop, "fetch_active_discounts", AsyncMock(return_value=[]))
     monkeypatch.setattr(public_shop, "fetch_option_groups", AsyncMock(return_value={}))
     monkeypatch.setattr(public_shop, "fetch_variants", AsyncMock(return_value={}))
+    monkeypatch.setattr(public_shop, "fetch_images", AsyncMock(return_value={}))
     monkeypatch.setattr(public_shop, "site_today", lambda *_a: None)
     rated, unrated = asyncio.run(public_shop.public_products("shop", _request()))
     assert (rated["rating_count"], rated["rating_avg"]) == (3, 4.7)

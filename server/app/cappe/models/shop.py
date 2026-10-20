@@ -100,6 +100,56 @@ class CappeProductVariant(BaseModel):
     sort_order: int = 0
 
 
+# A product's pictures, in order; the first is the cover (`image_url` mirrors it).
+class CappeProductImageInput(BaseModel):
+    url: str = Field(min_length=1, max_length=2000)
+    alt: Optional[str] = Field(default=None, max_length=250)
+
+    @field_validator("url")
+    @classmethod
+    def our_kind_of_url(cls, value):
+        value = value.strip()
+        # https, or a path on this server (local uploads, template placeholders).
+        if not (value.lower().startswith("https://") or (value.startswith("/") and not value.startswith("//"))):
+            raise ValueError("A picture must be an https:// link or an uploaded file")
+        if any(c in value for c in "\'\"<>\n\r"):
+            raise ValueError("That picture link has characters a link can't have")
+        return value
+
+
+class CappeProductImage(BaseModel):
+    id: UUID
+    url: str
+    alt: Optional[str] = None
+    sort_order: int = 0
+
+
+def _clean_slug(value):
+    from ..services.product_pages import SLUG_RE
+    if value is None:
+        return value
+    value = value.strip().lower()
+    if not SLUG_RE.match(value) or len(value) > 72:
+        raise ValueError("A web address is lowercase letters and numbers, joined by single hyphens (72 at most)")
+    return value
+
+
+def _clean_gtin(value):
+    from ..services.product_pages import gtin_valid
+    if value is None:
+        return value
+    value = re_sub_spaces(value)
+    if not value:
+        return None
+    if not gtin_valid(value):
+        raise ValueError("That barcode isn't a valid GTIN (8, 12, 13 or 14 digits, the last one the check digit)")
+    return value
+
+
+def re_sub_spaces(value: str) -> str:
+    return "".join(value.split()).replace("-", "")
+
+
 class CappeProductCreate(BaseModel):
     subscription_intervals: list[Literal["week", "month"]] = Field(default_factory=list, max_length=2)
     subscription_discount_bps: int = Field(default=0, ge=0, le=5000)
@@ -126,6 +176,14 @@ class CappeProductCreate(BaseModel):
     option_groups: Optional[list[CappeProductOptionGroupInput]] = None
     # None = leave variants untouched; [] = remove them all. At most 100.
     variants: Optional[list[CappeProductVariantInput]] = Field(default=None, max_length=100)
+    # The product's address, /shop/<slug>. Omitted = made from the name.
+    slug: Optional[str] = Field(default=None, max_length=80)
+    brand: Optional[str] = Field(default=None, max_length=120)
+    gtin: Optional[str] = Field(default=None, max_length=20)
+    # The pictures in order. Omitted = `image_url` alone, as before.
+    images: Optional[list[CappeProductImageInput]] = Field(default=None, max_length=20)
+    _slug = field_validator("slug")(_clean_slug)
+    _gtin = field_validator("gtin")(_clean_gtin)
 
     @field_validator("subscription_intervals")
     @classmethod
@@ -157,6 +215,12 @@ class CappeProductUpdate(BaseModel):
     category: Optional[str] = Field(default=None, max_length=120)
     option_groups: Optional[list[CappeProductOptionGroupInput]] = None
     variants: Optional[list[CappeProductVariantInput]] = Field(default=None, max_length=100)
+    slug: Optional[str] = Field(default=None, max_length=80)
+    brand: Optional[str] = Field(default=None, max_length=120)
+    gtin: Optional[str] = Field(default=None, max_length=20)
+    images: Optional[list[CappeProductImageInput]] = Field(default=None, max_length=20)
+    _slug = field_validator("slug")(_clean_slug)
+    _gtin = field_validator("gtin")(_clean_gtin)
     # The stock the editor was showing when `inventory` was typed. Sent with a
     # stock change so a sale made in between is a 409 instead of being
     # overwritten. Not a column — never written.
@@ -193,6 +257,12 @@ class CappeProduct(BaseModel):
     category: Optional[str] = None
     option_groups: list[CappeProductOptionGroup] = Field(default_factory=list)
     variants: list[CappeProductVariant] = Field(default_factory=list)
+    slug: Optional[str] = None
+    brand: Optional[str] = None
+    gtin: Optional[str] = None
+    images: list[CappeProductImage] = Field(default_factory=list)
+    # The product's page on its store, `/shop/<slug>`.
+    url: Optional[str] = None
     # Public storefront pricing. Owner responses default to the undiscounted
     # shape; public routes populate these from the active promotion calendar.
     discount_percent: int = 0

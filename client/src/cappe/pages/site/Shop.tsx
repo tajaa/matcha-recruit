@@ -8,6 +8,7 @@ import ShippingSettingsCard from '../../components/ShippingSettingsCard'
 import PromoCodesCard from '../../components/PromoCodesCard'
 import StockAdjustModal from '../../components/StockAdjustModal'
 import ImageUpload from '../../components/ImageUpload'
+import ProductImagesEditor, { type ImageRow } from '../../components/ProductImagesEditor'
 import UpgradeNotice from '../../components/UpgradeNotice'
 import VariantsEditor from '../../components/VariantsEditor'
 import type {
@@ -47,7 +48,7 @@ type IntakeRow = { label: string; type: string; required: boolean; choices: stri
 // keeps option ids stable across a save (orders and the stock ledger point at them).
 type OptRow = { id?: string; name: string; price: string; stock: string }
 type OptGroupRow = { id?: string; name: string; select_type: 'single' | 'multi'; required: boolean; options: OptRow[] }
-const EMPTY = { name: '', description: '', price: '', sku: '', inventory: '', low_stock_threshold: '', image_url: '', digital_file_url: '', booking_type_id: '', category: '' }
+const EMPTY = { name: '', description: '', price: '', sku: '', inventory: '', low_stock_threshold: '', digital_file_url: '', booking_type_id: '', category: '', slug: '', brand: '', gtin: '' }
 
 const stockText = (value: number | null | undefined) => (value == null ? '' : String(value))
 const sameSet = (a: string[], b: string[]) => [...a].sort().join() === [...b].sort().join()
@@ -77,6 +78,8 @@ export default function Shop() {
   const [query, setQuery] = useState('')
   // Per-combination stock/SKU/price, keyed by combination (utils/variants.ts).
   const [variantRows, setVariantRows] = useState<Record<string, VariantRow>>({})
+  // The product's pictures in order; the first is the cover.
+  const [images, setImages] = useState<ImageRow[]>([])
   const [useVariants, setUseVariants] = useState(false)
   // What the plan sells. null until known (or unreadable): the server enforces
   // it either way, this only keeps the form from offering what it refuses.
@@ -121,6 +124,7 @@ export default function Shop() {
     setOptionGroups([])
     setVariantRows({})
     setUseVariants(false)
+    setImages([])
     setFulfillment(null)
     setRequireApproval(false)
     setIntervals([])
@@ -154,7 +158,9 @@ export default function Shop() {
       sku: product.sku || '',
       inventory: stockText(product.inventory),
       low_stock_threshold: product.low_stock_threshold == null ? '' : String(product.low_stock_threshold),
-      image_url: product.image_url || '',
+      slug: product.slug || '',
+      brand: product.brand || '',
+      gtin: product.gtin || '',
       digital_file_url: product.digital_file_url || '',
       booking_type_id: product.booking_type_id || '',
       category: product.category || '',
@@ -180,6 +186,9 @@ export default function Shop() {
     })))
     setVariantRows(rowsFromProduct(product))
     setUseVariants(!!product.variants?.length)
+    setImages(product.images?.length
+      ? product.images.map((img) => ({ url: img.url, alt: img.alt || '' }))
+      : product.image_url ? [{ url: product.image_url, alt: '' }] : [])
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
@@ -217,7 +226,10 @@ export default function Shop() {
         price_cents: priceCents,
         sku: form.sku.trim() || null,
         low_stock_threshold: physical && form.low_stock_threshold !== '' ? parseInt(form.low_stock_threshold, 10) : null,
-        image_url: form.image_url.trim() || null,
+        // The pictures decide the cover the apps and receipts read.
+        images: images.filter((img) => img.url.trim()).map((img) => ({ url: img.url.trim(), alt: img.alt.trim() || null })),
+        brand: form.brand.trim() || null,
+        gtin: form.gtin.trim() || null,
         digital_file_url: fulfillment === 'digital' ? form.digital_file_url.trim() || null : null,
         booking_type_id: fulfillment === 'booking' ? form.booking_type_id || null : null,
         requires_approval: requireApproval,
@@ -283,6 +295,8 @@ export default function Shop() {
           ...details,
           option_groups: groupsFor(editing),
           ...variantsBody,
+          // The address changes only when the owner changes it: a rename keeps it.
+          ...(form.slug.trim() && form.slug.trim() !== (editing.slug || '') ? { slug: form.slug.trim().toLowerCase() } : {}),
           ...(fulfillment !== editing.fulfillment ? { fulfillment } : {}),
           ...(nextStock !== editing.inventory ? { inventory: nextStock, expected_inventory: editing.inventory } : {}),
           ...(subscriptionChanged ? { subscription_intervals: subIntervals, subscription_discount_bps: subDiscount } : {}),
@@ -296,6 +310,7 @@ export default function Shop() {
           inventory: stock(form.inventory),
           option_groups: groupsFor(null),
           ...variantsBody,
+          ...(form.slug.trim() ? { slug: form.slug.trim().toLowerCase() } : {}),
           subscription_intervals: subIntervals,
           subscription_discount_bps: subDiscount,
         })
@@ -404,6 +419,14 @@ export default function Shop() {
         <div className="grid gap-3 sm:grid-cols-3">
           <input value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} placeholder="Category — e.g. Drinks, Pastries (optional, groups your storefront)" className={`sm:col-span-2 ${input}`} />
           <input value={form.sku} onChange={(e) => setForm({ ...form, sku: e.target.value })} placeholder="SKU (optional)" maxLength={120} className={input} />
+        </div>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <label className="flex items-center rounded-lg border border-zinc-700 bg-zinc-950 pl-3 text-sm text-zinc-500 focus-within:border-emerald-500">
+            /shop/
+            <input value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value })} placeholder={editing ? '' : 'made from the name'} maxLength={72} aria-label="Web address" className="w-full bg-transparent px-1 py-2 text-zinc-100 placeholder:text-zinc-500 outline-none" />
+          </label>
+          <input value={form.brand} onChange={(e) => setForm({ ...form, brand: e.target.value })} placeholder="Brand (optional)" maxLength={120} className={input} />
+          <input value={form.gtin} onChange={(e) => setForm({ ...form, gtin: e.target.value })} placeholder="Barcode — UPC / EAN (optional)" inputMode="numeric" maxLength={20} className={input} />
         </div>
 
         {/* fulfillment */}
@@ -574,10 +597,11 @@ export default function Shop() {
             enabled={useVariants}
             onEnabled={setUseVariants}
             currency={currency}
+            images={images.map((img) => img.url).filter(Boolean)}
           />
         )}
 
-        <ImageUpload siteId={siteId || ''} value={form.image_url} onChange={(url) => setForm({ ...form, image_url: url })} placeholder="Cover image URL (optional)" />
+        <ProductImagesEditor siteId={siteId || ''} images={images} onChange={setImages} />
 
         <label className="flex items-center gap-2 text-sm text-zinc-300">
           <input

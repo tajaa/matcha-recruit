@@ -13,6 +13,7 @@ from ...services.recurring import build_subscription_lines
 from ...services.common import receipt_filename as _receipt_filename
 from ...services.discounts import apply_discount_cents, best_discount_percent, fetch_active_discounts, site_today
 from ...services.variants import fetch_variants
+from ...services.product_pages import fetch_images, product_path
 from ...services.entitlements import resolve_entitlements, sells
 from ...services.shipping import Destination, home_country, load_zones, resolve_destination, ship_countries
 from ...services.promos import find_code, normalize_code
@@ -29,7 +30,7 @@ _PUBLIC_PRODUCT_COLS = (
     "subscription_intervals, subscription_discount_bps, "
     "id, site_id, name, description, price_cents, currency, image_url, sku, "
     "inventory, status, sort_order, fulfillment, booking_type_id, requires_approval, "
-    "intake_fields, category, created_at, updated_at"
+    "intake_fields, category, slug, brand, gtin, created_at, updated_at"
 )
 
 
@@ -50,6 +51,7 @@ async def public_products(slug: str, request: Request):
         rows = [r for r in rows if ent is None or sells(ent, r["fulfillment"])]
         groups = await fetch_option_groups(conn, [r["id"] for r in rows])
         variants = await fetch_variants(conn, [r["id"] for r in rows])
+        images = await fetch_images(conn, [r["id"] for r in rows])
         subscribable = any(r["subscription_intervals"] for r in rows) and await _sells_subscriptions(conn, site["id"])
         ratings = {
             r["product_id"]: r for r in await conn.fetch(
@@ -72,6 +74,8 @@ async def public_products(slug: str, request: Request):
             "intake_fields": loads_list(r["intake_fields"]),
             "option_groups": groups.get(r["id"], []),
             "variants": variants.get(r["id"], []),
+            "images": images.get(r["id"], []),
+            "url": product_path(r["slug"]),
             "discount_percent": pct,
             "discounted_price_cents": apply_discount_cents(r["price_cents"], pct) if pct else None,
         })

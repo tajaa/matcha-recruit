@@ -6,7 +6,7 @@ const input = 'w-full rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1.5 
 // Stock, SKU and price for each combination of a product's required pick-one
 // groups. Off, a product's options keep their own stock as they always have;
 // on, each combination ("M / Red") has its own.
-export default function VariantsEditor({ combos, tooMany, rows, onRow, enabled, onEnabled, currency }: {
+export default function VariantsEditor({ combos, tooMany, rows, onRow, enabled, onEnabled, currency, images = [] }: {
   combos: ComboPart[][]
   tooMany: boolean
   rows: Record<string, VariantRow>
@@ -14,6 +14,8 @@ export default function VariantsEditor({ combos, tooMany, rows, onRow, enabled, 
   enabled: boolean
   onEnabled: (on: boolean) => void
   currency: string
+  /** The product's pictures: a combination can show one of them instead of the cover. */
+  images?: string[]
 }) {
   return (
     <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
@@ -39,6 +41,7 @@ export default function VariantsEditor({ combos, tooMany, rows, onRow, enabled, 
                 <th className="pb-1.5 pr-2 font-medium">SKU</th>
                 <th className="pb-1.5 pr-2 font-medium">Price ({currency})</th>
                 <th className="pb-1.5 pr-2 font-medium">Stock</th>
+                {images.length > 1 && <th className="pb-1.5 pr-2 font-medium">Picture</th>}
                 <th className="pb-1.5 font-medium">Sell</th>
               </tr>
             </thead>
@@ -53,6 +56,14 @@ export default function VariantsEditor({ combos, tooMany, rows, onRow, enabled, 
                     <td className="py-1 pr-2"><input value={row.sku} onChange={(e) => onRow(key, { ...row, sku: e.target.value })} placeholder="optional" maxLength={120} aria-label={`SKU for ${label}`} className={input} /></td>
                     <td className="py-1 pr-2"><input value={row.price} onChange={(e) => onRow(key, { ...row, price: e.target.value })} placeholder="from options" inputMode="decimal" aria-label={`Price for ${label}`} className={input} /></td>
                     <td className="py-1 pr-2"><input value={row.stock} onChange={(e) => onRow(key, { ...row, stock: e.target.value })} placeholder="unlimited" type="number" min="0" aria-label={`Stock for ${label}`} className={input} /></td>
+                    {images.length > 1 && (
+                      <td className="py-1 pr-2">
+                        <select value={row.image_url && images.includes(row.image_url) ? row.image_url : ''} onChange={(e) => onRow(key, { ...row, image_url: e.target.value || null })} aria-label={`Picture for ${label}`} className={input}>
+                          <option value="">Cover</option>
+                          {images.map((url, i) => <option key={url} value={url}>Picture {i + 1}</option>)}
+                        </select>
+                      </td>
+                    )}
                     <td className="py-1"><input type="checkbox" checked={row.active} onChange={(e) => onRow(key, { ...row, active: e.target.checked })} aria-label={`Sell ${label}`} className="h-4 w-4 rounded border-zinc-600 bg-zinc-950 text-emerald-500" /></td>
                   </tr>
                 )
