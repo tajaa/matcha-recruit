@@ -107,6 +107,9 @@ export type CappeSite = {
   is_multi_location: boolean
   tax_rate_bps?: number | null
   tax_label?: string | null
+  /** The listed prices already include the tax (VAT-style); shipping is taxed too. */
+  prices_include_tax?: boolean
+  tax_on_shipping?: boolean
   receipt_prefix?: string | null
   shipping_flat_cents?: number | null
   shipping_free_threshold_cents?: number | null
@@ -621,6 +624,10 @@ export type CappeOrder = {
   delivery_min_days?: number | null
   delivery_max_days?: number | null
   shipping_instructions?: string | null
+  /** The prices included the tax: `tax_cents` is inside the subtotal (and
+   *  `shipping_tax_cents` of it inside the shipping), not on top. */
+  tax_included?: boolean
+  shipping_tax_cents?: number
   /** The refund ledger (detail view only). */
   refunds?: CappeOrderRefund[]
   /** The promo code the buyer used and what it took off (subtotal is after it). */
@@ -1431,8 +1438,9 @@ export type CappeShippingZoneInput = {
   rest_of_world: boolean
   flat_cents: number
   free_threshold_cents: number | null
-  /** Charge the store's tax rate on goods shipped here. */
+  /** Charge tax on goods shipped here — at `tax_rate_bps` when set, else the store's rate. */
   charge_tax: boolean
+  tax_rate_bps?: number | null
   /** The zone's delivery options; omitted = keep what it had. */
   rates?: CappeShippingRateInput[]
 }

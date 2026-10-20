@@ -104,7 +104,7 @@ if(seq!==qseq||!q||q.total_cents==null)return;var l=(q.lines||[])[0];if(l&&l.rea
 if(l&&l.available===false){sb.disabled=true;sb.textContent='Out of stock';if(qbox)qbox.textContent='Not enough in stock for that choice. Try a lower quantity or another option.';return;}
 var cur=q.currency||p.currency,parts=[];
 if(!booking){sb.textContent=verb()+RT.money(q.subtotal_cents,cur);if(qbox)qbox.textContent='';return;}
-if(q.tax_cents>0)parts.push('Tax '+RT.money(q.tax_cents,cur));
+if(q.tax_cents>0)parts.push((q.tax_included?'Includes ':'')+(q.tax_label||'Tax')+' '+RT.money(q.tax_cents,cur));
 if(q.shipping_cents>0)parts.push('Shipping '+RT.money(q.shipping_cents,cur));
 sb.textContent=verb()+RT.money(q.total_cents,cur);
 if(qbox)qbox.textContent=parts.length?('Subtotal '+RT.money(q.subtotal_cents,cur)+' · '+parts.join(' · ')):'';

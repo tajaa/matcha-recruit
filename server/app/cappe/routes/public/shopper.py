@@ -237,7 +237,7 @@ async def delete_favorite(product_id: UUID, context=Depends(require_shopper)):
     return Response(status_code=204)
 
 
-ORDER_COLS = "id,access_token AS order_token,status,subtotal_cents,tax_cents,shipping_cents,total_cents,currency,created_at,carrier,tracking_number"
+ORDER_COLS = "id,access_token AS order_token,status,subtotal_cents,tax_cents,shipping_cents,total_cents,currency,created_at,carrier,tracking_number,tax_included"
 
 
 async def order_items(conn, orders):

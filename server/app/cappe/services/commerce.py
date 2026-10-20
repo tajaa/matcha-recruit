@@ -45,7 +45,7 @@ from .entitlements import (
     sells,
 )
 from .stripe_connect import CONNECT_CHECKOUT_TTL_SECONDS, CappeStripeError, get_cappe_stripe
-from .cart import cart_totals
+from .cart import cart_totals, goods_net_cents
 from .shipping import (
     FLAT_RATE_ID, home_country, load_rates, load_zones, not_shippable, resolve_destination, ship_load,
 )
@@ -100,6 +100,8 @@ def build_stripe_line_items(
     pass `shipping` (label, cents) and it is a line too). Sum of these
     unit_amount×quantity equals `subtotal_cents + tax_cents`; adding
     `shipping_cents` from `shipping_options` brings the charge to `total_cents`.
+    For a tax-inclusive order the caller passes `tax_cents=0`: the tax is
+    already inside the lines (and the shipping).
 
     A line a promo code discounted is sent as ONE item at its discounted total
     ("Mug × 2"): its share doesn't always divide by the quantity, and Stripe
@@ -567,11 +569,12 @@ async def open_order_checkout(
     prices FROZEN on the order, never the live product. Raises
     CappeStripeError; holds no connection across the Stripe call.
     """
-    pay_total = order["subtotal_cents"]
     cur = (order["currency"] or "USD").lower()
-    # Per-plan take rate, computed ONCE here and handed to Stripe, so the number
-    # persisted on the order is the same number Stripe actually takes.
-    fee = entitlement_fee_cents(pay_total, owner_ent.platform_fee_bps)
+    # Per-plan take rate on the goods net of tax, computed ONCE here and handed
+    # to Stripe, so the number persisted on the order is the same number Stripe
+    # actually takes. A tax-inclusive subtotal would otherwise be fee'd on the
+    # tax inside it.
+    fee = entitlement_fee_cents(goods_net_cents(order), owner_ent.platform_fee_bps)
     # What the buyer chose to get it by (an order from before delivery options
     # was always shipped). Stripe asks for an address only for a shipped one:
     # a pickup needs none, and a local delivery's was typed (and its postal
@@ -579,10 +582,10 @@ async def open_order_checkout(
     method = order.get("shipping_method") or "ship"
     label = order.get("shipping_rate_label") or shipping_label
     collect = has_physical and method == "ship"
-    # Tax as its own line so the charged amount equals the receipt total. The
-    # platform fee stays on the goods subtotal.
+    # Tax as its own line so the charged amount equals the receipt total —
+    # unless the prices already include it: then the lines are the total.
     line_items = build_stripe_line_items(
-        line_rows, cur, order["tax_cents"], tax_label, line_discounts,
+        line_rows, cur, 0 if order.get("tax_included") else order["tax_cents"], tax_label, line_discounts,
         shipping=(label, order["shipping_cents"]) if has_physical and not collect else None,
     )
     customer_id = None
@@ -647,6 +650,7 @@ async def pay_for_order(token: str) -> dict:
                       o.customer_email, o.stripe_session_id, o.access_token,
                       COALESCE(o.ship_country, s.home_country) AS ship_country,
                       o.shipping_method, o.shipping_rate_label, o.delivery_min_days, o.delivery_max_days,
+                      o.tax_included, o.shipping_tax_cents,
                       o.pay_by IS NOT NULL AND o.pay_by < NOW() AS overdue,
                       s.name AS site_name, s.slug, s.subdomain, s.custom_domain,
                       s.tax_label, s.shipping_label,
@@ -1012,7 +1016,7 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
             tax_cfg = await conn.fetchrow(
                 "SELECT tax_rate_bps, tax_label, shipping_flat_cents, "
                 "shipping_free_threshold_cents, shipping_label, home_country, "
-                "handling_days_min, handling_days_max "
+                "handling_days_min, handling_days_max, prices_include_tax, tax_on_shipping "
                 "FROM cappe_sites WHERE id = $1", site["id"]
             )
             cfg = dict(tax_cfg) if tax_cfg else {}
@@ -1053,13 +1057,14 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
                         shipping_cents, total_cents, currency, note, requires_approval, shipping_address,
                         ship_country, promo_code, discount_cents, paid_at,
                         shipping_rate_id, shipping_method, shipping_rate_label, delivery_min_days,
-                        delivery_max_days, shipping_instructions)
+                        delivery_max_days, shipping_instructions, tax_included, shipping_tax_cents)
                    VALUES ($1, $2, $3, CASE WHEN $15 THEN 'paid' ELSE 'pending' END, $4, $5, $6, $7, $8, $9,
                            $10, $11::jsonb, $12, $13, $14, CASE WHEN $15 THEN NOW() END,
-                           $16::uuid, $17, $18, $19, $20, $21)
+                           $16::uuid, $17, $18, $19, $20, $21, $22, $23)
                    RETURNING id, status, subtotal_cents, tax_cents, shipping_cents, total_cents,
                              currency, access_token, requires_approval, ship_country,
-                             shipping_method, shipping_rate_label, delivery_min_days, delivery_max_days""",
+                             shipping_method, shipping_rate_label, delivery_min_days, delivery_max_days,
+                             tax_included, shipping_tax_cents""",
                 site["id"], email, body.customer_name, subtotal, tax_cents, shipping_cents,
                 total_cents, order_currency or "USD", body.note, order_requires_approval,
                 # The buyer's address, when the storefront asked for it (a
@@ -1073,6 +1078,8 @@ async def create_public_order(site, body, background, *, shopper=None) -> dict:
                 option.get("id") if option.get("id") not in (None, FLAT_RATE_ID) else None,
                 method, option.get("label") if has_physical else None,
                 option.get("delivery_min_days"), option.get("delivery_max_days"), option.get("instructions"),
+                # How the tax was priced: inside the prices, or on top of them.
+                totals["tax_included"], totals["shipping_tax_cents"],
             )
             if promo:
                 await redeem_promo(

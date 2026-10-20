@@ -138,7 +138,8 @@ async def quote(slug: str, body: CartQuoteRequest, request: Request):
         site = await _published_site(conn, slug)
         settings = await conn.fetchrow(
             "SELECT tax_rate_bps,shipping_flat_cents,shipping_free_threshold_cents,home_country,currency,"
-            "shipping_label,handling_days_min,handling_days_max FROM cappe_sites WHERE id=$1", site["id"],
+            "shipping_label,handling_days_min,handling_days_max,tax_label,prices_include_tax,tax_on_shipping "
+            "FROM cappe_sites WHERE id=$1", site["id"],
         )
         # Whether checkout goes to a card payment page. The storefront cart
         # asks for a shipping address itself only when it does NOT (Stripe
@@ -176,6 +177,9 @@ async def quote(slug: str, body: CartQuoteRequest, request: Request):
                 "reason": None if takes_codes else "This store doesn't take promo codes.",
             }
     settings = dict(settings)
+    # What the bag calls the tax ("VAT", "GST"); with `tax_included` it reads
+    # "Includes VAT" under the total instead of adding a line to it.
+    tax_label = settings.get("tax_label") or "Tax"
     products = priceable_products(products, groups, discounts, today, variants)
     # Where the bag ships and what that costs. Subscriptions ship within the
     # home country only (their shipping is fixed into the Stripe price).
@@ -205,10 +209,10 @@ async def quote(slug: str, body: CartQuoteRequest, request: Request):
         _stripe_lines, lines, totals = build_subscription_lines(
             products, body.items, body.interval, settings
         )
-        return {"lines": lines, **totals, "pays_by_card": pays_by_card, **shipping}
+        return {"lines": lines, **totals, "pays_by_card": pays_by_card, "tax_label": tax_label, **shipping}
     return {**price_cart(products, body.items, settings, dest, promo=promo, on_date=today,
                          rate_id=body.shipping_rate_id, postal_code=body.postal_code),
-            "pays_by_card": pays_by_card, "promo_codes": bool(takes_codes), **shipping}
+            "pays_by_card": pays_by_card, "promo_codes": bool(takes_codes), "tax_label": tax_label, **shipping}
 
 
 @router.post("/public/orders/{token}/pay")
@@ -266,7 +270,8 @@ async def public_order_receipt(token: str, request: Request):
         order = await conn.fetchrow(
             "SELECT id, status, customer_email, customer_name, subtotal_cents, promo_code, discount_cents, "
             "tax_cents, shipping_cents, total_cents, carrier, tracking_number, currency, created_at, "
-            "requires_approval, approved_at, pay_by, stripe_session_id IS NOT NULL AS checkout_opened "
+            "requires_approval, approved_at, pay_by, stripe_session_id IS NOT NULL AS checkout_opened, "
+            "tax_included "
             "FROM cappe_orders WHERE access_token = $1",
             token,
         )
@@ -293,6 +298,7 @@ async def public_order_receipt(token: str, request: Request):
         discount_cents=order.get("discount_cents") or 0,
         currency=order["currency"],
         tax_cents=order["tax_cents"],
+        tax_included=bool(order.get("tax_included")),
         shipping_cents=order["shipping_cents"],
         total_cents=order["total_cents"],
         carrier=order["carrier"],

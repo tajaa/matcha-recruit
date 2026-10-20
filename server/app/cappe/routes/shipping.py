@@ -124,10 +124,11 @@ async def replace_shipping_zones(
                 zone_id = await conn.fetchval(
                     """INSERT INTO cappe_shipping_zones
                            (site_id, name, countries, rest_of_world, flat_cents,
-                            free_threshold_cents, charge_tax, sort_order)
-                       VALUES ($1, $2, $3::varchar[], $4, $5, $6, $7, $8) RETURNING id""",
+                            free_threshold_cents, charge_tax, sort_order, tax_rate_bps)
+                       VALUES ($1, $2, $3::varchar[], $4, $5, $6, $7, $8, $9) RETURNING id""",
                     site_id, zone.name, zone.countries, zone.rest_of_world, zone.flat_cents,
                     zone.free_threshold_cents, zone.charge_tax, i,
+                    zone.tax_rate_bps if zone.charge_tax else None,
                 )
                 rates = zone.rates if zone.rates is not None else _kept(kept_by_name.pop(zone.name, []))
                 await _insert_rates(conn, site_id, zone_id, rates)

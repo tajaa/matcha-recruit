@@ -142,6 +142,10 @@ class CappeSiteUpdate(_SnapshotSizeLimit):
     is_multi_location: Optional[bool] = None
     tax_rate_bps: Optional[int] = Field(default=None, ge=0, le=10000)
     tax_label: Optional[str] = Field(default=None, max_length=40)
+    # The listed prices already include the tax (VAT-style), and shipping is
+    # taxed too (services/cart.py:cart_totals).
+    prices_include_tax: Optional[bool] = None
+    tax_on_shipping: Optional[bool] = None
     shipping_flat_cents: Optional[int] = Field(default=None, ge=0)
     # Explicit null clears the threshold (model_fields_set gate in the route).
     shipping_free_threshold_cents: Optional[int] = Field(default=None, ge=0)
@@ -199,6 +203,8 @@ class CappeSite(BaseModel):
     is_multi_location: bool = False
     tax_rate_bps: int = 0
     tax_label: str = "Tax"
+    prices_include_tax: bool = False
+    tax_on_shipping: bool = False
     shipping_flat_cents: int = 0
     shipping_free_threshold_cents: Optional[int] = None
     shipping_label: str = "Shipping"

@@ -189,7 +189,7 @@ class CappeStripe:
         With `collect_shipping_address`, Stripe collects the buyer's address
         in one of `ship_countries` (the country the order was priced for) and
         `shipping_option` renders as a real shipping row included in
-        amount_total; the fee stays on the goods subtotal.
+        amount_total; the fee stays on the goods net of tax (`cart.goods_net_cents`).
 
         `expires_in_seconds` shortens Stripe's default 24h session lifetime. The
         order behind a session holds stock from the moment it is created, so an

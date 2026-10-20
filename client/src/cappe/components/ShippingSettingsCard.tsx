@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Loader2, Check, Truck, Plus, X } from 'lucide-react'
 import { cappeApi } from '../api'
-import { parseMoneyCents } from '../utils/money'
+import { parseMoneyCents, parsePercentBps } from '../utils/money'
 import { STORE_CURRENCIES, countryName } from '../utils/countries'
 import { weightUnit, type WeightUnit } from '../utils/weight'
 import { BILLING_PATH } from '../pages/CappeBilling/paths'
@@ -24,6 +24,8 @@ import type { CappeShippingRateInput, CappeShippingZoneInput, CappeShippingZones
 
 type ZoneRow = {
   key: number; name: string; countries: string[]; rest: boolean; flat: string; freeOver: string; tax: boolean
+  /** The zone's own tax rate, percent as typed; '' = the store's rate. */
+  taxRate: string
   rates: RateRow[]
 }
 
@@ -90,6 +92,7 @@ export default function ShippingSettingsCard({ siteId, onCurrencyChange, onHomeC
         flat: dollars(zone.flat_cents),
         freeOver: zone.free_threshold_cents != null ? (zone.free_threshold_cents / 100).toString() : '',
         tax: zone.charge_tax,
+        taxRate: zone.tax_rate_bps != null ? String(zone.tax_rate_bps / 100) : '',
         rates: (zone.rates || []).map((r) => rateRow(r, u)),
       })))
       setLoaded(true)
@@ -103,7 +106,7 @@ export default function ShippingSettingsCard({ siteId, onCurrencyChange, onHomeC
     setZones((zs) => zs.map((z) => (z.key === key ? { ...z, ...patch } : z)))
   const addZone = () => setZones((zs) => [...zs, {
     key: nextKey++, name: zs.length ? `Zone ${zs.length + 1}` : 'International', countries: [],
-    rest: false, flat: '', freeOver: '', tax: false, rates: [],
+    rest: false, flat: '', freeOver: '', tax: false, taxRate: '', rates: [],
   }])
   // A country is in one zone at most, and never the home country.
   const taken = new Set(zones.flatMap((z) => z.countries))
@@ -124,9 +127,13 @@ export default function ShippingSettingsCard({ siteId, onCurrencyChange, onHomeC
       if (z.freeOver.trim() !== '' && freeCents === null) return `Enter the free-shipping amount for “${name}” as a plain amount, e.g. 100`
       const rates = rateBodies(z.rates, unit)
       if (typeof rates === 'string') return rates
+      const taxBps = z.tax && z.taxRate.trim() !== '' ? parsePercentBps(z.taxRate) : null
+      if (z.tax && z.taxRate.trim() !== '' && (taxBps === null || taxBps > 10000)) {
+        return `Enter the tax rate for “${name}” as a plain number, e.g. 20 (or leave it blank for your own rate)`
+      }
       out.push({
         name, countries: z.rest ? [] : z.countries, rest_of_world: z.rest,
-        flat_cents: flatCents, free_threshold_cents: freeCents, charge_tax: z.tax, rates,
+        flat_cents: flatCents, free_threshold_cents: freeCents, charge_tax: z.tax, tax_rate_bps: taxBps, rates,
       })
     }
     return out
@@ -324,9 +331,16 @@ export default function ShippingSettingsCard({ siteId, onCurrencyChange, onHomeC
                 </label>
                 <label className="flex items-end gap-2 pb-2 text-xs text-zinc-300">
                   <input type="checkbox" checked={z.tax} onChange={(e) => setZone(z.key, { tax: e.target.checked })} />
-                  Charge my tax rate here
+                  Charge tax here
                 </label>
               </div>
+              {z.tax && (
+                <label className="mt-2 block max-w-xs text-xs text-zinc-400">
+                  Tax rate here (%)
+                  <input value={z.taxRate} onChange={(e) => setZone(z.key, { taxRate: e.target.value })} inputMode="decimal"
+                    placeholder="Blank = your own rate" aria-label={`Tax rate for ${z.name || 'this zone'}`} className={field} />
+                </label>
+              )}
               <div className="mt-3 text-[11px] font-medium uppercase tracking-wide text-zinc-500">Delivery options</div>
               <DeliveryOptionsEditor rows={z.rates} onChange={(rates) => setZone(z.key, { rates })} currency={currency} unit={unit}
                 flatLabel="this zone’s flat rate" />

@@ -623,7 +623,7 @@ async def order_page(token: str, request: Request):
                       o.subtotal_cents, o.tax_cents, o.shipping_cents, o.total_cents, o.refunded_cents,
                       o.promo_code, o.discount_cents,
                       o.currency, o.carrier, o.tracking_number, o.shipping_address, o.receipt_number,
-                      o.stripe_session_id, s.tax_label,
+                      o.stripe_session_id, s.tax_label, o.tax_included,
                       COALESCE(o.shipping_rate_label, s.shipping_label) AS shipping_label,
                       o.shipping_method, o.shipping_instructions, o.delivery_min_days, o.delivery_max_days
                  FROM cappe_orders o JOIN cappe_sites s ON s.id = o.site_id

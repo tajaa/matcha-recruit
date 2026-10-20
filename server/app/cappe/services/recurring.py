@@ -7,7 +7,7 @@ from urllib.parse import urlsplit
 from fastapi import HTTPException
 
 from app.database import get_connection
-from .cart import cart_totals, price_cart, priceable_products
+from .cart import cart_totals, goods_net_cents, price_cart, priceable_products
 from .common import loads_list, site_origins, site_public_origin, url_within_origins
 from .discounts import fetch_active_discounts, site_today
 from .entitlements import resolve_entitlements, require_can_sell, sells
@@ -66,8 +66,11 @@ def build_subscription_lines(products, items, interval, site):
                                "recurring": {"interval": interval}, "product_data": {"name": name[:250]}},
                 "quantity": quantity}
     lines = [stripe_line(row["title"], row["unit_price_cents"], row["quantity"]) for row in snapshot]
-    for label, key in (("Tax", "tax_cents"), ("Shipping", "shipping_cents")):
-        if totals[key]:
+    # The store's own name for its tax ("VAT"), as the bag and receipt show it.
+    tax_label = (site.get("tax_label") or "Tax")[:120]
+    for label, key in ((tax_label, "tax_cents"), ("Shipping", "shipping_cents")):
+        # Tax the prices already include is in the lines above, not on top.
+        if totals[key] and not (key == "tax_cents" and totals["tax_included"]):
             lines.append(stripe_line(label, totals[key], 1))
     if len(lines) > 20:
         raise HTTPException(422, "Subscriptions support at most 20 billed line items")
@@ -231,10 +234,11 @@ async def checkout(site, shopper, body):
         if pending >= 10:
             raise HTTPException(409, "Too many pending checkouts; cancel an existing checkout first")
         row = await conn.fetchrow(
-            "INSERT INTO cappe_shopper_subscriptions(site_id,shopper_id,stripe_account_id,status,interval,items,subtotal_cents,tax_cents,shipping_cents,total_cents,currency) "
-            "VALUES($1,$2,$3,'preparing',$4,$5::jsonb,$6,$7,$8,$9,$10) RETURNING *",
+            "INSERT INTO cappe_shopper_subscriptions(site_id,shopper_id,stripe_account_id,status,interval,items,subtotal_cents,tax_cents,shipping_cents,total_cents,currency,tax_included,shipping_tax_cents) "
+            "VALUES($1,$2,$3,'preparing',$4,$5::jsonb,$6,$7,$8,$9,$10,$11,$12) RETURNING *",
             site["id"], shopper["id"], owner["stripe_account_id"], body.interval, json.dumps(snapshot),
             totals["subtotal_cents"], totals["tax_cents"], totals["shipping_cents"], totals["total_cents"], totals["currency"],
+            totals["tax_included"], totals["shipping_tax_cents"],
         )
     def callback(url, result):
         parsed = urlsplit(url)
@@ -245,7 +249,7 @@ async def checkout(site, shopper, body):
         session = await get_cappe_stripe().create_subscription_checkout(
             account_id=owner["stripe_account_id"], customer_id=customer_id, line_items=stripe_lines,
             application_fee_percent=goods_fee_percent(
-                ent.platform_fee_bps, totals["subtotal_cents"], totals["total_cents"],
+                ent.platform_fee_bps, goods_net_cents(totals), totals["total_cents"],
             ),
             success_url=callback(success, "success"), cancel_url=callback(cancel, "cancel"),
             metadata={"cappe_shopper_subscription_id": str(row["id"]), "site_id": str(site["id"])},
@@ -336,14 +340,16 @@ async def record_invoice_order(conn, row, invoice, payment_intent=None):
     order = await conn.fetchrow(
         "INSERT INTO cappe_orders(site_id,shopper_id,subscription_id,stripe_invoice_id,status,paid_at,customer_email,customer_name,"
         "subtotal_cents,tax_cents,shipping_cents,total_cents,currency,shipping_address,"
-        "stripe_payment_intent,payment_ref,platform_fee_cents) "
-        "VALUES($1,$2,$3,$4,'paid',NOW(),$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$13,$14) "
+        "stripe_payment_intent,payment_ref,platform_fee_cents,tax_included,shipping_tax_cents) "
+        "VALUES($1,$2,$3,$4,'paid',NOW(),$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$13,$14,$15,$16) "
         "ON CONFLICT(stripe_invoice_id) WHERE stripe_invoice_id IS NOT NULL DO NOTHING RETURNING id",
         row["site_id"], row["shopper_id"], row["id"], invoice["id"],
         shopper["email"] if shopper else None, shopper["name"] if shopper else None,
         row["subtotal_cents"], row["tax_cents"], row["shipping_cents"], invoice.get("total", row["total_cents"]),
         row["currency"], json.dumps(shipping) if shipping else None,
         payment_intent, int(fee) if isinstance(fee, int) else None,
+        # A renewal is priced as its subscription was.
+        bool(row.get("tax_included")), int(row.get("shipping_tax_cents") or 0),
     )
     if not order:
         return None, False

@@ -369,6 +369,10 @@ class CappeOrder(BaseModel):
     delivery_min_days: Optional[int] = None
     delivery_max_days: Optional[int] = None
     shipping_instructions: Optional[str] = None
+    # The prices included the tax (`tax_cents` is inside the subtotal and,
+    # `shipping_tax_cents` of it, the shipping) rather than on top.
+    tax_included: bool = False
+    shipping_tax_cents: int = 0
     # The refund ledger (detail view and refund responses only).
     refunds: list[CappeOrderRefund] = Field(default_factory=list)
     carrier: Optional[str] = None
@@ -566,6 +570,8 @@ class CappeOrderReceipt(BaseModel):
     discount_cents: int = 0
     currency: str
     tax_cents: int = 0
+    # The prices included the tax: it is inside the subtotal, not on top of it.
+    tax_included: bool = False
     shipping_cents: int = 0
     total_cents: Optional[int] = None
     carrier: Optional[str] = None
@@ -689,9 +695,10 @@ class CappeShippingZoneInput(BaseModel):
     rest_of_world: bool = False
     flat_cents: int = Field(default=0, ge=0, le=1_000_000)
     free_threshold_cents: Optional[int] = Field(default=None, ge=0, le=99_999_999)
-    # Charge the store's tax rate on goods shipped here (off by default: the
-    # rate is the home country's).
+    # Charge tax on goods shipped here (off by default: the store's rate is
+    # the home country's) — at `tax_rate_bps` when set, else the store's rate.
     charge_tax: bool = False
+    tax_rate_bps: Optional[int] = Field(default=None, ge=0, le=10000)
 
     @field_validator("name")
     @classmethod
