@@ -18,7 +18,7 @@ import type {
   CappeProductVariantInput,
 } from '../../types'
 import { parseMoneyCents, parseSignedMoneyCents } from '../../utils/money'
-import { gramsFromText, textFromGrams, weightUnit } from '../../utils/weight'
+import { gramsFromText, textFromGrams, weightUnit, type WeightUnit } from '../../utils/weight'
 import { combinations, isVariantGroup, rowsFromProduct, variantPayload, type VariantRow } from '../../utils/variants'
 
 const STATUSES = ['active', 'draft', 'archived'] as const
@@ -65,7 +65,11 @@ export default function Shop() {
   const [siteCurrency, setSiteCurrency] = useState<string | null>(null)
   // Where the store is based (Shipping & currency card): weights are typed in its unit.
   const [homeCountry, setHomeCountry] = useState<string | null>(null)
-  const unit = weightUnit(homeCountry)
+  // The unit the form's weight was shown or first typed in, pinned so the
+  // store's country arriving (or changing) later can't re-read that text in
+  // another unit. null = nothing typed yet: follow the store.
+  const [formUnit, setFormUnit] = useState<WeightUnit | null>(null)
+  const unit = formUnit ?? weightUnit(homeCountry)
   const [shipsFree, setShipsFree] = useState(false)
   const [bookingTypes, setBookingTypes] = useState<CappeBookingType[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -137,6 +141,7 @@ export default function Shop() {
 
   function resetForm() {
     setForm(EMPTY)
+    setFormUnit(null)
     setShipsFree(false)
     setIntake([])
     setOptionGroups([])
@@ -187,6 +192,7 @@ export default function Shop() {
     })
     setFulfillment(product.fulfillment)
     setShipsFree(!!product.ships_free)
+    setFormUnit(unit)
     setRequireApproval(product.requires_approval)
     setIntervals(product.subscription_intervals || [])
     setSubscriptionDiscount(String((product.subscription_discount_bps || 0) / 100))
@@ -501,7 +507,7 @@ export default function Shop() {
           <div className="grid gap-3 sm:grid-cols-2">
             <input value={form.inventory} onChange={(e) => setForm({ ...form, inventory: e.target.value })} placeholder="Stock (blank = unlimited)" type="number" min="0" className={input} />
             <input value={form.low_stock_threshold} onChange={(e) => setForm({ ...form, low_stock_threshold: e.target.value })} placeholder="Low-stock alert at… (optional)" type="number" min="0" className={input} />
-            <input value={form.weight} onChange={(e) => setForm({ ...form, weight: e.target.value })} placeholder={`Weight per item, ${unit} (optional)`} aria-label={`Weight per item (${unit})`} inputMode="decimal" disabled={shipsFree} className={input} />
+            <input value={form.weight} onChange={(e) => { setFormUnit(unit); setForm({ ...form, weight: e.target.value }) }} placeholder={`Weight per item, ${unit} (optional)`} aria-label={`Weight per item (${unit})`} inputMode="decimal" disabled={shipsFree} className={input} />
             <input value={form.surcharge} onChange={(e) => setForm({ ...form, surcharge: e.target.value })} placeholder={`Extra shipping per item, ${currency} (optional)`} aria-label={`Extra shipping per item (${currency})`} inputMode="decimal" disabled={shipsFree} className={input} />
             <label className="flex items-center gap-2 text-xs text-zinc-300 sm:col-span-2">
               <input type="checkbox" checked={shipsFree} onChange={(e) => setShipsFree(e.target.checked)} />
