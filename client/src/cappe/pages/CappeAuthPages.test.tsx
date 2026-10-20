@@ -220,3 +220,61 @@ describe('signup grant link', () => {
     expect(await screen.findByText(/is yours free until/)).toHaveTextContent('Business is yours free until November 18, 2026')
   })
 })
+
+describe('signup grant link, when it changes under the person', () => {
+  const TOKEN = 'h'.repeat(32)
+
+  function fill() {
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'new@example.com' } })
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'correct horse' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create account' }))
+  }
+
+  it('sends the token even before the lookup answers, so a quick submit keeps the plan', async () => {
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes('/auth/signup-grants/')) return new Promise(() => {}) // never answers
+      return { ok: true, status: 201, statusText: '', json: async () => ({ verification_required: true, email: 'new@example.com' }) }
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    at(`/cappe/website-setup?grant=${TOKEN}`, <CappeSignup />)
+    fill()
+
+    await screen.findByRole('heading', { name: 'Confirm your email' })
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toMatchObject({ grant_token: TOKEN })
+  })
+
+  it('lets the person sign up without a link that was used up while the form was open', async () => {
+    let signups = 0
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes('/auth/signup-grants/')) {
+        return { ok: true, status: 200, statusText: '', json: async () => ({ plan_code: 'business', plan_name: 'Business', days: 30, email_locked: false }) }
+      }
+      signups += 1
+      if (signups === 1) {
+        return { ok: false, status: 400, statusText: '', json: async () => ({ detail: { code: 'grant_invalid', message: 'This invite link has already been used.' } }) }
+      }
+      return { ok: true, status: 201, statusText: '', json: async () => ({ verification_required: true, email: 'new@example.com' }) }
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    at(`/cappe/website-setup?grant=${TOKEN}`, <CappeSignup />)
+    await screen.findByText(/You've been given/)
+    fill()
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('again to sign up without the invite')
+    expect(screen.getByText(/already been used/)).toHaveTextContent('You can still create a free account.')
+    expect(screen.queryByText(/You've been given/)).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Create account' }))
+
+    await screen.findByRole('heading', { name: 'Confirm your email' })
+    expect(JSON.parse(fetchMock.mock.calls[2][1].body)).not.toHaveProperty('grant_token')
+  })
+
+  it('says why a promised plan was not given at confirmation', async () => {
+    respond(200, {
+      access_token: 'a', refresh_token: 'r', expires_in: 900, account: { account_type: 'business' },
+      grant_refused: 'This invite link has already been used.',
+    })
+    at('/cappe/verify?token=abc', <CappeVerify />)
+    expect(await screen.findByText(/already been used/)).toHaveTextContent("You're on the Free plan.")
+  })
+})

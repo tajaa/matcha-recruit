@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Any, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import AwareDatetime, BaseModel, EmailStr, Field
 
 BillingInterval = Literal["month", "year"]
 
@@ -100,6 +100,10 @@ class CappeSubscription(BaseModel):
     trial_end: Optional[datetime] = None
     cancel_at_period_end: bool = False
     comped_until: Optional[datetime] = None
+    # For a comp: the day a subscription to the same plan, bought now, would
+    # first bill (`billing.comp_trial_end`). None = it would bill at checkout.
+    # The page reads this rather than re-deriving Stripe's trial window.
+    comp_bills_from: Optional[datetime] = None
     addons: list[CappeSubscriptionAddon] = Field(default_factory=list)
     # Plan allowance + purchased add-on units, so the UI can show what the
     # account is actually entitled to provision.
@@ -237,7 +241,9 @@ class CappeAdminPlanChange(BaseModel):
     is a comp, so the account is never charged for it."""
     plan_code: str = Field(max_length=40, pattern=r"^[a-z0-9_]+$")
     # When the comp ends and the account drops to free; None = until changed.
-    until: Optional[datetime] = None
+    # Must carry a timezone: a bare "2026-12-01T00:00" is ambiguous, and is
+    # refused with 422 rather than guessed at.
+    until: Optional[AwareDatetime] = None
     reason: Optional[str] = Field(default=None, max_length=500)
 
 
@@ -258,8 +264,11 @@ class CappeSignupGrantAccount(BaseModel):
     email: str
     plan: str
     signed_up_at: datetime
-    # None = signed up but not confirmed yet, or the grant was used up first.
+    email_verified_at: Optional[datetime] = None
+    # Set when the plan was given; `refused` says why it wasn't. Neither, on a
+    # confirmed account, means redeeming it failed (logged).
     redeemed_at: Optional[datetime] = None
+    refused: Optional[str] = None
 
 
 class CappeAdminSignupGrant(BaseModel):
@@ -276,6 +285,8 @@ class CappeAdminSignupGrant(BaseModel):
     created_by_email: Optional[str] = None
     created_at: datetime
     signup_url: str
+    # Everyone who signed up through it; `accounts` is the latest few of them.
+    signup_count: int = 0
     accounts: list[CappeSignupGrantAccount] = []
 
 

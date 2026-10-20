@@ -10,6 +10,7 @@ import { cappeSiteHost } from '../../../../cappe/host'
 import { Modal, useToast } from '../../../../components/ui'
 import CappeCreators from './CappeCreators'
 import CappeSignupGrants from './CappeSignupGrants'
+import type { CappePlanOption } from '../../../../types/cappeAdmin'
 
 type CappeSite = {
   id: string
@@ -60,7 +61,6 @@ type CappeTotals = {
 }
 
 type CappeListResponse = { accounts: CappeAccount[]; totals: CappeTotals }
-type CappePlanOption = { code: string; name: string; status: string }
 type PlanFilter = 'all' | 'free' | 'creator' | 'business' | 'hosting' | 'pro'
 type View = 'websites' | 'brands' | 'creators' | 'grants'
 
@@ -70,7 +70,6 @@ const PLAN_LABEL: Record<Exclude<PlanFilter, 'all'>, string> = {
 
 const PLAN_BADGE_CLASS: Record<string, string> = {
   free: 'border-zinc-600 bg-zinc-700/30 text-zinc-300',
-  creator: 'border-amber-500/40 bg-amber-500/10 text-amber-300',
   hosting: 'border-sky-500/40 bg-sky-500/10 text-sky-300',
   pro: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
   business: 'border-violet-500/40 bg-violet-500/10 text-violet-300',
@@ -110,9 +109,8 @@ function compEnd(length: string, date: string): string | null {
 // Upgrade or downgrade an account by hand. Every plan but Free is given free
 // (a comp): the account is never charged for it, and drops to Free on the end
 // date. An account paying through Stripe has to be changed in Stripe.
-function ChangePlanModal({ account, onClose, onSaved }: { account: CappeAccount; onClose: () => void; onSaved: () => void }) {
+function ChangePlanModal({ account, plans, onClose, onSaved }: { account: CappeAccount; plans: CappePlanOption[] | null; onClose: () => void; onSaved: () => void }) {
   const { toast } = useToast()
-  const [plans, setPlans] = useState<CappePlanOption[] | null>(null)
   const [planCode, setPlanCode] = useState(account.plan)
   const [length, setLength] = useState<string>('30')
   const [date, setDate] = useState('')
@@ -120,12 +118,6 @@ function ChangePlanModal({ account, onClose, onSaved }: { account: CappeAccount;
   const [saving, setSaving] = useState(false)
   const paying = account.subscription_source === 'stripe'
   const toFree = planCode === 'free'
-
-  useEffect(() => {
-    api.get<CappePlanOption[]>('/cappe/matcha-admin/plans')
-      .then(setPlans)
-      .catch(() => setPlans([]))
-  }, [])
 
   async function save() {
     if (!toFree && length === 'date' && !date) {
@@ -156,7 +148,7 @@ function ChangePlanModal({ account, onClose, onSaved }: { account: CappeAccount;
         ) : (
           <>
             <Select label="Plan" value={planCode} onChange={(event) => setPlanCode(event.target.value)} disabled={!plans}
-              options={(plans ?? [{ code: account.plan, name: PLAN_LABEL[account.plan as Exclude<PlanFilter, 'all'>] ?? account.plan, status: 'active' }])
+              options={(plans?.length ? plans : [{ code: account.plan, name: PLAN_LABEL[account.plan as Exclude<PlanFilter, 'all'>] ?? account.plan, status: 'active' }])
                 .map((plan) => ({ value: plan.code, label: plan.status === 'legacy' ? `${plan.name} (legacy)` : plan.name }))} />
             {toFree ? (
               <p className="text-xs text-zinc-500">Ends any free plan they were given. Their sites stay; paid features switch off until they subscribe.</p>
@@ -221,6 +213,14 @@ export default function Cappe() {
   const [suspendNote, setSuspendNote] = useState('')
   const [busyId, setBusyId] = useState<string | null>(null)
   const [planTarget, setPlanTarget] = useState<CappeAccount | null>(null)
+  // The plan picker's options, shared by the plan modal and the signup links.
+  const [plans, setPlans] = useState<CappePlanOption[] | null>(null)
+
+  useEffect(() => {
+    api.get<CappePlanOption[]>('/cappe/matcha-admin/plans')
+      .then(setPlans)
+      .catch(() => setPlans([]))
+  }, [])
 
   const load = useCallback(() => {
     setLoading(true)
@@ -316,7 +316,7 @@ export default function Cappe() {
       {view === 'creators' ? (
         <div className="mt-7"><CappeCreators /></div>
       ) : view === 'grants' ? (
-        <div className="mt-7"><CappeSignupGrants /></div>
+        <div className="mt-7"><CappeSignupGrants plans={plans} /></div>
       ) : loading ? (
         <p className="mt-7 text-sm text-zinc-500">Loading…</p>
       ) : view === 'brands' ? (
@@ -434,7 +434,7 @@ export default function Cappe() {
         </div>
       )}
 
-      {planTarget && <ChangePlanModal account={planTarget} onClose={() => setPlanTarget(null)} onSaved={() => { setPlanTarget(null); load() }} />}
+      {planTarget && <ChangePlanModal account={planTarget} plans={plans} onClose={() => setPlanTarget(null)} onSaved={() => { setPlanTarget(null); load() }} />}
 
       <Modal open={suspendTarget != null} onClose={() => setSuspendTarget(null)} title={suspendTarget ? `Suspend ${suspendTarget.name || suspendTarget.email}` : ''} width="sm">
         <div className="space-y-4">

@@ -25,6 +25,14 @@ from app.cappe.models.auth import CappeLogin, CappeSignup, CappeVerifyRequest  #
 from app.cappe.routes import auth  # noqa: E402
 
 
+class _Tx:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args):
+        return False
+
+
 class _Conn:
     """Answers the three statements signup issues, and records writes."""
 
@@ -34,6 +42,9 @@ class _Conn:
         self.inserted = None
         self.executed = []
         self.selects = []
+
+    def transaction(self):
+        return _Tx()
 
     async def fetchrow(self, sql, *args):
         if "INSERT INTO cappe_accounts" in sql:

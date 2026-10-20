@@ -327,12 +327,19 @@ BEGIN
           FROM cappe_orders o WHERE o.id = r.order_id AND r.customer_email IS NOT NULL;
     END IF;
     -- Signup grants (zzzzcappe48): a live link's token works on prod, and a
-    -- locked grant names the person it was sent to. New tokens, scrubbed emails.
+    -- locked grant names the person it was sent to. Tokens become dev_<id>
+    -- (still a valid shape, and the refresh gate can see they were replaced),
+    -- emails are scrubbed.
     IF to_regclass('public.cappe_signup_grants') IS NOT NULL THEN
         UPDATE cappe_signup_grants SET
-            token = replace(gen_random_uuid()::text, '-', ''),
+            token = 'dev_' || replace(id::text, '-', ''),
             email = CASE WHEN email IS NOT NULL THEN 'grant_' || replace(id::text,'-','') || '@example.com' END,
             created_by_email = CASE WHEN created_by_email IS NOT NULL THEN 'admin@example.com' END;
+    END IF;
+    -- Matcha-admin audit rows name the account acted on (`email`, e.g. a
+    -- suspension). The admin's own address (`admin_email`) is kept.
+    IF to_regclass('public.cappe_admin_audit') IS NOT NULL THEN
+        UPDATE cappe_admin_audit SET payload = payload - 'email' WHERE payload ? 'email';
     END IF;
 END $$;
 

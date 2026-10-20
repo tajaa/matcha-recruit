@@ -225,20 +225,47 @@ describe('CappeBilling', () => {
     expect(api.post).toHaveBeenCalledWith('/billing/portal', { return_url: 'https://gummfit.example/cappe/billing' })
   })
 
-  it('lets a plan given free be kept by subscribing, billed from the day it ends', async () => {
-    serve(subscription({ source: 'comp', current_period_end: null, comped_until: '2026-11-18T12:00:00Z' }))
+  // Relative to now, so these never age into "has ended".
+  const inDays = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString()
+  const longDay = (iso: string) => new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })
+
+  it('lets the plan given free be kept, billed from the day the server names', async () => {
+    const until = inDays(30)
+    serve(subscription({ source: 'comp', current_period_end: null, comped_until: until, comp_bills_from: until }))
     api.post.mockResolvedValue({ checkout_url: 'https://checkout.stripe.test/c/3' })
     open()
 
-    expect(await screen.findByText(/Free from Gummfit until/)).toHaveTextContent('your card is first charged when the free time ends')
+    expect(await screen.findByText(/Free from Gummfit until/)).toHaveTextContent(`your card is first charged on ${longDay(until)}`)
     const card = screen.getByTestId('billing-plan-business')
-    expect(card).toHaveTextContent('Free until November 18, 2026, then billed')
+    expect(card).toHaveTextContent(`Free until ${longDay(until)}, then billed`)
     // The $1 intro isn't offered on top of free days.
     expect(card).not.toHaveTextContent('$1 for your first 30 days')
+    // Free time is for the plan that was given; another plan bills as usual.
+    expect(screen.getByTestId('billing-plan-creator')).not.toHaveTextContent('Free until')
+    expect(screen.getByRole('button', { name: 'Choose Creator' })).toBeEnabled()
     fireEvent.click(screen.getByRole('button', { name: 'Keep Business' }))
 
     await waitFor(() => expect(assign).toHaveBeenCalledWith('https://checkout.stripe.test/c/3'))
     expect(api.post.mock.calls[0][1]).toMatchObject({ plan_code: 'business', interval: 'month' })
+  })
+
+  it('promises no free time the server will not give', async () => {
+    // Ends within Stripe's 48-hour trial floor: the server bills at checkout.
+    serve(subscription({ source: 'comp', current_period_end: null, comped_until: inDays(1), comp_bills_from: null }))
+    open()
+
+    const status = await screen.findByText(/Free from Gummfit until/)
+    expect(status).not.toHaveTextContent('first charged')
+    const card = screen.getByTestId('billing-plan-business')
+    expect(card).not.toHaveTextContent('Free until')
+    expect(card).toHaveTextContent('$1 for your first 30 days')
+    expect(screen.getByRole('button', { name: 'Keep Business' })).toBeEnabled()
+  })
+
+  it('describes a trial by its first charge, not as an intro', async () => {
+    serve(subscription({ status: 'trialing', trial_end: '2026-11-18T12:00:00Z' }))
+    open()
+    expect(await screen.findByText(/First full charge on/)).toHaveTextContent('First full charge on November 18, 2026, then billed monthly.')
   })
 
   it('reports a billing page that cannot load', async () => {

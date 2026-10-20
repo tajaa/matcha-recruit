@@ -17,8 +17,10 @@ os.environ.setdefault("LIVE_API", "test-key")
 os.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost/test")
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-cappe")
 
+import asyncpg  # noqa: E402
 import pytest  # noqa: E402
 from fastapi import FastAPI, HTTPException  # noqa: E402
+from pydantic import ValidationError  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 from app.config import load_settings  # noqa: E402
@@ -232,6 +234,25 @@ async def test_an_end_date_in_the_past_is_refused(use):
     assert exc.value.status_code == 422
 
 
+def test_an_end_date_without_a_timezone_is_refused_not_guessed():
+    with pytest.raises(ValidationError):
+        CappeAdminPlanChange(plan_code="business", until="2026-12-01T00:00:00")
+    assert CappeAdminPlanChange(plan_code="business", until="2026-12-01T00:00:00Z").until.tzinfo
+
+
+@pytest.mark.asyncio
+async def test_a_plan_written_by_someone_else_at_the_same_moment_is_409_not_500(use, monkeypatch):
+    use(_Conn())
+
+    async def _clash(conn, **_kwargs):
+        raise asyncpg.UniqueViolationError("uq_cappe_sub_live")
+
+    monkeypatch.setattr(billing_svc, "grant_comp", _clash)
+    with pytest.raises(HTTPException) as exc:
+        await matcha_admin.set_account_plan(ACCOUNT_ID, CappeAdminPlanChange(plan_code="business"), admin=ADMIN)
+    assert exc.value.status_code == 409 and "same moment" in exc.value.detail
+
+
 @pytest.mark.asyncio
 async def test_list_plans_returns_the_catalog_rows(monkeypatch):
     conn = AsyncMock()
@@ -248,10 +269,12 @@ def _grant_row(**over):
         "id": GRANT_ID, "token": "t" * 32, "plan_code": "business", "plan_name": "Business",
         "days": 30, "max_redemptions": 1, "redeemed_count": 0, "email": None, "note": None,
         "expires_at": None, "revoked_at": None, "created_by_email": "admin@example.com",
-        "created_at": datetime.now(timezone.utc),
+        "created_at": datetime.now(timezone.utc), "signup_count": 14,
         "accounts": json.dumps([{
-            "id": str(ACCOUNT_ID), "email": "new@example.com", "plan": "business",
-            "signed_up_at": "2026-10-19T12:00:00+00:00", "redeemed_at": None,
+            "id": str(ACCOUNT_ID), "email": "new@example.com", "plan": "free",
+            "signed_up_at": "2026-10-19T12:00:00+00:00",
+            "email_verified_at": "2026-10-19T12:05:00+00:00", "redeemed_at": None,
+            "refused": "This invite link has already been used.",
         }]),
     }
     row.update(over)
@@ -271,7 +294,11 @@ async def test_creating_a_grant_returns_its_link(use):
     assert timedelta(days=29, hours=23) < expires_at - datetime.now(timezone.utc) <= timedelta(days=30)
     assert grant.signup_url.endswith("/cappe/signup?grant=" + "t" * 32)
     assert grant.accounts[0].email == "new@example.com"
-    assert _audits(calls["conn"])[0][0] == "matcha:signup_grant.create"
+    [(action, payload)] = _audits(calls["conn"])
+    assert action == "matcha:signup_grant.create"
+    # The invitee's address stays on the grant row, out of the audit payload.
+    assert "email" not in payload and payload["email_locked"] is True
+    assert payload["admin_email"] == "admin@example.com"
 
 
 @pytest.mark.asyncio
@@ -292,10 +319,18 @@ async def test_a_grant_must_name_a_paid_plan_on_sale(use):
 
 
 @pytest.mark.asyncio
-async def test_listing_grants_decodes_their_accounts(use):
+async def test_listing_grants_decodes_their_accounts_and_outcomes(use):
     use(_Conn(grant_row=_grant_row()))
     [grant] = await matcha_admin.list_signup_grants()
-    assert grant.plan_name == "Business" and grant.accounts[0].plan == "business"
+    assert grant.plan_name == "Business" and grant.signup_count == 14
+    [account] = grant.accounts
+    assert account.email_verified_at is not None and account.redeemed_at is None
+    assert account.refused == "This invite link has already been used."
+
+
+def test_the_grant_list_shows_a_bounded_few_accounts_per_link():
+    sql = matcha_admin._GRANT_LIST
+    assert f"LIMIT {matcha_admin._GRANT_ACCOUNTS_SHOWN}" in sql and "AS signup_count" in sql
 
 
 @pytest.mark.asyncio
@@ -321,9 +356,24 @@ async def test_end_comp_cancels_comps_and_drops_to_free(monkeypatch):
     monkeypatch.setattr(billing_svc, "_materialize_plan", materialized)
     await billing_svc.end_comp(conn, account_id=ACCOUNT_ID)
 
+    lock_sql = conn.execute.call_args_list[0].args[0]
+    assert "FROM cappe_accounts" in lock_sql and "FOR UPDATE" in lock_sql
     cancel_sql = conn.execute.call_args.args[0]
     assert "source = 'comp'" in cancel_sql and "status = 'canceled'" in cancel_sql
     materialized.assert_awaited_once_with(conn, ACCOUNT_ID, billing_svc.FREE_PLAN_CODE)
+
+
+@pytest.mark.asyncio
+async def test_grant_comp_locks_the_account_before_touching_its_comps(monkeypatch):
+    """Two comp writers on one account run in turn instead of both inserting
+    a live row (uq_cappe_sub_live)."""
+    conn = AsyncMock()
+    conn.fetchval = AsyncMock(return_value=None)
+    monkeypatch.setattr(billing_svc, "_materialize_plan", AsyncMock())
+    await billing_svc.grant_comp(conn, account_id=ACCOUNT_ID, plan_code="business", until=None, reason="x")
+    statements = [c.args[0] for c in conn.execute.call_args_list]
+    assert "FOR UPDATE" in statements[0]
+    assert "INSERT INTO cappe_subscriptions" in statements[-1]
 
 
 @pytest.mark.asyncio
@@ -332,7 +382,9 @@ async def test_end_comp_refuses_a_paying_account(monkeypatch):
     conn.fetchval = AsyncMock(return_value="sub_123")
     with pytest.raises(billing_svc.LiveSubscriptionExists):
         await billing_svc.end_comp(conn, account_id=ACCOUNT_ID)
-    conn.execute.assert_not_awaited()
+    # Only the row lock ran; no comp was touched.
+    [lock] = conn.execute.call_args_list
+    assert "FOR UPDATE" in lock.args[0]
 
 
 # ── the /admin/cappe roster shows comps ───────────────────────────────────────

@@ -98,17 +98,27 @@ DB safety rules, test-data email domain rules, and deploy rules are in root `CLA
   `core/routes/admin/`, so plan changes go through `billing.grant_comp` / `end_comp` rather than a
   copy in core. `/admin/*` on this router is the in-Cappe platform admin, a different auth realm.
 - **Every plan an admin gives is a comp, never a charge.** Free = `end_comp`; any other plan =
-  `grant_comp` with an optional `comped_until`. Both refuse (409) an account with a live Stripe
-  subscription: change those in Stripe.
+  `grant_comp` with an optional `comped_until` (timezone required). Both refuse (409) an account
+  with a live Stripe subscription: change those in Stripe. Both take the account row lock, so comp
+  writers on one account run in turn; a webhook-recorded subscription racing them is a 409.
 - **A signup grant (`cappe_signup_grants`, `zzzzcappe48`) is a link, `/cappe/signup?grant=<token>`.**
   Signup records it on the account (`signup_grant_id`); confirming the email redeems it
-  (`services/signup_grants.redeem`: account row locked, then the grant row; capacity and revocation
-  judged then, link expiry judged at signup time) into a comp ending `days` later. A failed
-  redemption never fails the confirmation. `cappe_comp_expiry` must stay ON or a "30 days free"
-  grant never ends (`zzzzcappe48` turned it on).
-- **Subscribing during a comp with an end date bills from that date** (`billing.comp_trial_end` →
-  Stripe `trial_end`, no $1 intro), so paying early never costs the free days. A comp ending
-  within 49 h, or with no end date, bills at checkout as before.
+  (`services/signup_grants.redeem`: account row locked, then the grant row; capacity, revocation
+  and the plan still being on sale judged then, link expiry judged at signup time) into a comp
+  ending `days` later, or records why not in `signup_grant_refused` (an account that already holds
+  a plan is never overwritten). **Every path that confirms an account redeems, in the same
+  transaction as the confirmation:** `/auth/verify`, `/auth/reset-password` (it confirms too, and
+  clears the verification token) and auto-verified signup. A new confirming path must do the same.
+  A failed redemption rolls back its savepoint alone and never fails the confirmation.
+  `unusable_reason` is the one rule for the lookup, signup and redemption. `cappe_comp_expiry`
+  must stay ON or a "30 days free" grant never ends (`zzzzcappe48` turned it on).
+- **Subscribing to the comped plan during its comp bills from the comp's end**
+  (`billing.comp_trial_end(sub, plan_code)` → Stripe `trial_end`, no $1 intro), so keeping it early
+  never costs the free days. Any OTHER plan bills at checkout: deferring every plan turned a comp
+  on a cheap plan into free time on the top one. Also at checkout: no end date, or an end outside
+  Stripe's 49 h–729 d window. The billing page reads `CappeSubscription.comp_bills_from` rather
+  than re-deriving this. `change_plan` keeps such a trial for an interval switch on the same plan
+  (`trial_is_from_comp`: no intro redemption on the subscription) and ends it for a tier switch.
 - **`models/billing.CappePlanCheckoutRequest` is not `models/shop.CappeCheckoutRequest`.** The
   `models.cappe` shim star-imports every module, so one name in two modules resolves to the last
   one imported; that sent the cart model to `/billing/checkout` and 422'd every plan purchase.

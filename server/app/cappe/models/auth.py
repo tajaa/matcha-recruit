@@ -7,6 +7,10 @@ from pydantic import BaseModel, EmailStr, Field
 
 # --- Auth -------------------------------------------------------------------
 
+# A signup-grant link's secret (`services/signup_grants.new_token` makes 32 of
+# these characters). The signup page's copy is in pages/CappeSignup.tsx.
+GRANT_TOKEN_PATTERN = r"^[A-Za-z0-9_-]{16,64}$"
+
 class CappeSignup(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8, max_length=200)
@@ -23,7 +27,7 @@ class CappeSignup(BaseModel):
     intended_interval: Optional[Literal["month", "year"]] = None
     # The secret from a signup-grant link (/cappe/signup?grant=…): the plan it
     # names is given free, for its days, once the email is confirmed.
-    grant_token: Optional[str] = Field(default=None, pattern=r"^[A-Za-z0-9_-]{16,64}$")
+    grant_token: Optional[str] = Field(default=None, pattern=GRANT_TOKEN_PATTERN)
 
 
 class CappeSignupGrantInfo(BaseModel):
@@ -88,12 +92,15 @@ class CappeVerifyResponse(CappeTokenResponse):
     the client can continue to checkout. Returned once: confirming clears it.
 
     `granted_*` is the plan a signup-grant link gave instead, free until
-    `granted_until`; there is then no intended plan, as nothing is owed yet."""
+    `granted_until`; there is then no intended plan, as nothing is owed yet.
+    `grant_refused` says why a link's plan was NOT given (used up meanwhile,
+    revoked, the account already had a plan), so nobody is left wondering."""
     intended_plan: Optional[str] = None
     intended_interval: Optional[str] = None
     granted_plan: Optional[str] = None
     granted_plan_name: Optional[str] = None
     granted_until: Optional[datetime] = None
+    grant_refused: Optional[str] = None
 
 
 class CappeVerifyRequest(BaseModel):

@@ -16,17 +16,18 @@ from __future__ import annotations
 
 import logging
 import secrets
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 from uuid import UUID
 
+from ..models.auth import GRANT_TOKEN_PATTERN
 from . import billing
 from .email import dashboard_url
 
 logger = logging.getLogger(__name__)
 
-# What a token in a link may look like; `new_token` makes 32 of these.
-TOKEN_PATTERN = r"^[A-Za-z0-9_-]{16,64}$"
+TOKEN_PATTERN = GRANT_TOKEN_PATTERN
 
 
 def new_token() -> str:
@@ -40,8 +41,11 @@ def signup_url(token: str) -> str:
 def unusable_reason(grant: Any, *, now: datetime, email: Optional[str] = None) -> Optional[str]:
     """Why this grant can't start an account, as a sentence for the person
     holding the link, or None when it can. `email` is checked only when given:
-    the signup page asks before anyone has typed an address."""
-    if grant is None or grant["revoked_at"] is not None:
+    the signup page asks before anyone has typed an address.
+
+    The one check for every path (the signup page's lookup, signup, the
+    redemption at confirmation), so a rule added here holds everywhere."""
+    if grant is None or grant["revoked_at"] is not None or grant["plan_status"] != "active":
         return "This invite link is no longer valid."
     if grant["expires_at"] is not None and grant["expires_at"] <= now:
         return "This invite link has expired."
@@ -54,7 +58,8 @@ def unusable_reason(grant: Any, *, now: datetime, email: Optional[str] = None) -
 
 _GRANT_SELECT = """
     SELECT g.id, g.token, g.plan_code, g.days, g.max_redemptions, g.redeemed_count,
-           g.email, g.note, g.expires_at, g.revoked_at, p.name AS plan_name
+           g.email, g.note, g.expires_at, g.revoked_at,
+           p.name AS plan_name, p.status AS plan_status
       FROM cappe_signup_grants g
       JOIN cappe_billing_products p ON p.code = g.plan_code
 """
@@ -64,40 +69,68 @@ async def find(conn, token: str):
     return await conn.fetchrow(f"{_GRANT_SELECT} WHERE g.token = $1", token)
 
 
-async def redeem(conn, *, account_id: UUID) -> Optional[dict]:
+@dataclass(frozen=True)
+class Redemption:
+    """What confirming an account did with its grant: the plan given, free
+    until `until`, or `refused` with the reason the person is told."""
+    plan_code: Optional[str] = None
+    plan_name: Optional[str] = None
+    until: Optional[datetime] = None
+    refused: Optional[str] = None
+
+
+ALREADY_ON_A_PLAN = "Your account already has a plan, so the invite's free plan wasn't added."
+
+
+async def redeem(conn, *, account_id: UUID) -> Optional[Redemption]:
     """Give a just-confirmed account the plan its signup grant promised.
 
-    Returns `{plan_code, plan_name, until}`, or None when the account has no
-    grant, already got it, or the grant can no longer be used (revoked, or
-    every use went to someone who confirmed first).
+    None when the account has no grant or it was already dealt with. Otherwise
+    a `Redemption`: the plan given, or why not — the grant can no longer be
+    used (revoked, its plan withdrawn, every use taken by people who confirmed
+    first), or the account already holds a plan (an admin gave it one while
+    the email was unconfirmed; replacing that would undo the admin's choice).
+    The outcome is written on the account either way, which is what makes this
+    run once and lets the admin page say what happened.
 
-    One transaction. The account row is locked first, so two confirmations of
-    the same account racing each other give the plan once; the grant row is
-    locked next, so two accounts racing for its last use can't both get it.
+    One transaction (a savepoint inside the caller's). The account row is
+    locked first, so two confirmations of one account give the plan once; the
+    grant row next, so two accounts racing for its last use can't both get it.
     Expiry is judged at signup time, when the link was used: a confirmation
     email opened the day after the link expired still gets the plan.
     """
     now = datetime.now(timezone.utc)
     async with conn.transaction():
         account = await conn.fetchrow(
-            "SELECT email, created_at, signup_grant_id, signup_grant_redeemed_at "
-            "FROM cappe_accounts WHERE id = $1 FOR UPDATE",
+            "SELECT email, created_at, signup_grant_id, signup_grant_redeemed_at, "
+            "signup_grant_refused FROM cappe_accounts WHERE id = $1 FOR UPDATE",
             account_id,
         )
         if account is None or account["signup_grant_id"] is None:
             return None
-        if account["signup_grant_redeemed_at"] is not None:
+        if account["signup_grant_redeemed_at"] is not None or account["signup_grant_refused"]:
             return None
         grant = await conn.fetchrow(
             f"{_GRANT_SELECT} WHERE g.id = $1 FOR UPDATE OF g", account["signup_grant_id"]
         )
         reason = unusable_reason(grant, now=account["created_at"] or now, email=account["email"])
+        if reason is None and await conn.fetchval(
+            "SELECT 1 FROM cappe_subscriptions WHERE account_id = $1 "
+            "AND status IN ('trialing','active','past_due','incomplete','unpaid','paused')",
+            account_id,
+        ):
+            reason = ALREADY_ON_A_PLAN
         if reason is not None:
             logger.info(
                 "cappe: signup grant %s not given to account %s: %s",
                 account["signup_grant_id"], account_id, reason,
             )
-            return None
+            await conn.execute(
+                "UPDATE cappe_accounts SET signup_grant_refused = $2, updated_at = NOW() "
+                "WHERE id = $1",
+                account_id, reason,
+            )
+            return Redemption(refused=reason)
 
         until = now + timedelta(days=grant["days"])
         await billing.grant_comp(
@@ -113,4 +146,4 @@ async def redeem(conn, *, account_id: UUID) -> Optional[dict]:
             "WHERE id = $1",
             account_id, now,
         )
-    return {"plan_code": grant["plan_code"], "plan_name": grant["plan_name"], "until": until}
+    return Redemption(plan_code=grant["plan_code"], plan_name=grant["plan_name"], until=until)

@@ -59,6 +59,8 @@ export type CappeVerifyResponse = CappeTokenResponse & {
   granted_plan?: string | null
   granted_plan_name?: string | null
   granted_until?: string | null
+  /** Why a grant link's plan was NOT given (used up meanwhile, revoked, …). */
+  grant_refused?: string | null
 }
 
 // What a signup-grant link (/signup?grant=…) offers.
@@ -196,6 +198,9 @@ export type CappeSubscription = {
   trial_end: string | null
   cancel_at_period_end: boolean
   comped_until: string | null
+  /** For a plan given free: the day subscribing to it now would first bill.
+   *  null = it would bill at checkout (no end date, or it ends too soon). */
+  comp_bills_from?: string | null
 }
 
 export type CappePublicAddon = {

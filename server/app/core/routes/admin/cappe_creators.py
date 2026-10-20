@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 
 from app.config import get_settings
 from app.core.dependencies import require_admin
+from app.core.services.cappe_admin_audit import record_matcha_admin_action
 from app.core.services.email import get_email_service
 from app.database import get_connection
 
@@ -45,12 +46,7 @@ def _settings_subvalue(values: dict, key: str, subkey: str, fallback):
 
 
 async def _audit(conn, admin_user, action: str, target: str, payload: dict) -> None:
-    await conn.execute(
-        "INSERT INTO cappe_admin_audit (actor_account_id, action, target, payload) "
-        "VALUES (NULL, $1, $2, $3::jsonb)",
-        f"matcha:{action}", target,
-        json.dumps({**payload, "admin_email": admin_user.email}),
-    )
+    await record_matcha_admin_action(conn, admin_user.email, action, target, payload)
 
 
 async def _send_review_email(handle: str, to_email: str, approved: bool, note: Optional[str]) -> None:

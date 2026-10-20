@@ -805,26 +805,50 @@ class LiveSubscriptionExists(Exception):
     """Raised when a comp would collide with a paying subscription."""
 
 
-# Stripe Checkout refuses a trial ending less than 48 hours out; an hour over
-# that covers the time between making the session and Stripe checking it.
+# Stripe takes a Checkout trial ending 48 hours to 730 days out. An hour over
+# the floor covers the time between making the session and Stripe checking it;
+# a day under the ceiling, the same the other way.
 _MIN_CHECKOUT_TRIAL = timedelta(hours=49)
+_MAX_CHECKOUT_TRIAL = timedelta(days=729)
 
 
-def comp_trial_end(subscription: Optional[dict], *, now: Optional[datetime] = None) -> Optional[datetime]:
-    """When a subscription bought during a comp should start billing: the day
-    the comp ends, so subscribing early never costs the free days left (a
-    signup grant's "30 days free" stays 30 days). None when there is no comp
-    with an end date, or it ends too soon for Stripe to accept as a trial;
-    billing then starts at checkout, as it always did.
+def comp_trial_end(
+    subscription: Optional[dict], plan_code: str, *, now: Optional[datetime] = None,
+) -> Optional[datetime]:
+    """When a subscription to `plan_code` bought during a comp should start
+    billing: the day the comp ends, so keeping a plan given free never costs
+    the free days left (a signup grant's "30 days free" stays 30 days).
+
+    Only for the comped plan itself. The free time was given for that plan;
+    deferring billing on any plan bought would turn a comp on a cheap plan
+    into the same time free on the most expensive one.
+
+    None — billing starts at checkout, as it always did — for any other plan,
+    a comp with no end date, or one ending outside the window Stripe accepts.
     """
     if not subscription or subscription.get("source") != "comp":
+        return None
+    if subscription.get("plan_code") != plan_code:
         return None
     until = subscription.get("comped_until")
     if until is None:
         return None
-    if until - (now or datetime.now(timezone.utc)) < _MIN_CHECKOUT_TRIAL:
+    left = until - (now or datetime.now(timezone.utc))
+    if not _MIN_CHECKOUT_TRIAL <= left <= _MAX_CHECKOUT_TRIAL:
         return None
     return until
+
+
+async def trial_is_from_comp(conn, stripe_subscription_id: str) -> bool:
+    """Whether a trialing subscription's trial is free time carried over from
+    a comp (`comp_trial_end`) rather than the $1 intro. Every intro checkout
+    records a `cappe_intro_redemptions` row for its subscription; a comp
+    carry-over is the only other way a subscription starts in a trial."""
+    intro = await conn.fetchval(
+        "SELECT 1 FROM cappe_intro_redemptions WHERE stripe_subscription_id = $1",
+        stripe_subscription_id,
+    )
+    return not intro
 
 
 async def grant_comp(conn, *, account_id: UUID, plan_code: str, until, reason: str) -> None:
@@ -839,7 +863,12 @@ async def grant_comp(conn, *, account_id: UUID, plan_code: str, until, reason: s
     account has a live Stripe subscription. Silently superseding a paying
     subscription would strand it: the Stripe side keeps billing while our row
     says comp. Cancel the subscription first, deliberately.
+
+    Takes the account row lock, so two comp writers on one account (an admin
+    double-click, an admin edit racing a grant redemption) run one after the
+    other instead of both inserting a live row. Run it inside a transaction.
     """
+    await _lock_account(conn, account_id)
     await _refuse_if_paying(
         conn, account_id,
         "This account has a live Stripe subscription. Cancel it before comping, "
@@ -864,8 +893,9 @@ async def end_comp(conn, *, account_id: UUID) -> None:
     Also what an admin downgrade does for an account given a plan by hand
     before comps existed: it has no subscription row, only `plan`. Refused
     for a live Stripe subscription, as `grant_comp` is: Stripe would keep
-    billing for the plan we took away.
+    billing for the plan we took away. Locks like `grant_comp`.
     """
+    await _lock_account(conn, account_id)
     await _refuse_if_paying(
         conn, account_id,
         "This account has a live Stripe subscription. Cancel it in Stripe to "
@@ -873,6 +903,10 @@ async def end_comp(conn, *, account_id: UUID) -> None:
     )
     await _cancel_live_comps(conn, account_id)
     await _materialize_plan(conn, account_id, FREE_PLAN_CODE)
+
+
+async def _lock_account(conn, account_id: UUID) -> None:
+    await conn.execute("SELECT 1 FROM cappe_accounts WHERE id = $1 FOR UPDATE", account_id)
 
 
 async def _refuse_if_paying(conn, account_id: UUID, message: str) -> None:

@@ -9,16 +9,18 @@ in-Cappe platform admin: a Cappe identity, a different auth realm.
 
 Every plan an admin gives is a comp, never a charge: it shows as "free until"
 on the account's billing page and in reports, and `cappe_comp_expiry` ends it
-on its date. Audited like core's Cappe admin (`admin/cappe_creators.py`):
-`actor_account_id` NULL, a `matcha:` action, the admin's email in the payload.
+on its date. Audited in the same format as core's Cappe admin
+(`core/services/cappe_admin_audit.py`).
 """
 import json
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
+import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from ...core.dependencies import require_admin
+from ...core.services.cappe_admin_audit import record_matcha_admin_action
 from ...database import get_connection
 from ..models.cappe import (
     CappeAdminPlanChange,
@@ -31,13 +33,10 @@ from ..services import signup_grants
 router = APIRouter()
 
 
-async def _audit(conn, admin, action: str, target: str, payload: dict) -> None:
-    await conn.execute(
-        "INSERT INTO cappe_admin_audit (actor_account_id, action, target, payload) "
-        "VALUES (NULL, $1, $2, $3::jsonb)",
-        f"matcha:{action}", target,
-        json.dumps({**payload, "admin_email": admin.email}, default=str),
-    )
+_CHANGED_MEANWHILE = HTTPException(
+    status_code=status.HTTP_409_CONFLICT,
+    detail="This account's plan changed at the same moment. Reload and try again.",
+)
 
 
 @router.get("/plans")
@@ -62,6 +61,11 @@ async def set_account_plan(
     until `until` (or until changed again). Refused with 409 when the account
     pays through Stripe: changing the plan here would leave Stripe billing for
     one plan while the account holds another.
+
+    `grant_comp`/`end_comp` lock the account row, so two admin edits (or an
+    edit and a grant redemption) run in turn. A Stripe subscription recorded
+    by its webhook at the same instant is the one race left; its unique-index
+    clash is answered 409, not 500.
     """
     if body.until is not None and body.until <= datetime.now(timezone.utc):
         raise HTTPException(
@@ -89,27 +93,43 @@ async def set_account_plan(
                         conn, account_id=account_id, plan_code=body.plan_code,
                         until=body.until, reason=body.reason or f"Set by {admin.email}",
                     )
-                await _audit(conn, admin, "account.plan", str(account_id), {
+                await record_matcha_admin_action(conn, admin.email, "account.plan", str(account_id), {
                     "from": previous, "to": body.plan_code,
                     "until": None if to_free else body.until, "reason": body.reason,
                 })
         except billing_svc.LiveSubscriptionExists as exc:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        except asyncpg.UniqueViolationError as exc:
+            raise _CHANGED_MEANWHILE from exc
     return {
         "plan": body.plan_code,
         "comped_until": None if to_free else body.until,
     }
 
 
-_GRANT_LIST = """
-    SELECT g.*, p.name AS plan_name,
-           COALESCE(json_agg(json_build_object(
-               'id', a.id, 'email', a.email, 'plan', a.plan,
-               'signed_up_at', a.created_at, 'redeemed_at', a.signup_grant_redeemed_at
-           ) ORDER BY a.created_at) FILTER (WHERE a.id IS NOT NULL), '[]') AS accounts
+# Each grant with how many signed up through it and the latest few of them.
+# Bounded: a 1,000-use link would otherwise put every account in every row.
+_GRANT_ACCOUNTS_SHOWN = 10
+_GRANT_LIST = f"""
+    SELECT g.*, p.name AS plan_name, signups.signup_count, signups.accounts
       FROM cappe_signup_grants g
       JOIN cappe_billing_products p ON p.code = g.plan_code
-      LEFT JOIN cappe_accounts a ON a.signup_grant_id = g.id
+      CROSS JOIN LATERAL (
+          SELECT (SELECT COUNT(*) FROM cappe_accounts c WHERE c.signup_grant_id = g.id)
+                     AS signup_count,
+                 COALESCE((
+                     SELECT json_agg(json_build_object(
+                         'id', a.id, 'email', a.email, 'plan', a.plan,
+                         'signed_up_at', a.created_at, 'email_verified_at', a.email_verified_at,
+                         'redeemed_at', a.signup_grant_redeemed_at,
+                         'refused', a.signup_grant_refused
+                     ) ORDER BY a.created_at DESC)
+                       FROM (SELECT * FROM cappe_accounts
+                              WHERE signup_grant_id = g.id
+                              ORDER BY created_at DESC
+                              LIMIT {_GRANT_ACCOUNTS_SHOWN}) a
+                 ), '[]') AS accounts
+      ) signups
 """
 
 
@@ -126,9 +146,7 @@ def _grant_out(row) -> CappeAdminSignupGrant:
 @router.get("/signup-grants", response_model=list[CappeAdminSignupGrant])
 async def list_signup_grants():
     async with get_connection() as conn:
-        rows = await conn.fetch(
-            f"{_GRANT_LIST} GROUP BY g.id, p.name ORDER BY g.created_at DESC LIMIT 200"
-        )
+        rows = await conn.fetch(f"{_GRANT_LIST} ORDER BY g.created_at DESC LIMIT 200")
     return [_grant_out(r) for r in rows]
 
 
@@ -166,9 +184,13 @@ async def create_signup_grant(body: CappeSignupGrantCreate, admin=Depends(requir
                 signup_grants.new_token(), body.plan_code, body.days, body.max_redemptions,
                 body.email.lower() if body.email else None, body.note, expires_at, admin.email,
             )
-            await _audit(conn, admin, "signup_grant.create", str(grant_id),
-                          body.model_dump(mode="json"))
-        row = await conn.fetchrow(f"{_GRANT_LIST} WHERE g.id = $1 GROUP BY g.id, p.name", grant_id)
+            # Not the invitee's address: the grant row holds it, and the
+            # audit payload is not where a customer's email should live.
+            await record_matcha_admin_action(
+                conn, admin.email, "signup_grant.create", str(grant_id),
+                {**body.model_dump(mode="json", exclude={"email"}), "email_locked": bool(body.email)},
+            )
+        row = await conn.fetchrow(f"{_GRANT_LIST} WHERE g.id = $1", grant_id)
     return _grant_out(row)
 
 
@@ -188,6 +210,6 @@ async def revoke_signup_grant(grant_id: UUID, admin=Depends(require_admin)):
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="No such link, or it was already revoked.",
                 )
-            await _audit(conn, admin, "signup_grant.revoke", str(grant_id), {})
-        row = await conn.fetchrow(f"{_GRANT_LIST} WHERE g.id = $1 GROUP BY g.id, p.name", grant_id)
+            await record_matcha_admin_action(conn, admin.email, "signup_grant.revoke", str(grant_id), {})
+        row = await conn.fetchrow(f"{_GRANT_LIST} WHERE g.id = $1", grant_id)
     return _grant_out(row)

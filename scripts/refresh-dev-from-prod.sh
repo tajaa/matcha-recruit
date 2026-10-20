@@ -319,8 +319,15 @@ else
         fi
         HAS_GRANTS=$(ddev -tA -d "$DB_NAME" -c "SELECT to_regclass('public.cappe_signup_grants') IS NOT NULL;")
         if [[ "$HAS_GRANTS" == "t" ]]; then
-            GRANT_LEAK=$(ddev -tA -d "$DB_NAME" -c "SELECT count(*) FROM cappe_signup_grants WHERE (email IS NOT NULL AND email NOT LIKE '%@example.com') OR (created_by_email IS NOT NULL AND created_by_email NOT LIKE '%@example.com');")
-            [[ "$GRANT_LEAK" == "0" ]] || { echo "${RED}PII LEAK DETECTED — signup-grant emails remain.${NC}"; exit 1; }
+            # A prod token left in place is a link that works on prod: every one
+            # must be the anonymizer's dev_<id>.
+            GRANT_LEAK=$(ddev -tA -d "$DB_NAME" -c "SELECT count(*) FROM cappe_signup_grants WHERE (email IS NOT NULL AND email NOT LIKE '%@example.com') OR (created_by_email IS NOT NULL AND created_by_email NOT LIKE '%@example.com') OR token NOT LIKE 'dev\_%';")
+            [[ "$GRANT_LEAK" == "0" ]] || { echo "${RED}PII LEAK DETECTED — signup-grant emails or live tokens remain.${NC}"; exit 1; }
+        fi
+        HAS_AUDIT=$(ddev -tA -d "$DB_NAME" -c "SELECT to_regclass('public.cappe_admin_audit') IS NOT NULL;")
+        if [[ "$HAS_AUDIT" == "t" ]]; then
+            AUDIT_LEAK=$(ddev -tA -d "$DB_NAME" -c "SELECT count(*) FROM cappe_admin_audit WHERE payload ? 'email';")
+            [[ "$AUDIT_LEAK" == "0" ]] || { echo "${RED}PII LEAK DETECTED — cappe_admin_audit payloads still name accounts.${NC}"; exit 1; }
         fi
     else
         echo "      cappe tables absent in this dump — cappe leak check skipped."

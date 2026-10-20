@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Loader2, Store, User, Sparkles, MailCheck, Gift } from 'lucide-react'
-import { cappePublicGet, cappePublicPost, setCappeTokens } from '../api'
+import { CappeApiError, cappePublicGet, cappePublicPost, setCappeTokens } from '../api'
 import { invalidateCappeMeCache } from '../hooks/useCappeMe'
 import { creatorPaths } from '../creators/creatorPaths'
 import ResendVerification from '../components/ResendVerification'
@@ -53,9 +53,14 @@ export default function CappeSignup({ creatorOnly = false, brandOnly = false }: 
   // email-confirmation hop; creators and brands have their own signup pages.
   // A grant link (/signup?grant=…) gives a paid plan free for a while, so it
   // replaces any plan picked on the pricing cards: there is nothing to pay.
+  // The pattern mirrors the server's GRANT_TOKEN_PATTERN (models/auth.py).
   const grantToken = !creatorOnly && !brandOnly && /^[A-Za-z0-9_-]{16,64}$/.test(params.get('grant') ?? '') ? params.get('grant') : null
   const [grant, setGrant] = useState<CappeSignupGrantInfo | null>(null)
-  const [grantError, setGrantError] = useState<string | null>(null)
+  // Set only when the SERVER says the link can't be used. Until then the token
+  // is sent with the signup even if the lookup hasn't answered (or failed for
+  // a passing reason), and the server decides: a promised plan is never
+  // dropped because the page was quick or the network slow.
+  const [grantDead, setGrantDead] = useState<string | null>(null)
   const plan = !grantToken && !creatorOnly && !brandOnly && /^[a-z0-9_]{1,40}$/.test(params.get('plan') ?? '') ? params.get('plan') : null
   const interval = params.get('interval') === 'year' ? 'year' : 'month'
 
@@ -63,7 +68,9 @@ export default function CappeSignup({ creatorOnly = false, brandOnly = false }: 
     if (!grantToken) return
     cappePublicGet<CappeSignupGrantInfo>(`/auth/signup-grants/${grantToken}`)
       .then(setGrant)
-      .catch((err) => setGrantError(err instanceof Error ? err.message : 'This invite link is no longer valid.'))
+      .catch((err) => {
+        if (err instanceof CappeApiError && err.code === 'grant_invalid') setGrantDead(err.message)
+      })
   }, [grantToken])
 
   async function onSubmit(e: React.FormEvent) {
@@ -81,7 +88,7 @@ export default function CappeSignup({ creatorOnly = false, brandOnly = false }: 
         password,
         account_type: accountType,
         ...(plan ? { intended_plan: plan, intended_interval: interval } : {}),
-        ...(grant && grantToken ? { grant_token: grantToken } : {}),
+        ...(grantToken && !grantDead ? { grant_token: grantToken } : {}),
       })
       if (res.verification_required) {
         // No tokens yet — account is live only after the email link is clicked.
@@ -102,7 +109,15 @@ export default function CappeSignup({ creatorOnly = false, brandOnly = false }: 
         )
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong.')
+      if (err instanceof CappeApiError && err.code === 'grant_invalid') {
+        // The link stopped working while the form was open (used up, revoked).
+        // Say so, and let the next press sign up without it.
+        setGrant(null)
+        setGrantDead(err.message)
+        setError('Press “Create account” again to sign up without the invite.')
+      } else {
+        setError(err instanceof Error ? err.message : 'Something went wrong.')
+      }
     } finally {
       setSubmitting(false)
     }
@@ -224,7 +239,7 @@ export default function CappeSignup({ creatorOnly = false, brandOnly = false }: 
             <p id="cappe-signup-password-hint" className="mt-1 text-xs text-zinc-500">At least 8 characters.</p>
           </div>
 
-          {grant && (
+          {grant && !grantDead && (
             <p className="flex gap-2 rounded-lg border border-lime-400/20 bg-lime-300/[0.06] px-3 py-2 text-xs leading-relaxed text-zinc-300">
               <Gift className="mt-0.5 h-3.5 w-3.5 shrink-0 text-lime-300" />
               <span>
@@ -234,9 +249,9 @@ export default function CappeSignup({ creatorOnly = false, brandOnly = false }: 
               </span>
             </p>
           )}
-          {grantError && (
+          {grantDead && (
             <p className="rounded-lg border border-amber-500/30 bg-amber-500/[0.06] px-3 py-2 text-xs leading-relaxed text-amber-300">
-              {grantError} You can still create a free account.
+              {grantDead} You can still create a free account.
             </p>
           )}
 

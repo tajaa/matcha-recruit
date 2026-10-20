@@ -15,7 +15,9 @@ that they pay like everybody else.
 
 `cappe_accounts.signup_grant_id` — the grant an account signed up with, kept
 from signup until the email is confirmed. `signup_grant_redeemed_at` — when the
-comp was given; set once, which is what stops a grant being redeemed twice.
+comp was given; `signup_grant_refused` — why it wasn't (used up, revoked, the
+account already had a plan). One of the two is set once, which is what stops
+a grant being looked at twice.
 
 Also turns ON the `cappe_comp_expiry` sweep (seeded off in zzzzcappe26). Every
 comp from these links ends because of it; with it off, a 30-day grant is a
@@ -57,7 +59,8 @@ _UPGRADE = [
     ALTER TABLE cappe_accounts
         ADD COLUMN IF NOT EXISTS signup_grant_id UUID
             REFERENCES cappe_signup_grants(id) ON DELETE SET NULL,
-        ADD COLUMN IF NOT EXISTS signup_grant_redeemed_at TIMESTAMPTZ
+        ADD COLUMN IF NOT EXISTS signup_grant_redeemed_at TIMESTAMPTZ,
+        ADD COLUMN IF NOT EXISTS signup_grant_refused TEXT
     """,
     "CREATE INDEX IF NOT EXISTS idx_cappe_accounts_signup_grant ON cappe_accounts (signup_grant_id) "
     "WHERE signup_grant_id IS NOT NULL",
@@ -68,6 +71,7 @@ _DOWNGRADE = [
     "DROP INDEX IF EXISTS idx_cappe_accounts_signup_grant",
     """
     ALTER TABLE cappe_accounts
+        DROP COLUMN IF EXISTS signup_grant_refused,
         DROP COLUMN IF EXISTS signup_grant_redeemed_at,
         DROP COLUMN IF EXISTS signup_grant_id
     """,
