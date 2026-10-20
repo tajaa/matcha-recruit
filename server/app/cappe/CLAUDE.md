@@ -197,8 +197,10 @@ DB safety rules, test-data email domain rules, and deploy rules are in root `CLA
 - **Lock order: products → variants → options**, each in id order (`inventory.lock_stock_rows`).
 - **A variant row's combination never changes.** `replace_variants` pairs by id only when the id
   still names the same combination, else by combination; anything unclaimed is deleted, and
-  `prune_variants` drops variants of a deleted option. The editor sends `{group, option}` NAMES so
-  options created in the same save can carry variants; `variants` omitted = leave them, `[]` = none.
+  `prune_variants` drops every variant that no longer fits the groups an option save leaves (a
+  deleted option, a group made optional or pick-many, a variant group added since). The editor
+  sends `{group, option}` NAMES so options created in the same save can carry variants; `variants`
+  omitted = leave them, `[]` = none.
 - **Checkout asks the plan about every line** (`entitlements.sells`), not only the editor's create /
   kind-change gate: a store whose plan stopped selling a kind (downgrade, lineup change) can't sell
   it. The public listing and `/quote` drop those products. Since `zzzzcappe50` Free sells digital,

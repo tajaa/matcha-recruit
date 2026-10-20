@@ -113,7 +113,8 @@ function refresh(){var v=variantFor(p,chosen()),phys=p.fulfillment==='physical';
 if(v&&v.image_url)showImg(RT.url(v.image_url));
 if(v&&v.status!=='active'){sb.disabled=true;sb.textContent='Unavailable';if(qbox)qbox.textContent='We don\u2019t sell that combination.';return;}
 if(gone||(phys&&v&&out(v.inventory))){sb.disabled=true;sb.textContent='Sold out';if(qbox)qbox.textContent='';return;}
-var qi=info.querySelector('[data-qty]'),cap=phys?((v&&v.inventory>0)?v.inventory:(p.inventory>0?p.inventory:null)):null;
+// The lower of the product's own count and the combination's: both limit the sale.
+var qi=info.querySelector('[data-qty]'),caps=phys?[p.inventory,v&&v.inventory].filter(function(n){return n>0;}):[],cap=caps.length?Math.min.apply(null,caps):null;
 if(cap)qi.max=cap;else qi.removeAttribute('max');
 sb.disabled=false;sb.textContent=verb()+RT.money(unit()*qn(),p.currency);if(qbox)qbox.textContent='';clearTimeout(qtimer);qtimer=setTimeout(quote,250);}
 info.querySelectorAll('.cz-opt-group').forEach(function(g){var single=g.getAttribute('data-single')==='1';g.querySelectorAll('.cz-opt').forEach(function(o){o.addEventListener('click',function(){if(single){g.querySelectorAll('.cz-opt').forEach(function(x){x.classList.remove('cz-opt--on');});o.classList.add('cz-opt--on');}else o.classList.toggle('cz-opt--on');refresh();});});});

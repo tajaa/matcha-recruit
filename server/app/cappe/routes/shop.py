@@ -239,7 +239,8 @@ async def _replace_option_groups(conn, site_id, product_id, groups) -> None:
         options_by_group.setdefault(row["group_id"], []).append(row)
 
     group_pairs, groups_gone = match_prior_rows(list(prior_groups), groups)
-    removed: list = []
+    # The groups as this save leaves them, for `prune_variants`.
+    written: list[dict] = []
     for gi, (g, was) in enumerate(zip(groups, group_pairs)):
         # Position is the order unless the caller pinned one: rows keep their
         # created_at now, so it can no longer stand in for "the order sent".
@@ -260,6 +261,9 @@ async def _replace_option_groups(conn, site_id, product_id, groups) -> None:
                 g.name, g.select_type, g.required, g_sort, gid,
             )
             stored = options_by_group.get(gid, [])
+        kept: list[dict] = []
+        written.append({"id": gid, "name": g.name, "select_type": g.select_type,
+                        "required": g.required, "options": kept})
 
         incoming = g.options or []
         option_pairs, options_gone = match_prior_rows(stored, incoming)
@@ -272,6 +276,7 @@ async def _replace_option_groups(conn, site_id, product_id, groups) -> None:
                        VALUES ($1, $2, $3, $4, $5, $6) RETURNING id""",
                     site_id, gid, o.name, o.price_delta_cents, o_sort, o.inventory,
                 )
+                kept.append({"id": new_oid, "name": o.name})
                 if o.inventory is not None:
                     await log_adjustment(
                         conn, site_id=site_id, product_id=product_id, option_id=new_oid,
@@ -279,6 +284,7 @@ async def _replace_option_groups(conn, site_id, product_id, groups) -> None:
                         reason="adjustment", note="Opening stock",
                     )
                 continue
+            kept.append({"id": owas["id"], "name": o.name})
             sets = "name = $1, price_delta_cents = $2, sort_order = $3"
             args = [o.name, o.price_delta_cents, o_sort]
             if "inventory" in o.model_fields_set and o.inventory != owas["inventory"]:
@@ -297,20 +303,17 @@ async def _replace_option_groups(conn, site_id, product_id, groups) -> None:
                 f"UPDATE cappe_product_options SET {sets} WHERE id = ${len(args)}", *args,
             )
         if options_gone:
-            removed.extend(row["id"] for row in options_gone)
             await conn.execute(
                 "DELETE FROM cappe_product_options WHERE id = ANY($1::uuid[]) AND site_id = $2",
                 [row["id"] for row in options_gone], site_id,
             )
     if groups_gone:
-        for row in groups_gone:
-            removed.extend(o["id"] for o in options_by_group.get(row["id"], []))
         await conn.execute(
             "DELETE FROM cappe_product_option_groups WHERE id = ANY($1::uuid[]) AND site_id = $2",
             [row["id"] for row in groups_gone], site_id,
         )
-    # A combination made of a removed option can never be picked again.
-    await prune_variants(conn, site_id, product_id, removed)
+    # A combination that no longer fits these groups can never be picked again.
+    await prune_variants(conn, site_id, product_id, written)
 
 
 def _subscription_changed(body, existing) -> bool:

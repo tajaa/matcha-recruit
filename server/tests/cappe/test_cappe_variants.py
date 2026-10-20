@@ -286,13 +286,27 @@ def test_none_leaves_variants_alone_and_an_empty_list_removes_them():
     assert len(conn.deletes) == 1
 
 
-def test_a_removed_option_takes_its_variants_with_it():
-    conn = VariantConn([])
-    asyncio.run(var_mod.prune_variants(conn, SITE, PRODUCT, [RED]))
+def test_only_combinations_that_still_fit_the_groups_survive_a_prune():
+    fits, stale = _variant(M, RED), _variant(M)       # M alone: from before Colour was required
+    gone = _variant(S, uuid4())                        # made of a deleted option
+    conn = VariantConn([fits, stale, gone])
+    asyncio.run(var_mod.prune_variants(conn, SITE, PRODUCT, _groups()))
     ((sql, args),) = conn.deletes
-    assert "option_ids && $3::uuid[]" in sql and args[2] == [RED]
-    asyncio.run(var_mod.prune_variants(conn, SITE, PRODUCT, []))
-    assert len(conn.deletes) == 1
+    assert args == ([stale["id"], gone["id"]], SITE)
+    conn = VariantConn([fits])
+    asyncio.run(var_mod.prune_variants(conn, SITE, PRODUCT, _groups()))
+    assert conn.deletes == []
+
+
+def test_a_variant_price_only_covers_its_own_options_whatever_they_are_called():
+    """An add-on group sharing a variant group's name and option name still adds its price."""
+    twin = uuid4()
+    groups = _groups() + [{"id": uuid4(), "name": "Size", "select_type": "multi", "required": False, "options": [
+        {"id": twin, "name": "M", "price_delta_cents": 400, "inventory": None},
+    ]}]
+    price, snap = var_mod.price_selection(1000, groups, [M, RED, twin], _variant(M, RED, price_cents=2500))
+    assert price == 2900
+    assert [e["price_delta_cents"] for e in snap] == [0, 0, 400]
 
 
 def test_variants_are_fetched_per_product_in_their_order():
@@ -447,6 +461,85 @@ def test_the_plan_decides_what_sells():
                        allowed_fulfillment=frozenset({"digital", "service", "booking"}), site_limit=1,
                        mailbox_quota_included=0)
     assert not sells(ent, "physical") and not sells(ent, None) and sells(ent, "Booking")
+
+
+def test_a_subscription_cant_start_for_what_the_plan_doesnt_sell(monkeypatch):
+    """The one-off checkout asks the plan about every line; so does subscribing."""
+    from app.cappe.services import recurring
+
+    class Conn:
+        async def fetchrow(self, sql, *args):
+            return {"stripe_account_id": "acct_1", "stripe_charges_enabled": True, "plan": "free"}
+
+        async def fetch(self, sql, *args):
+            return [{"id": PRODUCT, "name": "Tee", "fulfillment": "physical", "status": "active",
+                     "price_cents": 1000, "currency": "USD", "subscription_intervals": ["month"],
+                     "subscription_discount_bps": 0, "requires_approval": False, "inventory": None}]
+
+        async def fetchval(self, sql, *args):
+            return datetime.now(timezone.utc)
+
+    class Ctx:
+        async def __aenter__(self):
+            return Conn()
+
+        async def __aexit__(self, *_exc):
+            return False
+
+    ent = Entitlements(plan_code="free", plan_name="Free", can_sell=True, platform_fee_bps=200,
+                       allowed_fulfillment=frozenset({"digital", "service", "booking"}), site_limit=1,
+                       mailbox_quota_included=0, features={"recurring_orders": True})
+    monkeypatch.setattr(recurring, "get_connection", lambda: Ctx())
+    monkeypatch.setattr(recurring, "resolve_entitlements", AsyncMock(return_value=ent))
+    monkeypatch.setattr(recurring, "fetch_option_groups", AsyncMock(return_value={}))
+    monkeypatch.setattr(recurring, "fetch_variants", AsyncMock(return_value={}))
+    monkeypatch.setattr(recurring, "fetch_active_discounts", AsyncMock(return_value=[]))
+    site = {"id": SITE, "account_id": uuid4(), "subdomain": "tee", "custom_domain": None, "timezone": "UTC",
+            "tax_rate_bps": 0, "shipping_flat_cents": 0, "shipping_free_threshold_cents": None}
+    body = SimpleNamespace(items=[CappeCartItem(product_id=PRODUCT, quantity=1)], interval="month",
+                           success_url="https://tee.gummfit.com/done", cancel_url="https://tee.gummfit.com/bag")
+    monkeypatch.setattr(recurring, "site_origins", lambda _site: ["https://tee.gummfit.com"])
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(recurring.checkout(site, {"id": uuid4()}, body))
+    assert exc.value.status_code == 409 and "unavailable" in exc.value.detail
+
+
+def test_a_renewal_matches_its_combination_as_checkout_does(monkeypatch):
+    """A leftover one-option row (from before Colour was required) is never the
+    renewal's variant: only the exact combination is."""
+    from app.cappe.services import recurring
+    stale, exact = _variant(M, sku="OLD"), _variant(M, RED, sku="TEE-M-R")
+    order_id = uuid4()
+
+    class Conn:
+        def __init__(self):
+            self.items = []
+
+        async def fetchrow(self, sql, *args):
+            if "INSERT INTO cappe_orders" in sql:
+                return {"id": order_id}
+            if "FROM cappe_products" in sql:
+                return {"id": PRODUCT, "sku": "TEE"}
+            return None
+
+        async def execute(self, sql, *args):
+            if "INSERT INTO cappe_order_items" in sql:
+                self.items.append(args)
+
+        async def fetchval(self, sql, *args):
+            return False
+
+    for variants, want in (([stale, exact], (exact["id"], "TEE-M-R")), ([stale], (None, "TEE"))):
+        conn = Conn()
+        monkeypatch.setattr(recurring, "fetch_variants", AsyncMock(return_value={PRODUCT: variants}))
+        monkeypatch.setattr(recurring, "fetch_option_groups", AsyncMock(return_value={PRODUCT: _groups()}))
+        monkeypatch.setattr(inv_mod, "retake_order_stock", AsyncMock())
+        row = {"id": uuid4(), "site_id": SITE, "shopper_id": None, "subtotal_cents": 1000, "tax_cents": 0,
+               "shipping_cents": 0, "total_cents": 1000, "currency": "USD",
+               "items": [{"product_id": str(PRODUCT), "title": "Tee", "unit_price_cents": 1000, "quantity": 1,
+                          "fulfillment": "physical", "selected_option_ids": [str(M), str(RED)]}]}
+        asyncio.run(recurring.record_invoice_order(conn, row, {"id": "in_1"}))
+        assert conn.items[0][9:11] == want
 
 
 # ── restock and re-take ──────────────────────────────────────────────────────

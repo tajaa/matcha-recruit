@@ -170,10 +170,11 @@ def test_a_stale_id_falls_back_to_the_name():
     assert paired == [stored] and gone == []
 
 
-def _groups_conn(group_id, options):
+def _groups_conn(group_id, options, variants=()):
     return SqlConn([
         ("FROM cappe_product_option_groups", [{"id": group_id, "name": "Size"}]),
         ("FROM cappe_product_options o", options),
+        ("SELECT id, option_ids FROM cappe_product_variants", list(variants)),
         ("INSERT INTO cappe_product_options", lambda _s, _a: uuid4()),
         ("INSERT INTO cappe_product_option_groups", lambda _s, _a: uuid4()),
     ])
@@ -183,11 +184,12 @@ def test_saving_a_product_keeps_its_option_ids(monkeypatch):
     """The old code deleted every group and re-inserted the set."""
     ledger = _ledger(monkeypatch, shop_mod)
     gid, small, large = uuid4(), uuid4(), uuid4()
+    v_small, v_large = uuid4(), uuid4()
     conn = _groups_conn(gid, [
         {"id": small, "group_id": gid, "name": "Small", "inventory": 5},
         {"id": large, "group_id": gid, "name": "Large", "inventory": 2},
-    ])
-    groups = [CappeProductOptionGroupInput(id=gid, name="Size", options=[
+    ], [{"id": v_small, "option_ids": [small]}, {"id": v_large, "option_ids": [large]}])
+    groups = [CappeProductOptionGroupInput(id=gid, name="Size", required=True, options=[
         _opt("Small", id=small), _opt("Medium", inventory=4),
     ])]
     asyncio.run(shop_mod._replace_option_groups(conn, SITE, PRODUCT, groups))
@@ -200,8 +202,8 @@ def test_saving_a_product_keeps_its_option_ids(monkeypatch):
     assert "inventory" not in updated[0][1]
     assert len(conn.sql("INSERT INTO cappe_product_options")) == 1       # Medium
     assert conn.sql("DELETE FROM cappe_product_options")[0][2] == ([large], SITE)
-    # Every combination made of Large goes with it.
-    assert conn.sql("DELETE FROM cappe_product_variants")[0][2] == (PRODUCT, SITE, [large])
+    # Every combination made of Large goes with it; Small's stays.
+    assert conn.sql("DELETE FROM cappe_product_variants")[0][2] == ([v_large], SITE)
     assert [(e["delta"], e["note"]) for e in ledger] == [(4, "Opening stock")]
     # Stock rows are read under a lock, in id order.
     assert "ORDER BY o.id FOR UPDATE OF o" in conn.sql("FROM cappe_product_options o")[0][1]
@@ -210,14 +212,29 @@ def test_saving_a_product_keeps_its_option_ids(monkeypatch):
 def test_removing_a_group_takes_its_options_variants_with_it(monkeypatch):
     _ledger(monkeypatch, shop_mod)
     gid, small, large = uuid4(), uuid4(), uuid4()
+    v_small, v_large = uuid4(), uuid4()
     conn = _groups_conn(gid, [
         {"id": small, "group_id": gid, "name": "Small", "inventory": None},
         {"id": large, "group_id": gid, "name": "Large", "inventory": None},
-    ])
+    ], [{"id": v_small, "option_ids": [small]}, {"id": v_large, "option_ids": [large]}])
     asyncio.run(shop_mod._replace_option_groups(conn, SITE, PRODUCT, []))
     assert conn.sql("DELETE FROM cappe_product_option_groups")[0][2] == ([gid], SITE)
     (_kind, _sql, args), = conn.sql("DELETE FROM cappe_product_variants")
-    assert args[2] == sorted([small, large], key=str)
+    assert args == ([v_small, v_large], SITE)
+
+
+def test_a_group_made_optional_takes_its_variants_with_it(monkeypatch):
+    """No option was deleted, but Size is no longer a variant group: nothing
+    can match those rows at checkout, so they must not linger."""
+    _ledger(monkeypatch, shop_mod)
+    gid, small = uuid4(), uuid4()
+    v_small = uuid4()
+    conn = _groups_conn(gid, [{"id": small, "group_id": gid, "name": "Small", "inventory": None}],
+                        [{"id": v_small, "option_ids": [small]}])
+    groups = [CappeProductOptionGroupInput(id=gid, name="Size", required=False, options=[_opt("Small", id=small)])]
+    asyncio.run(shop_mod._replace_option_groups(conn, SITE, PRODUCT, groups))
+    (_kind, _sql, args), = conn.sql("DELETE FROM cappe_product_variants")
+    assert args == ([v_small], SITE)
 
 
 def _wire_adjust(monkeypatch, variant):
@@ -954,3 +971,6 @@ def test_the_storefront_shows_sold_out_and_obeys_the_servers_availability():
     assert "sb.textContent='Sold out'" in js
     # The quote knows about variant stock the product row does not carry.
     assert "l.available===false" in js and "sb.textContent='Out of stock'" in js
+    # The quantity box stops at the lower of the product's and the combination's counts.
+    assert "[p.inventory,v&&v.inventory].filter(function(n){return n>0;})" in js
+    assert "Math.min.apply(null,caps)" in js

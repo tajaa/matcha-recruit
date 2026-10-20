@@ -92,18 +92,13 @@ def price_selection(base_price_cents: int, groups, selected_ids, variant=None) -
     if variant is None or variant.get("price_cents") is None:
         return max(0, base_price_cents + delta), snapshot
     covered = {str(i) for i in variant["option_ids"]}
-    names = {}
-    for g in groups or []:
-        for o in g.get("options") or []:
-            names[str(o["id"])] = (g.get("name"), o.get("name"))
-    covered_names = {names[i] for i in covered if i in names}
-    extra, out = 0, []
-    for entry in snapshot:
-        if (entry.get("group"), entry.get("name")) in covered_names:
-            out.append({**entry, "price_delta_cents": 0})
-        else:
-            extra += int(entry.get("price_delta_cents") or 0)
-            out.append(entry)
+    selected = {str(s) for s in (selected_ids or [])}
+    # The snapshot lists the chosen options in group order, then option order:
+    # pair each entry with its option id so "covered" is decided by id, never
+    # by a name another group might share.
+    chosen = [str(o["id"]) for g in groups or [] for o in g.get("options") or [] if str(o["id"]) in selected]
+    out = [{**entry, "price_delta_cents": 0} if oid in covered else entry for oid, entry in zip(chosen, snapshot)]
+    extra = sum(int(entry.get("price_delta_cents") or 0) for entry in out)
     return max(0, int(variant["price_cents"]) + extra), out
 
 
@@ -278,14 +273,27 @@ async def replace_variants(conn, site_id: UUID, product_id: UUID, variants) -> N
         )
 
 
-async def prune_variants(conn, site_id: UUID, product_id: UUID, removed_option_ids) -> None:
-    """Drop the variants made of an option that no longer exists: nobody can
-    pick that combination again. Called when an edit deletes options."""
-    removed = sorted_ids(removed_option_ids)
-    if not removed:
-        return
-    await conn.execute(
-        "DELETE FROM cappe_product_variants WHERE product_id = $1 AND site_id = $2 "
-        "AND option_ids && $3::uuid[]",
-        product_id, site_id, removed,
+def fits(groups, option_ids) -> bool:
+    """Whether a stored combination is still one option from each of the
+    product's variant groups — and nothing else."""
+    return variant_key(groups, option_ids) == frozenset(str(i) for i in (option_ids or []))
+
+
+async def prune_variants(conn, site_id: UUID, product_id: UUID, groups) -> None:
+    """Drop the variants that no longer fit the product's option groups as just
+    written (`groups`, in `fetch_option_groups` shape): one made of a deleted
+    option, one whose group stopped being a variant group (made optional or
+    pick-many), or one missing a pick from a variant group added since. Nobody
+    can pick such a combination at checkout again; left behind, it would still
+    mark options sold out on the storefront and count on the dashboard."""
+    rows = await conn.fetch(
+        "SELECT id, option_ids FROM cappe_product_variants WHERE product_id = $1 AND site_id = $2 "
+        "ORDER BY id FOR UPDATE",
+        product_id, site_id,
     )
+    misfits = [r["id"] for r in rows if not fits(groups, r["option_ids"])]
+    if misfits:
+        await conn.execute(
+            "DELETE FROM cappe_product_variants WHERE id = ANY($1::uuid[]) AND site_id = $2",
+            misfits, site_id,
+        )
