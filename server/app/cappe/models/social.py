@@ -1,15 +1,16 @@
 """Pydantic shapes — Cappe social growth (connected accounts, scheduled posts,
-the reply inbox, caption drafting, per-site settings)."""
+dropped videos, the reply inbox, caption drafting, per-site settings)."""
 from datetime import datetime
 from typing import Any, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from ._validators import https_url
 
 SocialNetwork = Literal["instagram", "facebook"]
-SocialPostStatus = Literal["draft", "scheduled", "publishing", "published", "partial", "failed", "cancelled"]
+SocialPostStatus = Literal["draft", "scheduled", "rendering", "publishing", "published", "partial", "failed", "cancelled"]
+SocialVideoType = Literal["video/mp4", "video/quicktime", "video/webm"]
 SocialAutoreplyMode = Literal["off", "review", "auto"]
 SocialTone = Literal["friendly", "professional", "playful", "minimal"]
 
@@ -49,11 +50,24 @@ class CappeSocialConnectStart(BaseModel):
 
 
 class CappeSocialMediaItem(BaseModel):
-    url: str = Field(min_length=8, max_length=1000)
+    """A photo (by its URL) or a dropped video (by its asset; the cut each
+    network gets is chosen at publish time). `poster` is filled in on the
+    way out, from the video's frames."""
+    url: Optional[str] = Field(default=None, min_length=8, max_length=1000)
     kind: Literal["image", "video"] = "image"
     alt: Optional[str] = Field(default=None, max_length=500)
+    asset_id: Optional[UUID] = None
+    poster: Optional[str] = Field(default=None, max_length=1000)
 
-    _url_https = field_validator("url")(https_url)
+    _url_https = field_validator("url", "poster")(https_url)
+
+    @model_validator(mode="after")
+    def _source(self) -> "CappeSocialMediaItem":
+        if self.kind == "image" and not self.url:
+            raise ValueError("A photo needs its url")
+        if self.kind == "video" and not self.asset_id:
+            raise ValueError("A video needs its asset_id")
+        return self
 
 
 def _clean_hashtags(tags: Optional[list[str]]) -> Optional[list[str]]:
@@ -78,6 +92,52 @@ class CappeSocialUpload(BaseModel):
     width: int
     height: int
     padded: bool
+
+
+class CappeSocialAssetPresign(BaseModel):
+    """Ask to upload one video straight to storage."""
+    filename: str = Field(min_length=1, max_length=200)
+    content_type: SocialVideoType
+    size: int = Field(gt=0)
+
+
+class CappeSocialAssetUpload(BaseModel):
+    """Where the browser posts the file: `upload_url` with `fields` first,
+    then the file, as multipart form data. Then `POST …/assets/{id}/complete`."""
+    asset_id: UUID
+    upload_url: str
+    fields: dict[str, str]
+    max_bytes: int
+
+
+class CappeSocialFrame(BaseModel):
+    url: str
+    t_ms: int
+
+
+class CappeSocialRender(BaseModel):
+    url: str
+    width: Optional[int] = None
+    height: Optional[int] = None
+    duration_ms: Optional[int] = None
+
+
+class CappeSocialAsset(BaseModel):
+    """A dropped video: `rendering` while it is being cut, then `ready` (or
+    `failed` with `error` saying why). `trimmed` when it ran past 90 s."""
+    id: UUID
+    kind: str
+    status: str
+    filename: Optional[str] = None
+    bytes: int
+    duration_ms: Optional[int] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
+    trimmed: bool = False
+    frames: list[CappeSocialFrame] = Field(default_factory=list)
+    renders: dict[str, CappeSocialRender] = Field(default_factory=dict)
+    error: Optional[str] = None
+    created_at: datetime
 
 
 class CappeSocialPostInput(BaseModel):
@@ -119,6 +179,9 @@ class CappeSocialTarget(BaseModel):
     attempts: int = 0
     published_at: Optional[datetime] = None
     metrics: dict[str, Any] = Field(default_factory=dict)
+    # While a video is with the network: "instagram_processing" /
+    # "facebook_processing".
+    phase: Optional[str] = None
 
 
 class CappeSocialPost(BaseModel):
@@ -171,8 +234,10 @@ class CappeSocialSettings(BaseModel):
     max_auto_per_hour: int = Field(default=20, ge=0, le=200)
     # Words that always route to the owner, on top of the built-in list.
     escalate_words: list[str] = Field(default_factory=list, max_length=50)
-    # Whether this plan may turn the AI inbox on (`social_autoreply`).
+    # Whether this plan may turn the AI inbox on (`social_autoreply`) and post
+    # video (`social_video`).
     autoreply_available: bool = True
+    video_available: bool = False
     ai_available: bool = True
 
     _tags = field_validator("default_hashtags")(_clean_hashtags)
@@ -259,10 +324,11 @@ class CappeSocialOverview(BaseModel):
 
 
 __all__ = [
-    "SocialNetwork", "SocialPostStatus", "SocialAutoreplyMode", "SocialTone",
+    "SocialNetwork", "SocialPostStatus", "SocialAutoreplyMode", "SocialTone", "SocialVideoType",
     "MAX_CAPTION_CHARS", "MAX_MEDIA_ITEMS", "MAX_HASHTAGS",
     "CappeSocialConnection", "CappeSocialConnections", "CappeSocialConnectStart",
     "CappeSocialMediaItem", "CappeSocialUpload", "CappeSocialPostInput", "CappeSocialPostUpdate",
+    "CappeSocialAssetPresign", "CappeSocialAssetUpload", "CappeSocialFrame", "CappeSocialRender", "CappeSocialAsset",
     "CappeSocialTarget", "CappeSocialPost",
     "CappeSocialCaptionRequest", "CappeSocialCaptionOption", "CappeSocialCaptions",
     "CappeSocialSettings", "CappeSocialSettingsUpdate",

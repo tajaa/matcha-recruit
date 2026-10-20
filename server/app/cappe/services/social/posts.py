@@ -6,6 +6,13 @@ the due ones (`FOR UPDATE SKIP LOCKED`, so two sweeps never double-post),
 publishes, and records each outcome; the post's status is then rolled up
 from its targets. Retries are per target with a short backoff, capped, and
 only for failures the provider called retryable.
+
+A video makes two things slower. Before: a scheduled post whose video is
+still being cut waits as `rendering` and is never claimed; the render flips
+it to `scheduled` (`release_rendered`). During: Meta processes a video for a
+minute or more, so the provider returns `Pending` and the target goes back to
+`pending` with its `state` (`record_pending`) — a check, not an attempt, so
+it doesn't count against the retries.
 """
 from __future__ import annotations
 
@@ -15,7 +22,8 @@ from typing import Any, Optional
 from uuid import UUID
 
 from ..common import loads, loads_list
-from .providers.base import ProviderError, PublishResult
+from .assets import poster
+from .providers.base import Pending, ProviderError, PublishResult
 
 MAX_ATTEMPTS = 3
 _BACKOFF = (timedelta(minutes=2), timedelta(minutes=10), timedelta(minutes=30))
@@ -23,7 +31,9 @@ _BACKOFF = (timedelta(minutes=2), timedelta(minutes=10), timedelta(minutes=30))
 POST_COLUMNS = ("id, site_id, caption, media, link_url, product_id, status, scheduled_at, published_at, "
                 "ai_meta, created_at, updated_at")
 TARGET_COLUMNS = ("t.id, t.post_id, t.connection_id, c.platform, c.handle, t.status, t.external_post_id, "
-                  "t.permalink, t.error, t.attempts, t.next_attempt_at, t.published_at, t.metrics")
+                  "t.permalink, t.error, t.attempts, t.next_attempt_at, t.published_at, t.metrics, t.state")
+# Statuses an owner may still change (edit, reschedule, cancel, delete).
+OPEN_STATUSES = ("draft", "scheduled", "rendering", "failed")
 
 
 def backoff_after(attempts: int) -> timedelta:
@@ -32,15 +42,16 @@ def backoff_after(attempts: int) -> timedelta:
 
 
 def validate_for_targets(caption: str, media: list[dict], platforms: list[str]) -> Optional[str]:
-    """Why this post can't go to these platforms, or None. Instagram is a
-    photo network: no image, no post."""
-    images = [m for m in media if (m.get("kind") or "image") == "image"]
+    """Why this post can't go to these platforms, or None. Instagram needs a
+    photo or a video; a video goes out on its own (a Reel can't carry
+    photos)."""
+    videos = [m for m in media if m.get("kind") == "video"]
     if not caption.strip() and not media:
-        return "Add a caption or at least one photo"
-    if "instagram" in platforms and not images:
-        return "Instagram posts need at least one photo"
-    if any(m.get("kind") == "video" for m in media):
-        return "Video posts aren't supported yet — photos only for now"
+        return "Add a caption, a photo or a video"
+    if videos and len(media) > 1:
+        return "A video goes out on its own — put the photos in a separate post"
+    if "instagram" in platforms and not media:
+        return "Instagram posts need a photo or a video"
     return None
 
 
@@ -54,6 +65,8 @@ def _row_to_post(row) -> dict[str, Any]:
 def _row_to_target(row) -> dict[str, Any]:
     d = dict(row)
     d["metrics"] = loads(d.get("metrics")) or {}
+    state = loads(d.pop("state", None)) or {}
+    d["phase"] = state.get("phase") if d.get("status") in ("pending", "publishing") else None
     return d
 
 
@@ -68,7 +81,11 @@ async def create_post(
             RETURNING {POST_COLUMNS}""",
         site_id, caption, json.dumps(media), link_url, product_id, status, scheduled_at, json.dumps(ai_meta or {}),
     )
-    return _row_to_post(row)
+    post = _row_to_post(row)
+    has_video = any(m.get("kind") == "video" for m in media)
+    if scheduled_at and has_video and await hold_for_renders(conn, post["id"]):
+        post["status"] = "rendering"
+    return post
 
 
 async def set_targets(conn, post_id: UUID, connection_ids: list[UUID], *, due_at: Optional[datetime]) -> None:
@@ -88,9 +105,25 @@ async def set_targets(conn, post_id: UUID, connection_ids: list[UUID], *, due_at
                                  THEN cappe_social_post_targets.status ELSE 'pending' END,
                    next_attempt_at = CASE WHEN cappe_social_post_targets.status IN ('published', 'publishing')
                                           THEN cappe_social_post_targets.next_attempt_at ELSE EXCLUDED.next_attempt_at END,
+                   state = CASE WHEN cappe_social_post_targets.status IN ('published', 'publishing')
+                                THEN cappe_social_post_targets.state ELSE '{}'::jsonb END,
                    error = NULL, attempts = 0""",
             post_id, connection_id, due_at,
         )
+
+
+async def attach_posters(conn, posts: list[dict]) -> None:
+    """Give each video in these posts its poster frame, for the queue. One
+    query, and none at all when there's no video."""
+    ids = {m["asset_id"] for p in posts for m in p["media"] if m.get("kind") == "video" and m.get("asset_id")}
+    if not ids:
+        return
+    rows = await conn.fetch("SELECT id, frames FROM cappe_social_assets WHERE id = ANY($1::uuid[])", list(ids))
+    frames = {str(r["id"]): {"frames": loads_list(r["frames"]) or []} for r in rows}
+    for p in posts:
+        for m in p["media"]:
+            if m.get("kind") == "video":
+                m["poster"] = poster(frames.get(str(m.get("asset_id"))))
 
 
 async def get_post(conn, site_id: UUID, post_id: UUID) -> Optional[dict]:
@@ -101,6 +134,7 @@ async def get_post(conn, site_id: UUID, post_id: UUID) -> Optional[dict]:
         return None
     post = _row_to_post(row)
     post["targets"] = await targets_for(conn, [post["id"]])
+    await attach_posters(conn, [post])
     return post
 
 
@@ -132,6 +166,7 @@ async def list_posts(conn, site_id: UUID, *, status: Optional[str] = None, limit
         by_post.setdefault(t["post_id"], []).append(t)
     for p in posts:
         p["targets"] = by_post.get(p["id"], [])
+    await attach_posters(conn, posts)
     return posts
 
 
@@ -140,14 +175,14 @@ async def update_post(conn, site_id: UUID, post_id: UUID, fields: dict[str, Any]
     columns the caller may set; media/ai_meta are JSON-encoded here."""
     if not fields:
         return await get_post(conn, site_id, post_id)
-    sets, args = [], [post_id, site_id]
+    sets, args = [], [post_id, site_id, list(OPEN_STATUSES)]
     for col, value in fields.items():
         args.append(json.dumps(value) if col in ("media", "ai_meta") else value)
         cast = "::jsonb" if col in ("media", "ai_meta") else ""
         sets.append(f"{col} = ${len(args)}{cast}")
     row = await conn.fetchrow(
         f"""UPDATE cappe_social_posts SET {', '.join(sets)}, updated_at = NOW()
-            WHERE id = $1 AND site_id = $2 AND status IN ('draft', 'scheduled', 'failed')
+            WHERE id = $1 AND site_id = $2 AND status = ANY($3::text[])
             RETURNING {POST_COLUMNS}""",
         *args,
     )
@@ -164,7 +199,7 @@ async def set_schedule(conn, site_id: UUID, post_id: UUID, when: Optional[dateti
     takes a `partial` post (one network took it, another didn't) and re-tries
     just the targets that didn't go out."""
     status = "scheduled" if when else "draft"
-    allowed = ["draft", "scheduled", "failed"] + (["partial"] if retry else [])
+    allowed = list(OPEN_STATUSES) + (["partial"] if retry else [])
     row = await conn.fetchrow(
         """UPDATE cappe_social_posts SET status = $3, scheduled_at = $4, updated_at = NOW()
            WHERE id = $1 AND site_id = $2 AND status = ANY($5::text[])
@@ -174,10 +209,12 @@ async def set_schedule(conn, site_id: UUID, post_id: UUID, when: Optional[dateti
     if row is None:
         return False
     await conn.execute(
-        "UPDATE cappe_social_post_targets SET status = 'pending', next_attempt_at = $2, error = NULL, attempts = 0 "
-        "WHERE post_id = $1 AND status IN ('pending', 'failed', 'cancelled')",
+        "UPDATE cappe_social_post_targets SET status = 'pending', next_attempt_at = $2, error = NULL, attempts = 0, "
+        "state = '{}'::jsonb WHERE post_id = $1 AND status IN ('pending', 'failed', 'cancelled')",
         post_id, when,
     )
+    if when:
+        await hold_for_renders(conn, post_id)
     return True
 
 
@@ -189,9 +226,9 @@ async def publish_now(conn, site_id: UUID, post_id: UUID) -> bool:
 async def cancel_post(conn, site_id: UUID, post_id: UUID) -> bool:
     row = await conn.fetchrow(
         """UPDATE cappe_social_posts SET status = 'cancelled', updated_at = NOW()
-           WHERE id = $1 AND site_id = $2 AND status IN ('draft', 'scheduled', 'failed')
+           WHERE id = $1 AND site_id = $2 AND status = ANY($3::text[])
            RETURNING id""",
-        post_id, site_id,
+        post_id, site_id, list(OPEN_STATUSES),
     )
     if row is None:
         return False
@@ -207,8 +244,8 @@ async def delete_post(conn, site_id: UUID, post_id: UUID) -> bool:
     of what was posted where."""
     row = await conn.fetchrow(
         "DELETE FROM cappe_social_posts WHERE id = $1 AND site_id = $2 "
-        "AND status IN ('draft', 'scheduled', 'cancelled', 'failed') RETURNING id",
-        post_id, site_id,
+        "AND status = ANY($3::text[]) RETURNING id",
+        post_id, site_id, [*OPEN_STATUSES, "cancelled"],
     )
     return row is not None
 
@@ -221,7 +258,7 @@ async def claim_due_targets(conn, limit: int, *, post_id: Optional[UUID | str] =
     concurrent sweep off the same rows. `post_id` narrows to one post ("Post
     now")."""
     rows = await conn.fetch(
-        """UPDATE cappe_social_post_targets t SET status = 'publishing', attempts = t.attempts + 1
+        """UPDATE cappe_social_post_targets t SET status = 'publishing', attempts = t.attempts + 1, claimed_at = NOW()
              WHERE t.id IN (
                  SELECT x.id FROM cappe_social_post_targets x
                  JOIN cappe_social_posts p ON p.id = x.post_id
@@ -230,10 +267,10 @@ async def claim_due_targets(conn, limit: int, *, post_id: Optional[UUID | str] =
                    AND ($2::uuid IS NULL OR p.id = $2::uuid)
                  ORDER BY x.next_attempt_at
                  LIMIT $1 FOR UPDATE SKIP LOCKED)
-             RETURNING t.id, t.post_id, t.connection_id, t.attempts""",
+             RETURNING t.id, t.post_id, t.connection_id, t.attempts, t.state""",
         limit, UUID(str(post_id)) if post_id else None,
     )
-    claimed = [dict(r) for r in rows]
+    claimed = [{**dict(r), "state": loads(r["state"]) if "state" in r.keys() else {}} for r in rows]
     if claimed:
         await conn.execute(
             "UPDATE cappe_social_posts SET status = 'publishing', updated_at = NOW() "
@@ -246,7 +283,7 @@ async def claim_due_targets(conn, limit: int, *, post_id: Optional[UUID | str] =
 async def record_success(conn, target_id: UUID, result: PublishResult) -> None:
     await conn.execute(
         """UPDATE cappe_social_post_targets SET status = 'published', external_post_id = $2, permalink = $3,
-                  error = NULL, published_at = NOW(), next_attempt_at = NULL WHERE id = $1""",
+                  error = NULL, published_at = NOW(), next_attempt_at = NULL, state = '{}'::jsonb WHERE id = $1""",
         target_id, result.external_post_id, result.permalink,
     )
 
@@ -264,10 +301,94 @@ async def record_failure(conn, target_id: UUID, attempts: int, error: ProviderEr
         )
         return "pending"
     await conn.execute(
-        "UPDATE cappe_social_post_targets SET status = 'failed', error = $2, next_attempt_at = NULL WHERE id = $1",
+        "UPDATE cappe_social_post_targets SET status = 'failed', error = $2, next_attempt_at = NULL, "
+        "state = '{}'::jsonb WHERE id = $1",
         target_id, message,
     )
     return "failed"
+
+
+async def record_pending(conn, target_id: UUID, pending: Pending) -> None:
+    """The network is still working on it: keep where it got to and look
+    again later. Hands back the attempt the claim counted — a check isn't a
+    try."""
+    state = {**pending.state, "phase": pending.phase}
+    await conn.execute(
+        """UPDATE cappe_social_post_targets SET status = 'pending', state = $2::jsonb, error = NULL,
+                  attempts = GREATEST(attempts - 1, 0), next_attempt_at = NOW() + make_interval(secs => $3)
+           WHERE id = $1""",
+        target_id, json.dumps(state), max(5, int(pending.retry_after_s)),
+    )
+
+
+async def recover_stale_claims(conn, older_than_minutes: int = 20) -> list[UUID]:
+    """Targets a killed worker left `publishing` go back to `pending` (or
+    fail, out of attempts). Their `state` stays, so a video already handed
+    to Meta is checked on, not uploaded again. Returns the posts touched."""
+    rows = await conn.fetch(
+        """UPDATE cappe_social_post_targets SET
+                  status = CASE WHEN attempts >= $2 THEN 'failed' ELSE 'pending' END,
+                  error = CASE WHEN attempts >= $2 THEN 'Publishing was interrupted too many times' ELSE error END,
+                  next_attempt_at = CASE WHEN attempts >= $2 THEN NULL ELSE NOW() END
+           WHERE status = 'publishing' AND claimed_at < NOW() - make_interval(mins => $1)
+           RETURNING post_id""",
+        older_than_minutes, MAX_ATTEMPTS,
+    )
+    return list({r["post_id"] for r in rows})
+
+
+# ── posts waiting on a video ────────────────────────────────────────────────
+
+_PENDING_RENDER = """EXISTS (
+    SELECT 1 FROM jsonb_array_elements(p.media) item
+    LEFT JOIN cappe_social_assets a ON a.id = (item->>'asset_id')::uuid
+    WHERE item->>'kind' = 'video' AND (a.id IS NULL OR a.status <> 'ready'))"""
+
+
+async def hold_for_renders(conn, post_id: UUID) -> bool:
+    """A scheduled post whose video isn't cut yet waits as `rendering`."""
+    row = await conn.fetchrow(
+        f"""UPDATE cappe_social_posts p SET status = 'rendering', updated_at = NOW()
+            WHERE p.id = $1 AND p.status = 'scheduled' AND {_PENDING_RENDER}
+            RETURNING p.id""",
+        post_id,
+    )
+    return row is not None
+
+
+async def release_rendered(conn, asset_id: UUID) -> list[dict[str, Any]]:
+    """Posts that were waiting only on this video go back to `scheduled`.
+    Returns them (id, scheduled_at) so the caller can publish the overdue
+    ones right away."""
+    rows = await conn.fetch(
+        f"""UPDATE cappe_social_posts p SET status = 'scheduled', updated_at = NOW()
+            WHERE p.status = 'rendering'
+              AND p.media @> jsonb_build_array(jsonb_build_object('asset_id', $1::text))
+              AND NOT {_PENDING_RENDER}
+            RETURNING p.id, p.scheduled_at""",
+        str(asset_id),
+    )
+    return [dict(r) for r in rows]
+
+
+async def fail_rendering(conn, asset_id: UUID, error: str) -> list[UUID]:
+    """The video couldn't be prepared: the posts waiting on it fail with the
+    reason, and nothing of theirs is left to publish."""
+    rows = await conn.fetch(
+        """UPDATE cappe_social_posts p SET status = 'failed', updated_at = NOW()
+           WHERE p.status = 'rendering'
+             AND p.media @> jsonb_build_array(jsonb_build_object('asset_id', $1::text))
+           RETURNING p.id""",
+        str(asset_id),
+    )
+    post_ids = [r["id"] for r in rows]
+    if post_ids:
+        await conn.execute(
+            "UPDATE cappe_social_post_targets SET status = 'failed', error = $2, next_attempt_at = NULL "
+            "WHERE post_id = ANY($1::uuid[]) AND status = 'pending'",
+            post_ids, f"Video: {error}"[:500],
+        )
+    return post_ids
 
 
 def rollup_status(target_statuses: list[str]) -> str:
@@ -300,7 +421,9 @@ async def rollup_post(conn, post_id: UUID) -> str:
 
 
 __all__ = [
-    "MAX_ATTEMPTS", "backoff_after", "validate_for_targets", "create_post", "set_targets", "get_post", "targets_for",
-    "list_posts", "update_post", "set_schedule", "publish_now", "cancel_post", "delete_post",
-    "claim_due_targets", "record_success", "record_failure", "rollup_status", "rollup_post",
+    "MAX_ATTEMPTS", "OPEN_STATUSES", "backoff_after", "validate_for_targets", "create_post", "set_targets",
+    "attach_posters", "get_post",
+    "targets_for", "list_posts", "update_post", "set_schedule", "publish_now", "cancel_post", "delete_post",
+    "claim_due_targets", "record_success", "record_failure", "record_pending", "recover_stale_claims",
+    "hold_for_renders", "release_rendered", "fail_rendering", "rollup_status", "rollup_post",
 ]

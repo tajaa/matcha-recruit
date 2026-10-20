@@ -1,7 +1,7 @@
 """Network providers. One Meta app serves both networks we publish to today;
 `provider_for` is the one place that mapping lives, so a new network is a new
 module and one line here."""
-from .base import ConnectionDraft, InboundEvent, ProviderError, PublishResult
+from .base import ConnectionDraft, InboundEvent, Pending, ProviderError, PublishResult
 from . import meta
 
 # platform → provider module. Both current networks are Meta's.
@@ -15,4 +15,4 @@ def provider_for(platform: str):
         raise ProviderError(f"No provider for platform {platform!r}", retryable=False) from None
 
 
-__all__ = ["ConnectionDraft", "InboundEvent", "ProviderError", "PublishResult", "provider_for", "meta"]
+__all__ = ["ConnectionDraft", "InboundEvent", "Pending", "ProviderError", "PublishResult", "provider_for", "meta"]

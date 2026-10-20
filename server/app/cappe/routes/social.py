@@ -2,9 +2,13 @@
 
 Everything under `/sites/{site_id}/social/*`, each route on
 `require_cappe_account` + site ownership. Plan gates: `social` for posting and
-scheduling, `social_autoreply` for the AI inbox (turning the mode on, asking
-for a draft). The Meta OAuth callback and the webhook are public routes in
-`routes/public/social_meta.py`.
+scheduling, `social_video` for dropped videos, `social_autoreply` for the AI
+inbox (turning the mode on, asking for a draft). The Meta OAuth callback and
+the webhook are public routes in `routes/public/social_meta.py`.
+
+A video is uploaded by the browser straight to S3 (`assets/presign`, then
+`assets/{id}/complete`), cut to size on the worker, and named in a post's
+media by its `asset_id`.
 """
 from __future__ import annotations
 
@@ -12,6 +16,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import asyncio
 
@@ -23,6 +28,9 @@ from ...database import get_connection
 from ..dependencies import require_cappe_account
 from ..models.cappe import (
     CappeAccount,
+    CappeSocialAsset,
+    CappeSocialAssetPresign,
+    CappeSocialAssetUpload,
     CappeSocialCaptionRequest,
     CappeSocialCaptions,
     CappeSocialConnection,
@@ -43,6 +51,7 @@ from ..services.email import app_origin
 from ..services.entitlements import resolve_entitlements
 from ..services import cappe_assets, upload_guard
 from ..services.social import ai as social_ai
+from ..services.social import assets as asset_store
 from ..services.social import autoreply, captions, oauth
 from ..services.social import connections as conn_store
 from ..services.social import inbox as inbox_store
@@ -64,12 +73,19 @@ _MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 # Caption drafting is a real model call per click.
 _CAPTIONS_PER_HOUR = 30
 _DRAFTS_PER_HOUR = 60
+_VIDEO_UPLOADS_PER_HOUR = 30
 
 
 def _social_gate(ent) -> None:
     if not ent.has("social"):
         raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED,
                             detail="Social posting isn't included in your plan.")
+
+
+def _video_gate(ent) -> None:
+    if not ent.has("social_video"):
+        raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                            detail="Video posts are part of the Business, Pro and Creator plans.")
 
 
 def _autoreply_gate(ent) -> None:
@@ -91,13 +107,21 @@ def oauth_redirect_uri() -> str:
     return f"{app_origin()}/api/cappe/public/social/meta/callback"
 
 
-def check_schedule(when: Optional[datetime]) -> Optional[datetime]:
+def site_zone(site) -> ZoneInfo:
+    try:
+        return ZoneInfo(str((site or {}).get("timezone") or "UTC"))
+    except (ZoneInfoNotFoundError, ValueError):
+        return ZoneInfo("UTC")
+
+
+def check_schedule(when: Optional[datetime], tz: ZoneInfo | timezone = timezone.utc) -> Optional[datetime]:
     """A schedule must be in the future (a minute's grace for clock skew)
-    and within a year. Returns it as an aware UTC datetime."""
+    and within a year. A time with no zone is the site's wall-clock time
+    (`tz`). Returns it as an aware UTC datetime."""
     if when is None:
         return None
     if when.tzinfo is None:
-        when = when.replace(tzinfo=timezone.utc)
+        when = when.replace(tzinfo=tz)
     now = datetime.now(timezone.utc)
     if when < now - timedelta(minutes=1):
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="That time has already passed")
@@ -105,6 +129,33 @@ def check_schedule(when: Optional[datetime]) -> Optional[datetime]:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                             detail="Schedule within the next year")
     return when.astimezone(timezone.utc)
+
+
+async def _checked_media(conn, site_id: UUID, items, ent) -> list[dict]:
+    """The post's media as stored: a photo by its URL, a video by its asset
+    (this site's, uploaded, not failed — and the plan must include video)."""
+    media: list[dict] = []
+    for item in items:
+        if item.kind == "video":
+            media.append({"kind": "video", "asset_id": str(item.asset_id), "alt": item.alt})
+        else:
+            media.append({"kind": "image", "url": item.url, "alt": item.alt})
+    video_ids = [m["asset_id"] for m in media if m["kind"] == "video"]
+    if not video_ids:
+        return media
+    _video_gate(ent)
+    found = await asset_store.load_many(conn, video_ids)
+    for asset_id in video_ids:
+        asset = found.get(asset_id)
+        if asset is None or asset["site_id"] != site_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video not found")
+        if asset["status"] in ("failed", "deleted"):
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                                detail=asset["error"] or "That video couldn't be prepared — upload it again")
+        if asset["status"] == "uploading":
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                                detail="That video hasn't finished uploading")
+    return media
 
 
 async def _own_connections(conn, site_id: UUID, connection_ids: list[UUID]) -> list[dict]:
@@ -196,7 +247,7 @@ async def disconnect(site_id: UUID, connection_id: UUID, account: CappeAccount =
 async def _settings_view(conn, site_id: UUID, ent) -> CappeSocialSettings:
     row = await inbox_store.get_settings(conn, site_id)
     return CappeSocialSettings(**row, autoreply_available=ent.has("social_autoreply"),
-                               ai_available=await social_ai.available())
+                               video_available=ent.has("social_video"), ai_available=await social_ai.available())
 
 
 @router.get("/settings", response_model=CappeSocialSettings)
@@ -232,7 +283,7 @@ def _post_view(post: dict) -> CappeSocialPost:
 async def list_posts(
     site_id: UUID,
     status_filter: Optional[str] = Query(default=None, alias="status",
-                                         pattern="^(draft|scheduled|publishing|published|partial|failed|cancelled)$"),
+                                         pattern="^(draft|scheduled|rendering|publishing|published|partial|failed|cancelled)$"),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     account: CappeAccount = Depends(require_cappe_account),
@@ -245,12 +296,12 @@ async def list_posts(
 
 @router.post("/posts", response_model=CappeSocialPost, status_code=status.HTTP_201_CREATED)
 async def create_post(site_id: UUID, body: CappeSocialPostInput, account: CappeAccount = Depends(require_cappe_account)):
-    when = check_schedule(body.scheduled_at)
-    media = [m.model_dump() for m in body.media]
     async with get_connection() as conn:
-        await get_owned_site(conn, site_id, account.id)
+        site = await get_owned_site(conn, site_id, account.id)
+        when = check_schedule(body.scheduled_at, site_zone(site))
         ent = await resolve_entitlements(account.plan, conn=conn)
         _social_gate(ent)
+        media = await _checked_media(conn, site_id, body.media, ent)
         targets = await _own_connections(conn, site_id, body.connection_ids)
         if when and not targets:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -288,18 +339,20 @@ async def update_post(
     fields = body.model_dump(exclude_unset=True)
     connection_ids = fields.pop("connection_ids", None)
     reschedule = "scheduled_at" in fields
-    when = check_schedule(fields.pop("scheduled_at", None)) if reschedule else None
+    scheduled_at = fields.pop("scheduled_at", None)
     alt_text = fields.pop("alt_text", None)
     if "caption" in fields and fields["caption"] is None:
         fields["caption"] = ""
-    if "media" in fields:
-        fields["media"] = [m.model_dump() if hasattr(m, "model_dump") else dict(m) for m in (body.media or [])]
     async with get_connection() as conn:
-        await get_owned_site(conn, site_id, account.id)
+        site = await get_owned_site(conn, site_id, account.id)
+        when = check_schedule(scheduled_at, site_zone(site)) if reschedule else None
+        if "media" in fields:
+            ent = await resolve_entitlements(account.plan, conn=conn)
+            fields["media"] = await _checked_media(conn, site_id, body.media or [], ent)
         current = await post_store.get_post(conn, site_id, post_id)
         if current is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
-        if current["status"] not in ("draft", "scheduled", "failed"):
+        if current["status"] not in post_store.OPEN_STATUSES:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT,
                                 detail=f"A {current['status']} post can't be edited")
         if alt_text is not None:
@@ -339,7 +392,7 @@ async def publish_post(site_id: UUID, post_id: UUID, account: CappeAccount = Dep
         if current is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
         # `partial` is a retry: only the targets that didn't go out are re-tried.
-        if current["status"] not in ("draft", "scheduled", "failed", "partial"):
+        if current["status"] not in (*post_store.OPEN_STATUSES, "partial"):
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Post is already {current['status']}")
         if not current["targets"]:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -365,7 +418,8 @@ async def cancel_post(site_id: UUID, post_id: UUID, account: CappeAccount = Depe
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
         if not await post_store.cancel_post(conn, site_id, post_id):
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Only a draft or scheduled post can be cancelled")
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                                detail="Only a post that hasn't gone out can be cancelled")
         post = await post_store.get_post(conn, site_id, post_id)
     return _post_view(post)
 
@@ -407,6 +461,87 @@ async def upload_media(
     except Exception as exc:  # noqa: BLE001 — catalog bookkeeping never fails the upload
         logger.warning("cappe asset catalog insert failed (social): %s", exc)
     return CappeSocialUpload(url=url, width=prepared.width, height=prepared.height, padded=prepared.padded)
+
+
+# ── videos ──────────────────────────────────────────────────────────────────
+
+def _asset_view(asset: dict) -> CappeSocialAsset:
+    return CappeSocialAsset(**asset_store.public_view(asset))
+
+
+@router.post("/assets/presign", response_model=CappeSocialAssetUpload, status_code=status.HTTP_201_CREATED)
+async def presign_video(site_id: UUID, body: CappeSocialAssetPresign, account: CappeAccount = Depends(require_cappe_account)):
+    """Start a video upload. The browser posts the file straight to storage
+    (pinned to the size given here), then calls `…/complete`."""
+    await check_rate_limit(str(account.id), "cappe_social_video_upload", _VIDEO_UPLOADS_PER_HOUR, 3600)
+    async with get_connection() as conn:
+        await get_owned_site(conn, site_id, account.id)
+        ent = await resolve_entitlements(account.plan, conn=conn)
+        _social_gate(ent)
+        _video_gate(ent)
+        try:
+            upload = asset_store.presign_upload(site_id, body.filename, body.content_type, body.size)
+        except asset_store.AssetStorageUnavailable as exc:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc))
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+        asset = await asset_store.create(conn, site_id=site_id, account_id=account.id, filename=body.filename,
+                                         path=upload["path"], content_type=body.content_type, size=body.size)
+    return CappeSocialAssetUpload(asset_id=asset["id"], upload_url=upload["upload_url"], fields=upload["fields"],
+                                  max_bytes=asset_store.MAX_VIDEO_BYTES)
+
+
+@router.post("/assets/{asset_id}/complete", response_model=CappeSocialAsset)
+async def complete_video(site_id: UUID, asset_id: UUID, account: CappeAccount = Depends(require_cappe_account)):
+    """The upload finished: check what landed, then queue the cut. Storage
+    is checked with no pooled connection held."""
+    async with get_connection() as conn:
+        await get_owned_site(conn, site_id, account.id)
+        asset = await asset_store.get(conn, site_id, asset_id)
+    if asset is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video not found")
+    if asset["status"] != "uploading":
+        return _asset_view(asset)
+    try:
+        problem = await asset_store.verify_upload(asset)
+    except asset_store.AssetStorageUnavailable as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc))
+    async with get_connection() as conn:
+        if problem:
+            await asset_store.mark_failed(conn, asset_id, problem)
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=problem)
+        await asset_store.mark_rendering(conn, asset_id)
+        asset = await asset_store.get(conn, site_id, asset_id)
+    try:
+        from app.workers.tasks.cappe_social_media import render_cappe_social_video
+
+        render_cappe_social_video.delay(str(asset_id))
+    except Exception:  # noqa: BLE001 — the media sweep re-queues a render that never started
+        logger.warning("cappe social: could not queue the render for %s; the sweep will", asset_id, exc_info=True)
+    return _asset_view(asset)
+
+
+@router.get("/assets/{asset_id}", response_model=CappeSocialAsset)
+async def get_video(site_id: UUID, asset_id: UUID, account: CappeAccount = Depends(require_cappe_account)):
+    async with get_connection() as conn:
+        await get_owned_site(conn, site_id, account.id)
+        asset = await asset_store.get(conn, site_id, asset_id)
+    if asset is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video not found")
+    return _asset_view(asset)
+
+
+@router.delete("/assets/{asset_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_video(site_id: UUID, asset_id: UUID, account: CappeAccount = Depends(require_cappe_account)):
+    """Drop a video no post uses (removed from the composer)."""
+    async with get_connection() as conn:
+        await get_owned_site(conn, site_id, account.id)
+        deleted = await asset_store.delete(conn, site_id, asset_id)
+        if deleted is None:
+            exists = await asset_store.get(conn, site_id, asset_id)
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT if exists else status.HTTP_404_NOT_FOUND,
+                                detail="A post uses this video" if exists else "Video not found")
+    await asset_store.delete_files(deleted)
 
 
 @router.post("/captions", response_model=CappeSocialCaptions)
@@ -563,4 +698,4 @@ async def skip_item(site_id: UUID, inbox_id: UUID, account: CappeAccount = Depen
     return _item_view(item)
 
 
-__all__ = ["router", "oauth_redirect_uri", "check_schedule", "MAX_SCHEDULE_AHEAD"]
+__all__ = ["router", "oauth_redirect_uri", "check_schedule", "site_zone", "MAX_SCHEDULE_AHEAD"]

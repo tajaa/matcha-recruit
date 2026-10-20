@@ -148,8 +148,9 @@ def test_escalation_words_are_trimmed_and_lowercased():
 
 @pytest.mark.parametrize("caption,media,platforms,reason", [
     ("", [], ["facebook"], "Add a caption"),
-    ("Hello", [], ["instagram"], "need at least one photo"),
-    ("Hello", [{"url": "u", "kind": "video"}], ["facebook"], "Video posts"),
+    ("Hello", [], ["instagram"], "need a photo or a video"),
+    ("Hello", [{"asset_id": "a1", "kind": "video"}], ["instagram", "facebook"], None),
+    ("Hello", [{"asset_id": "a1", "kind": "video"}, IMG], ["facebook"], "goes out on its own"),
     ("Hello", [], ["facebook"], None),
     ("", [IMG], ["instagram", "facebook"], None),
 ])
@@ -228,8 +229,9 @@ async def test_update_post_encodes_json_columns_and_refuses_sent_posts():
     )
     post = await post_store.update_post(conn, SITE, POST, {"caption": "New", "media": [IMG], "ai_meta": {"a": 1}})
     sql = conn.sql_for("fetchrow")[0]
-    assert "caption = $3" in sql and "media = $4::jsonb" in sql and "ai_meta = $5::jsonb" in sql
-    assert "status IN ('draft', 'scheduled', 'failed')" in sql
+    assert "caption = $4" in sql and "media = $5::jsonb" in sql and "ai_meta = $6::jsonb" in sql
+    assert "status = ANY($3::text[])" in sql
+    assert conn.calls[0][2][2] == ["draft", "scheduled", "rendering", "failed"]
     assert post["caption"] == "New"
     assert await post_store.update_post(conn, SITE, POST, {"caption": "x"}) is None
     assert (await post_store.update_post(conn, SITE, POST, {}))["id"] == POST
@@ -241,15 +243,19 @@ async def test_schedule_publish_cancel_and_delete():
         "SET status = $3": Queue([{"id": POST}, None, {"id": POST}]),
         "SET status = 'cancelled'": Queue([None, {"id": POST}]),
         "DELETE FROM cappe_social_posts": Queue([{"id": POST}, None]),
+        "SET status = 'rendering'": None,
     })
     assert await post_store.set_schedule(conn, SITE, POST, NOW) is True
-    assert conn.args_for("SET status = $3") == (POST, SITE, "scheduled", NOW, ["draft", "scheduled", "failed"])
+    assert conn.args_for("SET status = $3") == (POST, SITE, "scheduled", NOW, ["draft", "scheduled", "rendering", "failed"])
+    # A post whose video isn't cut yet waits as `rendering`.
+    assert conn.args_for("SET status = 'rendering'") == (POST,)
     assert any("next_attempt_at = $2" in s for s in conn.sql_for("execute"))
     assert await post_store.set_schedule(conn, SITE, POST, None) is False
     assert await post_store.publish_now(conn, SITE, POST) is True
     # Post now is also the retry for a post one network took and another didn't.
-    assert "partial" in conn.calls[-2][2][4]
+    assert "partial" in conn.calls[-3][2][4]
     assert "status IN ('pending', 'failed', 'cancelled')" in conn.sql_for("execute")[-1]
+    assert "state = '{}'::jsonb" in conn.sql_for("execute")[-1]
     assert await post_store.cancel_post(conn, SITE, POST) is False
     assert await post_store.cancel_post(conn, SITE, POST) is True
     assert await post_store.delete_post(conn, SITE, POST) is True
@@ -258,9 +264,9 @@ async def test_schedule_publish_cancel_and_delete():
 
 @pytest.mark.asyncio
 async def test_claim_takes_due_targets_with_skip_locked_and_marks_posts():
-    claimed = [{"id": uuid4(), "post_id": POST, "connection_id": CONN, "attempts": 1}]
+    claimed = [{"id": uuid4(), "post_id": POST, "connection_id": CONN, "attempts": 1, "state": '{"container_id": "c1"}'}]
     conn = QueryConn(fetch={"SET status = 'publishing', attempts": Queue([claimed, []])})
-    assert await post_store.claim_due_targets(conn, 25, post_id=str(POST)) == claimed
+    assert await post_store.claim_due_targets(conn, 25, post_id=str(POST)) == [{**claimed[0], "state": {"container_id": "c1"}}]
     sql = conn.sql_for("fetch")[0]
     assert "FOR UPDATE SKIP LOCKED" in sql and "next_attempt_at <= NOW()" in sql
     assert conn.args_for("SET status = 'publishing', attempts") == (25, POST)

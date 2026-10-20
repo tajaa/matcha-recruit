@@ -1555,12 +1555,47 @@ export type CappeSocialConnections = { configured: boolean; connections: CappeSo
 
 export type CappeSocialConnectStart = { authorize_url: string }
 
-export type CappeSocialMedia = { url: string; kind: 'image' | 'video'; alt?: string | null }
+/** A photo by its URL, or a dropped video by its asset (`poster` comes back
+ *  from the server once the video's frames exist). */
+export type CappeSocialMedia = {
+  url?: string | null
+  kind: 'image' | 'video'
+  alt?: string | null
+  asset_id?: string | null
+  poster?: string | null
+}
+
+export type CappeSocialAssetStatus = 'uploading' | 'rendering' | 'ready' | 'failed' | 'deleted'
+
+/** A dropped video: cut to size on the server, `ready` when every network's
+ *  version exists. */
+export type CappeSocialAsset = {
+  id: string
+  kind: 'video'
+  status: CappeSocialAssetStatus
+  filename: string | null
+  bytes: number
+  duration_ms: number | null
+  width: number | null
+  height: number | null
+  trimmed: boolean
+  frames: { url: string; t_ms: number }[]
+  renders: Record<string, { url: string; width: number | null; height: number | null; duration_ms: number | null }>
+  error: string | null
+  created_at: string
+}
+
+export type CappeSocialAssetUpload = {
+  asset_id: string
+  upload_url: string
+  fields: Record<string, string>
+  max_bytes: number
+}
 
 export type CappeSocialUpload = { url: string; width: number; height: number; padded: boolean }
 
 export type CappeSocialPostStatus =
-  'draft' | 'scheduled' | 'publishing' | 'published' | 'partial' | 'failed' | 'cancelled'
+  'draft' | 'scheduled' | 'rendering' | 'publishing' | 'published' | 'partial' | 'failed' | 'cancelled'
 
 export type CappeSocialTarget = {
   id: string
@@ -1574,6 +1609,8 @@ export type CappeSocialTarget = {
   attempts: number
   published_at: string | null
   metrics: Record<string, number>
+  /** While the network is still processing a video. */
+  phase?: 'instagram_processing' | 'facebook_processing' | null
 }
 
 export type CappeSocialPost = {
@@ -1619,6 +1656,7 @@ export type CappeSocialSettings = {
   max_auto_per_hour: number
   escalate_words: string[]
   autoreply_available: boolean
+  video_available: boolean
   ai_available: boolean
 }
 

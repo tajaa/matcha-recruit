@@ -39,6 +39,17 @@ class PublishResult:
 
 
 @dataclass(frozen=True)
+class Pending:
+    """A publish the network is still working on (a video being processed).
+    The target keeps `state` and is tried again in `retry_after_s`; the next
+    call resumes from it instead of uploading again. `phase` is what the
+    dashboard shows ("Instagram is processing the video")."""
+    phase: str
+    state: dict[str, Any] = field(default_factory=dict)
+    retry_after_s: int = 60
+
+
+@dataclass(frozen=True)
 class InboundEvent:
     """A comment or message a webhook delivered. `recipient_external_id` is
     the connected account it landed on — the key an inbox row is found by."""
@@ -85,4 +96,4 @@ class InboundEvent:
         )
 
 
-__all__ = ["ProviderError", "ConnectionDraft", "PublishResult", "InboundEvent"]
+__all__ = ["ProviderError", "ConnectionDraft", "PublishResult", "Pending", "InboundEvent"]
