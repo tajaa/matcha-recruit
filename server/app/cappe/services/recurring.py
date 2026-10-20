@@ -10,9 +10,9 @@ from app.database import get_connection
 from .cart import cart_totals, goods_net_cents, price_cart, priceable_products
 from .common import loads_list, site_origins, site_public_origin, url_within_origins
 from .discounts import fetch_active_discounts, site_today
-from .entitlements import resolve_entitlements, require_can_sell
+from .entitlements import resolve_entitlements, require_can_sell, sells
 from .options import fetch_option_groups
-from .variants import fetch_variants
+from .variants import fetch_variants, match_variant
 from .shipping import home_country, ship_load
 from .shopper_customers import connected_customer
 from .stripe_connect import get_cappe_stripe, CappeStripeError
@@ -209,6 +209,8 @@ async def checkout(site, shopper, body):
         if not owner or not owner["stripe_account_id"] or not owner["stripe_charges_enabled"]:
             raise HTTPException(409, "This store has not enabled card payments")
         product_rows = await conn.fetch("SELECT * FROM cappe_products WHERE site_id=$1 AND id=ANY($2::uuid[])", site["id"], [i.product_id for i in body.items])
+        # What the plan doesn't sell is unavailable here too, as at one-off checkout.
+        product_rows = [r for r in product_rows if sells(ent, r["fulfillment"])]
         groups = await fetch_option_groups(conn, [r["id"] for r in product_rows])
         variants = await fetch_variants(conn, [r["id"] for r in product_rows])
         discounts = await fetch_active_discounts(conn, site["id"])
@@ -354,14 +356,17 @@ async def record_invoice_order(conn, row, invoice, payment_intent=None):
         product = await conn.fetchrow(
             "SELECT id, sku FROM cappe_products WHERE id=$1 AND site_id=$2", UUID(item["product_id"]), row["site_id"],
         )
-        # The combination as the store has it today: the variant made of the
-        # most of these options (services/variants.py) — matched now, not
-        # remembered, because the one subscribed to may since have been removed.
-        variant = await conn.fetchrow(
-            "SELECT id, sku FROM cappe_product_variants WHERE product_id=$1 AND site_id=$2 "
-            "AND option_ids <@ $3::uuid[] ORDER BY cardinality(option_ids) DESC, id LIMIT 1",
-            product["id"], row["site_id"], selected,
-        ) if product and selected else None
+        # The combination as the store has it today, matched exactly as
+        # checkout matches it (services/variants.py) — not remembered, because
+        # the one subscribed to may since have been removed.
+        variant = None
+        if product and selected:
+            pid = product["id"]
+            variant = match_variant(
+                (await fetch_variants(conn, [pid])).get(pid, []),
+                (await fetch_option_groups(conn, [pid])).get(pid, []),
+                selected,
+            )
         await conn.execute(
             "INSERT INTO cappe_order_items(order_id,site_id,product_id,title,unit_price_cents,quantity,fulfillment,"
             "selected_options,selected_option_ids,variant_id,sku) "
