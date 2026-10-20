@@ -12,10 +12,15 @@ in code, from the store's own data:
   * the link — a real product page (`/shop/<slug>`) or the store, with UTM
     tags per network;
   * the grouping — photos may share a carousel (≤10), a video always goes
-    alone, and nothing dropped is left out.
+    alone, and nothing dropped is left out;
+  * the files to download — TikTok and YouTube can't be posted to yet, so a
+    video asked for there (or "prepare this for all platforms", or any video
+    when no account is connected) gets files made for those platforms
+    (`exports`), with the model's TikTok and YouTube words to paste. What the
+    owner asked for is read from their own words (`intent.parse`).
 
 What comes back is a plain dict (`resolve`) that the plan card shows and
-`confirm.py` turns into posts. Nothing here touches the database.
+`confirm.py` turns into posts and exports. Nothing here touches the database.
 """
 from __future__ import annotations
 
@@ -30,10 +35,17 @@ from app.core.services import anthropic_messages
 from ...email import fmt_money as fmt_money_cents
 from ...email import format_when
 from ...product_pages import absolute, product_path
+from .. import presets
+from . import intent as intent_parse
 from . import when as when_parse
 
 PUBLISHABLE = ("instagram", "facebook")
 COMING_SOON = {"tiktok": "TikTok", "youtube": "YouTube"}
+EXPORTABLE = presets.EXPORT_PLATFORMS
+TIKTOK_HASHTAGS = 6
+YOUTUBE_TITLE = 100
+YOUTUBE_DESCRIPTION = 5000
+YOUTUBE_TAG_CHARS = 500
 MAX_CAPTION = 2200
 MAX_HASHTAGS = 30
 MAX_PER_CAROUSEL = 10
@@ -69,6 +81,37 @@ def _text(value: Any, limit: int = MAX_CAPTION) -> str:
     return str(value or "").strip()[:limit]
 
 
+def _and(names: list[str]) -> str:
+    return names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
+
+
+def _labels(platforms: list[str]) -> str:
+    return _and([presets.LABELS.get(p, p.capitalize()) for p in platforms])
+
+
+def _tags(tags: Any) -> list[str]:
+    """YouTube tags: plain words, no `#`, 500 characters together."""
+    out: list[str] = []
+    total = 0
+    for raw in tags if isinstance(tags, list) else []:
+        tag = " ".join(str(raw).replace("#", " ").split())[:100]
+        if not tag or tag.lower() in {t.lower() for t in out}:
+            continue
+        if total + len(tag) + (1 if out else 0) > YOUTUBE_TAG_CHARS:
+            break
+        total += len(tag) + (1 if out else 0)
+        out.append(tag)
+    return out
+
+
+def _title(text: str, limit: int = YOUTUBE_TITLE) -> str:
+    """The first sentence, cut at a word."""
+    first = re.split(r"(?<=[.!?])\s|\n", (text or "").strip(), maxsplit=1)[0].strip()
+    if len(first) <= limit:
+        return first
+    return first[:limit].rsplit(" ", 1)[0].rstrip(",;:—-") or first[:limit]
+
+
 # ── the prompt ──────────────────────────────────────────────────────────────
 
 def describe_item(index: int, item: dict[str, Any]) -> str:
@@ -90,6 +133,7 @@ def build_prompt(
     *, site: dict[str, Any], settings: dict[str, Any], accounts: list[dict[str, Any]],
     products: list[dict[str, Any]], items: list[dict[str, Any]], pictures: list[int],
     history: list[dict[str, Any]], current_plan: Optional[dict[str, Any]], message: str, now_local: datetime,
+    export_platforms: tuple[str, ...] | list[str] = (),
 ) -> str:
     lines = [f"Business: {site.get('name') or 'the business'}."]
     tone = settings.get("tone") or "friendly"
@@ -108,7 +152,11 @@ def build_prompt(
             for a in accounts))
     else:
         lines.append("No accounts are connected yet.")
-    lines.append("TikTok and YouTube can't be posted to yet.")
+    if export_platforms:
+        lines.append(f"TikTok and YouTube can't be posted to yet. The owner will download files for "
+                     f"{_labels(list(export_platforms))} and upload them by hand, so write those words too.")
+    else:
+        lines.append("TikTok and YouTube can't be posted to yet.")
     if products:
         lines.append("Products the store sells (link one by its id when the owner names it or the post is about it):")
         for p in products:
@@ -132,20 +180,30 @@ def build_prompt(
             ig = (post.get("instagram") or {}).get("caption") or ""
             lines.append(f"Post {n}: items {post.get('items')}; Instagram: {ig[:300]!r}")
     lines.append(f"Owner's message: {message[:2000]}")
+    extra, rules = "", ""
+    if "tiktok" in export_platforms:
+        extra += ', "tiktok": {"caption": "...", "hashtags": ["#tag"]}'
+        rules += " TikTok captions open with a hook, under 300 characters, with 3-6 hashtags."
+    if "youtube" in export_platforms:
+        extra += ', "youtube": {"title": "...", "description": "...", "tags": ["tag"]}'
+        rules += (" YouTube titles under 100 characters, a description of two to four sentences, and 5-10 tags "
+                  "without #.")
+    if extra:
+        rules += " Write the TikTok and YouTube words for the posts with a video."
     lines.append(
         'Return JSON: {"reply": "1-2 short sentences to the owner: what you planned, or the one thing you need '
         'to know", "needs": [], "plan": null or {"when": {"mode": "now" | "at", "date": "YYYY-MM-DD" or null, '
         '"time": "HH:MM" or null, "words": "the owner\'s words about timing, or empty"}, "spread_days": 0, '
         '"networks": ["instagram", "facebook"], "link": {"kind": "store" | "product" | "none", "product_id": '
         'null}, "posts": [{"items": [1, 2], "instagram": {"caption": "...", "hashtags": ["#tag"]}, '
-        '"facebook": {"text": "..."}, "alt_text": "what the first picture shows"}]}}. '
+        f'"facebook": {{"text": "..."}}{extra}, "alt_text": "what the first picture shows"}}]}}}}. '
         "Rules: return a plan whenever something was dropped or written to post. Photos of the same thing may "
         "share one post (a carousel, up to 10); each video is its own post. Use every dropped item once. "
         "`networks` lists what the owner named (\"all socials\" or nothing named means every connected one). "
         "If the owner gave no time, set when.mode \"at\" with date and time null and add \"when\" to needs. "
         "`spread_days` is the days between posts when the owner asks to spread them out, else 0. "
         "Instagram captions under 2,000 characters, 5-12 hashtags; Facebook text without hashtags or with "
-        "at most three. `needs` may hold \"when\" or \"what\"."
+        f"at most three.{rules} `needs` may hold \"when\" or \"what\"."
     )
     return "\n".join(lines)
 
@@ -217,20 +275,87 @@ def resolve_when(message: str, model_when: Any, now_local: datetime, tz_name: st
             "source": source, "defaulted_clock": defaulted}
 
 
-def _networks(named: Any, accounts: list[dict[str, Any]], warnings: list[str]) -> list[dict[str, Any]]:
-    wanted = {str(n).lower().strip() for n in (named if isinstance(named, list) else []) if str(n).strip()}
+def _live(accounts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [a for a in accounts if a.get("status") == "connected" and a.get("platform") in PUBLISHABLE]
+
+
+def _wanted(named: Any) -> set[str]:
+    return {str(n).lower().strip() for n in (named if isinstance(named, list) else []) if str(n).strip()}
+
+
+def _networks(wanted: set[str], accounts: list[dict[str, Any]], warnings: list[str], *,
+              files: bool, files_only: bool = False) -> list[dict[str, Any]]:
+    """The connected accounts to post to. `files`: videos get downloadable
+    files, so TikTok/YouTube (and "no account yet") aren't a dead end;
+    `files_only`: nothing is being posted, so a missing account isn't news."""
     soon = sorted(wanted & set(COMING_SOON))
-    if soon:
+    if soon and not files:
         warnings.append(f"{' and '.join(COMING_SOON[s] for s in soon)} "
                         "can't be posted to yet — this goes to Instagram and Facebook.")
-    live = [a for a in accounts if a.get("status") == "connected" and a.get("platform") in PUBLISHABLE]
+    live = _live(accounts)
     picked = [a for a in live if not (wanted & set(PUBLISHABLE)) or a["platform"] in wanted]
     missing = sorted((wanted & set(PUBLISHABLE)) - {a["platform"] for a in live})
-    if missing:
+    if missing and live and not files_only:
         warnings.append(f"{', '.join(m.capitalize() for m in missing)} isn't connected — connect it under Accounts & AI.")
-    if not live:
+    if not live and not files:
         warnings.append("No account is connected yet, so this can only be saved as a draft.")
     return picked
+
+
+def export_platforms(ask: intent_parse.Ask, named: set[str], *, has_video: bool, live: bool) -> Optional[tuple[list[str], str]]:
+    """Which platforms get downloadable files, and why — or None.
+
+    * files asked for ("prepare", "export", "cut it for…"): the platforms
+      named, or all three;
+    * nothing can be posted (no account connected): all three (or those named);
+    * posting, with TikTok/YouTube named or "everywhere": those two, since
+      they can't be posted to yet.
+    Photos never get files."""
+    if not has_video:
+        return None
+    # The owner's own words decide; the model's `networks` (about posting)
+    # only count for TikTok/YouTube when the owner named nothing we caught.
+    names = set(ask.platforms) or (named & set(COMING_SOON))
+    chosen = [] if ask.everywhere else [p for p in EXPORTABLE if p in names]
+    if ask.files_only:
+        return (chosen or list(EXPORTABLE)), "asked"
+    if not live:
+        return (chosen or list(EXPORTABLE)), "no_accounts"
+    soon = set(COMING_SOON) if ask.everywhere or (ask.prepare and not names & set(COMING_SOON)) else names & set(COMING_SOON)
+    if not soon:
+        return None
+    return [p for p in EXPORTABLE if p in soon], "coming_soon"
+
+
+def export_hint(message: str, items: list[dict[str, Any]], accounts: list[dict[str, Any]]) -> list[str]:
+    """Before the model is asked: which platforms' words it should write."""
+    found = export_platforms(intent_parse.parse(message), set(), has_video=any(i.get("kind") == "video" for i in items),
+                             live=bool(_live(accounts)))
+    return found[0] if found else []
+
+
+def _exports(ask: intent_parse.Ask, wanted: set[str], items: list[dict[str, Any]], accounts: list[dict[str, Any]],
+             warnings: list[str]) -> Optional[dict[str, Any]]:
+    videos = [n for n, item in enumerate(items, start=1) if item.get("kind") == "video"]
+    if ask.prepare and not videos and items:
+        warnings.append("Only videos get files to download; photos post as they are.")
+    found = export_platforms(ask, wanted, has_video=bool(videos), live=bool(_live(accounts)))
+    if found is None:
+        return None
+    platforms, reason = found
+    labels = _labels(platforms)
+    if reason == "asked":
+        note = f"Nothing is posted: you'll get files for {labels} to download from Exports."
+    elif reason == "no_accounts":
+        note = f"No account is connected yet, so you'll get files for {labels} to download and upload yourself."
+    else:
+        note = (f"{_and([COMING_SOON[p] for p in platforms if p in COMING_SOON])} can't be posted to yet, so you'll "
+                "get files to download and upload yourself.")
+    captions = ask.captions is True
+    if captions:
+        note += " The spoken words are burned in as captions."
+    return {"platforms": platforms, "captions": captions, "items": videos, "reason": reason,
+            "files_only": reason != "coming_soon", "note": note}
 
 
 def _link(link: Any, products: dict[str, dict[str, Any]], origin: Optional[str],
@@ -267,6 +392,9 @@ def _posts(raw_posts: Any, items: list[dict[str, Any]], warnings: list[str]) -> 
         fb = raw.get("facebook") if isinstance(raw.get("facebook"), dict) else {}
         words = {"instagram": {"caption": _text(ig.get("caption")), "hashtags": _hashtags(ig.get("hashtags"))},
                  "facebook": {"text": _text(fb.get("text"))}, "alt_text": _text(raw.get("alt_text"), 500) or None}
+        for network in ("tiktok", "youtube"):
+            if isinstance(raw.get(network), dict):
+                words[network] = raw[network]
         has_words = bool(words["instagram"]["caption"] or words["facebook"]["text"])
         if not numbers:
             if not items and has_words:
@@ -282,7 +410,8 @@ def _posts(raw_posts: Any, items: list[dict[str, Any]], warnings: list[str]) -> 
     leftover = [n for n in range(1, len(items) + 1) if n not in used]
     if leftover:
         planned = bool(posts)
-        words = spare or ({k: posts[0][k] for k in ("instagram", "facebook", "alt_text")} if posts else {
+        words = spare or ({k: posts[0][k] for k in ("instagram", "facebook", "alt_text", "tiktok", "youtube")
+                           if k in posts[0]} if posts else {
             "instagram": {"caption": "", "hashtags": []}, "facebook": {"text": ""}, "alt_text": None})
         for n in leftover:
             posts.append({"items": [n], **words})
@@ -297,9 +426,29 @@ def _posts(raw_posts: Any, items: list[dict[str, Any]], warnings: list[str]) -> 
     return posts
 
 
+def tiktok_words(post: dict[str, Any]) -> dict[str, Any]:
+    """The model's TikTok words, or the Instagram ones cut down."""
+    raw = post.get("tiktok") if isinstance(post.get("tiktok"), dict) else {}
+    ig = post.get("instagram") or {}
+    return {"caption": _text(raw.get("caption")) or _text(ig.get("caption")),
+            "hashtags": _hashtags(raw.get("hashtags"))[:TIKTOK_HASHTAGS] or list(ig.get("hashtags") or [])[:TIKTOK_HASHTAGS]}
+
+
+def youtube_words(post: dict[str, Any]) -> dict[str, Any]:
+    """The model's YouTube words, or a title, description and tags made from
+    the Instagram ones."""
+    raw = post.get("youtube") if isinstance(post.get("youtube"), dict) else {}
+    ig = post.get("instagram") or {}
+    caption = _text(ig.get("caption"), YOUTUBE_DESCRIPTION)
+    return {"title": _title(_text(raw.get("title"), 300) or caption or post.get("alt_text") or ""),
+            "description": _text(raw.get("description"), YOUTUBE_DESCRIPTION) or caption,
+            "tags": _tags(raw.get("tags")) or _tags(ig.get("hashtags"))}
+
+
 def resolve(
     model_out: dict[str, Any], *, message: str, items: list[dict[str, Any]], accounts: list[dict[str, Any]],
     products: list[dict[str, Any]], origin: Optional[str], now_local: datetime, tz_name: str,
+    ask: Optional[intent_parse.Ask] = None,
 ) -> Optional[dict[str, Any]]:
     """The plan the card shows, or None when the model proposed none."""
     raw = model_out.get("plan")
@@ -307,7 +456,10 @@ def resolve(
         return None
     warnings: list[str] = []
     needs = [n for n in model_out.get("needs") or [] if n in ("when", "what")]
-    networks = _networks(raw.get("networks"), accounts, warnings)
+    wanted = _wanted(raw.get("networks"))
+    exports = _exports(ask or intent_parse.parse(message), wanted, items, accounts, warnings)
+    networks = _networks(wanted, accounts, warnings, files=exports is not None,
+                         files_only=bool(exports and exports["files_only"]))
     link = _link(raw.get("link"), {str(p["id"]): p for p in products}, origin, warnings)
     posts = _posts(raw.get("posts"), items, warnings)
     when = resolve_when(message, raw.get("when"), now_local, tz_name)
@@ -324,8 +476,15 @@ def resolve(
     for i, post in enumerate(posts):
         post["offset_days"] = i * spread
         post["media"] = [items[n - 1] for n in post["items"]]
+        if exports and any(n in exports["items"] for n in post["items"]):
+            post["tiktok"], post["youtube"] = tiktok_words(post), youtube_words(post)
+        else:
+            post.pop("tiktok", None)
+            post.pop("youtube", None)
     if not posts:
         needs.append("what")
+    if exports and exports["files_only"]:
+        needs = [n for n in needs if n != "when"]
     return {
         "when": when,
         "accounts": [{"connection_id": str(a["id"]), "platform": a["platform"],
@@ -333,6 +492,7 @@ def resolve(
         "link": link,
         "posts": posts,
         "spread_days": spread,
+        "exports": exports,
         "warnings": warnings,
         "needs": sorted(set(needs)),
     }
@@ -344,8 +504,12 @@ def summary(plan: Optional[dict[str, Any]]) -> Optional[str]:
         return None
     networks = ", ".join(sorted({a["platform"].capitalize() for a in plan["accounts"]})) or "no account"
     n = len(plan["posts"])
+    exports = plan.get("exports")
+    files = f"files for {_labels(exports['platforms'])}" if exports else ""
+    if exports and exports.get("files_only"):
+        return f"Planned {files} for {len(exports['items'])} video{'s' if len(exports['items']) != 1 else ''}"
     when = plan["when"].get("label") or ("now" if plan["when"]["mode"] == "now" else "no time yet")
-    return f"Planned {n} post{'s' if n != 1 else ''} to {networks}, {when}"
+    return f"Planned {n} post{'s' if n != 1 else ''} to {networks}, {when}" + (f", and {files}" if files else "")
 
 
 def compose_caption(words: dict[str, Any]) -> str:
@@ -356,7 +520,23 @@ def compose_caption(words: dict[str, Any]) -> str:
     return text[:MAX_CAPTION]
 
 
+def texts_for(post: dict[str, Any], platform: str, link_url: Optional[str]) -> dict[str, Any]:
+    """The words the owner pastes when uploading a file by hand. Instagram
+    and TikTok captions don't make links clickable, so the link is kept apart
+    ("for your bio"); YouTube's description takes it."""
+    link = with_utm(link_url, platform)
+    if platform == "youtube":
+        words = youtube_words(post)
+        description = words["description"]
+        if link:
+            description = f"{description}\n\n{link}".strip()[:YOUTUBE_DESCRIPTION]
+        return {"title": words["title"], "description": description, "tags": words["tags"]}
+    words = tiktok_words(post) if platform == "tiktok" else (post.get("instagram") or {})
+    return {"text": compose_caption(words), "link": link}
+
+
 __all__ = [
-    "SYSTEM", "MAX_PICTURES", "describe_item", "build_prompt", "parse_reply", "with_utm", "resolve_when",
-    "resolve", "summary", "compose_caption",
+    "SYSTEM", "MAX_PICTURES", "EXPORTABLE", "describe_item", "build_prompt", "parse_reply", "with_utm",
+    "resolve_when", "export_platforms", "export_hint", "tiktok_words", "youtube_words", "resolve", "summary",
+    "compose_caption", "texts_for",
 ]

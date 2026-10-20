@@ -1,6 +1,7 @@
 """A confirmed plan becomes posts — the same posts and targets the form
 composer makes, so the queue, the publisher and the retries don't know or
-care where they came from.
+care where they came from — and, for its videos, exports: the files the
+owner downloads for platforms that can't be posted to (`exports.py`).
 
 Each network's own copy goes on its target (`content`: the text and the
 link with that network's UTM tags), and the post keeps the Instagram caption
@@ -14,8 +15,9 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 from uuid import UUID
 
+from .. import exports as export_store
 from .. import posts as post_store
-from .plan import compose_caption, with_utm
+from .plan import EXPORTABLE, compose_caption, texts_for, with_utm
 
 MAX_AHEAD = timedelta(days=365)
 
@@ -24,8 +26,15 @@ class PlanError(ValueError):
     """The plan (as edited) can't be posted; the message says why."""
 
 
-def apply_edits(plan: dict[str, Any], edits: Optional[list[dict[str, Any]]], *, keep_link: bool) -> dict[str, Any]:
-    """The plan with the owner's own words in place of the model's."""
+def _video_items(plan: dict[str, Any]) -> list[int]:
+    return [n for post in plan.get("posts") or [] for n, item in zip(post.get("items") or [], post.get("media") or [])
+            if item.get("kind") == "video"]
+
+
+def apply_edits(plan: dict[str, Any], edits: Optional[list[dict[str, Any]]], *, keep_link: bool,
+                exports: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    """The plan with the owner's own words (and file choices) in place of
+    the model's."""
     out = {**plan, "posts": [dict(p) for p in plan.get("posts") or []]}
     if edits is not None:
         if len(edits) != len(out["posts"]):
@@ -34,15 +43,25 @@ def apply_edits(plan: dict[str, Any], edits: Optional[list[dict[str, Any]]], *, 
             post["instagram"] = {"caption": edit["instagram"]["caption"], "hashtags": edit["instagram"]["hashtags"]}
             post["facebook"] = {"text": edit["facebook"]["text"]}
             post["alt_text"] = edit.get("alt_text")
+            for network in ("tiktok", "youtube"):
+                if edit.get(network) is not None:
+                    post[network] = dict(edit[network])
     if not keep_link:
         out["link"] = {"kind": "none", "product_id": None, "product_name": None, "url": None}
+    if exports is not None:
+        platforms = [p for p in EXPORTABLE if p in (exports.get("platforms") or [])]
+        current = plan.get("exports") or {}
+        items = current.get("items") or _video_items(out)
+        out["exports"] = ({**current, "platforms": platforms, "captions": bool(exports.get("captions")),
+                           "items": items} if platforms and items else None)
     return out
 
 
 def schedule(mode: str, when_local: Optional[str], tz, now: Optional[datetime] = None) -> Optional[datetime]:
-    """The first post's time (UTC), None for a draft. `now` posts at once."""
+    """The first post's time (UTC), None for a draft (or files only). `now`
+    posts at once."""
     now = now or datetime.now(timezone.utc)
-    if mode == "draft":
+    if mode in ("draft", "export"):
         return None
     if mode == "now":
         return now
@@ -70,7 +89,15 @@ def _media(post: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def check(plan: dict[str, Any], platforms: list[str], *, mode: str) -> None:
-    """Every post must be postable where it's going (drafts may be anything)."""
+    """Every post must be postable where it's going (drafts may be anything).
+    Files only need a video and a platform to make them for."""
+    if mode == "export":
+        exports = plan.get("exports") or {}
+        if not exports.get("items"):
+            raise PlanError("Only videos can be prepared as files — drop a video")
+        if not exports.get("platforms"):
+            raise PlanError("Pick at least one platform to make files for")
+        return
     if not plan.get("posts"):
         raise PlanError("There's nothing to post yet — drop a photo or a video, or say what to post")
     if mode == "draft":
@@ -116,4 +143,26 @@ async def create_posts(
     return created
 
 
-__all__ = ["PlanError", "apply_edits", "schedule", "check", "create_posts"]
+async def create_exports(conn, *, site_id: UUID, account_id: UUID, plan: dict[str, Any],
+                         provenance: dict[str, Any]) -> list[dict[str, Any]]:
+    """One export per video the plan makes files for, with each platform's
+    words to paste. The caller starts them once the transaction commits."""
+    exports = plan.get("exports") or {}
+    platforms, wanted = exports.get("platforms") or [], set(exports.get("items") or [])
+    if not platforms or not wanted:
+        return []
+    link = (plan.get("link") or {}).get("url")
+    created = []
+    for post in plan.get("posts") or []:
+        for n, item in zip(post.get("items") or [], post.get("media") or []):
+            if item.get("kind") != "video" or n not in wanted:
+                continue
+            created.append(await export_store.create(
+                conn, site_id=site_id, account_id=account_id, asset_id=UUID(str(item["asset_id"])),
+                platforms=platforms, captions=bool(exports.get("captions")),
+                texts={p: texts_for(post, p, link) for p in platforms}, provenance=provenance,
+            ))
+    return created
+
+
+__all__ = ["PlanError", "apply_edits", "schedule", "check", "create_posts", "create_exports"]

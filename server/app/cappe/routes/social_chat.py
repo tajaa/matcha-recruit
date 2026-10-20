@@ -5,7 +5,10 @@ and when ("post these everywhere at 2pm tomorrow and link the oat latte").
 Each turn is one Claude call that writes the copy for every network; the
 plan comes back as a card the owner can edit, and nothing is posted until
 they confirm it (`…/plans/{id}/confirm`), which makes the same posts the form
-composer does. Planning and confirming: `services/social/chat/`.
+composer does, and for videos the files to download for TikTok and YouTube
+(exports — "prepare this for all platforms" makes only those). Planning and
+confirming: `services/social/chat/`. The owner's chats are listed, renamed
+and deleted here too.
 
 Gates: `social` for the chat, `social_video` for any video in it. No pooled
 connection is held while the model is called.
@@ -17,7 +20,7 @@ from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 
 from ...core.services.redis_cache import check_rate_limit
 from ...database import get_connection
@@ -26,6 +29,7 @@ from ..models.cappe import (
     CappeAccount,
     CappeSocialChat,
     CappeSocialChatMessage,
+    CappeSocialChatRename,
     CappeSocialChatSummary,
     CappeSocialChatTurn,
     CappeSocialChatTurnInput,
@@ -34,7 +38,7 @@ from ..models.cappe import (
     CappeSocialPlanConfirmed,
     CappeSocialPost,
 )
-from ..services.common import site_public_origin
+from ..services.common import loads_list, site_public_origin
 from ..services.entitlements import resolve_entitlements
 from ..services.merlin import store as convo_store
 from ..services.social import ai as social_ai
@@ -46,6 +50,7 @@ from ..services.social.chat import confirm as confirmer
 from ..services.social.chat import plan as planner
 from ..services.social.chat import turn as chat
 from ._shared import get_owned_site
+from . import social_exports
 from .social import _social_gate, _video_gate, site_zone
 
 logger = logging.getLogger(__name__)
@@ -81,16 +86,53 @@ async def _products(conn, site_id: UUID) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def _summary(row) -> CappeSocialChatSummary:
+    d = dict(row)
+    plan = chat.latest(loads_list(d.get("staged_actions")) or [])
+    last = " ".join(str(d.get("last") or "").split())
+    return CappeSocialChatSummary(id=d["id"], title=d["title"], created_at=d.get("created_at"),
+                                  updated_at=d["updated_at"], last=last[:120] or None,
+                                  plan_status=plan.get("status") if plan else None)
+
+
 @router.get("/conversations", response_model=list[CappeSocialChatSummary])
 async def list_chats(site_id: UUID, account: CappeAccount = Depends(require_cappe_account)):
+    """The owner's chats for this site, newest first, with the last thing
+    said and whether a plan is waiting on them."""
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
         rows = await conn.fetch(
-            """SELECT id, title, updated_at FROM cappe_merlin_conversations
-               WHERE site_id = $1 AND account_id = $2 AND kind = $3 ORDER BY updated_at DESC LIMIT 30""",
+            """SELECT c.id, c.title, c.created_at, c.updated_at, c.staged_actions,
+                      (SELECT m.content FROM cappe_merlin_messages m WHERE m.conversation_id = c.id
+                        ORDER BY m.created_at DESC LIMIT 1) AS last
+               FROM cappe_merlin_conversations c
+               WHERE c.site_id = $1 AND c.account_id = $2 AND c.kind = $3 ORDER BY c.updated_at DESC LIMIT 30""",
             site_id, account.id, chat.KIND,
         )
-    return [CappeSocialChatSummary(**dict(r)) for r in rows]
+    return [_summary(r) for r in rows]
+
+
+@router.patch("/conversations/{conversation_id}", response_model=CappeSocialChatSummary)
+async def rename_chat(site_id: UUID, conversation_id: UUID, body: CappeSocialChatRename,
+                      account: CappeAccount = Depends(require_cappe_account)):
+    async with get_connection() as conn:
+        await get_owned_site(conn, site_id, account.id)
+        convo = await _conversation(conn, conversation_id, site_id, account.id)
+        title = " ".join(body.title.split())[:120] or convo["title"]
+        await convo_store.rename_conversation(conn, conversation_id, title)
+    plan = chat.latest(convo["staged_actions"] or [])
+    return CappeSocialChatSummary(id=convo["id"], title=title, created_at=convo.get("created_at"),
+                                  updated_at=convo["updated_at"], plan_status=plan.get("status") if plan else None)
+
+
+@router.delete("/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_chat(site_id: UUID, conversation_id: UUID, account: CappeAccount = Depends(require_cappe_account)):
+    """Forget a chat. Posts and files it made stay."""
+    async with get_connection() as conn:
+        await get_owned_site(conn, site_id, account.id)
+        await _conversation(conn, conversation_id, site_id, account.id)
+        await convo_store.delete_conversation(conn, conversation_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/conversations/{conversation_id}", response_model=CappeSocialChat)
@@ -185,8 +227,9 @@ async def confirm_plan(
     site_id: UUID, conversation_id: UUID, plan_id: str, body: CappeSocialPlanConfirm,
     account: CappeAccount = Depends(require_cappe_account),
 ):
-    """Make the posts. The plan's row is locked for the whole write, so a
-    second click finds it already `executed`."""
+    """Make the posts (and the files to download, for its videos). The
+    plan's row is locked for the whole write, so a second click finds it
+    already `executed`. `export` mode makes only the files."""
     async with get_connection() as conn:
         site = await get_owned_site(conn, site_id, account.id)
         ent = await resolve_entitlements(account.plan, conn=conn)
@@ -208,23 +251,28 @@ async def confirm_plan(
                 raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="The plan changed — check the new one")
             try:
                 plan = confirmer.apply_edits(action["plan"], [p.model_dump() for p in body.posts] if body.posts else None,
-                                             keep_link=body.keep_link)
+                                             keep_link=body.keep_link,
+                                             exports=body.exports.model_dump() if body.exports else None)
                 confirmer.check(plan, [a["platform"] for a in accounts], mode=body.mode)
                 first_at = confirmer.schedule(body.mode, body.when_local, site_zone(site))
             except confirmer.PlanError as exc:
                 raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc))
-            if any(m.get("kind") == "video" for p in plan["posts"] for m in p.get("media") or []):
+            if plan.get("exports") or any(m.get("kind") == "video" for p in plan["posts"] for m in p.get("media") or []):
                 _video_gate(ent)
-            created = await confirmer.create_posts(
+            provenance = {"conversation_id": str(conversation_id), "plan_id": plan_id, "revision": body.revision}
+            created = [] if body.mode == "export" else await confirmer.create_posts(
                 conn, site_id=site_id, plan=plan, accounts=accounts, first_at=first_at,
-                publish_now=body.mode == "now",
-                provenance={"conversation_id": str(conversation_id), "plan_id": plan_id, "revision": body.revision},
+                publish_now=body.mode == "now", provenance=provenance,
             )
+            made = await confirmer.create_exports(conn, site_id=site_id, account_id=account.id, plan=plan,
+                                                  provenance=provenance)
             done = {**action, "status": "executed", "plan": plan, "post_ids": [str(c["id"]) for c in created],
-                    "executed_at": datetime.now(timezone.utc).isoformat()}
+                    "export_ids": [str(e["id"]) for e in made], "executed_at": datetime.now(timezone.utc).isoformat()}
             await convo_store.mutate_staged_actions(
                 conn, conversation_id, lambda current: [done if a.get("id") == plan_id else a for a in current])
         posts = [await post_store.get_post(conn, site_id, c["id"]) for c in created]
+        exports = await social_exports.views(conn, made)
+    social_exports.queue([e["id"] for e in made])
     for c in created:
         if c["publish_now"]:
             try:
@@ -234,7 +282,7 @@ async def confirm_plan(
             except Exception:  # noqa: BLE001 — the minute sweep picks it up
                 logger.warning("cappe social chat: could not dispatch publish for %s", c["id"], exc_info=True)
     return CappeSocialPlanConfirmed(plan=CappeSocialPlanCard(**done),
-                                    posts=[CappeSocialPost(**p) for p in posts if p])
+                                    posts=[CappeSocialPost(**p) for p in posts if p], exports=exports)
 
 
 @router.post("/conversations/{conversation_id}/plans/{plan_id}/dismiss", response_model=CappeSocialPlanCard)

@@ -8,7 +8,7 @@ import type {
 import {
   CAPTION_LIMIT, localInputToIso, nextSlot, scheduleError, spreadTimes, toLocalInput, withHashtags,
 } from '../../../utils/socialSchedule'
-import { posterOf, uploadVideo, VIDEO_TYPES, videoProblem } from '../../../utils/socialVideo'
+import { MAX_VIDEO_MB, posterOf, uploadVideo, VIDEO_TYPES, videoProblem } from '../../../utils/socialVideo'
 
 // A dropped photo or video. A photo is ready once it has its `url`; a video
 // once the server has it (`assetId`) — it may still be `rendering` (being cut
@@ -319,7 +319,7 @@ export default function Composer({ siteId, connections, settings, metaConfigured
         </p>
         <p className="mt-1 text-xs text-zinc-500">
           Up to {MAX_PHOTOS} photos. Each is resized and fitted for Instagram and Facebook automatically.
-          {videoOk && ' Videos (up to 90 seconds, 200 MB) are cut to size and posted as Reels.'}
+          {videoOk && ` Videos (up to ${MAX_VIDEO_MB} MB; posts use the first 90 seconds) are cut to size and posted as Reels.`}
         </p>
         <input ref={fileRef} type="file" multiple accept={videoOk ? `${IMAGE_ACCEPT},${VIDEO_TYPES.join(',')}` : IMAGE_ACCEPT}
           className="hidden" aria-label={videoOk ? 'Choose photos or videos' : 'Choose photos'}

@@ -11,7 +11,8 @@ Everything dropped in the conversation and not yet posted is one numbered
 list (`items_from`), so "put the first two together" means the same thing on
 every turn, and a chat that goes on after a confirm plans only what's new.
 Videos are looked up fresh each turn: the model sees a poster frame once the
-cut has one.
+cut has one. A video made into download files by a confirmed plan counts as
+used too, so the next turn doesn't offer it again.
 """
 from __future__ import annotations
 
@@ -118,7 +119,7 @@ def proposed(actions: list[dict[str, Any]]) -> Optional[dict[str, Any]]:
 
 def staged(plan: dict[str, Any], *, revision: int, model: str) -> dict[str, Any]:
     return {"id": uuid4().hex, "kind": ACTION_KIND, "status": "proposed", "revision": revision, "plan": plan,
-            "post_ids": [], "model": model, "created_at": datetime.now(timezone.utc).isoformat()}
+            "post_ids": [], "export_ids": [], "model": model, "created_at": datetime.now(timezone.utc).isoformat()}
 
 
 def replace_proposed(new: dict[str, Any]):
@@ -146,13 +147,16 @@ async def think(
     if not model:
         raise AiUnavailable("The social assistant needs Claude; ask your admin to set ANTHROPIC_API_KEY")
     blocks, numbers = pictures(items)
+    files_for = planner.export_hint(message, items, accounts)
     prompt = planner.build_prompt(
         site=site, settings=settings, accounts=accounts, products=products, items=items, pictures=numbers,
         history=history, current_plan=current_plan, message=message, now_local=now_local,
+        export_platforms=files_for,
     )
     raw = await anthropic_messages.generate_text(
         prompt, model=model, system=planner.SYSTEM, attachments=blocks, json_output=True,
-        max_tokens=6_000, effort="low", timeout_seconds=60.0,
+        # TikTok and YouTube words for each video post need the room.
+        max_tokens=8_000 if files_for else 6_000, effort="low", timeout_seconds=60.0,
     )
     out = planner.parse_reply(raw)
     plan = planner.resolve(out, message=message, items=items, accounts=accounts, products=products,

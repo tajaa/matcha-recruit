@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { cappeApi } from '../../../api'
@@ -6,16 +6,20 @@ import SurfaceShell from '../../../components/SurfaceShell'
 import type { CappeSocialConnection, CappeSocialConnections, CappeSocialOverview, CappeSocialSettings } from '../../../types'
 import Chat from './Chat'
 import Composer from './Composer'
+import Exports from './Exports'
 import Inbox from './Inbox'
 import Queue from './Queue'
 import Setup from './Setup'
 
-type Tab = 'create' | 'queue' | 'inbox' | 'setup'
+type Tab = 'create' | 'queue' | 'exports' | 'inbox' | 'setup'
 
 // Social growth: drop photos or videos → say what to post (the chat writes
 // each network's copy) or fill in the form → schedule to the connected
-// Instagram / Facebook accounts; the inbox answers comments and DMs.
-// Server side: server/app/cappe/routes/social.py + social_chat.py (+ services/social/).
+// Instagram / Facebook accounts; the inbox answers comments and DMs. Videos
+// can also be prepared as files to download for Instagram, TikTok and
+// YouTube (Exports), since TikTok and YouTube can't be posted to yet.
+// Server side: server/app/cappe/routes/social.py + social_chat.py +
+// social_exports.py (+ services/social/).
 export default function Social() {
   const { siteId = '' } = useParams<{ siteId: string }>()
   const [params, setParams] = useSearchParams()
@@ -34,6 +38,8 @@ export default function Social() {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
   const [createWith, setCreateWith] = useState<'chat' | 'form'>('chat')
+  const [exportCount, setExportCount] = useState<number | undefined>(undefined)
+  const countExports = useCallback((n: number) => setExportCount(n), [])
 
   // The OAuth round-trip lands here with ?connected= / ?social_error=; show it
   // once and take it off the URL so a reload doesn't repeat it.
@@ -60,21 +66,22 @@ export default function Social() {
     cappeApi.get<CappeSocialOverview>(`/sites/${siteId}/social/overview`).then(setOverview).catch(() => setOverview(null))
   }, [siteId, refreshKey])
 
-  function posted(message: string) {
+  function posted(message: string, where: 'queue' | 'exports' = 'queue') {
     setNotice({ tone: 'ok', text: message })
     setRefreshKey((n) => n + 1)
-    setTab('queue')
+    setTab(where)
   }
 
   const tabs: { key: Tab; label: string; count?: number }[] = [
     { key: 'create', label: 'Create' },
     { key: 'queue', label: 'Queue', count: overview?.scheduled },
+    ...(settings?.video_available ? [{ key: 'exports' as const, label: 'Exports', count: exportCount }] : []),
     { key: 'inbox', label: 'Inbox', count: overview ? overview.inbox_new + overview.drafts_waiting : undefined },
     { key: 'setup', label: 'Accounts & AI' },
   ]
 
   return (
-    <SurfaceShell title="Social" subtitle="Post to Instagram and Facebook, schedule ahead, and answer comments and messages.">
+    <SurfaceShell title="Social" subtitle="Post to Instagram and Facebook, schedule ahead, get videos ready for TikTok and YouTube, and answer comments and messages.">
       {notice && (
         <div role="status" className={`mb-4 flex items-start justify-between gap-3 rounded-xl border px-4 py-3 text-sm ${notice.tone === 'ok'
           ? 'border-emerald-500/30 bg-emerald-500/[0.06] text-emerald-300' : 'border-red-500/30 bg-red-500/[0.06] text-red-300'}`}>
@@ -121,6 +128,7 @@ export default function Social() {
             </>
           )}
           {tab === 'queue' && <Queue siteId={siteId} refreshKey={refreshKey} />}
+          {tab === 'exports' && <Exports siteId={siteId} settings={settings} refreshKey={refreshKey} onCount={countExports} />}
           {tab === 'inbox' && <Inbox siteId={siteId} settings={settings} />}
           {tab === 'setup' && (
             <Setup siteId={siteId} configured={configured} connections={connections} settings={settings}

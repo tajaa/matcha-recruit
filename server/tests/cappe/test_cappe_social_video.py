@@ -37,6 +37,7 @@ from app.cappe.models.auth import CappeAccount  # noqa: E402
 from app.cappe.models.social import CappeSocialMediaItem  # noqa: E402
 from app.cappe.routes import social as social_routes  # noqa: E402
 from app.cappe.services.social import assets as asset_store  # noqa: E402
+from app.cappe.services.social import exports as export_store  # noqa: E402
 from app.cappe.services.social import outbound, render, variants  # noqa: E402
 from app.cappe.services.social import connections as conn_store  # noqa: E402
 from app.cappe.services.social import inbox as inbox_store  # noqa: E402
@@ -365,7 +366,7 @@ def test_presign_pins_the_size_and_type(monkeypatch):
 @pytest.mark.parametrize("content_type,size,message", [
     ("video/x-msvideo", 10, "MP4, MOV or WebM"),
     ("video/mp4", 0, "empty"),
-    ("video/mp4", asset_store.MAX_VIDEO_BYTES + 1, "200 MB"),
+    ("video/mp4", asset_store.MAX_VIDEO_BYTES + 1, "500 MB"),
 ])
 def test_presign_refuses_files_we_dont_take(monkeypatch, content_type, size, message):
     monkeypatch.setattr(asset_store, "get_storage", lambda: storage())
@@ -403,7 +404,8 @@ async def test_renders_and_frames_upload_from_disk_to_the_public_bucket(monkeypa
     out = await asset_store.upload_render(str(clip), ASSET, "vertical")
     path, bucket, key, extra = s3.uploads[0]
     assert bucket == "public-bucket" and key.startswith(f"cappe/social/renders/{ASSET}/vertical-")
-    assert out == {"url": f"https://cdn.example.test/{key}", "bytes": 42} and extra["ContentType"] == "video/mp4"
+    assert out == {"url": f"https://cdn.example.test/{key}", "key": key, "bytes": 42}
+    assert extra["ContentType"] == "video/mp4"
     frame_url = await asset_store.upload_frame(str(clip), ASSET, 2)
     assert frame_url.startswith(f"https://cdn.example.test/cappe/social/frames/{ASSET}/2-")
     assert s3.uploads[1][3]["ContentType"] == "image/jpeg"
@@ -1102,9 +1104,11 @@ async def test_sweep_recovers_renders_targets_and_removes_expired_files(monkeypa
     monkeypatch.setattr(asset_store, "expired", AsyncMock(return_value=[asset()]))
     deleted = AsyncMock()
     monkeypatch.setattr(asset_store, "mark_deleted", deleted)
+    monkeypatch.setattr(export_store, "stuck", AsyncMock(return_value=[]))
+    monkeypatch.setattr(export_store, "expired", AsyncMock(return_value=[]))
     out = await media_task.sweep(TxConn(), 50)
     assert out == {"renders_requeued": 1, "renders_failed": 1, "uploads_cleared": 1, "targets_recovered": 1,
-                   "expired": 1}
+                   "expired": 1, "exports_requeued": 0, "exports_failed": 0, "exports_expired": 0}
     assert touch.await_args.args[1] == stale["id"] and delay.call_args.args == (str(stale["id"]),)
     assert files.await_count == 2 and deleted.await_args.args[1] == ASSET and rollup.await_args.args[1] == POST
     # A broker outage leaves the render for the next sweep.

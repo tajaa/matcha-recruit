@@ -20,6 +20,12 @@ demuxers only, so a text playlist is never parsed as HLS).
 
 Pure builders (`probe_facts`, `specs_for`, `encode_args`, `frame_args`) carry
 the decisions and are tested without the binary.
+
+Exports (`presets.py`, the files the owner downloads for TikTok and YouTube)
+use the same runner with a longer clip (`max_seconds`) and, when asked, the
+spoken words burned in by libass (`subtitles`, an ASS file from
+`subtitles.py`, drawn after the frame is fitted so the text sits on the
+finished picture).
 """
 from __future__ import annotations
 
@@ -27,10 +33,13 @@ import asyncio
 import json
 import logging
 import os
+import re
 import signal
+import subprocess
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +90,12 @@ class VideoFacts:
 
     @property
     def output_seconds(self) -> float:
-        return min(self.duration_ms / 1000, MAX_SECONDS)
+        return clip_seconds(self, MAX_SECONDS)
+
+
+def clip_seconds(facts: VideoFacts, max_seconds: float) -> float:
+    """How long a cut of this clip is when it is trimmed to `max_seconds`."""
+    return min(facts.duration_ms / 1000, max_seconds)
 
 
 @dataclass(frozen=True)
@@ -156,13 +170,33 @@ def input_args(source: str) -> list[str]:
     return ["-protocol_whitelist", protocols, "-format_whitelist", _DEMUXERS]
 
 
-def video_graph(spec: RenderSpec, facts: VideoFacts) -> str:
+_SAFE_PATH = re.compile(r"[\w./-]+")
+
+
+def filter_path(value: str) -> str:
+    """A path ffmpeg's filtergraph can take as an option value. Our caption
+    files live in temporary directories we name, so anything that would need
+    escaping (`:`, `,`, quotes, brackets) is refused rather than escaped."""
+    if not _SAFE_PATH.fullmatch(value or ""):
+        raise RenderError("We couldn't add the captions to that video.")
+    return value
+
+
+def video_graph(spec: RenderSpec, facts: VideoFacts, *, subtitles: Optional[str] = None,
+                fonts_dir: Optional[str] = None) -> str:
     """Fit the clip into the spec's frame. When the shapes already match it
     is a plain scale; otherwise the frame sits on a blurred copy of itself.
     The blur runs at a quarter size and is scaled up, which is most of the
-    cost saved."""
+    cost saved. Captions (`subtitles`, an ASS file) are drawn last, on the
+    finished frame."""
     w, h = spec.width, spec.height
-    tail = "setsar=1,fps=30,format=yuv420p[v]"
+    captions = ""
+    if subtitles:
+        captions = f"ass=filename={filter_path(subtitles)}"
+        if fonts_dir:
+            captions += f":fontsdir={filter_path(fonts_dir)}"
+        captions += ","
+    tail = f"setsar=1,fps=30,{captions}format=yuv420p[v]"
     if abs(facts.aspect - spec.aspect) < 0.01:
         return f"[0:v]scale={w}:{h},{tail}"
     sw, sh = w // 4, h // 4
@@ -174,15 +208,18 @@ def video_graph(spec: RenderSpec, facts: VideoFacts) -> str:
     )
 
 
-def encode_args(source: str, spec: RenderSpec, facts: VideoFacts, out_path: str) -> list[str]:
+def encode_args(source: str, spec: RenderSpec, facts: VideoFacts, out_path: str, *,
+                max_seconds: float = MAX_SECONDS, max_bytes: int = MAX_RENDER_BYTES,
+                subtitles: Optional[str] = None, fonts_dir: Optional[str] = None) -> list[str]:
     """H.264 High / AAC 48 kHz stereo MP4 with the index up front — what Meta
-    asks for. A 2 s closed GOP keeps Facebook's Reels check happy. A clip
-    with no sound gets a silent track: Reels without audio are refused."""
+    asks for, and what TikTok and YouTube recommend. A 2 s closed GOP keeps
+    Facebook's Reels check happy. A clip with no sound gets a silent track:
+    Reels without audio are refused."""
     args = [FFMPEG, "-hide_banner", "-nostdin", "-loglevel", "error", "-y", *input_args(source), "-i", source]
     if not facts.has_audio:
         args += ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"]
     args += [
-        "-filter_complex", video_graph(spec, facts),
+        "-filter_complex", video_graph(spec, facts, subtitles=subtitles, fonts_dir=fonts_dir),
         "-map", "[v]", "-map", "0:a:0" if facts.has_audio else "1:a:0",
         "-c:v", "libx264", "-profile:v", "high", "-preset", "veryfast", "-crf", "23",
         "-maxrate", "6M", "-bufsize", "12M", "-g", "60", "-keyint_min", "60", "-sc_threshold", "0",
@@ -191,7 +228,7 @@ def encode_args(source: str, spec: RenderSpec, facts: VideoFacts, out_path: str)
     ]
     if not facts.has_audio:
         args.append("-shortest")
-    args += ["-t", str(MAX_SECONDS), "-movflags", "+faststart", "-fs", str(MAX_RENDER_BYTES), out_path]
+    args += ["-t", f"{max_seconds:g}", "-movflags", "+faststart", "-fs", str(max_bytes), out_path]
     return args
 
 
@@ -212,7 +249,8 @@ def probe_args(source: str) -> list[str]:
             "-show_streams", "-show_format", source]
 
 
-def check_output(data: dict[str, Any], spec: RenderSpec, facts: VideoFacts) -> None:
+def check_output(data: dict[str, Any], spec: RenderSpec, facts: VideoFacts, *,
+                 max_seconds: float = MAX_SECONDS) -> None:
     """The cut is what we meant to make: H.264 at the spec's size, about as
     long as the clip (or the trim), with sound."""
     streams = [s for s in data.get("streams") or [] if isinstance(s, dict)]
@@ -226,8 +264,23 @@ def check_output(data: dict[str, Any], spec: RenderSpec, facts: VideoFacts) -> N
         duration = float((data.get("format") or {}).get("duration") or 0)
     except (TypeError, ValueError):
         duration = 0.0
-    if abs(duration - facts.output_seconds) > 1.5:
+    if abs(duration - clip_seconds(facts, max_seconds)) > 1.5:
         raise RenderError("The prepared video came out too short. Try uploading it again.")
+
+
+@lru_cache(maxsize=None)
+def has_filter(name: str) -> bool:
+    """Whether this ffmpeg build has a filter (`ass` needs libass, which
+    Debian's ffmpeg has and Homebrew's doesn't). Asked once per process."""
+    try:
+        out = subprocess.run([FFMPEG, "-hide_banner", "-filters"], capture_output=True, timeout=10, check=False).stdout
+    except (OSError, subprocess.SubprocessError):
+        return False
+    for line in out.decode("utf-8", "replace").splitlines():
+        parts = line.split()
+        if len(parts) >= 3 and parts[1] == name:
+            return True
+    return False
 
 
 # ── running ffmpeg ──────────────────────────────────────────────────────────
@@ -274,19 +327,24 @@ async def extract_frame(source: str, at_ms: int, workdir: Path, index: int) -> P
     return path
 
 
-async def encode(source: str, spec: RenderSpec, facts: VideoFacts, workdir: Path) -> Path:
+async def encode(source: str, spec: RenderSpec, facts: VideoFacts, workdir: Path, *, name: Optional[str] = None,
+                 max_seconds: float = MAX_SECONDS, max_bytes: int = MAX_RENDER_BYTES,
+                 subtitles: Optional[str] = None, fonts_dir: Optional[str] = None,
+                 timeout: float = ENCODE_TIMEOUT) -> Path:
     """Cut one render and check it before it is uploaded."""
-    path = workdir / f"cut-{spec.name}.mp4"
-    await run(encode_args(source, spec, facts, str(path)), timeout=ENCODE_TIMEOUT)
+    path = workdir / f"cut-{name or spec.name}.mp4"
+    await run(encode_args(source, spec, facts, str(path), max_seconds=max_seconds, max_bytes=max_bytes,
+                          subtitles=subtitles, fonts_dir=fonts_dir), timeout=timeout)
     if not path.exists() or path.stat().st_size == 0:
         raise RenderError("The prepared video came out empty. Try uploading it again.")
     out = await run(probe_args(str(path)), timeout=PROBE_TIMEOUT)
-    check_output(json.loads(out or b"{}"), spec, facts)
+    check_output(json.loads(out or b"{}"), spec, facts, max_seconds=max_seconds)
     return path
 
 
 __all__ = [
     "MIN_SECONDS", "MAX_SECONDS", "RenderError", "VideoFacts", "RenderSpec", "VERTICAL", "LANDSCAPE",
-    "probe_facts", "specs_for", "input_args", "video_graph", "encode_args", "frame_points_ms", "frame_args",
-    "probe_args", "check_output", "run", "probe", "extract_frame", "encode",
+    "clip_seconds", "probe_facts", "specs_for", "input_args", "filter_path", "video_graph", "encode_args",
+    "frame_points_ms", "frame_args", "probe_args", "check_output", "has_filter", "run", "probe", "extract_frame",
+    "encode",
 ]
