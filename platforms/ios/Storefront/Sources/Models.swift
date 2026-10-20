@@ -95,6 +95,11 @@ struct Quote: Decodable {
     let shippingCents: Int
     let totalCents: Int
     let currency: String
+    /// The store's prices already include the tax: `taxCents` is inside the
+    /// items (shown under the total), not added to them.
+    let taxIncluded: Bool?
+    /// What the store calls its tax ("VAT", "GST").
+    let taxLabel: String?
 }
 
 struct OrderItem: Decodable, Identifiable {

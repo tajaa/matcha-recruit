@@ -100,6 +100,8 @@ def build_stripe_line_items(
     pass `shipping` (label, cents) and it is a line too). Sum of these
     unit_amount×quantity equals `subtotal_cents + tax_cents`; adding
     `shipping_cents` from `shipping_options` brings the charge to `total_cents`.
+    For a tax-inclusive order the caller passes `tax_cents=0`: the tax is
+    already inside the lines (and the shipping).
 
     A line a promo code discounted is sent as ONE item at its discounted total
     ("Mug × 2"): its share doesn't always divide by the quantity, and Stripe
