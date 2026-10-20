@@ -20,9 +20,11 @@ import unicodedata
 from typing import Any, Iterable, Optional
 from uuid import UUID
 
+from asyncpg.exceptions import UniqueViolationError
 from fastapi import HTTPException
 
 from .common import _SLUG_RE
+from .discounts import apply_discount_cents
 
 MAX_IMAGES = 20
 SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
@@ -65,17 +67,31 @@ async def assign_slug(conn, site_id: UUID, product_id: UUID, name: str, wanted: 
             site_id, product_id, base,
         )
     }
+    taken_409 = HTTPException(status_code=409, detail=f'Another product already uses the address "{base}".')
     if wanted is not None:
         if base in taken:
-            raise HTTPException(status_code=409, detail=f'Another product already uses the address "{base}".')
+            raise taken_409
         slug = base
     else:
         slug = next((c for c in (base, *(f"{base}-{n}" for n in range(2, 100))) if c not in taken),
                     f"{base}-{secrets.token_hex(3)}")
-    await conn.execute(
-        "UPDATE cappe_products SET slug = $1, updated_at = NOW() WHERE id = $2 AND site_id = $3",
-        slug, product_id, site_id,
-    )
+    # The read above can race another write to the same store (two products
+    # saved at once): the unique index decides, inside a savepoint so the
+    # caller's transaction survives the loser.
+    try:
+        async with conn.transaction():
+            await conn.execute(
+                "UPDATE cappe_products SET slug = $1, updated_at = NOW() WHERE id = $2 AND site_id = $3",
+                slug, product_id, site_id,
+            )
+    except UniqueViolationError:
+        if wanted is not None:
+            raise taken_409
+        slug = f"{base}-{secrets.token_hex(3)}"
+        await conn.execute(
+            "UPDATE cappe_products SET slug = $1, updated_at = NOW() WHERE id = $2 AND site_id = $3",
+            slug, product_id, site_id,
+        )
     return slug
 
 
@@ -107,11 +123,11 @@ async def replace_images(conn, site_id: UUID, product_id: UUID, images) -> None:
     await conn.execute(
         "DELETE FROM cappe_product_images WHERE product_id = $1 AND site_id = $2", product_id, site_id,
     )
-    for pos, img in enumerate(images):
-        await conn.execute(
+    if images:
+        await conn.executemany(
             "INSERT INTO cappe_product_images (site_id, product_id, url, alt, sort_order) "
             "VALUES ($1, $2, $3, $4, $5)",
-            site_id, product_id, img.url, img.alt, pos,
+            [(site_id, product_id, img.url, img.alt, pos) for pos, img in enumerate(images)],
         )
     await conn.execute(
         "UPDATE cappe_products SET image_url = $1, updated_at = NOW() WHERE id = $2 AND site_id = $3",
@@ -130,6 +146,13 @@ async def set_cover(conn, site_id: UUID, product_id: UUID, image_url: Optional[s
     if not image_url:
         if first:
             await conn.execute("DELETE FROM cappe_product_images WHERE id = $1", first["id"])
+            # The next picture is the cover now; the column keeps mirroring it.
+            await conn.execute(
+                "UPDATE cappe_products SET image_url = (SELECT url FROM cappe_product_images "
+                "WHERE product_id = $1 AND site_id = $2 ORDER BY sort_order, created_at, id LIMIT 1) "
+                "WHERE id = $1 AND site_id = $2",
+                product_id, site_id,
+            )
         return
     if first:
         await conn.execute("UPDATE cappe_product_images SET url = $1 WHERE id = $2", image_url, first["id"])
@@ -154,10 +177,16 @@ def is_sold_out(product: dict, variants: list) -> bool:
     return bool(live) and all(v.get("inventory") is not None and v["inventory"] <= 0 for v in live)
 
 
-def price_range(product: dict, variants: list, price_cents: int) -> tuple[int, int]:
-    """(low, high) over the product's price and every live variant's own price."""
-    prices = [price_cents] + [v["price_cents"] for v in variants or []
-                              if v.get("status") == "active" and v.get("price_cents") is not None]
+def price_range(product: dict, variants: list, price_cents: int, discount_percent: int = 0) -> tuple[int, int]:
+    """(low, high) a buyer can actually pay: every live variant's own price
+    (discounted like the product's), and `price_cents` — already discounted —
+    only when something still sells at it (no live variants, or one without
+    its own price)."""
+    live = [v for v in variants or [] if v.get("status") == "active"]
+    own = [v["price_cents"] for v in live if v.get("price_cents") is not None]
+    prices = [apply_discount_cents(c, discount_percent) if discount_percent else c for c in own]
+    if not live or len(own) < len(live):
+        prices.append(price_cents)
     return min(prices), max(prices)
 
 
@@ -168,13 +197,13 @@ def absolute(url: Optional[str], origin: str) -> Optional[str]:
 
 
 def product_ld(product: dict, *, images: list, variants: list, origin: str, url: str,
-               price_cents: int, rating: Optional[dict] = None) -> str:
+               price_cents: int, discount_percent: int = 0, rating: Optional[dict] = None) -> str:
     """schema.org Product JSON-LD: what Google Shopping and rich results read.
     Absolute URLs only; one Offer, or an AggregateOffer when variants are
     priced differently."""
     cur = product.get("currency") or "USD"
     available = "https://schema.org/OutOfStock" if is_sold_out(product, variants) else "https://schema.org/InStock"
-    low, high = price_range(product, variants, price_cents)
+    low, high = price_range(product, variants, price_cents, discount_percent)
     if low == high:
         offers: dict[str, Any] = {"@type": "Offer", "price": f"{low / 100:.2f}", "priceCurrency": cur,
                                   "availability": available, "url": url}

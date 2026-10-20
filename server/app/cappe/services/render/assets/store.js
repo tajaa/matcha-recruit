@@ -65,7 +65,7 @@ function openDetail(p,root){
 var R=root||ov,inline=R!==ov,media=R.querySelector('[data-media]'),list=pics(p);
 media.innerHTML='<div class="cz-pd__shot"></div>'+(list.length>1?'<div class="cz-pd__thumbs">'+list.map(function(x,i){
 return '<button type="button" class="cz-pd__thumb" data-img="'+i+'" aria-label="Picture '+(i+1)+'"><img src="'+RT.esc(RT.url(x.url))+'" alt="'+RT.esc(x.alt)+'" /></button>';}).join('')+'</div>':'');
-var shot=media.querySelector('.cz-pd__shot'),shownImg;
+var shot=media.querySelector('.cz-pd__shot'),shownImg,shownV;
 function showImg(u){if(u===shownImg)return;shownImg=u;
 shot.innerHTML=u?'<img src="'+RT.esc(u)+'" alt="'+RT.esc(p.name)+'" />':'<div class="cz-pd__noimg"></div>';
 media.querySelectorAll('.cz-pd__thumb').forEach(function(t){t.classList.toggle('is-on',RT.url(list[+t.getAttribute('data-img')].url)===u);});}
@@ -110,7 +110,9 @@ sb.textContent=verb()+RT.money(q.total_cents,cur);
 if(qbox)qbox.textContent=parts.length?('Subtotal '+RT.money(q.subtotal_cents,cur)+' · '+parts.join(' · ')):'';
 }).catch(function(){});}
 function refresh(){var v=variantFor(p,chosen()),phys=p.fulfillment==='physical';
-if(v&&v.image_url)showImg(RT.url(v.image_url));
+// A newly chosen combination shows its own picture, or the cover when it has none;
+// a thumbnail the buyer clicked stays until the combination changes.
+if(v&&v!==shownV){shownV=v;showImg(RT.url(v.image_url||(list.length?list[0].url:'')));}
 if(v&&v.status!=='active'){sb.disabled=true;sb.textContent='Unavailable';if(qbox)qbox.textContent='We don\u2019t sell that combination.';return;}
 if(gone||(phys&&v&&out(v.inventory))){sb.disabled=true;sb.textContent='Sold out';if(qbox)qbox.textContent='';return;}
 // The lower of the product's own count and the combination's: both limit the sale.
