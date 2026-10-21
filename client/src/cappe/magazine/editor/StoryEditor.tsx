@@ -99,6 +99,13 @@ export default function StoryEditor() {
     })
   }, [])
 
+  // From "Find pictures": the chosen picture joins the story as a photo block.
+  const addPhoto = (a: CappeAsset) => {
+    setAssets((m) => new Map(m).set(a.id, a))
+    setBlocks((bs) => [...bs, { type: 'photo', asset_id: a.id, caption: '', size: 'column' }])
+    setFinding(null)
+  }
+
   const save = async (status?: CappePost['status']) => {
     if (!fields || !post) return
     setSaving(true)
@@ -292,7 +299,8 @@ export default function StoryEditor() {
               <h2 className="text-sm font-medium text-zinc-100">{picking ? 'Choose a picture' : 'Find pictures for this story'}</h2>
               <button type="button" onClick={() => { setPicking(null); setFinding(null) }} className="text-zinc-500 hover:text-zinc-300" aria-label="Close picker"><X className="h-4 w-4" /></button>
             </div>
-            <LibraryPanel siteId={siteId!} onPick={picking || undefined} postId={postId}
+            {finding && <p className="mb-3 text-xs text-zinc-500">Import pictures, then click one and “Use this picture” to add it to the story as a photo.</p>}
+            <LibraryPanel siteId={siteId!} onPick={picking || (finding ? addPhoto : undefined)} postId={postId}
               stockQuery={picking ? undefined : finding || undefined} />
           </div>
         </div>
