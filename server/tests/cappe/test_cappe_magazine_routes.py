@@ -544,3 +544,51 @@ def test_a_picture_a_story_uses_cant_be_deleted(monkeypatch):
         res = client.delete(f"/sites/{SITE}/assets/{ASSET}")
     assert res.status_code == 409 and "The harbour at dawn" in res.json()["detail"]
     assert conn.sql_for("execute") == []
+
+
+# ── the owner's reader view ──────────────────────────────────────────────────
+
+def _reader_view(monkeypatch, conn):
+    async def none(*a, **k):
+        return []
+
+    async def no_covers(*a, **k):
+        return {}
+
+    async def front(c, site, mag, page, host):
+        return f"<h1>front of {mag['name']}</h1>"
+
+    monkeypatch.setattr(magazine_mod, "_front_html", front)
+    monkeypatch.setattr(magazine_mod, "_nav", none)
+    monkeypatch.setattr(magazine_mod.mag_reader, "story_assets", no_covers)
+    monkeypatch.setattr(magazine_mod.mag_reader, "live_stories", none)
+    monkeypatch.setattr(magazine_mod.mag_reader, "covers", no_covers)
+    return _mag_client(monkeypatch, conn)
+
+
+def test_the_owner_sees_a_draft_as_a_reader_would(monkeypatch):
+    draft_site = {**SITE_ROW, "status": "draft"}
+    draft = story_row(status="draft", published_at=None, title="Not out yet")
+    conn = _owner_conn(fetchrow={"FROM cappe_sites": draft_site, "FROM cappe_posts WHERE site_id = $1 AND": draft})
+    with _reader_view(monkeypatch, conn) as client:
+        story = client.post(f"/sites/{SITE}/magazine/view", json={"story_id": str(POST)})
+        front = client.post(f"/sites/{SITE}/magazine/view", json={})
+    assert story.status_code == 200 and "Not out yet" in story.text and "The <strong>boats</strong>." in story.text
+    assert story.headers["cache-control"] == "no-store"
+    assert front.status_code == 200 and "front of Salt & Light" in front.text
+
+
+def test_the_reader_view_of_a_paid_story_is_the_teaser(monkeypatch):
+    paid = story_row(access="paid", content=json.dumps({"blocks": [
+        {"type": "text", "md": "Free words."}, {"type": "paywall"}, {"type": "text", "md": SENTINEL}]}))
+    conn = _owner_conn(fetchrow={"FROM cappe_posts WHERE site_id = $1 AND": paid})
+    with _reader_view(monkeypatch, conn) as client:
+        res = client.post(f"/sites/{SITE}/magazine/view", json={"slug": "harbour-at-dawn"})
+    assert conn.args_for("FROM cappe_posts WHERE site_id = $1 AND slug = $2") == (SITE, "harbour-at-dawn")
+    assert "Free words." in res.text and SENTINEL not in res.text
+
+
+def test_the_reader_view_of_another_sites_story_is_a_404(monkeypatch):
+    conn = _owner_conn(fetchrow={"FROM cappe_posts WHERE site_id = $1 AND": None, "FROM cappe_magazines": None})
+    with _reader_view(monkeypatch, conn) as client:
+        assert client.post(f"/sites/{SITE}/magazine/view", json={"story_id": str(uuid4())}).status_code == 404

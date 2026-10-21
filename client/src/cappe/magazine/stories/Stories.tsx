@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { EyeOff, Loader2, Newspaper, Plus, Settings2 } from 'lucide-react'
+import { BookOpen, EyeOff, Loader2, Newspaper, Plus, Settings2 } from 'lucide-react'
 import { cappeApi } from '../../api'
 import SurfaceShell from '../../components/SurfaceShell'
 import { statusBadge, ui } from '../../components/ui'
@@ -59,6 +59,7 @@ export default function Stories() {
       subtitle={magazine?.live ? 'Live on your site.' : magazine?.enabled ? 'Turned on, but your plan doesn’t include a magazine yet.' : 'Stories told through pictures. Turn the magazine on in its settings to publish them.'}
       actions={
         <div className="flex gap-2">
+          <Link to={`/cappe/sites/${siteId}/magazine/view`} className={ui.btnGhost}><BookOpen className="h-4 w-4" /> View as a reader</Link>
           <Link to={`/cappe/sites/${siteId}/magazine`} className={ui.btnGhost}><Settings2 className="h-4 w-4" /> Magazine settings</Link>
           <button type="button" onClick={startStory} disabled={creating} className={ui.btnPrimary}>
             {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} New story
