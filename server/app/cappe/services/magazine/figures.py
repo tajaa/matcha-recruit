@@ -80,8 +80,10 @@ def img_html(asset: dict, *, size: str = "column", eager: bool = False, cls: str
 
 
 def figure_html(asset: Optional[dict], *, caption: str = "", size: str = "column", eager: bool = False,
-                cls: str = "mz-fig", style: str = "") -> str:
-    """A picture with its caption and credit, or "" for an empty slot."""
+                cls: str = "mz-fig", style: str = "", cap_attrs: Optional[str] = None) -> str:
+    """A picture with its caption and credit, or "" for an empty slot.
+    `cap_attrs` (the story editor's markers) always prints the caption's
+    slot, empty or not, so it can be typed into."""
     if not asset:
         return ""
     img = img_html(asset, size=size, eager=eager)
@@ -90,8 +92,9 @@ def figure_html(asset: Optional[dict], *, caption: str = "", size: str = "column
     caption = (caption or asset.get("caption") or "").strip()
     credit = credit_html(asset)
     figcaption = ""
-    if caption or credit:
-        cap = f'<span class="mz-cap">{escape(caption)}</span>' if caption else ""
+    if caption or credit or cap_attrs is not None:
+        cap = (f'<span class="mz-cap"{cap_attrs or ""}>{escape(caption)}</span>'
+               if caption or cap_attrs is not None else "")
         figcaption = f"<figcaption>{cap}{credit}</figcaption>"
     style_attr = f' style="{escape(style, quote=True)}"' if style else ""
     return f'<figure class="{cls}"{style_attr}>{img}{figcaption}</figure>'

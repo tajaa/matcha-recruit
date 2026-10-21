@@ -48,7 +48,8 @@ from ..services.magazine.issue_schema import (
     normalize_cover,
 )
 from ..services.magazine.magazines import get_magazine, live_magazine, preview_blocks
-from ..services.magazine.stories import POST_COLS, post_row, site_assets
+from ..services.magazine.stories import POST_COLS, check_assets, post_row, site_assets
+from ..services.magazine.story_schema import StoryError, normalize_layout, normalize_story
 from ._shared import get_owned_site
 from .render import _nav, _site_dict, invalidate_render_cache, tenant_security_headers
 
@@ -56,6 +57,8 @@ router = APIRouter()
 
 _BASE = "/sites/{site_id}/magazine/issues"
 PREVIEWS_PER_HOUR = 600
+# Editing on the page re-renders the issue on each change of layout.
+EDIT_PREVIEWS_PER_HOUR = 2400
 
 
 def _unprocessable(exc: Exception) -> HTTPException:
@@ -137,8 +140,13 @@ async def preview_issue(site_id: UUID, body: CappeMagazineIssuePreview,
                         account: CappeAccount = Depends(require_cappe_account)):
     """An unsaved issue as its book will look, in the site's theme: the issue
     editor's preview. Drafts show as they will once released; a paid story
-    shows what a reader without a subscription sees."""
-    await check_rate_limit(str(account.id), "cappe_issue_preview", PREVIEWS_PER_HOUR, 3600)
+    shows what a reader without a subscription sees. With `edit`, the issue
+    editor's page to edit on: every story whole and marked, with the stories'
+    unsaved words (`stories_content`, each checked as a saved story is)."""
+    if body.edit:
+        await check_rate_limit(str(account.id), "cappe_issue_edit_preview", EDIT_PREVIEWS_PER_HOUR, 3600)
+    else:
+        await check_rate_limit(str(account.id), "cappe_issue_preview", PREVIEWS_PER_HOUR, 3600)
     refs = [r.model_dump() for r in body.stories]
     async with get_connection() as conn:
         site = await get_owned_site(conn, site_id, account.id)
@@ -154,6 +162,19 @@ async def preview_issue(site_id: UUID, body: CappeMagazineIssuePreview,
             site_id, ids,
         ) if ids else []
         by_id = {str(r["id"]): post_row(r) for r in rows}
+        try:
+            for post_id, draft in body.stories_content.items():
+                post = by_id.get(str(post_id))
+                if post is None:
+                    continue
+                content = normalize_story(draft.content)
+                await check_assets(conn, site_id, content, None)
+                post.update(title=draft.title, excerpt=draft.excerpt, kicker=draft.kicker, byline=draft.byline,
+                            format="blocks", content=content)
+                if draft.layout:
+                    post["layout"] = normalize_layout(draft.layout)
+        except StoryError as exc:
+            raise _unprocessable(exc) from exc
         stories = [{**by_id[str(r["post_id"])], "section": r.get("section"), "contents_line": r.get("contents_line")}
                    for r in refs if str(r["post_id"]) in by_id]
         released_at = None
@@ -166,7 +187,8 @@ async def preview_issue(site_id: UUID, body: CappeMagazineIssuePreview,
     issue = {"id": body.issue_id, "number": body.number, "title": body.title, "cover": cover,
              "contents": normalize_contents(body.contents), "released_at": released_at}
     html = issue_pages.render_issue(_site_dict(site), nav, magazine, issue, stories, assets, origin="",
-                                    currency=site.get("currency"), preview_blocks=preview_blocks(magazine))
+                                    currency=site.get("currency"), preview_blocks=preview_blocks(magazine),
+                                    edit=body.edit)
     return HTMLResponse(html, headers={**tenant_security_headers(), "Cache-Control": "no-store"})
 
 

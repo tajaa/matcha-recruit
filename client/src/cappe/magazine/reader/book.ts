@@ -67,9 +67,12 @@ export function wireBook(doc: Document | null | undefined, { start = 0, onState 
     for (const r of Array.from(story?.getClientRects() ?? [])) x = Math.max(x, r.right - box.left + book.scrollLeft)
     return x || book.scrollWidth
   }
-  // The column an element starts in (0 is the first, the mat's when there is one).
+  // The column an element starts in (0 is the first, the mat's when there is one):
+  // its first piece with any height (one that starts at the foot of a column
+  // leaves an empty sliver there).
   const column = (el: Element) => {
-    const r = el.getClientRects()[0]
+    const rects = Array.from(el.getClientRects())
+    const r = rects.find((x) => x.height > 1) ?? rects[0]
     if (!r) return -1
     return Math.floor((r.left - book.getBoundingClientRect().left + book.scrollLeft - pad() + 2) / (width() / perSpread()))
   }

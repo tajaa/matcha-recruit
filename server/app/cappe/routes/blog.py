@@ -301,7 +301,9 @@ async def story_options(site_id: UUID, account: CappeAccount = Depends(require_c
 async def preview_story(site_id: UUID, body: CappeStoryPreview,
                         account: CappeAccount = Depends(require_cappe_account)):
     """Render an unsaved story as its page will look, in the site's theme —
-    the story editor's preview frame. No persistence, never cached."""
+    the story editor's preview frame, or with `edit` its page to edit on (the
+    whole story, marked, with the editor's script). No persistence, never
+    cached."""
     async with get_connection() as conn:
         site = await get_owned_site(conn, site_id, account.id)
         try:
@@ -322,5 +324,6 @@ async def preview_story(site_id: UUID, body: CappeStoryPreview,
         "published_at": datetime.now(timezone.utc), "updated_at": None,
     }
     html = mag_pages.render_story(_site_dict(site), nav, magazine, post, assets, more=[], more_covers={},
-                                  origin="", preview_blocks=preview_blocks(magazine), currency=site.get("currency"))
+                                  origin="", preview_blocks=preview_blocks(magazine), currency=site.get("currency"),
+                                  edit=body.edit)
     return HTMLResponse(html, headers={**tenant_security_headers(), "Cache-Control": "no-store"})

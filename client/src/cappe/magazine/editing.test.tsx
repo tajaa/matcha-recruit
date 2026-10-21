@@ -35,7 +35,7 @@ function mountEditor() {
     return Promise.reject(new Error(`unexpected GET ${path}`))
   })
   return render(
-    <MemoryRouter initialEntries={['/cappe/sites/s-1/stories/p-1']}>
+    <MemoryRouter initialEntries={['/cappe/sites/s-1/stories/p-1?view=outline']}>
       <Routes>
         <Route path="/cappe/sites/:siteId/stories/:postId" element={<StoryEditor />} />
         <Route path="/cappe/sites/:siteId/stories" element={<p>stories list</p>} />

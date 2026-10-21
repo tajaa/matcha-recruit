@@ -102,7 +102,7 @@ describe('StoryEditor — who can read it', () => {
   it('makes a story paid only while the magazine charges, and offers one paywall', async () => {
     answer({ '/posts/p-1': post(), '/stories/options': OPTIONS, '/assets': { assets: [] }, '/magazine': magazine({ paid_enabled: true }) })
     api.put.mockResolvedValue(post({ access: 'paid' }))
-    mount('/sites/s-1/stories/p-1', <StoryEditor />, '/sites/:siteId/stories/:postId')
+    mount('/sites/s-1/stories/p-1?view=outline', <StoryEditor />, '/sites/:siteId/stories/:postId')
     const select = await screen.findByLabelText('Who can read it')
     await waitFor(() => expect(within(select).getByRole('option', { name: /Subscribers/ })).not.toBeDisabled())
     fireEvent.change(select, { target: { value: 'paid' } })
@@ -115,7 +115,7 @@ describe('StoryEditor — who can read it', () => {
 
   it('points to the settings when the magazine doesn’t charge', async () => {
     answer({ '/posts/p-1': post(), '/stories/options': OPTIONS, '/assets': { assets: [] }, '/magazine': magazine() })
-    mount('/sites/s-1/stories/p-1', <StoryEditor />, '/sites/:siteId/stories/:postId')
+    mount('/sites/s-1/stories/p-1?view=outline', <StoryEditor />, '/sites/:siteId/stories/:postId')
     const select = await screen.findByLabelText('Who can read it')
     expect(within(select).getByRole('option', { name: /Subscribers/ })).toBeDisabled()
     expect(screen.getByRole('link', { name: 'Magazine settings' })).toHaveAttribute('href', '/cappe/sites/s-1/magazine')

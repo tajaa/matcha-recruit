@@ -1,6 +1,7 @@
 import type {
   CappeMagazineIssue, CappeMagazineIssueOptions, ContentsDesign, CoverDesign, CoverElement, CoverLine, IssueStoryRef,
 } from '../../types'
+import type { StoryDoc } from '../canvas/storyDoc'
 import { MASTHEAD_EM, MAX_LINES, MAX_SIZE, MIN_SIZE, MIN_WIDTH } from './coverVocab'
 
 /** What the issue editor edits, as one document with undo and redo. */
@@ -10,6 +11,8 @@ export type IssueDoc = {
   cover: CoverDesign
   contents: ContentsDesign
   stories: IssueStoryRef[]
+  /** Stories edited on the issue's pages, unsaved, by id (saved with the issue). */
+  drafts?: Record<string, StoryDoc>
 }
 
 export const docOf = (issue: CappeMagazineIssue): IssueDoc => ({

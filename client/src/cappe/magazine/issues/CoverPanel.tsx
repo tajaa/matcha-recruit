@@ -14,7 +14,7 @@ const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 
   'November', 'December']
 
 type Change = (next: CoverDesign, step?: boolean) => void
-type Selected = 'masthead' | 'issue_line' | number
+export type Selected = 'masthead' | 'issue_line' | number
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return <label className="block text-xs text-zinc-400">{label}<div className="mt-1">{children}</div></label>
@@ -88,6 +88,161 @@ function ElementControls<T extends CoverElement>({ el, onChange }: { el: T; onCh
   )
 }
 
+type Common = { cover: CoverDesign; onChange: Change }
+
+/** Start from a template: the photo and the words stay. */
+export function TemplateSection({ cover, templates, name, onChange }: Common & {
+  templates: CappeMagazineIssueOptions['templates']
+  name: string
+}) {
+  return (
+    <section className={`${ui.card} space-y-3 p-4`} aria-label="Template">
+      <h3 className="text-sm font-medium text-zinc-100">Start from a template</h3>
+      <p className="text-xs text-zinc-500">Your photo and words stay; they move into the template’s places.</p>
+      <div className="flex flex-wrap gap-2">
+        {templates.map((t) => (
+          <button key={t.key} type="button" aria-pressed={cover.template === t.key}
+            onClick={() => onChange(applyTemplate(cover, t, name), true)}
+            className={`rounded-lg border px-3 py-1.5 text-sm ${cover.template === t.key ? 'border-emerald-500 text-emerald-300' : 'border-zinc-700 text-zinc-300 hover:bg-zinc-800'}`}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+/** The photo, the darkening behind the words and the background. */
+export function PhotoSection({ cover, assets, onChange, onPickPhoto, focusHint = false }: Common & {
+  assets: Map<string, CappeAsset>
+  onPickPhoto: () => void
+  /** On the page, the focus is dragged: say so. */
+  focusHint?: boolean
+}) {
+  const photo = cover.photo
+  const setPhoto = (change: Partial<CoverDesign['photo']>) => onChange({ ...cover, photo: { ...photo, ...change } })
+  return (
+    <section className={`${ui.card} space-y-3 p-4`} aria-label="Photo">
+      <h3 className="text-sm font-medium text-zinc-100">Photo</h3>
+      <PictureSlot assetId={photo.asset_id} assets={assets} label="Cover photo" onPick={onPickPhoto}
+        onClear={() => setPhoto({ asset_id: null })} />
+      {focusHint && <p className="text-xs text-zinc-500">Drag the dot on the cover to choose what the photo keeps in view.</p>}
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Slider label="Focus across" value={photo.focal.x} min={0} max={100} step={1}
+          onChange={(x) => setPhoto({ focal: { ...photo.focal, x: Math.round(x) } })} disabled={!photo.asset_id} />
+        <Slider label="Focus down" value={photo.focal.y} min={0} max={100} step={1}
+          onChange={(y) => setPhoto({ focal: { ...photo.focal, y: Math.round(y) } })} disabled={!photo.asset_id} />
+        <Slider label="Zoom" value={photo.zoom} min={ZOOM_MIN} max={ZOOM_MAX} step={1}
+          onChange={(zoom) => setPhoto({ zoom: Math.round(zoom) })} disabled={!photo.asset_id} />
+        <Choice label="Colour" value={photo.filter} options={FILTERS} names={LABELS.filter} onChange={(filter) => setPhoto({ filter })} />
+      </div>
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Choice label="Darken behind the words" value={cover.scrim.kind} options={SCRIMS} names={LABELS.scrim}
+          onChange={(kind) => onChange({ ...cover, scrim: { ...cover.scrim, kind } })} />
+        <Slider label="How dark" value={cover.scrim.strength} min={0} max={90} step={1} disabled={cover.scrim.kind === 'none'}
+          onChange={(strength) => onChange({ ...cover, scrim: { ...cover.scrim, strength: Math.round(strength) } })} />
+        <Colour label="Background" value={cover.background} onChange={(background) => onChange({ ...cover, background })} />
+      </div>
+    </section>
+  )
+}
+
+/** One of the cover's words: the masthead, the issue line or a cover line,
+ *  its words (unless typed on the page), place and look. */
+export function CoverElementSection({ cover, which, stories, name, number, onChange, onRemoveLine, words = true }: Common & {
+  which: Selected
+  stories: { id: string; title: string }[]
+  name: string
+  number: number
+  onRemoveLine: (i: number) => void
+  /** The boxes its words are typed in (not on the page, where they're typed on it). */
+  words?: boolean
+}) {
+  const setLine = (i: number, next: CoverLine) => onChange({ ...cover, lines: cover.lines.map((ln, j) => (j === i ? next : ln)) })
+  const now = new Date()
+  const issueLine = `No. ${number} · ${MONTHS[now.getMonth()]} ${now.getFullYear()}`
+  if (which === 'masthead') {
+    return (
+      <>
+        <p className="text-xs text-zinc-500">The magazine’s name, “{name}”. Change it in Magazine settings.</p>
+        <ElementControls el={cover.masthead} onChange={(masthead) => onChange({ ...cover, masthead })} />
+      </>
+    )
+  }
+  if (which === 'issue_line') {
+    return (
+      <>
+        <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+          {words && (
+            <Field label="Words">
+              <input value={cover.issue_line.text} maxLength={80} placeholder={issueLine} className={`${small} w-full`}
+                aria-label="Issue line words"
+                onChange={(e) => onChange({ ...cover, issue_line: { ...cover.issue_line, text: e.target.value } })} />
+            </Field>
+          )}
+          <label className="flex items-center gap-2 pb-2 text-xs text-zinc-400">
+            <input type="checkbox" checked={cover.issue_line.hidden}
+              onChange={(e) => onChange({ ...cover, issue_line: { ...cover.issue_line, hidden: e.target.checked } })} /> Hide it
+          </label>
+        </div>
+        <ElementControls el={cover.issue_line} onChange={(issue_line) => onChange({ ...cover, issue_line })} />
+      </>
+    )
+  }
+  const line = cover.lines[which]
+  if (!line) return null
+  return (
+    <>
+      {words && (
+        <Field label="Words">
+          <input value={line.text} maxLength={140} className={`${small} w-full`} aria-label="Cover line words"
+            onChange={(e) => setLine(which, { ...line, text: e.target.value })} />
+        </Field>
+      )}
+      <div className="grid gap-3 sm:grid-cols-2">
+        {words && (
+          <Field label="A smaller line under it">
+            <input value={line.sub} maxLength={200} className={`${small} w-full`} aria-label="Smaller line"
+              onChange={(e) => setLine(which, { ...line, sub: e.target.value })} />
+          </Field>
+        )}
+        <Field label="Opens the story">
+          <select value={line.post_id || ''} className={`${small} w-full`} aria-label="Opens the story"
+            onChange={(e) => setLine(which, { ...line, post_id: e.target.value || null })}>
+            <option value="">None</option>
+            {stories.map((s) => <option key={s.id} value={s.id}>{s.title}</option>)}
+          </select>
+        </Field>
+      </div>
+      <ElementControls el={line} onChange={(next) => setLine(which, next)} />
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Choice label="Box behind it" value={line.box} options={BOXES} names={{ none: 'None', solid: 'Solid' }}
+          onChange={(box) => setLine(which, { ...line, box })} />
+        {line.box === 'solid' && <Colour label="Box colour" value={line.box_color} onChange={(box_color) => setLine(which, { ...line, box_color })} />}
+      </div>
+      <button type="button" onClick={() => onRemoveLine(which)} className={`inline-flex items-center gap-2 text-xs ${ui.danger}`}>
+        <Trash2 className="h-3.5 w-3.5" /> Remove this line
+      </button>
+    </>
+  )
+}
+
+/** Where the photo credit goes and its tone. */
+export function CreditSection({ cover, onChange }: Common) {
+  return (
+    <section className={`${ui.card} space-y-3 p-4`} aria-label="Photo credit">
+      <h3 className="text-sm font-medium text-zinc-100">Photo credit</h3>
+      <p className="text-xs text-zinc-500">Always printed on the cover, from the picture’s library entry.</p>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Choice label="Corner" value={cover.credit.corner} options={CREDIT_CORNERS} names={LABELS.corner}
+          onChange={(corner) => onChange({ ...cover, credit: { ...cover.credit, corner } })} />
+        <Choice label="Tone" value={cover.credit.tone} options={TONES} names={LABELS.tone}
+          onChange={(tone) => onChange({ ...cover, credit: { ...cover.credit, tone } })} />
+      </div>
+    </section>
+  )
+}
+
 /** The cover: start from a template, then the photo, the darkening behind
  *  the words, and each element's words, place and look. The preview shows
  *  it as readers will. */
@@ -105,11 +260,6 @@ export default function CoverPanel({ cover, templates, assets, stories, name, nu
 }) {
   const [selected, setSelected] = useState<Selected>('masthead')
   const pick = typeof selected === 'number' && !cover.lines[selected] ? 'masthead' : selected
-  const photo = cover.photo
-  const setPhoto = (change: Partial<CoverDesign['photo']>) => onChange({ ...cover, photo: { ...photo, ...change } })
-  const setLine = (i: number, next: CoverLine) => onChange({ ...cover, lines: cover.lines.map((ln, j) => (j === i ? next : ln)) })
-  const now = new Date()
-  const issueLine = `No. ${number} · ${MONTHS[now.getMonth()]} ${now.getFullYear()}`
 
   const addLine = () => {
     const line = newLine(cover)
@@ -124,41 +274,8 @@ export default function CoverPanel({ cover, templates, assets, stories, name, nu
 
   return (
     <div className="space-y-5">
-      <section className={`${ui.card} space-y-3 p-4`} aria-label="Template">
-        <h3 className="text-sm font-medium text-zinc-100">Start from a template</h3>
-        <p className="text-xs text-zinc-500">Your photo and words stay; they move into the template’s places.</p>
-        <div className="flex flex-wrap gap-2">
-          {templates.map((t) => (
-            <button key={t.key} type="button" aria-pressed={cover.template === t.key}
-              onClick={() => onChange(applyTemplate(cover, t, name), true)}
-              className={`rounded-lg border px-3 py-1.5 text-sm ${cover.template === t.key ? 'border-emerald-500 text-emerald-300' : 'border-zinc-700 text-zinc-300 hover:bg-zinc-800'}`}>
-              {t.label}
-            </button>
-          ))}
-        </div>
-      </section>
-
-      <section className={`${ui.card} space-y-3 p-4`} aria-label="Photo">
-        <h3 className="text-sm font-medium text-zinc-100">Photo</h3>
-        <PictureSlot assetId={photo.asset_id} assets={assets} label="Cover photo" onPick={onPickPhoto}
-          onClear={() => setPhoto({ asset_id: null })} />
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Slider label="Focus across" value={photo.focal.x} min={0} max={100} step={1}
-            onChange={(x) => setPhoto({ focal: { ...photo.focal, x: Math.round(x) } })} disabled={!photo.asset_id} />
-          <Slider label="Focus down" value={photo.focal.y} min={0} max={100} step={1}
-            onChange={(y) => setPhoto({ focal: { ...photo.focal, y: Math.round(y) } })} disabled={!photo.asset_id} />
-          <Slider label="Zoom" value={photo.zoom} min={ZOOM_MIN} max={ZOOM_MAX} step={1}
-            onChange={(zoom) => setPhoto({ zoom: Math.round(zoom) })} disabled={!photo.asset_id} />
-          <Choice label="Colour" value={photo.filter} options={FILTERS} names={LABELS.filter} onChange={(filter) => setPhoto({ filter })} />
-        </div>
-        <div className="grid gap-3 sm:grid-cols-3">
-          <Choice label="Darken behind the words" value={cover.scrim.kind} options={SCRIMS} names={LABELS.scrim}
-            onChange={(kind) => onChange({ ...cover, scrim: { ...cover.scrim, kind } })} />
-          <Slider label="How dark" value={cover.scrim.strength} min={0} max={90} step={1} disabled={cover.scrim.kind === 'none'}
-            onChange={(strength) => onChange({ ...cover, scrim: { ...cover.scrim, strength: Math.round(strength) } })} />
-          <Colour label="Background" value={cover.background} onChange={(background) => onChange({ ...cover, background })} />
-        </div>
-      </section>
+      <TemplateSection cover={cover} templates={templates} name={name} onChange={onChange} />
+      <PhotoSection cover={cover} assets={assets} onChange={onChange} onPickPhoto={onPickPhoto} />
 
       <section className={`${ui.card} space-y-4 p-4`} aria-label="Words">
         <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="Cover words">
@@ -177,74 +294,11 @@ export default function CoverPanel({ cover, templates, assets, stories, name, nu
             <Plus className="h-3.5 w-3.5" /> Cover line
           </button>
         </div>
-
-        {pick === 'masthead' && (
-          <>
-            <p className="text-xs text-zinc-500">The magazine’s name, “{name}”. Change it in Magazine settings.</p>
-            <ElementControls el={cover.masthead} onChange={(masthead) => onChange({ ...cover, masthead })} />
-          </>
-        )}
-        {pick === 'issue_line' && (
-          <>
-            <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
-              <Field label="Words">
-                <input value={cover.issue_line.text} maxLength={80} placeholder={issueLine} className={`${small} w-full`}
-                  aria-label="Issue line words"
-                  onChange={(e) => onChange({ ...cover, issue_line: { ...cover.issue_line, text: e.target.value } })} />
-              </Field>
-              <label className="flex items-center gap-2 pb-2 text-xs text-zinc-400">
-                <input type="checkbox" checked={cover.issue_line.hidden}
-                  onChange={(e) => onChange({ ...cover, issue_line: { ...cover.issue_line, hidden: e.target.checked } })} /> Hide it
-              </label>
-            </div>
-            <ElementControls el={cover.issue_line} onChange={(issue_line) => onChange({ ...cover, issue_line })} />
-          </>
-        )}
-        {typeof pick === 'number' && cover.lines[pick] && (() => {
-          const line = cover.lines[pick]
-          return (
-            <>
-              <Field label="Words">
-                <input value={line.text} maxLength={140} className={`${small} w-full`} aria-label="Cover line words"
-                  onChange={(e) => setLine(pick, { ...line, text: e.target.value })} />
-              </Field>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <Field label="A smaller line under it">
-                  <input value={line.sub} maxLength={200} className={`${small} w-full`} aria-label="Smaller line"
-                    onChange={(e) => setLine(pick, { ...line, sub: e.target.value })} />
-                </Field>
-                <Field label="Opens the story">
-                  <select value={line.post_id || ''} className={`${small} w-full`} aria-label="Opens the story"
-                    onChange={(e) => setLine(pick, { ...line, post_id: e.target.value || null })}>
-                    <option value="">None</option>
-                    {stories.map((s) => <option key={s.id} value={s.id}>{s.title}</option>)}
-                  </select>
-                </Field>
-              </div>
-              <ElementControls el={line} onChange={(next) => setLine(pick, next)} />
-              <div className="grid gap-3 sm:grid-cols-3">
-                <Choice label="Box behind it" value={line.box} options={BOXES} names={{ none: 'None', solid: 'Solid' }}
-                  onChange={(box) => setLine(pick, { ...line, box })} />
-                {line.box === 'solid' && <Colour label="Box colour" value={line.box_color} onChange={(box_color) => setLine(pick, { ...line, box_color })} />}
-              </div>
-              <button type="button" onClick={() => removeLine(pick)} className={`inline-flex items-center gap-2 text-xs ${ui.danger}`}>
-                <Trash2 className="h-3.5 w-3.5" /> Remove this line
-              </button>
-            </>
-          )
-        })()}
+        <CoverElementSection cover={cover} which={pick} stories={stories} name={name} number={number} onChange={onChange}
+          onRemoveLine={removeLine} />
       </section>
 
-      <section className={`${ui.card} space-y-3 p-4`} aria-label="Photo credit">
-        <h3 className="text-sm font-medium text-zinc-100">Photo credit</h3>
-        <p className="text-xs text-zinc-500">Always printed on the cover, from the picture’s library entry.</p>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Choice label="Corner" value={cover.credit.corner} options={CREDIT_CORNERS} names={LABELS.corner}
-            onChange={(corner) => onChange({ ...cover, credit: { ...cover.credit, corner } })} />
-          <Choice label="Tone" value={cover.credit.tone} options={TONES} names={LABELS.tone}
-            onChange={(tone) => onChange({ ...cover, credit: { ...cover.credit, tone } })} />
-        </div>
-      </section>
+      <CreditSection cover={cover} onChange={onChange} />
     </div>
   )
 }

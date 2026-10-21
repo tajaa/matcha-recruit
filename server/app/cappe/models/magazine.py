@@ -83,6 +83,9 @@ class CappeStoryPreview(BaseModel):
     cover_asset_id: Optional[UUID] = None
     access: Literal["free", "paid"] = "free"
     content: dict[str, Any] = Field(default_factory=dict)
+    # The owner's editor on the page: the story whole, marked for editing,
+    # with the editor's script (services/magazine/story_render.py).
+    edit: bool = False
 
 
 class CappeStoryLayoutInfo(BaseModel):
@@ -268,9 +271,22 @@ class CappeMagazineIssueSave(BaseModel):
     stories: Optional[list[CappeIssueStoryRef]] = Field(default=None, max_length=40)
 
 
+class CappeIssueStoryDraft(BaseModel):
+    """A story's unsaved words in the issue editor, previewed in the issue."""
+    title: str = Field(default="", max_length=255)
+    excerpt: Optional[str] = Field(default=None, max_length=600)
+    kicker: Optional[str] = Field(default=None, max_length=60)
+    byline: Optional[str] = Field(default=None, max_length=160)
+    layout: Optional[str] = Field(default=None, max_length=20)
+    content: dict[str, Any] = Field(default_factory=dict)
+
+
 class CappeMagazineIssuePreview(BaseModel):
-    """An unsaved issue to render as its book would look."""
+    """An unsaved issue to render as its book would look. `edit`: the owner's
+    editor on the page; `stories_content`: the stories' unsaved words."""
     issue_id: Optional[UUID] = None
+    edit: bool = False
+    stories_content: dict[UUID, CappeIssueStoryDraft] = Field(default_factory=dict, max_length=40)
     number: int = Field(default=1, ge=1, le=9999)
     title: Optional[str] = Field(default=None, max_length=120)
     cover: dict[str, Any] = Field(default_factory=dict)
@@ -372,6 +388,7 @@ __all__ = [
     "CappeMagazineCheckout",
     "CappeMagazineCompCreate",
     "CappeIssueStoryRef",
+    "CappeIssueStoryDraft",
     "CappeMagazineIssueCreate",
     "CappeMagazineIssueSave",
     "CappeMagazineIssuePreview",
