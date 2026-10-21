@@ -134,6 +134,41 @@ class CappeStockImports(BaseModel):
     remaining_today: Optional[int] = None
 
 
+
+IllustrationAspect = Literal["16:9", "3:2", "4:3", "1:1", "3:4", "2:3", "9:16"]
+AssistAction = Literal["draft", "headlines", "captions", "tighten", "search_terms"]
+
+
+class CappeIllustrateRequest(BaseModel):
+    """Describe the picture; it is drawn as a labeled AI illustration."""
+    prompt: str = Field(min_length=3, max_length=1000)
+    aspect: IllustrationAspect = "3:2"
+
+
+class CappeStoryAssistRequest(BaseModel):
+    """One Assist action. `content`/`title`/`excerpt` are the editor's
+    unsaved state (the saved story is used without them); `asset_ids` picks
+    the pictures for a draft or captions (else the story's own)."""
+    action: AssistAction
+    notes: str = Field(default="", max_length=2000)
+    block: Optional[int] = Field(default=None, ge=0, le=119)
+    asset_ids: list[UUID] = Field(default_factory=list, max_length=8)
+    content: Optional[dict[str, Any]] = None
+    title: Optional[str] = Field(default=None, max_length=255)
+    excerpt: Optional[str] = Field(default=None, max_length=600)
+
+
+class CappeStoryAssist(BaseModel):
+    """A proposal; nothing is saved. Which fields are set depends on `action`."""
+    action: AssistAction
+    headlines: Optional[list[dict[str, str]]] = None
+    captions: Optional[list[dict[str, str]]] = None
+    md: Optional[str] = None
+    block: Optional[int] = None
+    terms: Optional[list[dict[str, str]]] = None
+    draft: Optional[dict[str, Any]] = None
+
+
 __all__ = [
     "MastheadStyle",
     "CappeMagazine",
@@ -149,4 +184,9 @@ __all__ = [
     "CappeStockTopicRequest",
     "CappeStockImport",
     "CappeStockImports",
+    "IllustrationAspect",
+    "AssistAction",
+    "CappeIllustrateRequest",
+    "CappeStoryAssistRequest",
+    "CappeStoryAssist",
 ]

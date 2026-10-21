@@ -88,6 +88,7 @@ GUMMFIT_MERLIN = "gummfit.merlin"
 GUMMFIT_MERLIN_ROUTER = "gummfit.merlin_router"
 GUMMFIT_DIRECTORY = "gummfit.directory"
 GUMMFIT_BOOKING = "gummfit.booking"
+GUMMFIT_MAGAZINE = "gummfit.magazine"
 
 # ── Tell-Us ──
 TELLUS_FLYER_AI = "tellus.flyer_ai"
@@ -170,6 +171,10 @@ SURFACES: tuple[SurfaceDef, ...] = (
                "Suggests a published site's directory category, tags and blurb.", f"{_GEMINI} Flash Lite"),
     SurfaceDef(GUMMFIT_BOOKING, GUMMFIT, "Booking suggestions",
                "Reads the times and staff a visitor asks for when suggesting bookings.", f"{_GEMINI} Flash Lite"),
+    SurfaceDef(GUMMFIT_MAGAZINE, GUMMFIT, "Magazine writing help",
+               "The story editor's Assist: drafts from the writer's pictures and notes, headlines, captions, "
+               "tightening and archive search terms. Proposals only; nothing is saved without the writer. "
+               "The real-person check on AI illustrations always runs on Claude Haiku.", _HAIKU),
     SurfaceDef(TELLUS_FLYER_AI, TELLUS, "Flyer AI",
                "The flyer designer's assistant (edits a design from chat) and its idea generator.",
                f"{_GEMINI} Flash"),

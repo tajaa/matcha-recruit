@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import Stories from './stories/Stories'
@@ -162,6 +162,29 @@ describe('StoryEditor', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Use this picture' }))
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Change picture' })).toBeInTheDocument()
+  })
+
+  it('applies an Assist headline and opens a suggested archive search', async () => {
+    answer({ '/posts/p-1': post(), '/stories/options': OPTIONS, '/assets': { assets: [ASSET] },
+      '/library/search': { source: 'nasa', query: 'earth at night', page: 0, has_more: false, results: [] } })
+    api.post.mockImplementation((_path: string, body: { action: string }) => Promise.resolve(body.action === 'headlines'
+      ? { action: 'headlines', headlines: [{ title: 'Four a.m.', dek: 'Boats go out.', kicker: 'Dispatch' }] }
+      : { action: 'search_terms', terms: [{ source: 'nasa', query: 'earth at night' }] }))
+    mount('/sites/s-1/stories/p-1', <StoryEditor />, '/sites/:siteId/stories/:postId')
+    await screen.findByDisplayValue('The harbour at dawn')
+    fireEvent.click(screen.getByRole('button', { name: 'Assist' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Ask' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Use this' }))
+    expect(screen.getByLabelText('Headline')).toHaveValue('Four a.m.')
+    expect(screen.getByLabelText('Kicker')).toHaveValue('Dispatch')
+    expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled()
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Find pictures' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Ask' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Search' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Find pictures' })
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith('/sites/s-1/library/search?source=nasa&q=earth+at+night&page=0'))
+    expect(within(dialog).getByPlaceholderText(/Harbour at dawn/)).toHaveValue('earth at night')
   })
 
   it('removes and reorders blocks', async () => {

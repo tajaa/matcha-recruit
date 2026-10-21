@@ -354,6 +354,30 @@ What is built so far:
   search result carries a signed path (`sources/thumbs.py`: HMAC from `JWT_SECRET_KEY`, 6 h) and the
   route fetches only addresses our searches signed, re-encodes them as a small WebP and caches them a
   day by picture. It is not an open proxy; the archive's file URL never reaches the browser.
+- **An AI illustration is always labeled and never a real person** (`services/magazine/ai_images.py`,
+  `POST /sites/{id}/library/illustrate`, `routes/magazine_ai.py`). The prompt is checked before anything
+  is generated: first a deterministic check for the unmistakable cases (an @handle; an office only a
+  person holds followed by a name, "President Lincoln", "Pope Francis"; titles that also name things,
+  "General Motors", "Dr Pepper", are left to the model), then Claude Haiku. The check FAILS CLOSED: no
+  key, an error, a timeout or an unreadable verdict is a 503, never a pass. A refusal (422
+  `real_person`) or an unavailable check spends no image quota; the shared `image_quota` is charged
+  only after a pass (the paid allowance for any plan with `magazine`, since Writer isn't a premium
+  design plan), plus 40 prompt checks a day. The picture is drawn in a visible illustration style
+  ("clearly an illustration and not a photograph", invented people only), stored as
+  `kind='generated'`, `ai_generated`, `license='ai'`, credit "AI illustration"
+  (`cappe_assets.insert_generated`). The generator's own file stays the original (with whatever
+  provenance data it carries); only the responsive sizes are added (`media.store_processed(main_url=)`).
+- **Assist is fixed writing actions on Claude, proposals only** (`services/magazine/assist.py`,
+  `POST /sites/{id}/posts/{post_id}/assist`): `draft`, `headlines`, `captions`, `tighten`,
+  `search_terms`. One `generate_text` call each, no agent loop, no Gemini, nothing saved. The model is
+  Admin → Settings → AI models, surface `gummfit.magazine` (`claude_default`: Haiku unless the admin
+  picks another). It reads the editor's unsaved story when sent (else the saved one; a plain post is
+  one text block), releases the connection, then downloads each picture's 960 px WebP size and calls
+  the model. The prompt forbids invented facts, quotes and numbers (a draft writes "[check: …]"
+  instead), naming a person in a picture unless its title or credit does, and writing credits. Every
+  proposed draft goes through `normalize_story`, and a picture id the model wasn't given is dropped
+  (`_scrub`). 5 a day without the `magazine` feature, 60 with; a request the writer has to fix (422)
+  spends none.
 
 ## Site templates (`services/site_templates/`)
 

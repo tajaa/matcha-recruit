@@ -26,6 +26,10 @@ Website-builder frontend for the consumer brand **Gummfit**, host-routed on gumm
   `library/StockSearch.tsx` is its "Find free photos" section: archive chips, license badges,
   multi-select import, "stock a topic", and polling of the server's imports. Archive thumbnails are
   signed paths under the Cappe API (`cappeApiBase` + `thumb`), never the archive's own URLs.
+  `library/IllustrateForm.tsx` draws a labeled AI illustration (a refusal for a real person shows as
+  a refusal, `code === 'real_person'`). `editor/AssistPanel.tsx` is the editor's Assist (draft,
+  headlines, captions, tighten, archive searches): it sends the editor's unsaved story, shows each
+  proposal, and changes nothing until the writer applies it.
   `stories/Stories.tsx` (the wall of covers at `sites/:siteId/stories`; `/blog` redirects here),
   `editor/StoryEditor.tsx` + `editor/BlockEditor.tsx` (blocks, a library picker, a live preview
   iframe fed by `POST /stories/preview`), `settings/MagazineSettings.tsx`. `storyBlocks.ts` mirrors

@@ -39,3 +39,25 @@ export function moveBlock(blocks: StoryBlock[], from: number, to: number): Story
   next.splice(to, 0, b)
   return next
 }
+
+/** The blocks with `caption` under every use of the picture `assetId`. */
+export function withCaption(blocks: StoryBlock[], assetId: string, caption: string): StoryBlock[] {
+  return blocks.map((b) => {
+    if (b.type === 'photo' && b.asset_id === assetId) return { ...b, caption }
+    if (b.type === 'photos' && b.items.some((i) => i.asset_id === assetId)) {
+      return { ...b, items: b.items.map((i) => (i.asset_id === assetId ? { ...i, caption } : i)) }
+    }
+    return b
+  })
+}
+
+/** The blocks with text block `index` rewritten as `md` (any other kind is left alone). */
+export function withText(blocks: StoryBlock[], index: number, md: string): StoryBlock[] {
+  return blocks.map((b, j) => (j === index && b.type === 'text' ? { ...b, md } : b))
+}
+
+/** The first words of a text block, to name it in a list. */
+export function textPreview(md: string, words = 8): string {
+  const plain = md.replace(/[*_`#>[\]()]/g, '').split(/\s+/).filter(Boolean)
+  return plain.slice(0, words).join(' ') + (plain.length > words ? '…' : '')
+}
