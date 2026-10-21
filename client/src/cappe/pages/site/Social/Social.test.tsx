@@ -195,6 +195,52 @@ describe('Social', () => {
     vi.unstubAllGlobals()
   })
 
+  it('posts a carousel and a video together at one time, and keeps the video when only it fails', async () => {
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: vi.fn(() => 'blob:x'), revokeObjectURL: vi.fn() }))
+    class Xhr {
+      status = 204
+      upload = {}
+      onload?: () => void
+      open() {}
+      send() { this.onload?.() }
+    }
+    vi.stubGlobal('XMLHttpRequest', Xhr)
+    api.get.mockImplementation((path: string) => path.endsWith('/social/settings')
+      ? Promise.resolve({ ...SETTINGS, video_available: true })
+      : answer()(path))
+    api.upload.mockResolvedValue({ url: 'https://cdn.example.test/a.jpg', width: 1080, height: 1080 })
+    let saved = 0
+    api.post.mockImplementation((path: string) => {
+      if (path.endsWith('/assets/presign')) {
+        return Promise.resolve({ asset_id: 'a-1', upload_url: 'https://bucket.example.test/', fields: {}, max_bytes: 1 })
+      }
+      if (path.endsWith('/complete')) {
+        return Promise.resolve({ id: 'a-1', status: 'ready', frames: [], trimmed: false, error: null })
+      }
+      saved += 1
+      return saved === 1 ? Promise.resolve(POST) : Promise.reject(new Error('Video failed'))
+    })
+    render(
+      <MemoryRouter initialEntries={['/sites/s-1/social']}>
+        <Routes><Route path="/sites/:siteId/social" element={<Social />} /></Routes>
+      </MemoryRouter>,
+    )
+    await screen.findByText(/Drop photos or videos here/)
+    const photo = new File([new Uint8Array(8)], 'a.jpg', { type: 'image/jpeg' })
+    const clip = new File([new Uint8Array(8)], 'latte.mov', { type: 'video/quicktime' })
+    fireEvent.change(screen.getByLabelText('Choose photos or videos'), { target: { files: [photo, clip] } })
+    await waitFor(() => expect(api.upload).toHaveBeenCalled())
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith(expect.stringMatching(/complete$/)))
+    fireEvent.click(await screen.findByRole('button', { name: 'Schedule 2 posts' }))
+    expect(await screen.findByText(/Saved 1 of 2/)).toBeInTheDocument()
+    const bodies = api.post.mock.calls.filter(([p]) => p === '/sites/s-1/social/posts').map(([, b]) => b)
+    expect(bodies).toHaveLength(2)
+    expect(bodies[0].scheduled_at).toBe(bodies[1].scheduled_at)
+    // The saved carousel is gone; the video that failed is still there to try again.
+    expect(await screen.findByRole('button', { name: 'Schedule post' })).toBeInTheDocument()
+    vi.unstubAllGlobals()
+  })
+
   it('says video needs a paid plan instead of uploading it', async () => {
     load()
     fireEvent.click(await screen.findByRole('button', { name: 'Form' }))

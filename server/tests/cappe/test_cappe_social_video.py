@@ -516,6 +516,30 @@ async def test_release_and_fail_posts_waiting_on_a_video():
 
 
 @pytest.mark.asyncio
+async def test_settle_renders_releases_ready_posts_and_fails_broken_ones():
+    conn = QueryConn(fetch={"SET status = 'failed', updated_at": [{"id": POST}],
+                            "SET status = 'scheduled'": [{"id": POST, "scheduled_at": NOW}]})
+    out = await post_store.settle_renders(conn, limit=10)
+    assert out == {"released": [{"id": POST, "scheduled_at": NOW}], "failed": [POST]}
+    failing = conn.sql_for("fetch")[0]
+    assert "a.status IN ('failed', 'deleted')" in failing and "a.id IS NULL" in failing
+    assert conn.args_for("UPDATE cappe_social_post_targets SET status = 'failed'") == ([POST], post_store.BROKEN_VIDEO)
+    scoped = QueryConn(fetch={"SET status = 'failed', updated_at": [], "SET status = 'scheduled'": []})
+    assert await post_store.settle_renders(scoped, post_ids=[POST]) == {"released": [], "failed": []}
+    assert scoped.args_for("SET status = 'scheduled'") == (200, [POST])
+    assert "p.id = ANY($2::uuid[])" in scoped.sql_for("fetch")[0]
+
+
+@pytest.mark.asyncio
+async def test_retrying_a_post_whose_video_failed_fails_it_again_instead_of_waiting():
+    conn = QueryConn(fetchrow={"UPDATE cappe_social_posts SET status = $3": {"id": POST},
+                               "SET status = 'rendering'": {"id": POST}},
+                     fetch={"SET status = 'failed', updated_at": [{"id": POST}], "SET status = 'scheduled'": []})
+    assert await post_store.publish_now(conn, SITE, POST)
+    assert any("a.status IN ('failed', 'deleted')" in s for s in conn.sql_for("fetch"))
+
+
+@pytest.mark.asyncio
 async def test_record_pending_keeps_the_state_and_gives_back_the_attempt():
     conn = QueryConn()
     await post_store.record_pending(conn, POST, Pending("instagram_processing", {"container_id": "c1"}, 1))
@@ -528,7 +552,11 @@ async def test_record_pending_keeps_the_state_and_gives_back_the_attempt():
 async def test_recover_stale_claims_and_target_phase():
     conn = QueryConn(fetch={"WHERE status = 'publishing' AND claimed_at": [{"post_id": POST}, {"post_id": POST}]})
     assert await post_store.recover_stale_claims(conn, 20) == [POST]
-    assert conn.args_for("claimed_at <") == (20, post_store.MAX_ATTEMPTS)
+    assert conn.args_for("claimed_at <") == (20, post_store.MAX_ATTEMPTS, post_store.INTERRUPTED)
+    # A target with no handle to resume from fails (it may have gone out)
+    # instead of being posted again; one with a handle resumes.
+    sql = conn.sql_for("fetch")[0]
+    assert "state = '{}'::jsonb THEN 'failed'" in sql
     target = post_store._row_to_target({"status": "pending", "metrics": None, "state": '{"phase": "facebook_processing"}'})
     assert target["phase"] == "facebook_processing" and "state" not in target
     assert post_store._row_to_target({"status": "failed", "metrics": None, "state": {"phase": "x"}})["phase"] is None
@@ -656,9 +684,15 @@ async def test_facebook_reel_uploads_by_url_then_checks():
         ("GET", "v1"): {"status": {"video_status": "processing", "publishing_phase": {"status": "not_started"}}},
     })
     async with graph.client() as client:
+        started = await meta.publish(CFG, platform="facebook", external_id="p1", token="t", caption="New latte",
+                                     media=[VIDEO], client=client)
+        # The Reel's id is saved before the upload, so a retry finishes it.
+        assert started.phase == "facebook_uploading" and started.state == {"video_id": "v1", "upload": True, "checks": 0}
+        assert not [p for m, p, _, f in graph.requests if f.get("upload_phase") == "finish"]
         first = await meta.publish(CFG, platform="facebook", external_id="p1", token="t", caption="New latte",
-                                   media=[VIDEO], client=client)
+                                   media=[VIDEO], state=started.state, client=client)
         assert first.phase == "facebook_processing" and first.state == {"video_id": "v1", "checks": 0}
+        assert len([p for m, p, _, f in graph.requests if f.get("upload_phase") == "start"]) == 1
         finish = [f for m, p, _, f in graph.requests if p == "p1/video_reels" and f.get("upload_phase") == "finish"][0]
         assert finish == {"video_id": "v1", "upload_phase": "finish", "video_state": "PUBLISHED",
                           "description": "New latte"}
@@ -721,10 +755,11 @@ async def test_facebook_reel_upload_failures():
     ]
     for routes, expect, retryable in cases:
         graph = Graph(routes)
+        state = {} if expect == "no video id" else {"video_id": "v1", "upload": True}
         async with graph.client() as client:
             with pytest.raises(ProviderError) as exc:
                 await meta.publish(CFG, platform="facebook", external_id="p1", token="t", caption="x",
-                                   media=[VIDEO], client=client)
+                                   media=[VIDEO], state=state, client=client)
         assert expect in str(exc.value) and exc.value.retryable is retryable, expect
 
 
@@ -1057,7 +1092,10 @@ def test_render_task_retries_once_then_fails_with_a_reason(monkeypatch):
         raise media_task.SoftTimeLimitExceeded()
 
     monkeypatch.setattr(media_task, "render_one", slow)
-    assert "too long" in media_task.render_cappe_social_video(str(ASSET))["error"]
+    with pytest.raises(media_task.SoftTimeLimitExceeded):
+        media_task.render_cappe_social_video(str(ASSET))  # out of time once: retried (it resumes)
+    out = media_task.render_cappe_social_video.apply(args=[str(ASSET)], retries=1).get()
+    assert "too long" in out["error"]
 
 
 @pytest.mark.asyncio
@@ -1102,9 +1140,16 @@ async def test_sweep_recovers_renders_targets_and_removes_expired_files(monkeypa
     monkeypatch.setattr(asset_store, "expired", AsyncMock(return_value=[asset()]))
     deleted = AsyncMock()
     monkeypatch.setattr(asset_store, "mark_deleted", deleted)
+    due, later = uuid4(), uuid4()
+    monkeypatch.setattr(post_store, "settle_renders", AsyncMock(return_value={
+        "released": [{"id": due, "scheduled_at": NOW - timedelta(minutes=1)},
+                     {"id": later, "scheduled_at": NOW + timedelta(days=1)}], "failed": [POST]}))
+    published = Mock()
+    monkeypatch.setattr(media_task, "_publish", published)
     out = await media_task.sweep(TxConn(), 50)
     assert out == {"renders_requeued": 1, "renders_failed": 1, "uploads_cleared": 1, "targets_recovered": 1,
-                   "expired": 1}
+                   "expired": 1, "posts_released": 2, "posts_failed": 1}
+    published.assert_called_once_with([due])
     assert touch.await_args.args[1] == stale["id"] and delay.call_args.args == (str(stale["id"]),)
     assert files.await_count == 2 and deleted.await_args.args[1] == ASSET and rollup.await_args.args[1] == POST
     # A broker outage leaves the render for the next sweep.

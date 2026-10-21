@@ -29,10 +29,13 @@ async def refresh_connection(conn, cfg: MetaConfig, cred: dict[str, Any]) -> dic
             cfg, platform=cred["platform"], external_id=cred["external_id"], token=cred["token"],
         )
     except ProviderError as exc:
+        # Only a dead token demotes the account. A read-only metrics call
+        # failing (a field this Page type lacks, a blip) must not stop
+        # publishing and replies, so it is noted and the account stays live.
         if exc.code in _TOKEN_CODES:
             await conn_store.mark_status(conn, cred["id"], "expired", str(exc))
         else:
-            await conn_store.mark_status(conn, cred["id"], "error" if not exc.retryable else "connected", str(exc))
+            await conn_store.mark_status(conn, cred["id"], "connected", str(exc))
         return {"ok": False, "error": str(exc)}
     await conn_store.record_metrics(conn, cred["id"], metrics)
     return {"ok": True, **metrics}
