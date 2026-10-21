@@ -48,6 +48,7 @@ const Library = lazy(() => import('./magazine/library/LibraryPage'))
 const Stories = lazy(() => import('./magazine/stories/Stories'))
 const StoryEditor = lazy(() => import('./magazine/editor/StoryEditor'))
 const MagazineSettings = lazy(() => import('./magazine/settings/MagazineSettings'))
+const ReaderView = lazy(() => import('./magazine/reader/ReaderView'))
 
 // The Blog page became the magazine's Stories (cappemag02); old links land there.
 function BlogRedirect() {
@@ -117,6 +118,7 @@ export default function CappeRoutes() {
           <Route path="sites/:siteId/stories" element={<Stories />} />
           <Route path="sites/:siteId/stories/:postId" element={<StoryEditor />} />
           <Route path="sites/:siteId/magazine" element={<MagazineSettings />} />
+          <Route path="sites/:siteId/magazine/view" element={<ReaderView />} />
           <Route path="sites/:siteId/library" element={<Library />} />
           {/* Creator marketplace: creator self-service + brand-side collabs.
               Each group is wrapped in RequireAccountType — CappeLayout above
