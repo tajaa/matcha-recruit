@@ -16,8 +16,53 @@ concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+# What runs on a PR follows what it changed (scripts/ci/select_scope.sh): a
+# Cappe-only change runs the Cappe tests, a client-only change skips the
+# server suite, and so on. A push to main runs everything, so anything a scoped
+# PR run could miss is caught right after merge. To run everything on a PR,
+# add the `ci:full` label and push (an empty commit is enough). Jobs skipped
+# here report success, so required checks keep their names and still pass.
 jobs:
+  changes:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 5
+    outputs:
+      full: ${{ steps.scope.outputs.full }}
+      base: ${{ steps.scope.outputs.base }}
+      server: ${{ steps.scope.outputs.server }}
+      server_scope: ${{ steps.scope.outputs.server_scope }}
+      server_tests: ${{ steps.scope.outputs.server_tests }}
+      oceanlab_tests: ${{ steps.scope.outputs.oceanlab_tests }}
+      client: ${{ steps.scope.outputs.client }}
+      tellus: ${{ steps.scope.outputs.tellus }}
+      oceanlab_client: ${{ steps.scope.outputs.oceanlab_client }}
+      ops: ${{ steps.scope.outputs.ops }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Work out what this change can affect
+        id: scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          CI_FULL: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci:full')) && '1' || '' }}
+        run: |
+          changed="$RUNNER_TEMP/changed.txt"
+          : > "$changed"
+          if [ "$CI_FULL" != "1" ]; then
+            # Same merge-commit parent diff as the lint job — see its comment.
+            if git rev-parse -q --verify HEAD^2 >/dev/null; then base=HEAD^1; head=HEAD^2; else base="$BASE_SHA"; head=HEAD; fi
+            git diff --name-only "$base"..."$head" > "$changed"
+            echo "base=$(git rev-parse "$base")" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Changed files: $(wc -l < "$changed")"
+          CI_FULL="$CI_FULL" scripts/ci/select_scope.sh < "$changed" | tee -a "$GITHUB_OUTPUT"
+
   checks:
+    needs: changes
+    if: needs.changes.outputs.ops == 'true' || needs.changes.outputs.client == 'true' || needs.changes.outputs.tellus == 'true' || needs.changes.outputs.oceanlab_client == 'true'
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 15
     steps:
@@ -40,12 +85,14 @@ jobs:
           python-version: "3.11"
 
       - name: Python syntax and operations unit tests
+        if: needs.changes.outputs.ops == 'true'
         run: |
           python -m pip install pytest 'asyncpg>=0.29.0'
           python -m compileall -q server/app server/alembic scripts apps
           python -m pytest -q scripts/tests/test_ops_health.py scripts/tests/test_operational_integrity.py apps/msandbox/tests/test_error_autofix_query.py scripts/tests/test_admin_updates.py
 
       - name: Shell syntax
+        if: needs.changes.outputs.ops == 'true'
         run: |
           # `bash -n f1 f2 f3` parses ONLY f1 — the rest become $1, $2 … — so
           # the hand-maintained list this replaces syntax-checked exactly one
@@ -59,6 +106,7 @@ jobs:
             | xargs -0 -n1 bash -n
 
       - name: Operations shell tests
+        if: needs.changes.outputs.ops == 'true'
         run: |
           bash scripts/tests/test_admin_updates_collect.sh
           bash scripts/tests/test_ci_guards.sh
@@ -66,6 +114,7 @@ jobs:
           bash scripts/tests/test_publish_issue.sh
 
       - name: Msandbox shell tests
+        if: needs.changes.outputs.ops == 'true'
         run: |
           bash apps/msandbox/tests/test_agent_sandbox_networking.sh
           bash apps/msandbox/tests/test_msandbox_attachments.sh
@@ -77,18 +126,22 @@ jobs:
           bash apps/msandbox/tests/test_error_autofix.sh
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
+        if: needs.changes.outputs.client == 'true' || needs.changes.outputs.tellus == 'true' || needs.changes.outputs.oceanlab_client == 'true'
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: client/package-lock.json
 
       - name: Install frontend deps
+        if: needs.changes.outputs.client == 'true'
         # --legacy-peer-deps mirrors client/Dockerfile's npm ci: react 19 vs
         # react-simple-maps@3's react<=18 peer range ERESOLVEs otherwise.
         run: npm ci --legacy-peer-deps
         working-directory: client
 
       - name: Frontend production build
+        if: needs.changes.outputs.client == 'true'
+        # Whole app, always: one type change can break a file it didn't touch.
         # Runs `tsc -b` against project references, then Vite. The bare
         # `npx tsc --noEmit` checks nothing because the root tsconfig has
         # `files: []`.
@@ -96,18 +149,33 @@ jobs:
         working-directory: client
 
       - name: Frontend unit tests
+        if: needs.changes.outputs.client == 'true'
         # No accepted baseline failures. The default reporter prints each
         # failing assertion with its message and stack, so a red run says why.
-        run: npm run test:run
+        # On a PR, Vitest runs the tests whose import graph reaches a changed
+        # file (`--changed <base>`); a change to the test setup, the Vite or
+        # TS config, or the dependencies runs them all, as main always does.
+        env:
+          FULL: ${{ needs.changes.outputs.full }}
+          BASE: ${{ needs.changes.outputs.base }}
+        run: |
+          if [ "$FULL" = "true" ] || [ -z "$BASE" ] \
+            || git diff --name-only "$BASE"...HEAD | grep -qE '^client/(package(-lock)?\.json|vite(st)?\.config\.|tsconfig|src/test/)'; then
+            npm run test:run
+          else
+            npx vitest run --changed "$BASE" --passWithNoTests
+          fi
         working-directory: client
 
       - name: Tellus production build
+        if: needs.changes.outputs.tellus == 'true'
         run: |
           npm ci --legacy-peer-deps
           npm run build
         working-directory: client/tellus
 
       - name: Oceanlab lint and production build
+        if: needs.changes.outputs.oceanlab_client == 'true'
         run: |
           npm ci --legacy-peer-deps
           npm run lint
@@ -115,6 +183,8 @@ jobs:
         working-directory: client/oceanlab
 
   server-tests:
+    needs: changes
+    if: needs.changes.outputs.server == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     services:
@@ -143,6 +213,9 @@ jobs:
       # matcha suite opens a redis client — init_redis_cache() runs in the app
       # lifespan, which these unit tests never enter.
       OPENSSL_armcap: "0"
+      # coverage's sys.monitoring core (Python 3.12+): the default settrace
+      # tracer made the suite about 3.5x slower here than without coverage.
+      COVERAGE_CORE: sysmon
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -158,6 +231,7 @@ jobs:
         run: python -m pip install -r requirements.txt -r requirements-dev.txt
         working-directory: server
       - name: Server test suite
+        if: needs.changes.outputs.server_tests != ''
         # This job used to run `alembic upgrade heads` against an empty
         # database, watch it fail on the root revision's REFERENCES
         # companies(id) (a table init_db creates, not a migration), accept
@@ -166,11 +240,21 @@ jobs:
         # schema step was never needed: this suite is unit-level and passes
         # with no database at all. There is no --collect-only fallback now;
         # if tests fail, this job goes red.
+        #
+        # SERVER_TESTS is `tests` (the whole suite) or one app's tests when
+        # the PR stays inside cappe/ or tellus/ — see scripts/ci/select_scope.sh.
+        # Left unquoted on purpose: it is a list, and test_cappe_*.py globs.
+        env:
+          SERVER_TESTS: ${{ needs.changes.outputs.server_tests }}
+          SERVER_SCOPE: ${{ needs.changes.outputs.server_scope }}
         run: |
-          python -m pytest -q tests \
+          echo "Scope: $SERVER_SCOPE — $SERVER_TESTS"
+          # shellcheck disable=SC2086
+          python -m pytest -q $SERVER_TESTS \
             --cov=app --cov-report=xml --cov-report=term-missing:skip-covered
         working-directory: server
       - name: Oceanlab test suite
+        if: needs.changes.outputs.oceanlab_tests == 'true'
         # Separate process on purpose: run in the same one as the matcha suite,
         # these fail on a closed event loop. They own their schema (their
         # conftest applies the oceanlab_app_* migrations to the test engine).
