@@ -174,6 +174,35 @@ def test_a_story_page_has_the_magazines_fonts_article_tags_and_structured_data()
     assert "4 min read" in html and "By Ana Ruiz" in html
 
 
+def test_a_story_reads_as_pages_turned_left_and_right():
+    p = post(content={"blocks": [{"type": "text", "md": "Words."}]})
+    html = pages.render_story(SITE, NAV, MAG, p, {}, more=[post(slug="two", title="Two")], more_covers={}, origin="https://b.test")
+    reader = html[html.index('<div class="mz-reader" data-mz-book>'):]
+    book = reader[:reader.index("</script>")]
+    # The article sits in the pages; the arrows, the page count and the script
+    # that turns them come with it. "More from" stays below the book.
+    assert book.index('data-mz-prev') < book.index('<div class="mz-book" tabindex="0" role="region"') \
+        < book.index('<div class="mz-pages"><article class="mz-story') < book.index("data-mz-next") < book.index("data-mz-folio")
+    assert "Words." in book and "ArrowRight" in book and "More from" not in book
+    assert 'aria-label="Previous page" hidden' in book and 'aria-label="Next page" hidden' in book
+    # The book's look ships in the page's stylesheet.
+    assert ".mz-pages{" in html and "column-fill:auto" in html
+
+
+def test_a_picture_tells_the_page_its_shape():
+    a = asset(width=2000, height=1000)
+    html = story_render.photo_html({"type": "photo", "asset_id": str(a["id"]), "size": "column"}, a)
+    assert 'style="--mz-ar:2.0000"' in html
+    cropped = story_render.photo_html({"type": "photo", "asset_id": str(a["id"]), "size": "column",
+                                      "crop": {"x": 0, "y": 0, "w": 50, "h": 100}}, a)
+    assert 'style="--mz-ar:1.0000"' in cropped
+    circle = story_render.photo_html({"type": "photo", "asset_id": str(a["id"]), "size": "column", "shape": "circle"}, a)
+    assert 'style="--mz-ar:1.0000"' in circle
+    # Without its size the picture has no ratio to give; the page falls back.
+    unsized = story_render.photo_html({"type": "photo", "asset_id": str(a["id"]), "size": "column"}, asset(width=None, height=None))
+    assert "--mz-ar" not in unsized and "<img" in unsized
+
+
 def test_a_dispatch_is_a_news_article_and_a_paid_story_hides_its_paid_part():
     p = post(layout="dispatch", access="paid", content={"blocks": [
         {"type": "text", "md": "Free words."},

@@ -93,9 +93,14 @@ def photo_html(b: dict, asset: Optional[dict]) -> str:
     img = img_html(asset, size=size, style=_crop_style(crop))
     if not img:
         return ""
-    frame_style = ""
-    if crop and asset.get("width") and asset.get("height"):
+    frame_style, ratio = "", None
+    if asset.get("width") and asset.get("height"):
+        ratio = asset["width"] / asset["height"]
+    if crop and ratio:
         frame_style = f' style="aspect-ratio:{asset["width"] * crop["w"]}/{asset["height"] * crop["h"]}"'
+        ratio = ratio * crop["w"] / crop["h"]
+    if shape == "circle":
+        ratio = 1.0
     overlays = "".join(_overlay(o) for o in b.get("overlays") or [])
     caption = (b.get("caption") or asset.get("caption") or "").strip()
     credit = credit_html(asset, cropped=bool(crop) or shape in ("circle", "arch"))
@@ -105,7 +110,10 @@ def photo_html(b: dict, asset: Optional[dict]) -> str:
         figcaption = f"<figcaption>{cap}{credit}</figcaption>"
     cls = " ".join(["mz-fig", f"mz-fig--{size}", f"mz-border--{b.get('border') or 'none'}", f"mz-shape--{shape}",
                     f"mz-filter--{b.get('filter') or 'none'}"])
-    return f'<figure class="{escape(cls)}"><div class="mz-frame"{frame_style}>{img}{overlays}</div>{figcaption}</figure>'
+    # `--mz-ar` lets a book page size the picture to fit its height.
+    fig_style = f' style="--mz-ar:{ratio:.4f}"' if ratio else ""
+    return (f'<figure class="{escape(cls)}"{fig_style}><div class="mz-frame"{frame_style}>{img}{overlays}</div>'
+            f"{figcaption}</figure>")
 
 
 def render_block(b: dict, assets: dict[str, dict], *, first_text: bool = False) -> str:
