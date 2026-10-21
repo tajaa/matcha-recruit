@@ -131,7 +131,11 @@ def render_cappe_social_video(self, asset_id: str) -> dict:
     failure; after that the clip (and the posts on it) fail with a reason."""
     try:
         return {"status": "success", **asyncio.run(render_one(asset_id))}
-    except SoftTimeLimitExceeded:
+    except SoftTimeLimitExceeded as exc:
+        # The render resumes where it stopped (frames and cuts already stored
+        # are skipped), so running out of time once is worth one more run.
+        if self.request.retries < self.max_retries:
+            raise self.retry(exc=exc, countdown=30)
         message = "Preparing the video took too long. Try a shorter clip."
     except Exception as exc:  # noqa: BLE001
         logger.warning("cappe social video: render of %s failed: %s", asset_id, exc, exc_info=True)
@@ -147,7 +151,8 @@ def render_cappe_social_video(self, asset_id: str) -> dict:
 async def sweep(conn, limit: int) -> dict:
     """One pass over everything that can get stuck. Pure orchestration over
     the stores, so it is testable with a fake connection."""
-    out = {"renders_requeued": 0, "renders_failed": 0, "uploads_cleared": 0, "targets_recovered": 0, "expired": 0}
+    out = {"renders_requeued": 0, "renders_failed": 0, "uploads_cleared": 0, "targets_recovered": 0, "expired": 0,
+           "posts_released": 0, "posts_failed": 0}
     requeue: list[str] = []
     for asset in await asset_store.stuck_renders(conn, minutes=STUCK_RENDER_MINUTES, limit=limit):
         if int(asset.get("render_attempts") or 0) >= MAX_RENDER_ATTEMPTS:
@@ -168,6 +173,10 @@ async def sweep(conn, limit: int) -> dict:
     for post_id in await post_store.recover_stale_claims(conn, STALE_CLAIM_MINUTES):
         await post_store.rollup_post(conn, post_id)
         out["targets_recovered"] += 1
+    settled = await post_store.settle_renders(conn, limit=limit)
+    out["posts_released"], out["posts_failed"] = len(settled["released"]), len(settled["failed"])
+    now = datetime.now(timezone.utc)
+    _publish([r["id"] for r in settled["released"] if r.get("scheduled_at") is not None and r["scheduled_at"] <= now])
     for asset in await asset_store.expired(conn, limit=limit):
         await asset_store.delete_files(asset)
         await asset_store.mark_deleted(conn, asset["id"])

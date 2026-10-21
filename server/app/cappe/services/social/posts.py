@@ -188,7 +188,17 @@ async def update_post(conn, site_id: UUID, post_id: UUID, fields: dict[str, Any]
     )
     if row is None:
         return None
+    if "media" in fields:
+        # New media may wait on a different video, or none: hold again from
+        # scratch, then settle (release, or fail on a broken video).
+        await conn.execute(
+            "UPDATE cappe_social_posts SET status = 'scheduled' WHERE id = $1 AND status = 'rendering'", post_id,
+        )
+        await hold_for_renders(conn, post_id)
+        await settle_renders(conn, post_ids=[post_id])
     post = _row_to_post(row)
+    if "media" in fields:
+        post["status"] = await conn.fetchval("SELECT status FROM cappe_social_posts WHERE id = $1", post_id) or post["status"]
     post["targets"] = await targets_for(conn, [post["id"]])
     return post
 
@@ -214,7 +224,10 @@ async def set_schedule(conn, site_id: UUID, post_id: UUID, when: Optional[dateti
         post_id, when,
     )
     if when:
-        await hold_for_renders(conn, post_id)
+        # A retry of a post whose video failed (or is gone) fails again with
+        # the reason instead of waiting on a render nobody will run.
+        if await hold_for_renders(conn, post_id):
+            await settle_renders(conn, post_ids=[post_id])
     return True
 
 
@@ -321,18 +334,26 @@ async def record_pending(conn, target_id: UUID, pending: Pending) -> None:
     )
 
 
+INTERRUPTED = ("Publishing was interrupted, so it may have gone out. Check the account before you retry, "
+               "or it may post twice.")
+
+
 async def recover_stale_claims(conn, older_than_minutes: int = 20) -> list[UUID]:
-    """Targets a killed worker left `publishing` go back to `pending` (or
-    fail, out of attempts). Their `state` stays, so a video already handed
-    to Meta is checked on, not uploaded again. Returns the posts touched."""
+    """Targets a killed worker left `publishing` go back to `pending` when
+    they carry a handle to resume from (`state`: a video already handed to
+    Meta is checked on, not uploaded again). One with no handle may already
+    have gone out — the network took it and the worker died before saying
+    so — so it fails with that said rather than being posted twice; the
+    owner checks and retries. Returns the posts touched."""
     rows = await conn.fetch(
         """UPDATE cappe_social_post_targets SET
-                  status = CASE WHEN attempts >= $2 THEN 'failed' ELSE 'pending' END,
-                  error = CASE WHEN attempts >= $2 THEN 'Publishing was interrupted too many times' ELSE error END,
-                  next_attempt_at = CASE WHEN attempts >= $2 THEN NULL ELSE NOW() END
+                  status = CASE WHEN attempts >= $2 OR state = '{}'::jsonb THEN 'failed' ELSE 'pending' END,
+                  error = CASE WHEN attempts >= $2 THEN 'Publishing was interrupted too many times'
+                               WHEN state = '{}'::jsonb THEN $3 ELSE error END,
+                  next_attempt_at = CASE WHEN attempts >= $2 OR state = '{}'::jsonb THEN NULL ELSE NOW() END
            WHERE status = 'publishing' AND claimed_at < NOW() - make_interval(mins => $1)
            RETURNING post_id""",
-        older_than_minutes, MAX_ATTEMPTS,
+        older_than_minutes, MAX_ATTEMPTS, INTERRUPTED,
     )
     return list({r["post_id"] for r in rows})
 
@@ -369,6 +390,46 @@ async def release_rendered(conn, asset_id: UUID) -> list[dict[str, Any]]:
         str(asset_id),
     )
     return [dict(r) for r in rows]
+
+
+_BROKEN_RENDER = """EXISTS (
+    SELECT 1 FROM jsonb_array_elements(p.media) item
+    LEFT JOIN cappe_social_assets a ON a.id = (item->>'asset_id')::uuid
+    WHERE item->>'kind' = 'video' AND (a.id IS NULL OR a.status IN ('failed', 'deleted')))"""
+BROKEN_VIDEO = "Video: the video couldn't be prepared or is gone. Upload it again."
+
+
+async def settle_renders(conn, *, post_ids: Optional[list[UUID]] = None, limit: int = 200) -> dict[str, list]:
+    """Put `rendering` posts right from their videos' current state, not
+    from the event that should have moved them: every video ready →
+    `scheduled` (returned with `scheduled_at` so the caller can publish the
+    overdue ones); any video failed or gone → `failed`. The media sweep runs
+    this over everything, so a post held a moment after its render finished,
+    or one whose video failed while it was a draft, never waits for good."""
+    scope = "AND p.id = ANY($2::uuid[])" if post_ids is not None else ""
+    args: list[Any] = [limit] + ([list(post_ids)] if post_ids is not None else [])
+    failed = await conn.fetch(
+        f"""UPDATE cappe_social_posts p SET status = 'failed', updated_at = NOW()
+            WHERE p.id IN (SELECT p.id FROM cappe_social_posts p WHERE p.status = 'rendering' AND {_BROKEN_RENDER}
+                           {scope} LIMIT $1)
+            RETURNING p.id""",
+        *args,
+    )
+    failed_ids = [r["id"] for r in failed]
+    if failed_ids:
+        await conn.execute(
+            "UPDATE cappe_social_post_targets SET status = 'failed', error = $2, next_attempt_at = NULL "
+            "WHERE post_id = ANY($1::uuid[]) AND status = 'pending'",
+            failed_ids, BROKEN_VIDEO,
+        )
+    released = await conn.fetch(
+        f"""UPDATE cappe_social_posts p SET status = 'scheduled', updated_at = NOW()
+            WHERE p.id IN (SELECT p.id FROM cappe_social_posts p WHERE p.status = 'rendering'
+                           AND NOT {_PENDING_RENDER} {scope} LIMIT $1)
+            RETURNING p.id, p.scheduled_at""",
+        *args,
+    )
+    return {"released": [dict(r) for r in released], "failed": failed_ids}
 
 
 async def fail_rendering(conn, asset_id: UUID, error: str) -> list[UUID]:
@@ -421,7 +482,7 @@ async def rollup_post(conn, post_id: UUID) -> str:
 
 
 __all__ = [
-    "MAX_ATTEMPTS", "OPEN_STATUSES", "backoff_after", "validate_for_targets", "create_post", "set_targets",
+    "MAX_ATTEMPTS", "OPEN_STATUSES", "INTERRUPTED", "BROKEN_VIDEO", "settle_renders", "backoff_after", "validate_for_targets", "create_post", "set_targets",
     "attach_posters", "get_post",
     "targets_for", "list_posts", "update_post", "set_schedule", "publish_now", "cancel_post", "delete_post",
     "claim_due_targets", "record_success", "record_failure", "record_pending", "recover_stale_claims",

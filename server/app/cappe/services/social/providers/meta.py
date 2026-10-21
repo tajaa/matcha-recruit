@@ -385,18 +385,25 @@ async def _publish_fb_video(cfg, page_id: str, token: str, caption: str, video: 
                              data={"file_url": video["url"], "description": caption, "published": "true"}, client=client)
             video_id = str(out.get("id") or "")
         else:
+            # The Reel's id is kept before anything is uploaded, so a retry
+            # (a lost response, a killed worker) finishes this same Reel
+            # instead of starting a second one.
             start = await call(cfg, "POST", f"{page_id}/video_reels", token=token,
                                data={"upload_phase": "start"}, client=client)
             video_id = str(start.get("video_id") or "")
-            if video_id:
-                await _rupload(cfg, video_id, token, video["url"], client)
-                done = await call(cfg, "POST", f"{page_id}/video_reels", token=token, data={
-                    "video_id": video_id, "upload_phase": "finish", "video_state": "PUBLISHED", "description": caption,
-                }, client=client)
-                if not done.get("success"):
-                    raise ProviderError("Facebook didn't publish the Reel", retryable=True)
+            if not video_id:
+                raise ProviderError("Facebook returned no video id", retryable=True)
+            return Pending("facebook_uploading", {"video_id": video_id, "upload": True, "checks": 0}, 0)
         if not video_id:
             raise ProviderError("Facebook returned no video id", retryable=True)
+        return Pending("facebook_processing", {"video_id": video_id, "checks": 0}, FIRST_CHECK_SECONDS)
+    if state.get("upload"):
+        await _rupload(cfg, video_id, token, video["url"], client)
+        done = await call(cfg, "POST", f"{page_id}/video_reels", token=token, data={
+            "video_id": video_id, "upload_phase": "finish", "video_state": "PUBLISHED", "description": caption,
+        }, client=client)
+        if not done.get("success"):
+            raise ProviderError("Facebook didn't publish the Reel", retryable=True)
         return Pending("facebook_processing", {"video_id": video_id, "checks": 0}, FIRST_CHECK_SECONDS)
     out = await call(cfg, "GET", video_id, token=token, params={"fields": "status,permalink_url"}, client=client)
     status = out.get("status") if isinstance(out.get("status"), dict) else {}

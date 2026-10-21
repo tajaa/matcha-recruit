@@ -224,10 +224,15 @@ async def test_get_and_list_posts_carry_their_targets():
 async def test_update_post_encodes_json_columns_and_refuses_sent_posts():
     conn = QueryConn(
         fetchrow={"UPDATE cappe_social_posts SET": Queue([post_row(caption="New"), None]),
+                  "SET status = 'rendering'": None,
                   "FROM cappe_social_posts WHERE id = $1": post_row()},
-        fetch={"FROM cappe_social_post_targets t": []},
+        fetch={"FROM cappe_social_post_targets t": [], "SET status = 'failed'": [], "SET status = 'scheduled'": []},
+        fetchval={"SELECT status": "scheduled"},
     )
     post = await post_store.update_post(conn, SITE, POST, {"caption": "New", "media": [IMG], "ai_meta": {"a": 1}})
+    # New media: the render hold is taken again from scratch and settled.
+    assert any("status = 'rendering'" in sql for _, sql, _ in conn.calls)
+    assert post["status"] == "scheduled"
     sql = conn.sql_for("fetchrow")[0]
     assert "caption = $4" in sql and "media = $5::jsonb" in sql and "ai_meta = $6::jsonb" in sql
     assert "status = ANY($3::text[])" in sql
