@@ -6,7 +6,6 @@ import MarkdownField from './editor/MarkdownField'
 import { duplicateBlock, insertBlock, newBlock } from './editor/blocks'
 import { HISTORY_LIMIT, MERGE_MS, historyReducer, type History } from './editor/history'
 import { formatMarkdown, shortcutFormat } from './editor/markdown'
-import { wireBook } from './reader/book'
 import type { CappePost, CappeStoryOptions, StoryBlock } from '../types'
 
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn(), postHtml: vi.fn(), upload: vi.fn(), patch: vi.fn() }))
@@ -265,55 +264,5 @@ describe('StoryEditor — editing', () => {
     confirm.mockReturnValue(true)
     fireEvent.click(screen.getByRole('link', { name: /Stories/ }))
     expect(await screen.findByText('stories list')).toBeInTheDocument()
-  })
-})
-
-describe('wireBook (the preview frames)', () => {
-  function bookDoc(spreadW: number, totalW: number) {
-    // A frame's document, like the preview's: it has its own window.
-    const frame = document.createElement('iframe')
-    document.body.appendChild(frame)
-    const doc = frame.contentDocument!
-    doc.body.innerHTML = '<div class="mz-reader" data-mz-book><button data-mz-prev hidden></button>'
-      + '<div class="mz-book"><div class="mz-pages"><article>Words</article></div></div>'
-      + '<button data-mz-next hidden></button><p data-mz-folio></p></div>'
-    const book = doc.querySelector('.mz-book') as HTMLElement
-    Object.defineProperty(book, 'clientWidth', { value: spreadW })
-    Object.defineProperty(book, 'scrollWidth', { value: totalW })
-    let left = 0
-    Object.defineProperty(book, 'scrollLeft', { get: () => left, set: (v: number) => { left = v } })
-    Object.defineProperty(book, 'scrollTo', { value: undefined })
-    return { doc, book, q: (sel: string) => doc.querySelector(sel) as HTMLElement }
-  }
-
-  it('turns spreads with the arrows and keys, counts pages, and opens where it was', () => {
-    const { doc, book, q } = bookDoc(800, 2400)
-    const turns: number[] = []
-    const ctl = wireBook(doc, 1, (i) => turns.push(i))!
-    expect(book.scrollLeft).toBe(800)
-    expect(q('[data-mz-folio]').textContent).toBe('Page 2 of 3')
-    expect([q('[data-mz-prev]').hidden, q('[data-mz-next]').hidden]).toEqual([false, false])
-    q('[data-mz-next]').click()
-    expect(book.scrollLeft).toBe(1600)
-    expect(q('[data-mz-next]').hidden).toBe(true)
-    doc.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', cancelable: true }))
-    doc.dispatchEvent(new KeyboardEvent('keydown', { key: 'PageUp', cancelable: true }))
-    expect(book.scrollLeft).toBe(0)
-    expect(q('[data-mz-prev]').hidden).toBe(true)
-    doc.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', metaKey: true }))
-    expect(book.scrollLeft).toBe(0)
-    expect(turns).toEqual([1, 2, 1, 0])
-    ctl.dispose()
-    q('[data-mz-next]').click()
-    expect(book.scrollLeft).toBe(0)
-  })
-
-  it('does nothing on a page that is not a book', () => {
-    expect(wireBook(document.implementation.createHTMLDocument('front'))).toBeNull()
-    expect(wireBook(null)).toBeNull()
-    const { doc, q } = bookDoc(800, 800)
-    wireBook(doc, 4)
-    expect(q('[data-mz-folio]').textContent).toBe('')
-    expect([q('[data-mz-prev]').hidden, q('[data-mz-next]').hidden]).toEqual([true, true])
   })
 })

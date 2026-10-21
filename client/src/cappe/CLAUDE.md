@@ -51,6 +51,10 @@ Website-builder frontend for the consumer brand **Gummfit**, host-routed on gumm
   `editor/StoryEditor.tsx` + `editor/BlockEditor.tsx` (blocks, a library picker, a live preview
   iframe fed by `POST /stories/preview`), `settings/MagazineSettings.tsx`. `storyBlocks.ts` mirrors
   the server's block/layout lists and a server test keeps them equal.
+  A story page in one of our frames always goes through `reader/BookFrame.tsx` (preview, "View as a
+  reader"): the frames are `sandbox="allow-same-origin"` with no scripts, and Safari runs nothing we
+  attach inside them, so the arrows, page count and keys are outside and `reader/book.ts` drives the
+  pages (see the Cappe server CLAUDE.md, magazines). Don't add listeners to a frame's document.
 
 ## Backend pairing
 

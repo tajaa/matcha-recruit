@@ -171,46 +171,92 @@
 .mz-sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
 
 /* The story as a book: pages turned left and right (pages.book_html, book.js).
-   Matte paper on a darker mat; every page has the same margins, so words and
-   pictures sit on one surface. The pages are columns of the page's height that
-   run off to the right: one page on a phone, a two-page spread from 960 px. */
-.mz-reader{--mz-paper:#f3eee4;--mz-paper-ink:#1f1c18;--mz-paper-muted:#6f675c;--mz-margin:1.4rem;
-  --mz-page-h:calc(100svh - 8.5rem);--mz-col-h:calc(var(--mz-page-h) - 2 * var(--mz-margin) - 1.2rem);
-  position:relative;background:#26231f;padding:1.25rem .5rem 2.75rem}
-@media (min-width:960px){.mz-reader{--mz-margin:3rem;padding:1.75rem 3.5rem 3rem}}
-.mz-book{position:relative;max-width:78rem;height:var(--mz-page-h);min-height:26rem;margin:0 auto;overflow-x:auto;overflow-y:hidden;
-  overscroll-behavior-x:contain;scrollbar-width:thin;color:var(--mz-paper-ink);outline:none;
-  background:var(--mz-paper);box-shadow:0 18px 50px rgba(0,0,0,.5)}
-.mz-book:focus-visible{box-shadow:0 0 0 3px var(--mz-accent),0 18px 50px rgba(0,0,0,.5)}
-@media (min-width:960px){.mz-book{background:linear-gradient(90deg,transparent calc(50% - 40px),rgba(0,0,0,.07) calc(50% - 2px),rgba(0,0,0,.12) 50%,rgba(0,0,0,.05) calc(50% + 3px),transparent calc(50% + 40px)),var(--mz-paper)}}
-.mz-pages{box-sizing:border-box;height:100%;width:100%;padding:var(--mz-margin) var(--mz-margin) calc(var(--mz-margin) + 1.2rem);
+   A matte cover and glossy pages. The opening spread is the cover sheet, front
+   and inside: soft-touch matte, with a fine grain and softer photographs.
+   After it the paper is bright and coated, photographs keep their full colour
+   and a sheen lies over the page (.mz-gloss, fixed while the pages move, off
+   while the cover shows: data-mz-at="0"). A gutter shadow runs down the spine
+   and the stacked page edges show at the sides. The pages are columns of the
+   page's height that run off to the right: one page on a phone, a two-page
+   spread from 960 px. */
+.mz-reader{--mz-paper:#fbfaf7;--mz-paper-ink:#141210;--mz-paper-muted:#5d5850;--mz-margin:1.4rem;
+  --mz-page-h:max(24rem,calc(100svh - 12.25rem));--mz-col-h:calc(var(--mz-page-h) - 2 * var(--mz-margin) - 1.2rem);
+  position:relative;background:radial-gradient(120% 90% at 50% 30%,#36322c,#1b1916);padding:1.25rem .9rem 2.75rem}
+@media (min-width:960px){.mz-reader{--mz-margin:3rem;--mz-page-h:max(26rem,calc(100svh - 13.75rem));padding:1.5rem 3.75rem 2.5rem}}
+.mz-spread{position:relative;max-width:78rem;height:var(--mz-page-h);margin:0 auto;
+  box-shadow:1px 1px 0 #e6e2da,2px 2px 0 #c9c4b9,3px 3px 0 #ebe7df,4px 4px 0 #c4beb2,5px 5px 0 #e4dfd6,
+    0 24px 50px rgba(0,0,0,.55),0 4px 12px rgba(0,0,0,.35)}
+@media (min-width:960px){.mz-spread{box-shadow:1px 1px 0 #e6e2da,2px 2px 0 #c9c4b9,3px 3px 0 #ebe7df,4px 4px 0 #c4beb2,5px 5px 0 #e4dfd6,
+  -1px 1px 0 #e6e2da,-2px 2px 0 #c9c4b9,-3px 3px 0 #ebe7df,-4px 4px 0 #c4beb2,-5px 5px 0 #e4dfd6,
+  0 28px 60px rgba(0,0,0,.6),0 4px 14px rgba(0,0,0,.35)}}
+.mz-book{position:relative;box-sizing:border-box;height:100%;min-height:24rem;padding:0 var(--mz-margin);overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain;
+  scrollbar-width:none;color:var(--mz-paper-ink);outline:none;background:var(--mz-paper)}
+.mz-book::-webkit-scrollbar{display:none}
+.mz-spread:has(.mz-book:focus-visible){outline:3px solid var(--mz-accent);outline-offset:4px}
+/* The light on the paper, and the paper's curve: the spine on a phone's
+   single page is at its left; a spread's gutter is in the middle. */
+.mz-gloss{position:absolute;inset:0;z-index:1;pointer-events:none;transition:opacity .45s ease;
+  background:linear-gradient(115deg,rgba(255,255,255,0) 8%,rgba(255,255,255,.11) 17%,rgba(255,255,255,.02) 24%,rgba(255,255,255,0) 30%),
+    linear-gradient(180deg,rgba(255,255,255,.09),rgba(255,255,255,0) 28%)}
+.mz-reader[data-mz-at="0"] .mz-gloss{opacity:0}
+.mz-spread::after{content:"";position:absolute;inset:0;z-index:1;pointer-events:none;mix-blend-mode:multiply;
+  background:linear-gradient(90deg,rgba(40,30,20,.24),rgba(40,30,20,.07) 2.5%,rgba(40,30,20,0) 7%,rgba(40,30,20,0) 95%,rgba(40,30,20,.1))}
+@media (min-width:960px){
+  .mz-spread::after{background:linear-gradient(90deg,rgba(40,30,20,.12),rgba(40,30,20,0) 3%,rgba(40,30,20,0) calc(50% - 80px),
+    rgba(40,30,20,.06) calc(50% - 36px),rgba(40,30,20,.22) calc(50% - 6px),rgba(40,30,20,.4) 50%,rgba(40,30,20,.2) calc(50% + 5px),
+    rgba(40,30,20,.05) calc(50% + 36px),rgba(40,30,20,0) calc(50% + 80px),rgba(40,30,20,0) 97%,rgba(40,30,20,.12))}
+  .mz-gloss{background:linear-gradient(90deg,transparent calc(50% - 26px),rgba(255,255,255,.16) calc(50% - 14px),transparent calc(50% - 7px),
+      transparent calc(50% + 7px),rgba(255,255,255,.12) calc(50% + 14px),transparent calc(50% + 26px)),
+    linear-gradient(115deg,rgba(255,255,255,0) 8%,rgba(255,255,255,.11) 17%,rgba(255,255,255,.02) 24%,rgba(255,255,255,0) 30%),
+    linear-gradient(180deg,rgba(255,255,255,.09),rgba(255,255,255,0) 28%)}
+}
+/* The cover sheet's matte: a grain and a warmer, softer stock over exactly
+   the first spread (the pages' own box), so it turns away with the cover. */
+/* The side margins are the book's padding, not the pages': a scroller counts
+   its own padding at the end of the last page, so the last spread lines up. */
+.mz-pages{position:relative;box-sizing:border-box;height:100%;width:100%;padding:var(--mz-margin) 0 calc(var(--mz-margin) + 1.2rem);
   column-count:1;column-gap:calc(2 * var(--mz-margin));column-fill:auto}
+.mz-pages::before{content:"";position:absolute;inset:0 calc(-1 * var(--mz-margin));z-index:2;pointer-events:none;mix-blend-mode:multiply;
+  background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .32 0 0 0 0 .27 0 0 0 0 .2 0 0 0 .3 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23g)'/%3E%3C/svg%3E") repeat,rgba(160,140,110,.035)}
 @media (min-width:960px){.mz-pages{column-count:2}}
+.mz-end{position:absolute;top:0;left:0;width:1px;height:1px;pointer-events:none}
 .mz-book .mz-story{--ink:var(--mz-paper-ink);--muted:var(--mz-paper-muted);--line:rgba(31,28,24,.14)}
 .mz-book .mz-story__body{font-size:1.05rem;line-height:1.62;hyphens:auto}
 /* On a page, everything takes the page's measure. */
 .mz-book .mz-measure,.mz-book .mz-fig--column,.mz-book .mz-fig--wide,.mz-book .mz-cover__words,.mz-book .mz-cover--stacked .mz-cover__media,
 .mz-book .mz-cover__credit,.mz-book .mz-story__topic,.mz-book .mz-paywall,.mz-book .mz-text--cols{max-width:none;padding-left:0;padding-right:0;margin-left:0;margin-right:0}
 .mz-book .mz-fig,.mz-book .mz-pull,.mz-book .mz-sidebar,.mz-book .mz-qa__item,.mz-book .mz-photos,.mz-book .mz-cover,.mz-book .mz-paywall{break-inside:avoid}
+/* Each page is already a column: text the writer set in columns runs in one
+   here (columns nested in the pages break across a page in Safari). */
 .mz-book .mz-text--cols{column-count:1}
-@media (min-width:960px){.mz-book .mz-text--cols{column-count:2;column-gap:1.5rem}}
-/* A picture is never taller than its page, and prints matte. */
+/* A pull quote is set to fit one page; a long one smaller still. */
+.mz-book .mz-pull{margin:2rem 0}
+.mz-book .mz-pull p{font-size:clamp(1.45rem,2.4vw,2.2rem)}
+.mz-book .mz-pull--long p{font-size:clamp(1.15rem,1.7vw,1.55rem);line-height:1.25}
+/* A picture is never taller than its page. Glossy pages keep a photograph's
+   colour; the matte cover softens it, as uncoated stock does. */
 .mz-book .mz-fig{margin:1.4rem auto;width:min(100%,calc((var(--mz-col-h) - 3rem) * var(--mz-ar,1.5)))}
 .mz-book .mz-fig--full{break-before:column;break-after:column;margin-top:0}
-.mz-book img{filter:saturate(.93) contrast(.97)}
-.mz-book .mz-filter--bw img{filter:grayscale(1) contrast(.97)}
-.mz-book .mz-filter--sepia img{filter:sepia(.85) contrast(.97)}
+.mz-book img{filter:contrast(1.03) saturate(1.04)}
+.mz-book .mz-filter--bw img{filter:grayscale(1) contrast(1.05)}
+.mz-book .mz-filter--sepia img{filter:sepia(.85) contrast(1.02)}
+.mz-book .mz-cover img{filter:saturate(.86) contrast(.9) brightness(1.04)}
 .mz-book .mz-photos img{max-height:calc(var(--mz-col-h) * .42);object-fit:contain}
 .mz-book .mz-row{margin:1.4rem 0}
-/* The cover is the opening page; the story starts on the next. */
-.mz-book .mz-cover{margin:0;break-after:column;max-height:var(--mz-col-h)}
-.mz-book .mz-cover--overlay{min-height:0;height:var(--mz-col-h)}
+/* The cover is the opening page, and always fits it: the photo takes what
+   the words leave. The story starts on the next page. */
+.mz-book .mz-cover{margin:0;break-after:column;height:var(--mz-col-h);max-height:none;display:flex;flex-direction:column;overflow:hidden}
+.mz-book .mz-cover--stacked .mz-cover__media,.mz-book .mz-cover--split .mz-cover__media{flex:1 1 0;min-height:7rem;max-width:none;margin:0;padding:0}
+.mz-book .mz-cover--stacked .mz-cover__img,.mz-book .mz-cover--split .mz-cover__img{width:100%;height:100%;max-height:none;aspect-ratio:auto;object-fit:cover}
+.mz-book .mz-cover--stacked .mz-cover__credit,.mz-book .mz-cover--split .mz-cover__credit{order:1;margin:.35rem 0 0}
+.mz-book .mz-cover--stacked .mz-cover__words,.mz-book .mz-cover--split .mz-cover__words{order:2;flex:none;padding-top:1.1rem}
+.mz-book .mz-cover--overlay{justify-content:flex-end;min-height:0}
 .mz-book .mz-cover--overlay .mz-cover__words{padding:0 1.5rem 1.75rem}
-.mz-book .mz-cover--stacked .mz-cover__img,.mz-book .mz-cover--split .mz-cover__img{max-height:calc(var(--mz-col-h) * .55);object-fit:cover}
-.mz-book .mz-cover--split{display:block;padding:0}
+.mz-book .mz-cover--plain{justify-content:center}
+.mz-book .mz-cover--split{padding:0;gap:0}
 .mz-book .mz-headline{font-size:clamp(2rem,4.2vw,3.6rem)}
 .mz-book .mz-story__topic{border-top:0;margin-top:1.5rem;padding-top:0}
-.mz-turn{position:absolute;top:calc(1.25rem + var(--mz-page-h) / 2);z-index:2;transform:translateY(-50%);width:2.6rem;height:2.6rem;border:0;border-radius:50%;
+.mz-turn{position:absolute;top:calc(1.25rem + var(--mz-page-h) / 2);z-index:3;transform:translateY(-50%);width:2.6rem;height:2.6rem;border:0;border-radius:50%;
   background:rgba(243,238,228,.92);color:#1f1c18;font-size:1.7rem;line-height:1;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.35)}
 .mz-turn[hidden]{display:none}
 .mz-turn--prev{left:.4rem}
@@ -218,5 +264,5 @@
 /* On a phone the arrows sit under the page, beside the page count, not on the words. */
 @media (max-width:959px){.mz-reader{padding-bottom:.6rem}.mz-turn{top:auto;bottom:.6rem;transform:none;width:2.3rem;height:2.3rem;font-size:1.45rem}
   .mz-turn--prev{left:calc(50% - 8.5rem)}.mz-turn--next{right:calc(50% - 8.5rem)}.mz-folio{margin-top:.6rem;line-height:2.3rem}}
-@media (min-width:960px){.mz-turn{top:calc(1.75rem + var(--mz-page-h) / 2)}.mz-turn--prev{left:.6rem}.mz-turn--next{right:.6rem}}
+@media (min-width:960px){.mz-turn{top:calc(1.5rem + var(--mz-page-h) / 2)}.mz-turn--prev{left:.7rem}.mz-turn--next{right:.7rem}}
 .mz-folio{margin:.8rem 0 0;text-align:center;font-size:.72rem;letter-spacing:.16em;text-transform:uppercase;color:rgba(243,238,228,.7);min-height:1em}

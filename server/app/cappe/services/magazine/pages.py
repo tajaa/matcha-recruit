@@ -303,16 +303,23 @@ def render_story(site: dict, nav: list[dict], mag: dict, post: dict, assets: dic
 
 
 def book_html(article: str) -> str:
-    """The story as pages turned left and right, on matte paper inside a mat.
-    The words flow from page to page in columns of the page's height (a
-    two-page spread from 960 px, one page on a phone); `render/assets/book.js`
-    turns them with the arrows, the keys or a swipe and counts the pages.
-    Without it the pages still scroll sideways."""
+    """The story as pages turned left and right: a matte cover, then glossy
+    pages, lying on a dark mat. The words flow from page to page in columns of
+    the page's height (a two-page spread from 960 px, one page on a phone);
+    `render/assets/book.js` turns them with the arrows, the keys or a swipe,
+    counts the pages and marks the spread showing (`data-mz-at`), which takes
+    the gloss off the cover. Without it the pages still scroll sideways.
+    `.mz-gloss` is the light on the paper: it stays put while pages move.
+    `.mz-end` is placed by the script so the pages end on a whole spread (a
+    browser never counts the space after the last column, so the last spread
+    could not be turned to)."""
     return (
         '<div class="mz-reader" data-mz-book>'
         '<button type="button" class="mz-turn mz-turn--prev" data-mz-prev aria-label="Previous page" hidden>&#8249;</button>'
+        '<div class="mz-spread">'
         '<div class="mz-book" tabindex="0" role="region" aria-label="The story. Use the left and right arrow keys to turn pages.">'
-        f'<div class="mz-pages">{article}</div></div>'
+        f'<div class="mz-pages">{article}<i class="mz-end" aria-hidden="true"></i></div></div>'
+        '<div class="mz-gloss" aria-hidden="true"></div></div>'
         '<button type="button" class="mz-turn mz-turn--next" data-mz-next aria-label="Next page" hidden>&#8250;</button>'
         '<p class="mz-folio" data-mz-folio aria-live="polite"></p>'
         f"</div><script>{_BOOK_JS}</script>"
