@@ -30,7 +30,7 @@ CLIENT_BLOCKS = pathlib.Path(__file__).resolve().parents[3] / "client" / "src" /
 def test_blocks_are_reshaped_and_unknown_keys_dropped():
     out = story_schema.normalize_story({"blocks": [
         {"type": "cover", "asset_id": A, "style": "banner", "tone": "dark", "focal": {"x": "120", "y": -4}, "junk": 1},
-        {"type": "text", "md": "  Hello  ", "dropcap": "yes", "columns": 3},
+        {"type": "text", "md": "  Hello  ", "dropcap": "yes", "columns": 4, "variant": "shout"},
         {"type": "photo", "asset_id": None, "caption": "x" * 600, "size": "huge"},
         {"type": "photos", "layout": "pair", "items": [{"asset_id": B, "caption": "c"}, "nope"]},
         {"type": "quote", "text": "Q", "attribution": "Who", "style": "odd"},
@@ -41,7 +41,7 @@ def test_blocks_are_reshaped_and_unknown_keys_dropped():
     ]})
     blocks = out["blocks"]
     assert blocks[0] == {"type": "cover", "asset_id": A, "style": "overlay", "tone": "dark", "focal": {"x": 100, "y": 0}}
-    assert blocks[1] == {"type": "text", "md": "Hello", "dropcap": True, "columns": 1}
+    assert blocks[1] == {"type": "text", "md": "Hello", "dropcap": True, "columns": 1, "variant": "body", "align": "left"}
     assert blocks[2]["asset_id"] is None and len(blocks[2]["caption"]) == 500 and blocks[2]["size"] == "column"
     assert blocks[3]["items"] == [{"asset_id": B, "caption": "c"}]
     assert blocks[4]["style"] == "big"

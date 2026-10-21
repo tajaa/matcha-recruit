@@ -41,6 +41,20 @@ QUOTE_STYLES = ("big", "side")
 
 STORY_BLOCKS = ("cover", "text", "photo", "photos", "quote", "sidebar", "qa", "divider", "paywall")
 
+# How a text block reads: its type size, alignment and columns. The first of
+# each list is the default.
+TEXT_VARIANTS = ("body", "lede", "small", "statement")
+ALIGNS = ("left", "center", "right", "justify")
+# How a photo is framed: border, shape, colour, a crop, and words on it.
+BORDERS = ("none", "thin", "thick", "mat")
+SHAPES = ("rect", "rounded", "circle", "arch")
+FILTERS = ("none", "bw", "sepia")
+OVERLAY_SIZES = ("m", "s", "l", "xl")
+OVERLAY_TONES = ("light", "dark")
+OVERLAY_ALIGNS = ("center", "left", "right")
+MAX_OVERLAYS = 8
+MIN_CROP = 5  # percent of the picture's width or height
+
 
 class StoryError(ValueError):
     """The story content can't be stored as given; the message is for the owner."""
@@ -86,8 +100,35 @@ def _text(b: dict) -> dict:
         "type": "text",
         "md": _str(b.get("md"), 20_000),
         "dropcap": bool(b.get("dropcap")),
-        "columns": 2 if b.get("columns") == 2 else 1,
+        "columns": b.get("columns") if b.get("columns") in (2, 3) else 1,
+        "variant": _choice(b.get("variant"), TEXT_VARIANTS),
+        "align": _choice(b.get("align"), ALIGNS),
     }
+
+
+def _crop(value: Any) -> Optional[dict]:
+    """The part of the picture kept, in percent of its width and height, or
+    None for the whole picture."""
+    if not isinstance(value, dict):
+        return None
+    w = max(MIN_CROP, min(100, _pct(value.get("w"), 100)))
+    h = max(MIN_CROP, min(100, _pct(value.get("h"), 100)))
+    x = min(_pct(value.get("x"), 0), 100 - w)
+    y = min(_pct(value.get("y"), 0), 100 - h)
+    return None if (w, h) == (100, 100) else {"x": x, "y": y, "w": w, "h": h}
+
+
+def _overlays(value: Any) -> list[dict]:
+    """Words placed on the picture, each centred on its point (percent)."""
+    items = value if isinstance(value, list) else []
+    if len(items) > MAX_OVERLAYS:
+        raise StoryError(f"A photo holds at most {MAX_OVERLAYS} pieces of text.")
+    return [
+        {"x": _pct(o.get("x")), "y": _pct(o.get("y")), "text": _str(o.get("text"), 300),
+         "size": _choice(o.get("size"), OVERLAY_SIZES), "tone": _choice(o.get("tone"), OVERLAY_TONES),
+         "box": bool(o.get("box")), "align": _choice(o.get("align"), OVERLAY_ALIGNS)}
+        for o in items if isinstance(o, dict)
+    ]
 
 
 def _photo(b: dict) -> dict:
@@ -96,6 +137,11 @@ def _photo(b: dict) -> dict:
         "asset_id": _asset_id(b.get("asset_id")),
         "caption": _str(b.get("caption"), 500),
         "size": _choice(b.get("size"), PHOTO_SIZES),
+        "border": _choice(b.get("border"), BORDERS),
+        "shape": _choice(b.get("shape"), SHAPES),
+        "filter": _choice(b.get("filter"), FILTERS),
+        "crop": _crop(b.get("crop")),
+        "overlays": _overlays(b.get("overlays")),
     }
 
 
@@ -212,7 +258,8 @@ def starter_content(layout: str) -> dict:
         "dispatch": [cover("stacked"), text(True), {"type": "sidebar", "title": "", "md": ""}, photo("wide"), text()],
         "lookbook": [cover("overlay"), photos("mosaic", 6), text(), photos("trio", 3)],
     }
-    return {"blocks": starters.get(layout, starters["standard"])}
+    # Through the normalizer, so a new story has every block's settings.
+    return normalize_story({"blocks": starters.get(layout, starters["standard"])})
 
 
 _WORD = re.compile(r"\w+(?:['’-]\w+)*")

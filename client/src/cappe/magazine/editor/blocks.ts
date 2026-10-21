@@ -1,4 +1,4 @@
-import type { StoryBlock } from '../../types'
+import type { PhotoCrop, StoryBlock } from '../../types'
 
 export const BLOCK_LABELS: Record<StoryBlock['type'], string> = {
   cover: 'Cover', text: 'Text', photo: 'Photo', photos: 'Photo group', quote: 'Pull quote',
@@ -9,8 +9,8 @@ export const BLOCK_LABELS: Record<StoryBlock['type'], string> = {
 export function newBlock(type: StoryBlock['type']): StoryBlock {
   switch (type) {
     case 'cover': return { type, asset_id: null, style: 'stacked', tone: 'light', focal: { x: 50, y: 50 } }
-    case 'text': return { type, md: '', dropcap: false, columns: 1 }
-    case 'photo': return { type, asset_id: null, caption: '', size: 'column' }
+    case 'text': return { type, md: '', dropcap: false, columns: 1, variant: 'body', align: 'left' }
+    case 'photo': return { type, asset_id: null, caption: '', size: 'column', border: 'none', shape: 'rect', filter: 'none', crop: null, overlays: [] }
     case 'photos': return { type, layout: 'pair', items: [{ asset_id: null, caption: '' }, { asset_id: null, caption: '' }] }
     case 'quote': return { type, text: '', attribution: '', style: 'big' }
     case 'sidebar': return { type, title: '', md: '' }
@@ -60,4 +60,12 @@ export function withText(blocks: StoryBlock[], index: number, md: string): Story
 export function textPreview(md: string, words = 8): string {
   const plain = md.replace(/[*_`#>[\]()]/g, '').split(/\s+/).filter(Boolean)
   return plain.slice(0, words).join(' ') + (plain.length > words ? '…' : '')
+}
+
+/** The crop between two dragged points (percent), or null when it's under 5%
+ *  either way — the server's smallest crop (story_schema.MIN_CROP). */
+export function cropBetween(a: { x: number; y: number }, b: { x: number; y: number }): PhotoCrop | null {
+  const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y)
+  const w = Math.abs(a.x - b.x), h = Math.abs(a.y - b.y)
+  return w < 5 || h < 5 ? null : { x, y, w, h }
 }

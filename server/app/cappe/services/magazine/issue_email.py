@@ -56,7 +56,10 @@ def _block(b: dict, assets: dict[str, dict]) -> str:
     if kind == "text":
         return _text(b.get("md") or "")
     if kind == "photo":
-        return _picture(assets.get(b.get("asset_id") or ""), caption=b.get("caption") or "")
+        # Email can't lay words over a picture, so they go under it.
+        words = " · ".join(o["text"] for o in b.get("overlays") or [] if (o.get("text") or "").strip())
+        caption = " — ".join(p for p in (words, b.get("caption") or "") if p)
+        return _picture(assets.get(b.get("asset_id") or ""), caption=caption)
     if kind == "photos":
         return "".join(_picture(assets.get(i.get("asset_id") or ""), caption=i.get("caption") or "")
                        for i in b.get("items") or [])
