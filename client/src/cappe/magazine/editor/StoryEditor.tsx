@@ -13,7 +13,7 @@ import { confirmLeave } from '../../utils/unsavedGuard'
 import { useUnsavedGuard } from '../../pages/site/PageEditor/useUnsavedGuard'
 import { BLOCK_LABELS, duplicateBlock, insertBlock, moveBlock, newBlock, withCaption, withText } from './blocks'
 import { useHistory } from './history'
-import { wireBook, type BookControl } from '../reader/book'
+import BookFrame from '../reader/BookFrame'
 
 type Fields = { title: string; kicker: string; excerpt: string; byline: string; topic: string; layout: StoryLayout; status: CappePost['status'] }
 
@@ -83,13 +83,6 @@ export default function StoryEditor() {
   const [preview, setPreview] = useState<string>('')
   const [previewOpen, setPreviewOpen] = useState(true)
   const previewGen = useRef(0)
-  // The preview's page turner; a fresh preview opens on the spread being read.
-  const previewBook = useRef<BookControl | null>(null)
-  const previewSpread = useRef(0)
-  const onPreviewLoad = (e: { currentTarget: HTMLIFrameElement }) => {
-    previewBook.current?.dispose()
-    previewBook.current = wireBook(e.currentTarget.contentDocument, previewSpread.current, (i) => { previewSpread.current = i })
-  }
   const { set: setDoc, reset: resetDoc, replace: replaceDoc } = doc
 
   /** Change the blocks. `step` keeps it its own undo step (adding, moving or
@@ -378,7 +371,9 @@ export default function StoryEditor() {
 
         {previewOpen && isStory && (
           <div className="hidden border-l border-zinc-800 bg-zinc-950 lg:block">
-            <iframe title="Story preview" srcDoc={preview} sandbox="allow-same-origin" onLoad={onPreviewLoad} className="h-full min-h-[80vh] w-full bg-white" />
+            {/* Pinned to the screen while the blocks scroll, so a page is a
+                screen's height. A fresh preview opens on the spread being read. */}
+            <BookFrame html={preview} title="Story preview" keepPlace className="sticky top-0 h-[calc(100dvh-3.9rem)]" />
           </div>
         )}
       </div>
