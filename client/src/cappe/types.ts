@@ -1530,3 +1530,137 @@ export type CappePromoCodeInput = {
 export type CappePromoCode = CappePromoCodeInput & { id: string; redemption_count: number; created_at: string }
 
 export type CappePromoCodes = { enabled: boolean; currency: string; codes: CappePromoCode[] }
+
+// --- Social growth (server/app/cappe/models/social.py) ---------------------------
+
+export type CappeSocialPlatform = 'instagram' | 'facebook'
+
+export type CappeSocialConnection = {
+  id: string
+  platform: CappeSocialPlatform
+  external_id: string
+  handle: string | null
+  display_name: string | null
+  avatar_url: string | null
+  status: 'connected' | 'expired' | 'revoked' | 'error'
+  last_error: string | null
+  followers_count: number | null
+  metrics: Record<string, number>
+  metrics_at: string | null
+  token_expires_at: string | null
+  connected_at: string
+}
+
+export type CappeSocialConnections = { configured: boolean; connections: CappeSocialConnection[] }
+
+export type CappeSocialConnectStart = { authorize_url: string }
+
+export type CappeSocialMedia = { url: string; kind: 'image' | 'video'; alt?: string | null }
+
+export type CappeSocialUpload = { url: string; width: number; height: number; padded: boolean }
+
+export type CappeSocialPostStatus =
+  'draft' | 'scheduled' | 'publishing' | 'published' | 'partial' | 'failed' | 'cancelled'
+
+export type CappeSocialTarget = {
+  id: string
+  connection_id: string
+  platform: CappeSocialPlatform
+  handle: string | null
+  status: 'pending' | 'publishing' | 'published' | 'failed' | 'cancelled'
+  external_post_id: string | null
+  permalink: string | null
+  error: string | null
+  attempts: number
+  published_at: string | null
+  metrics: Record<string, number>
+}
+
+export type CappeSocialPost = {
+  id: string
+  site_id: string
+  caption: string
+  media: CappeSocialMedia[]
+  link_url: string | null
+  product_id: string | null
+  status: CappeSocialPostStatus
+  scheduled_at: string | null
+  published_at: string | null
+  ai_meta: { alt_text?: string }
+  targets: CappeSocialTarget[]
+  created_at: string
+  updated_at: string
+}
+
+export type CappeSocialPostInput = {
+  caption: string
+  media: CappeSocialMedia[]
+  link_url?: string | null
+  product_id?: string | null
+  connection_ids: string[]
+  scheduled_at?: string | null
+  alt_text?: string | null
+}
+
+export type CappeSocialCaptionOption = { text: string; hashtags: string[] }
+export type CappeSocialCaptions = { options: CappeSocialCaptionOption[]; alt_text: string | null; model: string }
+
+export type CappeSocialAutoreplyMode = 'off' | 'review' | 'auto'
+export type CappeSocialTone = 'friendly' | 'professional' | 'playful' | 'minimal'
+
+export type CappeSocialSettings = {
+  autoreply_mode: CappeSocialAutoreplyMode
+  reply_to_comments: boolean
+  reply_to_messages: boolean
+  tone: CappeSocialTone
+  business_facts: string
+  signature: string | null
+  default_hashtags: string[]
+  max_auto_per_hour: number
+  escalate_words: string[]
+  autoreply_available: boolean
+  ai_available: boolean
+}
+
+export type CappeSocialReply = {
+  id: string
+  body: string
+  mode: 'auto' | 'approved' | 'manual'
+  status: 'draft' | 'sending' | 'sent' | 'failed' | 'rejected'
+  model: string | null
+  grounding: { facts_used?: string[]; decision?: string }
+  external_reply_id: string | null
+  error: string | null
+  created_at: string
+  sent_at: string | null
+}
+
+export type CappeSocialInboxStatus = 'new' | 'drafted' | 'replied' | 'skipped' | 'escalated'
+
+export type CappeSocialInboxItem = {
+  id: string
+  connection_id: string
+  platform: CappeSocialPlatform
+  handle: string | null
+  kind: 'comment' | 'message'
+  external_id: string
+  external_parent_id: string | null
+  author_name: string | null
+  text: string
+  received_at: string
+  status: CappeSocialInboxStatus
+  classification: { intent?: string; sentiment?: string; confidence?: number; needs_human?: boolean; escalated_on?: string | null }
+  replies: CappeSocialReply[]
+}
+
+export type CappeSocialOverview = {
+  connections: number
+  scheduled: number
+  published_30d: number
+  inbox_new: number
+  drafts_waiting: number
+  followers: { platform: CappeSocialPlatform; handle: string | null; followers_count: number | null }[]
+  autoreply_mode: CappeSocialAutoreplyMode
+  meta_configured: boolean
+  ai_available: boolean
+}
