@@ -97,7 +97,7 @@ export default function MagazineSettings() {
     <SurfaceShell
       title="Magazine settings"
       subtitle="The masthead, the topics, and whether the magazine is on."
-      actions={<Link to={`/sites/${siteId}/stories`} className={ui.btnGhost}><ArrowLeft className="h-4 w-4" /> Stories</Link>}
+      actions={<Link to={`/cappe/sites/${siteId}/stories`} className={ui.btnGhost}><ArrowLeft className="h-4 w-4" /> Stories</Link>}
     >
       {error && <p role="alert" className="mb-4 text-sm text-red-400">{error}</p>}
       {!form && !error && <div className="flex justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-zinc-400" /></div>}

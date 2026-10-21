@@ -58,7 +58,7 @@ const MagazineOnboarding = lazy(() => import('./magazine/onboarding/MagazineOnbo
 // The Blog page became the magazine's Stories (cappemag02); old links land there.
 function BlogRedirect() {
   const { siteId } = useParams<{ siteId: string }>()
-  return <Navigate to={`/sites/${siteId}/stories`} replace />
+  return <Navigate to={`/cappe/sites/${siteId}/stories`} replace />
 }
 
 // Cappe — website-builder product, served at /cappe. Self-contained route tree
