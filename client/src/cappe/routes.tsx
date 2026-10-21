@@ -52,6 +52,7 @@ const Issues = lazy(() => import('./magazine/issues/Issues'))
 const WritersLanding = lazy(() => import('./magazine/writers/WritersLanding'))
 const WriterHome = lazy(() => import('./magazine/writers/WriterHome'))
 const MagazineOnboarding = lazy(() => import('./magazine/onboarding/MagazineOnboarding'))
+const ReaderView = lazy(() => import('./magazine/reader/ReaderView'))
 
 // The Blog page became the magazine's Stories (cappemag02); old links land there.
 function BlogRedirect() {
@@ -125,6 +126,7 @@ export default function CappeRoutes() {
           <Route path="sites/:siteId/stories" element={<Stories />} />
           <Route path="sites/:siteId/stories/:postId" element={<StoryEditor />} />
           <Route path="sites/:siteId/magazine" element={<MagazineSettings />} />
+          <Route path="sites/:siteId/magazine/view" element={<ReaderView />} />
           <Route path="sites/:siteId/library" element={<Library />} />
           <Route path="sites/:siteId/issues" element={<Issues />} />
           <Route path="writer" element={<RequireAccountType type="writer"><WriterHome /></RequireAccountType>} />
