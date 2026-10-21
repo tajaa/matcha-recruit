@@ -470,11 +470,22 @@
     if (e.source !== parent || !e.data || typeof e.data.type !== 'string') return;
     var d = e.data;
     if (d.type === 'mz-goto') {
-      var el = elFor(d.target);
-      if (el) select(d.target, el, 'now');
-      else if (mz() && typeof d.spread === 'number') mz().go(d.spread, true);
-      reader.classList.add('mze-on');
-      post({ type: 'mz-shown' });
+      // Once the page's own type has loaded (or a moment has passed): the
+      // pages are measured with it, so the place found is where it stays,
+      // and the editor shows this page without a flash of other type.
+      var done = false;
+      var show = function () {
+        if (done) return;
+        done = true;
+        if (mz()) mz().refit();
+        var el = elFor(d.target);
+        if (el) select(d.target, el, 'now');
+        else if (mz() && typeof d.spread === 'number') mz().go(d.spread, true);
+        reader.classList.add('mze-on');
+        post({ type: 'mz-shown' });
+      };
+      (document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve()).then(show, show);
+      setTimeout(show, 1500);
     } else if (d.type === 'mz-select') {
       var to = elFor(d.target);
       select(d.target, to, to ? 'smooth' : null);
