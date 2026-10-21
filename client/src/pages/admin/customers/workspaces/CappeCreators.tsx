@@ -46,6 +46,8 @@ type MarketplaceSettings = {
   collab_fee_bps: number
   min_offer_cents: number
   auto_approve_days: number
+  /** Gummfit's share of every magazine reader's payment. */
+  magazine_fee_bps: number
 }
 
 type CollabOverview = {
@@ -108,6 +110,7 @@ export default function CappeCreators() {
   const [feePct, setFeePct] = useState('')
   const [minOfferDollars, setMinOfferDollars] = useState('')
   const [autoApproveDays, setAutoApproveDays] = useState('')
+  const [magazinePct, setMagazinePct] = useState('')
   const [savingSettings, setSavingSettings] = useState(false)
 
   const [overview, setOverview] = useState<CollabOverview | null>(null)
@@ -132,6 +135,7 @@ export default function CappeCreators() {
           setFeePct(String(s.collab_fee_bps / 100))
           setMinOfferDollars(String(s.min_offer_cents / 100))
           setAutoApproveDays(String(s.auto_approve_days))
+          setMagazinePct(String((s.magazine_fee_bps ?? 3000) / 100))
         })
         .catch(() => toast('Could not load settings', 'error'))
         .finally(() => setSettingsLoading(false))
@@ -287,6 +291,7 @@ export default function CappeCreators() {
         collab_fee_bps: Math.round(Number(feePct) * 100),
         min_offer_cents: Math.round(Number(minOfferDollars) * 100),
         auto_approve_days: Number(autoApproveDays),
+        magazine_fee_bps: Math.round(Number(magazinePct) * 100),
       }
       await api.patch('/admin/cappe/marketplace-settings', body)
       setSettings(body)
@@ -438,7 +443,8 @@ export default function CappeCreators() {
               <Input label="Collab fee (%)" type="number" min={0} max={50} step={0.25} value={feePct} onChange={(e) => setFeePct(e.target.value)} />
               <Input label="Minimum offer ($)" type="number" min={0} step={1} value={minOfferDollars} onChange={(e) => setMinOfferDollars(e.target.value)} />
               <Input label="Auto-approve after (days)" type="number" min={1} max={90} step={1} value={autoApproveDays} onChange={(e) => setAutoApproveDays(e.target.value)} />
-              <p className="text-xs text-zinc-500">Fee applies to new checkout sessions immediately; paid installments keep their snapshotted fee.</p>
+              <Input label="Magazine reader share (%)" type="number" min={0} max={50} step={0.5} value={magazinePct} onChange={(e) => setMagazinePct(e.target.value)} />
+              <p className="text-xs text-zinc-500">Fee applies to new checkout sessions immediately; paid installments keep their snapshotted fee. The magazine share is taken from every reader subscription started after a change, on every plan.</p>
               <Button variant="primary" disabled={savingSettings} onClick={saveSettings}>Save</Button>
             </div>
           )

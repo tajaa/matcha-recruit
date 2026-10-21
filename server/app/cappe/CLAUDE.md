@@ -407,6 +407,30 @@ What is built so far:
   the writer as Reply-To. Those headers go out on the Gmail path only
   (`EmailService.send_email_with_fallback(extra_headers=)`); MailerSend drops them, so the body always
   carries the link too. Unsubscribing works whatever the site's status.
+- **Readers pay with a `cappe_shopper_subscriptions` row of `kind='magazine'`** (`cappemag05`,
+  `services/magazine/billing.py`). They get everything a store's recurring order has: the Checkout
+  handshake (`recurring._attach_checkout_session`), cancel/resume, the card portal, the account page,
+  deletion of the reader or the site. **A magazine invoice never becomes an order**: `recurring.handle_event`
+  writes `cappe_magazine_payments` (unique on the invoice) instead, so there is no stock, receipt or order
+  alert, and the emails are the magazine's (the writer hears about a new paid reader, not each renewal).
+  `charge.refunded` without an order updates the ledger's `refunded_cents`.
+- **Gummfit's share is `magazine_fee_bps`** (`cappe_marketplace_settings`, admin-editable 0–5000, 3000 when
+  missing, unreadable or out of range — never the plan's store fee), sent as `application_fee_percent`.
+  Connect Standard with direct charges, so Stripe's processing fee comes out of the writer's balance.
+- **The paid part of a story is never in the page, the cache, the feed, an issue email or the public
+  JSON.** The page holds the teaser (blocks before the `paywall` block, else `preview_blocks`) and an empty
+  `.mz-paid` box; `render/assets/paywall.js` signs the reader in (emailed code, the same cookie session and
+  Web Lock as `account.js`), then fetches `GET /public/sites/{slug}/stories/{story}/paid`
+  (`no-store, private`; 403 `{code:'subscribe'}` without access) or starts checkout. Paid access
+  (`services/magazine/access.py`) is a magazine subscription that is `active`, `trialing` or `past_due`,
+  or a comp (`cappe_magazine_comps`) neither revoked nor expired. `magazine_paid` alone opens reader
+  sign-in (`shopper_auth.published_shopper_site`).
+- **Paid needs the plan, Stripe and a price** (`PUT /sites/{id}/magazine`); a story becomes `paid` only
+  while the magazine takes subscribers (an already paid story stays paid). **Turning paid off, or losing it**
+  (plan without `magazine_paid`, account not active — `services/magazine/lapse.py`, run by the hourly
+  `cappe_comp_expiry` task) stamps `lapsed_at`; the sweep then sets each reader's subscription to end with the
+  month they paid for and emails them, retrying what Stripe refused on the next run. A lapsed magazine stays
+  up for `magazines.GRACE_DAYS` (31) without the plan, so paid readers keep what they paid for.
 
 ## Site templates (`services/site_templates/`)
 

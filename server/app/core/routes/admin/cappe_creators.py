@@ -32,7 +32,10 @@ router = APIRouter(prefix="/cappe", tags=["admin-cappe-creators"])
 # hardcoded default here: it must match services/collab.py:resolve_collab_fee_bps's
 # fallback exactly (get_settings().cappe_platform_fee_bps), or this admin screen
 # reports a different fee than checkout actually charges.
-_MARKETPLACE_SETTINGS_DEFAULTS = {"min_offer_cents": 5000}
+# magazine_fee_bps — Gummfit's share of every magazine reader's payment —
+# falls back to 3000, matching cappe/services/magazine/billing.py:fee_bps and
+# the cappemag05 seed row (and never to the plan's store fee).
+_MARKETPLACE_SETTINGS_DEFAULTS = {"min_offer_cents": 5000, "magazine_fee_bps": 3000}
 
 
 def _settings_subvalue(values: dict, key: str, subkey: str, fallback):
@@ -308,6 +311,8 @@ async def admin_get_marketplace_settings():
         "collab_fee_bps": _settings_subvalue(values, "collab_fee_bps", "bps", get_settings().cappe_platform_fee_bps),
         "min_offer_cents": _settings_subvalue(values, "min_offer_cents", "cents", _MARKETPLACE_SETTINGS_DEFAULTS["min_offer_cents"]),
         "auto_approve_days": _settings_subvalue(values, "auto_approve_days", "days", 14),
+        "magazine_fee_bps": _settings_subvalue(values, "magazine_fee_bps", "bps",
+                                               _MARKETPLACE_SETTINGS_DEFAULTS["magazine_fee_bps"]),
     }
 
 
@@ -315,6 +320,7 @@ class _MarketplaceSettingsPatch(BaseModel):
     collab_fee_bps: Optional[int] = Field(default=None, ge=0, le=5000)
     min_offer_cents: Optional[int] = Field(default=None, ge=0, le=10_000_000)
     auto_approve_days: Optional[int] = Field(default=None, ge=1, le=90)
+    magazine_fee_bps: Optional[int] = Field(default=None, ge=0, le=5000)
 
 
 @router.patch("/marketplace-settings")
@@ -324,7 +330,8 @@ async def admin_patch_marketplace_settings(body: _MarketplaceSettingsPatch, curr
         return {"ok": True}
     key_for = {"collab_fee_bps": ("collab_fee_bps", "bps"),
                "min_offer_cents": ("min_offer_cents", "cents"),
-               "auto_approve_days": ("auto_approve_days", "days")}
+               "auto_approve_days": ("auto_approve_days", "days"),
+               "magazine_fee_bps": ("magazine_fee_bps", "bps")}
     async with get_connection() as conn:
         old_rows = await conn.fetch("SELECT key, value FROM cappe_marketplace_settings")
         old_values = {r["key"]: json.loads(r["value"]) if isinstance(r["value"], str) else r["value"] for r in old_rows}

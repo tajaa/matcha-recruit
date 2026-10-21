@@ -1,4 +1,8 @@
-"""Connected-account subscriptions; each paid invoice becomes one order."""
+"""Connected-account subscriptions; each paid invoice becomes one order.
+
+A magazine's reader subscription (`kind='magazine'`, services/magazine/
+billing.py) shares all of this except what a paid invoice becomes: a row in
+`cappe_magazine_payments`, never an order, and the emails say so."""
 import json
 from datetime import datetime, timezone
 from uuid import UUID
@@ -234,8 +238,8 @@ async def checkout(site, shopper, body):
         if pending >= 10:
             raise HTTPException(409, "Too many pending checkouts; cancel an existing checkout first")
         row = await conn.fetchrow(
-            "INSERT INTO cappe_shopper_subscriptions(site_id,shopper_id,stripe_account_id,status,interval,items,subtotal_cents,tax_cents,shipping_cents,total_cents,currency,tax_included,shipping_tax_cents) "
-            "VALUES($1,$2,$3,'preparing',$4,$5::jsonb,$6,$7,$8,$9,$10,$11,$12) RETURNING *",
+            "INSERT INTO cappe_shopper_subscriptions(site_id,shopper_id,stripe_account_id,status,interval,items,subtotal_cents,tax_cents,shipping_cents,total_cents,currency,tax_included,shipping_tax_cents,kind) "
+            "VALUES($1,$2,$3,'preparing',$4,$5::jsonb,$6,$7,$8,$9,$10,$11,$12,'goods') RETURNING *",
             site["id"], shopper["id"], owner["stripe_account_id"], body.interval, json.dumps(snapshot),
             totals["subtotal_cents"], totals["tax_cents"], totals["shipping_cents"], totals["total_cents"], totals["currency"],
             totals["tax_included"], totals["shipping_tax_cents"],
@@ -418,7 +422,7 @@ async def handle_event(etype, obj, event, background):
     except (ValueError, TypeError):
         return {"received": True}
     event_at = datetime.fromtimestamp(event.get("created") or 0, timezone.utc)
-    order_id = None
+    order_id = payment_id = None
     stock_shortfall = False
     notify_failed = notify_cancelled = False
     records_order = (
@@ -446,7 +450,12 @@ async def handle_event(etype, obj, event, background):
                 "WHERE id=$1 AND status=ANY($2::text[]) AND stripe_subscription_id IS NULL",
                 row["id"], list(_OPEN_CHECKOUT_STATUSES),
             )
-        if records_order:
+        magazine = row.get("kind") == "magazine"
+        if records_order and magazine:
+            from .magazine.billing import record_magazine_payment
+
+            payment_id = await record_magazine_payment(conn, row, obj, payment_intent)
+        elif records_order:
             order_id, stock_shortfall = await record_invoice_order(conn, row, obj, payment_intent)
         if (etype == "invoice.payment_failed" and row["shopper_id"] and subscription
                 and subscription.get("status") in ("incomplete", "past_due", "unpaid")):
@@ -463,12 +472,15 @@ async def handle_event(etype, obj, event, background):
                 "WHERE id=$1 AND cancel_notified_at IS NULL RETURNING id",
                 row["id"],
             ))
-    if order_id or notify_failed or notify_cancelled:
+    paid = order_id or payment_id
+    if paid or notify_failed or notify_cancelled:
         await _schedule_subscription_emails(
-            background, row, obj, order_id=order_id,
-            started=bool(order_id) and obj.get("billing_reason") == "subscription_create",
+            background, row, obj, order_id=paid,
+            started=bool(paid) and obj.get("billing_reason") == "subscription_create",
             failed=notify_failed, cancelled=notify_cancelled,
         )
+    if magazine:
+        return {"received": True}
     if order_id:
         from .receipt import issue_receipt_for_paid_order
         from .push import notify_order_event
@@ -513,7 +525,12 @@ def _items_summary(row) -> str:
 async def _schedule_subscription_emails(background, row, invoice, *, order_id, started, failed, cancelled):
     """Queue the emails a subscription event owes. The receipt (sent per paid
     invoice) used to be the only one: the owner heard nothing about a
-    renewal, and the shopper nothing about a declined card or a cancellation."""
+    renewal, and the shopper nothing about a declined card or a cancellation.
+
+    A magazine subscription's are its own: the writer hears about a new paid
+    reader (not every renewal), and the reader gets a welcome that links back
+    to the magazine. A declined card and an ended subscription read the same
+    for both kinds."""
     from . import email as mail
 
     async with get_connection() as conn:
@@ -527,9 +544,27 @@ async def _schedule_subscription_emails(background, row, invoice, *, order_id, s
         )
     if not info:
         return
-    items = _items_summary(row)
+    magazine = row.get("kind") == "magazine"
+    title = (loads_list(row["items"]) or [{}])[0].get("title") or info["site_name"]
+    items = title if magazine else _items_summary(row)
     total = invoice.get("total", row["total_cents"]) if order_id else row["total_cents"]
-    if order_id and info["owner_email"]:
+    origin = site_public_origin(info)
+    reply_to = mail.store_reply_to(info.get("meta_config"), info["owner_email"])
+    if magazine and started and info["owner_email"]:
+        background.add_task(
+            mail.send_cappe_magazine_new_reader_email, info["owner_email"], info["owner_name"], info["site_name"],
+            info["shopper_email"], row["total_cents"], row["currency"],
+            mail.dashboard_url(f"/sites/{row['site_id']}/readers"),
+        )
+    if magazine and started and info["shopper_email"]:
+        background.add_task(
+            mail.send_cappe_magazine_welcome_email, info["shopper_email"], info["shopper_name"], info["site_name"],
+            title, row["total_cents"], row["currency"], origin or None,
+            f"{origin}/account" if origin else None, reply_to=reply_to,
+        )
+    if magazine:
+        started = False  # the welcome above is this kind's "started"
+    elif order_id and info["owner_email"]:
         background.add_task(
             mail.send_cappe_order_alert_email, info["owner_email"], info["owner_name"], info["site_name"],
             info["shopper_name"] or info["shopper_email"], total, row["currency"],
@@ -539,11 +574,9 @@ async def _schedule_subscription_emails(background, row, invoice, *, order_id, s
     if not shopper:
         return
     # The storefront's account page, where the shopper manages it and updates
-    # the card (it used to say "contact the store").
-    origin = site_public_origin(info)
+    # the card (it used to say "contact the store"). Sent as the store; a
+    # reply reaches the store.
     account_url = f"{origin}/account" if origin else None
-    # Sent as the store; a reply reaches the store.
-    reply_to = mail.store_reply_to(info.get("meta_config"), info["owner_email"])
     if started:
         background.add_task(
             mail.send_cappe_subscription_started_email, shopper, info["shopper_name"], info["site_name"],

@@ -23,10 +23,20 @@ class CappeMagazine(BaseModel):
     nav_label: str = "Magazine"
     cover_post_id: Optional[UUID] = None
     follow_enabled: bool = True
+    paid_enabled: bool = False
+    price_cents: Optional[int] = None
+    paid_pitch: Optional[str] = None
+    preview_blocks: int = 3
+    lapsed_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     live: bool = False
     plan_includes_magazine: bool = False
+    # Paid subscriptions: whether the plan allows them, whether Stripe can take
+    # the money yet, and Gummfit's share of each payment.
+    plan_includes_paid: bool = False
+    stripe_ready: bool = False
+    fee_bps: int = 3000
 
 
 class CappeMagazineUpdate(BaseModel):
@@ -41,6 +51,24 @@ class CappeMagazineUpdate(BaseModel):
     nav_label: Optional[str] = Field(default=None, min_length=1, max_length=40)
     cover_post_id: Optional[UUID] = None
     follow_enabled: Optional[bool] = None
+    paid_enabled: Optional[bool] = None
+    price_cents: Optional[int] = Field(default=None, ge=100, le=100_000)
+    paid_pitch: Optional[str] = Field(default=None, max_length=600)
+    preview_blocks: Optional[int] = Field(default=None, ge=1, le=20)
+
+
+class CappeMagazineCheckout(BaseModel):
+    """Where Stripe Checkout returns the reader: the magazine's own pages."""
+    success_url: str = Field(min_length=1, max_length=2000)
+    cancel_url: str = Field(min_length=1, max_length=2000)
+
+
+class CappeMagazineCompCreate(BaseModel):
+    """A free subscription the writer gives. No `months` is for good, until
+    revoked."""
+    email: EmailStr
+    months: Optional[int] = Field(default=None, ge=1, le=24)
+    note: Optional[str] = Field(default=None, max_length=200)
 
 
 class CappeStoryPreview(BaseModel):
@@ -241,4 +269,6 @@ __all__ = [
     "CappeFollowRequest",
     "CappeIssueCreate",
     "CappeIssue",
+    "CappeMagazineCheckout",
+    "CappeMagazineCompCreate",
 ]

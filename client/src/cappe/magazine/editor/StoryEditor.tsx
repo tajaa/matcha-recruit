@@ -4,18 +4,18 @@ import { ArrowLeft, Eye, Loader2, Plus, Trash2, Wand2, X } from 'lucide-react'
 import { cappeApi } from '../../api'
 import { ui } from '../../components/ui'
 import type {
-  CappeAsset, CappePost, CappeStockSource, CappeStoryOptions, StoryBlock, StoryContent, StoryLayout,
+  CappeAsset, CappeMagazine, CappePost, CappeStockSource, CappeStoryOptions, StoryBlock, StoryContent, StoryLayout,
 } from '../../types'
 import LibraryPanel from '../library/LibraryPanel'
 import AssistPanel from './AssistPanel'
 import BlockEditor from './BlockEditor'
 import { BLOCK_LABELS, moveBlock, newBlock, withCaption, withText } from './blocks'
 
-type Fields = { title: string; kicker: string; excerpt: string; byline: string; topic: string; layout: StoryLayout; status: CappePost['status'] }
+type Fields = { title: string; kicker: string; excerpt: string; byline: string; topic: string; layout: StoryLayout; status: CappePost['status']; access: CappePost['access'] }
 
 const fieldsOf = (p: CappePost): Fields => ({
   title: p.title, kicker: p.kicker || '', excerpt: p.excerpt || '', byline: p.byline || '', topic: p.topic || '',
-  layout: p.layout, status: p.status,
+  layout: p.layout, status: p.status, access: p.access || 'free',
 })
 
 const ADDABLE: StoryBlock['type'][] = ['text', 'photo', 'photos', 'quote', 'sidebar', 'qa', 'divider']
@@ -39,7 +39,17 @@ export default function StoryEditor() {
   const [finding, setFinding] = useState<{ source: CappeStockSource; query: string } | null>(null)
   const [preview, setPreview] = useState<string>('')
   const [previewOpen, setPreviewOpen] = useState(true)
+  // Whether the magazine takes paid subscribers: a story can only become paid then.
+  const [paidOn, setPaidOn] = useState(false)
   const previewGen = useRef(0)
+
+  useEffect(() => {
+    let cancelled = false
+    cappeApi.get<CappeMagazine>(`/sites/${siteId}/magazine`)
+      .then((m) => { if (!cancelled) setPaidOn(!!m.paid_enabled) })
+      .catch(() => { /* treated as off; the server decides anyway */ })
+    return () => { cancelled = true }
+  }, [siteId])
 
   useEffect(() => {
     let cancelled = false
@@ -71,7 +81,7 @@ export default function StoryEditor() {
     const gen = ++previewGen.current
     const t = setTimeout(() => {
       const body = { title: fields.title, excerpt: fields.excerpt || null, kicker: fields.kicker || null, topic: fields.topic || null,
-        layout: fields.layout, byline: fields.byline || null, content: { blocks } satisfies StoryContent }
+        layout: fields.layout, byline: fields.byline || null, access: fields.access, content: { blocks } satisfies StoryContent }
       cappeApi.postHtml(`/sites/${siteId}/stories/preview`, body)
         .then((html) => { if (gen === previewGen.current) setPreview(html) })
         .catch(() => { /* the last good preview stays up */ })
@@ -99,6 +109,7 @@ export default function StoryEditor() {
         title: next.title.trim() || 'Untitled story', kicker: next.kicker.trim() || null, excerpt: next.excerpt.trim() || null,
         byline: next.byline.trim() || null, topic: next.topic || null, layout: next.layout, status: next.status,
       }
+      if (next.access !== post.access) body.access = next.access
       if (isStory) {
         body.content = { blocks }
         const cover = blocks[0]?.type === 'cover' ? blocks[0].asset_id : null
@@ -214,6 +225,20 @@ export default function StoryEditor() {
                 </select>
               </label>
             </div>
+            {isStory && (
+              <label className="block text-sm text-zinc-300">Who can read it
+                <select value={fields.access} onChange={(e) => setField('access', e.target.value as CappePost['access'])}
+                  className={`${ui.input} mt-1 sm:max-w-xs`} aria-label="Who can read it">
+                  <option value="free">Everyone</option>
+                  <option value="paid" disabled={!paidOn && fields.access !== 'paid'}>Subscribers (after the paywall)</option>
+                </select>
+                <span className="mt-1 block text-xs text-zinc-500">
+                  {paidOn
+                    ? 'Readers see everything above the paywall block (or the first few blocks), then are asked to subscribe.'
+                    : <>To charge readers, turn on paid subscriptions in <Link to={`/sites/${siteId}/magazine`} className="underline">Magazine settings</Link>.</>}
+                </span>
+              </label>
+            )}
           </section>
 
           {!isStory ? (
@@ -238,7 +263,7 @@ export default function StoryEditor() {
                     {blocks[0]?.type !== 'cover' && (
                       <button type="button" role="menuitem" className={ui.btnGhost} onClick={() => { setBlocks((bs) => [newBlock('cover'), ...bs]); setAdding(false) }}>Cover</button>
                     )}
-                    {ADDABLE.map((t) => (
+                    {[...ADDABLE, ...(fields.access === 'paid' && !blocks.some((b) => b.type === 'paywall') ? ['paywall' as const] : [])].map((t) => (
                       <button key={t} type="button" role="menuitem" className={ui.btnGhost} onClick={() => { setBlocks((bs) => [...bs, newBlock(t)]); setAdding(false) }}>{BLOCK_LABELS[t]}</button>
                     ))}
                   </div>

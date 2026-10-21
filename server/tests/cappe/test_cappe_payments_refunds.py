@@ -347,7 +347,8 @@ def test_a_partial_refund_of_something_that_is_not_an_order_changes_nothing(monk
         _charge(amount_refunded=100, refunded=False), {"account": ACCT},
     ))
     assert out == {"received": True}
-    assert conn.sql(" SET ") == []                       # nothing written
+    # Nothing written: only the magazine ledger was asked, and had no such payment.
+    assert [c for c in conn.sql(" SET ") if "cappe_magazine_payments" not in c[1]] == []
 
 
 def test_a_refund_event_with_no_connected_account_is_ignored(monkeypatch):

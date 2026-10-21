@@ -187,7 +187,7 @@ export default function BlockEditor({ block, index, count, assets, onChange, onM
       case 'divider':
         return <p className="text-xs text-zinc-500">A short rule between parts of the story.</p>
       case 'paywall':
-        return <p className="text-xs text-zinc-500">Everything below this line is for paying readers (coming in a later release; for now the whole story is free).</p>
+        return <p className="text-xs text-zinc-500">Everything below this line is for subscribers, when the story is set to “Subscribers”. Readers see what’s above it free.</p>
     }
   })()
 

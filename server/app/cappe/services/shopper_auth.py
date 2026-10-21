@@ -32,7 +32,9 @@ async def published_shopper_site(conn, slug):
     if not site:
         raise HTTPException(404, "Site not found")
     ent = await resolve_entitlements(site["owner_plan"], conn=conn)
-    if not ent.has("shopper_accounts"):
+    # A magazine's paying readers sign in the same way (`magazine_paid`): a
+    # writer's plan sells nothing else, so it has no shopper accounts of its own.
+    if not (ent.has("shopper_accounts") or ent.has("magazine_paid")):
         raise HTTPException(402, "Shopper accounts are not enabled for this store")
     return site
 

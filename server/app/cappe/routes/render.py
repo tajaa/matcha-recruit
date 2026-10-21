@@ -30,7 +30,7 @@ from ..services.common import normalize_host_header, site_public_origin
 from ..services.discounts import apply_discount_cents, best_discount_percent, fetch_active_discounts, site_today
 from ..services.entitlements import resolve_entitlements, sells
 from ..services.magazine import pages as mag_pages, reader as mag_reader
-from ..services.magazine.magazines import live_magazine, nav_entry
+from ..services.magazine.magazines import live_magazine, nav_entry, preview_blocks
 from ..services.magazine.topics import TOPICS
 from ..services.product_pages import SLUG_RE, fetch_images, product_path
 from ..services.policies import KINDS as POLICY_KINDS, links as policy_links, policy_kinds, policy_path
@@ -694,7 +694,8 @@ async def story_page(story_slug: str, request: Request):
         nav = await _nav(conn, site["id"])
         kinds = await policy_kinds(conn, site["id"])
         return mag_pages.render_story(_site_dict(site, kinds, magazine), nav, magazine, post, assets, more=more,
-                                      more_covers=more_covers, origin=_origin(site, host))
+                                      more_covers=more_covers, origin=_origin(site, host),
+                                      preview_blocks=preview_blocks(magazine), currency=site.get("currency"))
 
     return await _cached_magazine_page(request, f"story:{story_slug}", build)
 

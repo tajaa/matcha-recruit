@@ -10,6 +10,11 @@ Gated on `scheduler_settings.task_key = 'cappe_comp_expiry'`. Idempotent and
 set-based: expiring a comp cancels its row, so the next run does not see it
 again, and an account that has since started paying for real is skipped rather
 than downgraded.
+
+It also stops magazines' paid subscriptions when the owner can no longer
+have them, and winds down their readers' renewals
+(`app.cappe.services.magazine.lapse`) — a plan change is usually what this
+sweep just made, and both are hourly bookkeeping on plans.
 """
 
 import asyncio
@@ -33,11 +38,24 @@ async def _dispatch_cappe_comp_expiry() -> dict:
         from app.cappe.services.billing import expire_lapsed_comps
 
         expired = await expire_lapsed_comps(conn)
+        magazines = await _magazine_lapse(conn)
     finally:
         await conn.close()
 
-    print(f"[Cappe Comps] expired={expired}")
-    return {"expired": expired}
+    print(f"[Cappe Comps] expired={expired} magazines={magazines}")
+    return {"expired": expired, "magazines": magazines}
+
+
+async def _magazine_lapse(conn) -> dict:
+    """The magazine sweep, on its own: its failure must not make the task
+    retry the comps it has already expired."""
+    from app.cappe.services.magazine.lapse import sweep
+
+    try:
+        return await sweep(conn)
+    except Exception:  # noqa: BLE001 — logged; the next hourly run picks it up
+        logger.exception("[Cappe Comps] magazine lapse sweep failed")
+        return {"error": True}
 
 
 @celery_app.task(name="cappe.comp_expiry", bind=True, max_retries=1)

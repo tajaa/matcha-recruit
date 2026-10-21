@@ -32,7 +32,7 @@ from ..models.cappe import (
     CappeStoryPreview,
 )
 from ..services.magazine import pages as mag_pages
-from ..services.magazine.magazines import get_magazine
+from ..services.magazine.magazines import get_magazine, preview_blocks
 from ..services.magazine.richtext import md_to_text
 from ..services.magazine.stories import (
     POST_COLS,
@@ -79,10 +79,17 @@ def _topic(value: Optional[str]) -> Optional[str]:
     return topic
 
 
-def _refuse_paid(access: Optional[str]) -> None:
-    # Paid stories need reader subscriptions, which aren't built yet.
-    if access == "paid":
-        raise _unprocessable("Paid stories aren't available yet.")
+PAID_OFF = "Turn on paid subscriptions in the magazine's settings first."
+
+
+async def _check_paid(conn, site_id: UUID, access: Optional[str]) -> None:
+    """A story can be for subscribers only while the magazine takes them. A
+    story already paid stays paid when they're turned off (its readers keep
+    what they paid for); it just can't newly become paid."""
+    if access == "paid" and not await conn.fetchval(
+        "SELECT paid_enabled FROM cappe_magazines WHERE site_id = $1", site_id,
+    ):
+        raise _unprocessable(PAID_OFF)
 
 
 async def _story_fields(conn, site_id: UUID, content: dict, cover_asset_id: Optional[UUID]) -> dict[str, Any]:
@@ -127,13 +134,13 @@ async def list_posts(site_id: UUID, account: CappeAccount = Depends(require_capp
 async def create_post(
     site_id: UUID, body: CappePostCreate, account: CappeAccount = Depends(require_cappe_account)
 ):
-    _refuse_paid(body.access)
     topic = _topic(body.topic)
     layout = normalize_layout(body.layout)
     is_story = body.format == "blocks" or body.content is not None
     published_clause = "NOW()" if body.status == "published" else "NULL"
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
+        await _check_paid(conn, site_id, body.access)
         if is_story:
             derived = await _story_fields(conn, site_id, body.content or starter_content(layout),
                                           body.cover_asset_id)
@@ -150,11 +157,12 @@ async def create_post(
                          format, content, kicker, topic, layout, access, cover_asset_id, byline,
                          word_count, reading_minutes)
                     VALUES ($1, $2, $3, $4, $5, $6, $7, {published_clause},
-                            $8, $9::jsonb, $10, $11, $12, 'free', $13, $14, $15, $16)
+                            $8, $9::jsonb, $10, $11, $12, $17, $13, $14, $15, $16)
                     RETURNING {POST_COLS}""",
                 site_id, body.title, slug, body.excerpt, derived["body"], derived["cover_image_url"], body.status,
                 "blocks" if is_story else "markdown", json.dumps(derived["content"]), body.kicker, topic, layout,
                 body.cover_asset_id, body.byline, derived["word_count"], derived["reading_minutes"],
+                body.access or "free",
             )
             if is_story:
                 await sync_post_assets(conn, row["id"], site_id, derived["_asset_ids"])
@@ -187,7 +195,6 @@ async def update_post(
     for col in sent:
         if getattr(body, col) is None and col not in _NULLABLE:
             raise _unprocessable(f"These fields cannot be null: {col}")
-    _refuse_paid(body.access)
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
         async with conn.transaction():
@@ -204,6 +211,9 @@ async def update_post(
                 raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=EDIT_ON_WEB)
 
             values: dict[str, Any] = {col: getattr(body, col) for col in _SIMPLE if col in sent}
+            if "access" in sent and body.access != current["access"]:
+                await _check_paid(conn, site_id, body.access)
+                values["access"] = body.access
             if "topic" in sent:
                 values["topic"] = _topic(body.topic)
             if "layout" in sent and body.layout is not None:
@@ -312,5 +322,5 @@ async def preview_story(site_id: UUID, body: CappeStoryPreview,
         "published_at": datetime.now(timezone.utc), "updated_at": None,
     }
     html = mag_pages.render_story(_site_dict(site), nav, magazine, post, assets, more=[], more_covers={},
-                                  origin="")
+                                  origin="", preview_blocks=preview_blocks(magazine), currency=site.get("currency"))
     return HTMLResponse(html, headers={**tenant_security_headers(), "Cache-Control": "no-store"})

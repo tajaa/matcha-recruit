@@ -99,9 +99,10 @@ def render_block(b: dict, assets: dict[str, dict], *, first_text: bool = False) 
     return ""  # cover (rendered as the header) and the paywall marker
 
 
-def render_blocks(blocks: list[dict], assets: dict[str, dict]) -> str:
-    """The story body. The first text block gets the drop cap if it asks."""
-    out, seen_text = [], False
+def render_blocks(blocks: list[dict], assets: dict[str, dict], *, dropcap: bool = True) -> str:
+    """The story body. The first text block gets the drop cap if it asks
+    (`dropcap=False` for a paid story's second half: its opening had it)."""
+    out, seen_text = [], not dropcap
     for b in blocks:
         if b.get("type") == "cover":
             continue

@@ -8,7 +8,10 @@ Instagram or found on Google shows its picture, headline and words before any
 script runs: Open Graph `article` tags and Article structured data.
 
 A paid story's page holds only its free part (`story_render.split_at_paywall`);
-the paid part is never in this HTML, in the cache, or in the feed.
+the paid part is never in this HTML, in the cache, or in the feed. A
+subscriber's browser fetches it (`render/assets/paywall.js` →
+`GET /public/sites/{slug}/stories/{story}/paid`, never cached) and puts it in
+the empty `.mz-paid` box under the paywall.
 """
 from __future__ import annotations
 
@@ -32,6 +35,8 @@ from .topics import topic_label
 _ASSETS = Path(__file__).resolve().parent.parent / "render" / "assets"
 _CSS = (_ASSETS / "magazine.css").read_text(encoding="utf-8")
 _FOLLOW_JS = (_ASSETS / "follow.js").read_text(encoding="utf-8")
+_PAYWALL_JS = (_ASSETS / "paywall.js").read_text(encoding="utf-8")
+_SYMBOLS = {"USD": "$", "CAD": "CA$", "AUD": "A$", "NZD": "NZ$", "EUR": "€", "GBP": "£"}
 
 PAGE_SIZE = 12
 MAX_PAGE = 50
@@ -142,6 +147,35 @@ def follow_html(mag: dict) -> str:
             f'<p class="mz-follow__msg" data-mz-msg role="status"></p></section><script>{_FOLLOW_JS}</script>')
 
 
+def price_label(cents: int, currency: Optional[str]) -> str:
+    """$5 or $5.50 — whole amounts without the cents."""
+    cur = (currency or "USD").upper()
+    amount = f"{cents // 100}" if cents % 100 == 0 else f"{cents / 100:.2f}"
+    sym = _SYMBOLS.get(cur)
+    return f"{sym}{amount}" if sym else f"{amount} {cur}"
+
+
+def paywall_html(mag: dict, post: dict, *, currency: Optional[str]) -> str:
+    """Under a paid story's free part: the pitch and price (the same for every
+    reader, so the page caches), an empty `.mz-paid` box, and the script that
+    signs a reader in, starts their subscription, or fills the box. A
+    magazine that has stopped taking subscribers still lets the ones it has
+    sign in."""
+    open_ = bool(mag.get("paid_enabled") and mag.get("price_cents"))
+    price = price_label(int(mag["price_cents"]), currency) if open_ else ""
+    pitch = f'<p class="mz-paywall__pitch">{escape(mag["paid_pitch"])}</p>' if mag.get("paid_pitch") else ""
+    offer = f'<p class="mz-paywall__price">{escape(price)} a month. Cancel any time.</p>' if open_ else ""
+    return (
+        f'<section class="mz-paywall mz-measure" id="mz-paywall" data-mz-story="{escape(post["slug"], quote=True)}" '
+        f'data-mz-open="{1 if open_ else 0}" data-mz-price="{escape(price, quote=True)}">'
+        f'<p class="mz-paywall__lede">The rest of this story is for subscribers.</p>{pitch}{offer}'
+        '<div class="mz-paywall__actions" data-mz-actions><noscript>Turn on JavaScript to subscribe or sign in.'
+        '</noscript></div><p class="mz-paywall__msg" data-mz-msg role="status"></p></section>'
+        '<div class="mz-story__body mz-paid" data-mz-paid hidden></div>'
+        f"<script>{_PAYWALL_JS}</script>"
+    )
+
+
 def _page(site: dict, nav: list[dict], mag: dict, body: str, *, origin: str, seo: dict, extra_head: str = "") -> str:
     return render_site_html(
         site, {"title": seo.get("title") or mag.get("name"), "slug": "__magazine", "content": {}}, nav,
@@ -181,7 +215,7 @@ def render_topic(site: dict, nav: list[dict], mag: dict, topic: str, *, posts: l
     })
 
 
-def article_ld(post: dict, mag: dict, *, url: str, image: Optional[str]) -> str:
+def article_ld(post: dict, mag: dict, *, url: str, image: Optional[str], paid: bool = False) -> str:
     published = post["published_at"].isoformat() if post.get("published_at") else None
     data = {
         "@context": "https://schema.org",
@@ -199,7 +233,13 @@ def article_ld(post: dict, mag: dict, *, url: str, image: Optional[str]) -> str:
         data["image"] = [image]
     if post.get("topic"):
         data["articleSection"] = topic_label(post["topic"])
-    return f'<script type="application/ld+json">{_js_obj({k: v for k, v in data.items() if v})}</script>'
+    clean = {k: v for k, v in data.items() if v}
+    if paid:
+        # Google's paywalled-content markup: the part behind the paywall is
+        # the `.mz-paid` box, which a subscriber's browser fills.
+        clean["isAccessibleForFree"] = False
+        clean["hasPart"] = {"@type": "WebPageElement", "isAccessibleForFree": False, "cssSelector": ".mz-paid"}
+    return f'<script type="application/ld+json">{_js_obj(clean)}</script>'
 
 
 def story_blocks(post: dict) -> list[dict]:
@@ -210,16 +250,17 @@ def story_blocks(post: dict) -> list[dict]:
 
 
 def render_story(site: dict, nav: list[dict], mag: dict, post: dict, assets: dict[str, dict], *,
-                 more: list[dict], more_covers: dict[str, dict], origin: str, preview_blocks: int = 3) -> str:
+                 more: list[dict], more_covers: dict[str, dict], origin: str, preview_blocks: int = 3,
+                 currency: Optional[str] = None) -> str:
     blocks = story_blocks(post)
     cover = cover_block({"blocks": blocks})
     cover_asset = assets.get((cover or {}).get("asset_id") or "") or assets.get(str(post.get("cover_asset_id") or ""))
     free = blocks
     paywall = ""
-    if post.get("access") == "paid":
+    paid = post.get("access") == "paid"
+    if paid:
         free, _paid = split_at_paywall(blocks, preview_blocks=preview_blocks)
-        paywall = ('<section class="mz-paywall mz-measure" data-mz-paid>'
-                   "<p>The rest of this story is for subscribers.</p></section>")
+        paywall = paywall_html(mag, post, currency=currency)
     topic = post.get("topic")
     topic_link = (f'<p class="mz-story__topic"><a href="{topic_path(topic)}">{escape(topic_label(topic))}</a></p>'
                   if topic_label(topic) else "")
@@ -237,7 +278,7 @@ def render_story(site: dict, nav: list[dict], mag: dict, post: dict, assets: dic
     )
     url = f"{origin}{story_path(post['slug'])}"
     image = share_image(cover_asset)
-    extra = article_ld(post, mag, url=url, image=image)
+    extra = article_ld(post, mag, url=url, image=image, paid=paid)
     if post.get("published_at"):
         extra += f'<meta property="article:published_time" content="{escape(post["published_at"].isoformat(), quote=True)}" />'
     if topic_label(topic):
