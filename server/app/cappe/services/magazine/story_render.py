@@ -62,22 +62,66 @@ def _qa(b: dict) -> str:
     return f'<div class="mz-qa mz-measure">{rows}</div>' if rows else ""
 
 
+def _crop_style(crop: Optional[dict]) -> str:
+    """The kept part of the picture fills its frame: the picture is scaled up
+    and shifted so only that rectangle shows."""
+    if not crop:
+        return ""
+    x, y, w, h = (crop[k] for k in ("x", "y", "w", "h"))
+    return (f"position:absolute;max-width:none;width:{10000 / w:.3f}%;height:{10000 / h:.3f}%;"
+            f"left:{-100 * x / w:.3f}%;top:{-100 * y / h:.3f}%")
+
+
+def _overlay(o: dict) -> str:
+    text = (o.get("text") or "").strip()
+    if not text:
+        return ""
+    cls = (f"mz-ov mz-ov--{escape(o.get('size') or 'm')} mz-ov--{escape(o.get('tone') or 'light')} "
+           f"mz-ov--{escape(o.get('align') or 'center')}" + (" mz-ov--box" if o.get("box") else ""))
+    words = escape(text).replace("\n", "<br>")
+    return f'<div class="{cls}" style="left:{int(o.get("x", 50))}%;top:{int(o.get("y", 50))}%">{words}</div>'
+
+
+def photo_html(b: dict, asset: Optional[dict]) -> str:
+    """A photo block: its frame (border, shape, colour, crop) with any words
+    set on it, then its caption and credit. A crop or a circle/arch shape
+    changes the picture, so a CC BY credit says it was cropped."""
+    if not asset:
+        return ""
+    size, shape = b.get("size") or "column", b.get("shape") or "rect"
+    crop = b.get("crop") if shape != "circle" else None
+    img = img_html(asset, size=size, style=_crop_style(crop))
+    if not img:
+        return ""
+    frame_style = ""
+    if crop and asset.get("width") and asset.get("height"):
+        frame_style = f' style="aspect-ratio:{asset["width"] * crop["w"]}/{asset["height"] * crop["h"]}"'
+    overlays = "".join(_overlay(o) for o in b.get("overlays") or [])
+    caption = (b.get("caption") or asset.get("caption") or "").strip()
+    credit = credit_html(asset, cropped=bool(crop) or shape in ("circle", "arch"))
+    figcaption = ""
+    if caption or credit:
+        cap = f'<span class="mz-cap">{escape(caption)}</span>' if caption else ""
+        figcaption = f"<figcaption>{cap}{credit}</figcaption>"
+    cls = " ".join(["mz-fig", f"mz-fig--{size}", f"mz-border--{b.get('border') or 'none'}", f"mz-shape--{shape}",
+                    f"mz-filter--{b.get('filter') or 'none'}"])
+    return f'<figure class="{escape(cls)}"><div class="mz-frame"{frame_style}>{img}{overlays}</div>{figcaption}</figure>'
+
+
 def render_block(b: dict, assets: dict[str, dict], *, first_text: bool = False) -> str:
     kind = b.get("type")
     if kind == "text":
         html = render_md(b.get("md"))
         if not html:
             return ""
-        cls = ["mz-text", "mz-measure"]
+        cls = ["mz-text", "mz-measure", f"mz-text--{b.get('variant') or 'body'}", f"mz-align--{b.get('align') or 'left'}"]
         if b.get("dropcap") and first_text:
             cls.append("mz-dropcap")
-        if b.get("columns") == 2:
-            cls.append("mz-text--cols")
-        return f'<div class="{" ".join(cls)}">{html}</div>'
+        if b.get("columns") in (2, 3):
+            cls.append("mz-text--cols" if b["columns"] == 2 else "mz-text--cols mz-text--cols3")
+        return f'<div class="{escape(" ".join(cls))}">{html}</div>'
     if kind == "photo":
-        size = b.get("size") or "column"
-        return figure_html(assets.get(b.get("asset_id") or ""), caption=b.get("caption") or "", size=size,
-                           cls=f"mz-fig mz-fig--{size}")
+        return photo_html(b, assets.get(b.get("asset_id") or ""))
     if kind == "photos":
         return _photos(b, assets)
     if kind == "quote":

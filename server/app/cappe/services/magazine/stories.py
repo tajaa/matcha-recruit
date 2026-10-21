@@ -56,8 +56,11 @@ def story_text(content: dict) -> str:
         elif kind == "qa":
             for item in b.get("items") or []:
                 parts.append("\n".join(filter(None, [item.get("q"), md_to_text(item.get("a_md"))])))
-        elif kind == "photo" and b.get("caption"):
-            parts.append(b["caption"])
+        elif kind == "photo":
+            # Words set on the picture are part of the story too.
+            parts += [o["text"] for o in b.get("overlays") or [] if (o.get("text") or "").strip()]
+            if b.get("caption"):
+                parts.append(b["caption"])
     return "\n\n".join(p for p in parts if p.strip())
 
 

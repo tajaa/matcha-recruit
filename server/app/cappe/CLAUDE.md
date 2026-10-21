@@ -317,6 +317,13 @@ What is built so far:
 - **A paid story's words are never in the server-rendered page, the cache, the feed or the public
   JSON** (`story_render.split_at_paywall`; `routes/public/blog.py` nulls `body`/`content`). Writing
   `access='paid'` is refused until reader subscriptions ship (PR 6).
+- **Text and photos carry their design in the block** (`story_schema`): text has `variant`
+  (body/lede/small/statement), `align`, `columns` 1–3; a photo has `border`, `shape`
+  (rect/rounded/circle/arch), `filter` (none/bw/sepia), `crop` ({x,y,w,h} percent, at least 5%, a whole
+  picture is `null`) and up to 8 `overlays` (words centred on an x/y point, size, tone, box, align).
+  `story_render.photo_html` draws a crop by scaling the picture inside a frame of the crop's aspect, and a
+  crop, circle or arch adds "(cropped)" to a CC BY/BY-SA credit. Overlay words are escaped, count as story
+  text, and go under the picture in an issue email (email can't lay them over it). A circle ignores the crop.
 - **Rich text is constrained Markdown** (`richtext.render_md`: `<` escaped before Markdown, then our
   own `html.parser` allowlist of p/em/strong/a/h2/h3/lists/blockquote — not bleach, which several
   test modules stub; h1→h2; links http(s)/mailto with `rel="nofollow ugc noopener"`). Credits come

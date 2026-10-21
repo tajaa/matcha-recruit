@@ -82,6 +82,36 @@
 .mz-fig--column{max-width:var(--mz-measure);padding:0 1.25rem}
 .mz-fig--wide{max-width:var(--mz-wide);padding:0 1.25rem}
 .mz-fig--full{max-width:none}
+.mz-frame{position:relative;overflow:hidden;line-height:0}
+.mz-border--thin .mz-frame{border:1px solid rgba(0,0,0,.55)}
+.mz-border--thick .mz-frame{border:6px solid var(--mz-accent)}
+.mz-border--mat .mz-frame{border:14px solid #fff;box-shadow:0 2px 10px rgba(0,0,0,.18)}
+.mz-shape--rounded .mz-frame{border-radius:14px}
+.mz-shape--circle .mz-frame{aspect-ratio:1;border-radius:50%;max-width:min(100%,560px);margin:0 auto}
+.mz-shape--circle .mz-frame img{width:100%;height:100%;object-fit:cover}
+.mz-shape--arch .mz-frame{border-radius:999px 999px 0 0}
+.mz-filter--bw img{filter:grayscale(1)}
+.mz-filter--sepia img{filter:sepia(.85)}
+.mz-ov{position:absolute;transform:translate(-50%,-50%);max-width:80%;line-height:1.15;font-family:var(--mz-h);font-weight:700}
+.mz-ov--s{font-size:1rem}
+.mz-ov--m{font-size:1.5rem}
+.mz-ov--l{font-size:clamp(1.6rem,3.5vw,2.4rem)}
+.mz-ov--xl{font-size:clamp(2.2rem,6vw,4.5rem)}
+.mz-ov--light{color:#fff;text-shadow:0 1px 12px rgba(0,0,0,.55)}
+.mz-ov--dark{color:#111;text-shadow:0 1px 10px rgba(255,255,255,.5)}
+.mz-ov--box{padding:.35em .6em;text-shadow:none}
+.mz-ov--light.mz-ov--box{background:rgba(0,0,0,.55)}
+.mz-ov--dark.mz-ov--box{background:rgba(255,255,255,.85)}
+.mz-ov--center{text-align:center}
+.mz-ov--left{text-align:left}
+.mz-ov--right{text-align:right}
+.mz-text--lede{font-size:1.3em;line-height:1.5}
+.mz-text--small{font-size:.9em}
+.mz-text--statement{font-family:var(--mz-h);font-size:clamp(1.6rem,3.5vw,2.3rem);line-height:1.2}
+.mz-align--center{text-align:center}
+.mz-align--right{text-align:right}
+.mz-align--justify{text-align:justify;hyphens:auto}
+@media (min-width:900px){.mz-text--cols3{column-count:3;column-gap:2.5rem}}
 .mz-fig--full figcaption{max-width:var(--mz-wide);margin-left:auto;margin-right:auto;padding:0 1.25rem}
 .mz figcaption{display:flex;flex-wrap:wrap;justify-content:space-between;gap:.25rem 1rem;margin-top:.55rem;font-size:.8rem;line-height:1.4;color:var(--muted)}
 .mz-cap{font-style:italic}

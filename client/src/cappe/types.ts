@@ -1081,10 +1081,24 @@ export type CappePost = {
 // ── Magazine stories (services/magazine/story_schema.py) ─────────────────────
 export type StoryLayout = 'standard' | 'cover_story' | 'photo_essay' | 'interview' | 'dispatch' | 'lookbook'
 
+export type TextVariant = 'body' | 'lede' | 'small' | 'statement'
+export type TextAlign = 'left' | 'center' | 'right' | 'justify'
+export type PhotoBorder = 'none' | 'thin' | 'thick' | 'mat'
+export type PhotoShape = 'rect' | 'rounded' | 'circle' | 'arch'
+export type PhotoFilter = 'none' | 'bw' | 'sepia'
+/** The part of a photo kept, in percent of its width and height. */
+export type PhotoCrop = { x: number; y: number; w: number; h: number }
+/** Words set on a photo, centred on (x, y) in percent of the shown picture. */
+export type PhotoOverlay = {
+  x: number; y: number; text: string; size: 's' | 'm' | 'l' | 'xl'; tone: 'light' | 'dark'; box: boolean
+  align: 'center' | 'left' | 'right'
+}
+
 export type StoryBlock =
   | { type: 'cover'; asset_id: string | null; style: 'overlay' | 'stacked' | 'split'; tone: 'light' | 'dark'; focal: { x: number; y: number } }
-  | { type: 'text'; md: string; dropcap: boolean; columns: 1 | 2 }
-  | { type: 'photo'; asset_id: string | null; caption: string; size: 'column' | 'wide' | 'full' }
+  | { type: 'text'; md: string; dropcap: boolean; columns: 1 | 2 | 3; variant?: TextVariant; align?: TextAlign }
+  | { type: 'photo'; asset_id: string | null; caption: string; size: 'column' | 'wide' | 'full'
+      border?: PhotoBorder; shape?: PhotoShape; filter?: PhotoFilter; crop?: PhotoCrop | null; overlays?: PhotoOverlay[] }
   | { type: 'photos'; layout: 'pair' | 'trio' | 'grid' | 'mosaic'; items: { asset_id: string | null; caption: string }[] }
   | { type: 'quote'; text: string; attribution: string; style: 'big' | 'side' }
   | { type: 'sidebar'; title: string; md: string }

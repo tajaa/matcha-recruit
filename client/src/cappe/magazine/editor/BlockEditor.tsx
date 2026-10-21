@@ -3,6 +3,7 @@ import { ui } from '../../components/ui'
 import type { CappeAsset, StoryBlock } from '../../types'
 import { thumbUrl } from '../library/assets'
 import { BLOCK_LABELS } from './blocks'
+import PhotoDesigner from './PhotoDesigner'
 
 const small = 'rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-sm text-zinc-100'
 
@@ -88,9 +89,26 @@ export default function BlockEditor({ block, index, count, assets, onChange, onM
           <div className="space-y-2">
             <textarea value={block.md} onChange={(e) => onChange({ ...block, md: e.target.value })} rows={8}
               placeholder="Write in Markdown: **bold**, *italic*, ## heading, > quote, - list" className={`${ui.input} font-mono text-[13px]`} />
-            <div className="flex flex-wrap gap-4 text-sm text-zinc-300">
+            <div className="flex flex-wrap gap-3 text-sm text-zinc-300">
+              <label className="flex items-center gap-2">Style
+                <select value={block.variant || 'body'} onChange={(e) => onChange({ ...block, variant: e.target.value as typeof block.variant })} className={small}>
+                  <option value="body">Paragraphs</option>
+                  <option value="lede">Lede (larger opening)</option>
+                  <option value="statement">Statement (big, in the headline type)</option>
+                  <option value="small">Small print</option>
+                </select>
+              </label>
+              <label className="flex items-center gap-2">Columns
+                <select value={block.columns} onChange={(e) => onChange({ ...block, columns: Number(e.target.value) as typeof block.columns })} className={small}>
+                  <option value={1}>One</option><option value={2}>Two</option><option value={3}>Three</option>
+                </select>
+              </label>
+              <label className="flex items-center gap-2">Align
+                <select value={block.align || 'left'} onChange={(e) => onChange({ ...block, align: e.target.value as typeof block.align })} className={small}>
+                  <option value="left">Left</option><option value="center">Centred</option><option value="right">Right</option><option value="justify">Justified</option>
+                </select>
+              </label>
               <label className="flex items-center gap-2"><input type="checkbox" checked={block.dropcap} onChange={(e) => onChange({ ...block, dropcap: e.target.checked })} /> Drop cap</label>
-              <label className="flex items-center gap-2"><input type="checkbox" checked={block.columns === 2} onChange={(e) => onChange({ ...block, columns: e.target.checked ? 2 : 1 })} /> Two columns</label>
             </div>
           </div>
         )
@@ -109,6 +127,9 @@ export default function BlockEditor({ block, index, count, assets, onChange, onM
                 <option value="full">Edge to edge</option>
               </select>
             </div>
+            {block.asset_id && assets.get(block.asset_id) && (
+              <PhotoDesigner block={block} asset={assets.get(block.asset_id)!} onChange={onChange} />
+            )}
           </div>
         )
       case 'photos':
