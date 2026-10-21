@@ -29,6 +29,9 @@ from ..services.commerce import release_abandoned_checkout
 from ..services.common import normalize_host_header, site_public_origin
 from ..services.discounts import apply_discount_cents, best_discount_percent, fetch_active_discounts, site_today
 from ..services.entitlements import resolve_entitlements, sells
+from ..services.magazine import pages as mag_pages, reader as mag_reader
+from ..services.magazine.magazines import live_magazine, nav_entry
+from ..services.magazine.topics import TOPICS
 from ..services.product_pages import SLUG_RE, fetch_images, product_path
 from ..services.policies import KINDS as POLICY_KINDS, links as policy_links, policy_kinds, policy_path
 from ..services.render import render_site_html
@@ -299,15 +302,19 @@ async def invalidate_render_cache(site_id) -> None:
     _host_cache.clear()
 
 
-def _site_dict(site, policies=()) -> dict:
+def _site_dict(site, policies=(), magazine=None) -> dict:
     """`policies` are the kinds the store published (services/policies.py):
-    linked from the footer and the bag."""
+    linked from the footer and the bag. `magazine` is the site's live
+    magazine (services/magazine): a header link to it, and on a magazine-only
+    site (`front_at_root`) no page claims `/`."""
     return {
         "name": site["name"],
         "slug": site["slug"],
         "theme_config": loads(site["theme_config"]),
         "meta_config": loads(site["meta_config"]),
         "policies": policy_links(policies),
+        "magazine_nav": nav_entry(magazine),
+        "front_at_root": bool(magazine and magazine.get("front_at_root")),
     }
 
 
@@ -341,6 +348,14 @@ async def _render(request: Request, page_slug: str | None) -> HTMLResponse:
             cached = await cache_get(redis, cache_key)
             if isinstance(cached, str):
                 return HTMLResponse(cached, headers=tenant_security_headers())
+
+        magazine = await live_magazine(conn, site)
+        if page_slug is None and magazine and magazine["front_at_root"]:
+            # A magazine-only site: `/` is the magazine's front, cached as home.
+            html = await _front_html(conn, site, magazine, page=1, host=host)
+            if redis:
+                await cache_set(redis, cache_key, html, ttl=_RENDER_TTL)
+            return HTMLResponse(html, headers=tenant_security_headers())
 
         nav_rows = await conn.fetch(
             "SELECT title, slug FROM cappe_pages "
@@ -377,7 +392,7 @@ async def _render(request: Request, page_slug: str | None) -> HTMLResponse:
 
     locations = [{**dict(r), "id": str(r["id"]), "hours": loads_list(r["hours"])} for r in loc_rows]
     nav = [{"slug": r["slug"], "title": r["title"]} for r in nav_rows]
-    html = render_site_html(_site_dict(site, kinds), _page_dict(page), nav, locations=locations)
+    html = render_site_html(_site_dict(site, kinds, magazine), _page_dict(page), nav, locations=locations)
     if redis:
         await cache_set(redis, cache_key, html, ttl=_RENDER_TTL)
     return HTMLResponse(html, headers=tenant_security_headers())
@@ -385,6 +400,12 @@ async def _render(request: Request, page_slug: str | None) -> HTMLResponse:
 
 @router.get("/", response_class=HTMLResponse)
 async def render_home(request: Request):
+    page = _page_number(request)
+    if page > 1:
+        # Only a magazine-only site's front pages; any other home ignores it.
+        response = await _magazine_front(request, page, at_root=True)
+        if response is not None:
+            return response
     return await _render(request, None)
 
 
@@ -472,9 +493,10 @@ async def product_page(product_slug: str, request: Request):
         )
         back_href, back_label = await _back_link(conn, site["id"], nav)
         kinds = await policy_kinds(conn, site["id"])
+        magazine = await live_magazine(conn, site)
     pct = best_discount_percent(discounts, kind="product", target_id=str(product["id"]), on_date=today)
     html = render_product_page(
-        _site_dict(site, kinds), nav, dict(product), images=images, variants=variants,
+        _site_dict(site, kinds, magazine), nav, dict(product), images=images, variants=variants,
         price_cents=apply_discount_cents(product["price_cents"], pct) if pct else product["price_cents"],
         discount_percent=pct, origin=site_public_origin(site) or f"https://{_norm_host(host)}",
         rating=dict(rating) if rating else None, back_href=back_href, back_label=back_label,
@@ -515,7 +537,8 @@ async def catalog_page(request: Request):
             return _not_found_html("Site not found")
         products = await _sellable_products(conn, site)
         kinds = await policy_kinds(conn, site["id"])
-    html = render_catalog_page(_site_dict(site, kinds), nav, [dict(r) for r in products],
+        magazine = await live_magazine(conn, site)
+    html = render_catalog_page(_site_dict(site, kinds, magazine), nav, [dict(r) for r in products],
                                origin=site_public_origin(site) or f"https://{_norm_host(host)}")
     if redis:
         await cache_set(redis, cache_key, html, ttl=_RENDER_TTL)
@@ -547,15 +570,169 @@ async def policy_page(kind: str, request: Request):
         rows = await conn.fetch(
             "SELECT kind, body, updated_at FROM cappe_site_policies WHERE site_id = $1", site["id"],
         )
+        magazine = await live_magazine(conn, site)
     row = next((r for r in rows if r["kind"] == kind), None)
     if row is None:
         return _not_found_html("Page not found")
     kinds = [r["kind"] for r in rows]
-    html = render_policy_page(_site_dict(site, kinds), nav, kind, row["body"], updated_at=row["updated_at"],
+    html = render_policy_page(_site_dict(site, kinds, magazine), nav, kind, row["body"], updated_at=row["updated_at"],
                               origin=site_public_origin(site) or f"https://{_norm_host(host)}")
     if redis:
         await cache_set(redis, cache_key, html, ttl=_RENDER_TTL)
     return HTMLResponse(html, headers=tenant_security_headers())
+
+
+# --- The magazine: front, stories, topics, feed (services/magazine) -----------
+
+_STORY_SLUG = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+
+
+def _page_number(request: Request) -> int:
+    try:
+        page = int(request.query_params.get("page") or 1)
+    except ValueError:
+        return 1
+    return page if 1 <= page <= mag_pages.MAX_PAGE else 1
+
+
+def _origin(site, host: str | None) -> str:
+    return site_public_origin(site) or f"https://{_norm_host(host)}"
+
+
+async def _front_html(conn, site, magazine: dict, *, page: int, host: str | None) -> str:
+    size = mag_pages.PAGE_SIZE
+    lead = None
+    if page == 1:
+        if magazine.get("cover_post_id"):
+            lead = await mag_reader.live_story(conn, site["id"], post_id=magazine["cover_post_id"])
+        if lead is None:
+            latest = await mag_reader.live_stories(conn, site["id"], limit=1)
+            lead = latest[0] if latest else None
+    exclude = lead["id"] if lead else magazine.get("cover_post_id")
+    posts = await mag_reader.live_stories(conn, site["id"], exclude=exclude, limit=size + 1,
+                                          offset=(page - 1) * size)
+    has_more = len(posts) > size
+    posts = posts[:size]
+    covers = await mag_reader.covers(conn, site["id"], posts + ([lead] if lead else []))
+    topics = await mag_reader.topics_in_use(conn, site["id"], list(magazine.get("topics") or []))
+    nav = await _nav(conn, site["id"])
+    kinds = await policy_kinds(conn, site["id"])
+    return mag_pages.render_front(
+        _site_dict(site, kinds, magazine), nav, magazine, lead=lead, posts=posts, covers=covers, topics=topics,
+        page=page, has_more=has_more, origin=_origin(site, host),
+    )
+
+
+async def _cached_magazine_page(request: Request, key: str, build, *, media_type: str = "text/html"):
+    """Resolve the tenant and its live magazine, then serve `build(conn, site,
+    magazine, host)` from the render cache. 404 when the site has no live
+    magazine (off, or its plan doesn't include one)."""
+    host = request.headers.get("host")
+    if not _is_tenant_host(host):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    redis = get_redis_cache()
+    async with get_connection() as conn:
+        site = await _resolve_published_site(conn, host)
+        if site is None:
+            return _not_found_html("Site not found")
+        cache_key = f"cappe:render:{site['id']}:__mag__:{key}"
+        headers = tenant_security_headers()
+        if redis:
+            cached = await cache_get(redis, cache_key)
+            if isinstance(cached, str):
+                return Response(cached, media_type=media_type, headers=headers)
+        magazine = await live_magazine(conn, site)
+        if magazine is None:
+            return _not_found_html("Page not found")
+        built = await build(conn, site, magazine, host)
+    if isinstance(built, Response):
+        return built
+    if built is None:
+        return _not_found_html("Page not found")
+    if redis:
+        await cache_set(redis, cache_key, built, ttl=_RENDER_TTL)
+    return Response(built, media_type=media_type, headers=headers)
+
+
+async def _magazine_front(request: Request, page: int, *, at_root: bool):
+    """`/magazine` (and `/?page=N` on a magazine-only site). A magazine-only
+    site's front lives at `/`, so `/magazine` redirects there; `/` on any other
+    site returns None for the ordinary home page."""
+    async def build(conn, site, magazine, host):
+        if magazine["front_at_root"] != at_root:
+            if at_root:
+                return None
+            target = "/" if page == 1 else f"/?page={page}"
+            return RedirectResponse(target, status_code=status.HTTP_308_PERMANENT_REDIRECT)
+        return await _front_html(conn, site, magazine, page=page, host=host)
+
+    response = await _cached_magazine_page(request, f"front:{int(at_root)}:{page}", build)
+    if at_root and response.status_code == status.HTTP_404_NOT_FOUND:
+        return None
+    return response
+
+
+@router.get("/magazine", response_class=HTMLResponse)
+async def magazine_front(request: Request):
+    return await _magazine_front(request, _page_number(request), at_root=False)
+
+
+@router.get("/stories/{story_slug}", response_class=HTMLResponse)
+async def story_page(story_slug: str, request: Request):
+    """A story (services/magazine/pages.py). A paid story's page holds only its
+    free part; the rest is fetched by a subscriber's browser, never cached."""
+    if len(story_slug) > 160 or not _STORY_SLUG.match(story_slug):
+        return _not_found_html("Story not found")
+
+    async def build(conn, site, magazine, host):
+        post = await mag_reader.live_story(conn, site["id"], slug=story_slug)
+        if post is None:
+            return None
+        assets = await mag_reader.story_assets(conn, site["id"], post)
+        more = await mag_reader.live_stories(conn, site["id"], exclude=post["id"], limit=3)
+        more_covers = await mag_reader.covers(conn, site["id"], more)
+        nav = await _nav(conn, site["id"])
+        kinds = await policy_kinds(conn, site["id"])
+        return mag_pages.render_story(_site_dict(site, kinds, magazine), nav, magazine, post, assets, more=more,
+                                      more_covers=more_covers, origin=_origin(site, host))
+
+    return await _cached_magazine_page(request, f"story:{story_slug}", build)
+
+
+@router.get("/topics/{topic}", response_class=HTMLResponse)
+async def topic_page(topic: str, request: Request):
+    if topic not in TOPICS:
+        return _not_found_html("Page not found")
+    page = _page_number(request)
+
+    async def build(conn, site, magazine, host):
+        size = mag_pages.PAGE_SIZE
+        posts = await mag_reader.live_stories(conn, site["id"], topic=topic, limit=size + 1, offset=(page - 1) * size)
+        if not posts:
+            return None
+        covers = await mag_reader.covers(conn, site["id"], posts[:size])
+        topics = await mag_reader.topics_in_use(conn, site["id"], list(magazine.get("topics") or []))
+        nav = await _nav(conn, site["id"])
+        kinds = await policy_kinds(conn, site["id"])
+        return mag_pages.render_topic(_site_dict(site, kinds, magazine), nav, magazine, topic, posts=posts[:size],
+                                      covers=covers, topics=topics, page=page, has_more=len(posts) > size,
+                                      origin=_origin(site, host))
+
+    return await _cached_magazine_page(request, f"topic:{topic}:{page}", build)
+
+
+@router.get("/feed.xml")
+async def magazine_feed(request: Request):
+    """RSS for the magazine: the latest 20 stories."""
+    async def build(conn, site, magazine, host):
+        posts = await mag_reader.live_stories(conn, site["id"], limit=20)
+        assets: dict = {}
+        for post in posts:
+            if post.get("access") != "paid":
+                assets.update(await mag_reader.story_assets(conn, site["id"], post))
+        return mag_pages.render_feed(magazine, posts, assets, origin=_origin(site, host))
+
+    return await _cached_magazine_page(request, "feed", build, media_type="application/rss+xml")
 
 
 def _robots(origin: str) -> str:
@@ -612,13 +789,26 @@ async def tenant_seo(request: Request, kind: str):
         policies = await conn.fetch(
             "SELECT kind, updated_at FROM cappe_site_policies WHERE site_id = $1", site["id"],
         )
+        magazine = await live_magazine(conn, site)
+        stories = await conn.fetch(
+            "SELECT slug, topic, updated_at FROM cappe_posts WHERE site_id = $1 AND status = 'published' "
+            "AND hidden_at IS NULL ORDER BY published_at DESC NULLS LAST LIMIT 5000",
+            site["id"],
+        ) if magazine else []
 
     def day(ts):
         return ts.strftime("%Y-%m-%d") if ts else None
 
-    home = home_slug(pages)
+    front_at_root = bool(magazine and magazine["front_at_root"])
+    home = "" if front_at_root else home_slug(pages)
     urls = [(f"{origin}/" if r["slug"] == home else f"{origin}/p/{r['slug']}", day(r["updated_at"]))
             for r in pages]
+    if magazine:
+        newest = day(max((r["updated_at"] for r in stories), default=None))
+        urls.insert(0, (f"{origin}{mag_pages.front_path(magazine)}", newest))
+        urls += [(f"{origin}{mag_pages.story_path(r['slug'])}", day(r["updated_at"])) for r in stories]
+        urls += [(f"{origin}{mag_pages.topic_path(t)}", None)
+                 for t in sorted({r["topic"] for r in stories if r["topic"] in TOPICS})]
     if products:
         urls.append((f"{origin}/shop", day(max(r["updated_at"] for r in products))))
         urls += [(f"{origin}{product_path(r['slug'])}", day(r["updated_at"])) for r in products]

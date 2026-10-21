@@ -230,7 +230,9 @@ def render_site_html(site: dict, page: dict, nav_pages: list[dict], preview: boo
     t = _tokens(site.get("theme_config"))
     c = t["colors"]
     slug = site.get("slug") or ""
-    home = home_slug(nav_pages)
+    # A magazine-only site's `/` is the magazine front (`front_at_root`), so no
+    # page is the home page there: every page links to /p/<slug>.
+    home = "" if site.get("front_at_root") else home_slug(nav_pages)
     locations = locations or []
     # Default location (default-first ordered) drives the global hours/tz badge;
     # the booking widget fetches /locations itself for the per-location picker.
@@ -270,9 +272,13 @@ def render_site_html(site: dict, page: dict, nav_pages: list[dict], preview: boo
         _render_block(b, t, i, editable, block_anchors) for i, b in enumerate(blocks)
     ) or _text({"body": page.get("title")}, t))
 
+    # A page links to `/` or `/p/<slug>`; an entry with its own `href` (the
+    # magazine, `site["magazine_nav"]`) links there.
+    nav_items = list(nav_pages) + ([site["magazine_nav"]] if site.get("magazine_nav") else [])
     nav_links = "".join(
-        f'<a href="{"/" if p["slug"] == home else "/p/" + _esc(p["slug"])}">{_esc(p["title"])}</a>'
-        for p in nav_pages)
+        f'<a href="{_esc(_safe_href(p["href"])) if p.get("href") else ("/" if p["slug"] == home else "/p/" + _esc(p["slug"]))}">'
+        f'{_esc(p["title"])}</a>'
+        for p in nav_items)
     header_cls = "cz-header center" if t["navStyle"] == "centered" else "cz-header"
 
     theme_vars = (

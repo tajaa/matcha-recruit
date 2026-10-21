@@ -23,6 +23,10 @@ Website-builder frontend for the consumer brand **Gummfit**, host-routed on gumm
 - `magazine/` — photo-journalism magazines (server spec: `server/app/cappe/CLAUDE.md` §Magazines).
   `library/LibraryPanel.tsx` is the picture library with alt text, captions and credits (the
   Library page at `sites/:siteId/library`; pass `onPick` to use it as a picker).
+  `stories/Stories.tsx` (the wall of covers at `sites/:siteId/stories`; `/blog` redirects here),
+  `editor/StoryEditor.tsx` + `editor/BlockEditor.tsx` (blocks, a library picker, a live preview
+  iframe fed by `POST /stories/preview`), `settings/MagazineSettings.tsx`. `storyBlocks.ts` mirrors
+  the server's block/layout lists and a server test keeps them equal.
 
 ## Backend pairing
 

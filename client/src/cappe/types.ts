@@ -1063,6 +1063,60 @@ export type CappePost = {
   published_at: string | null
   created_at: string
   updated_at: string
+  // A post is also a magazine story (cappemag02): `blocks` keeps its words and
+  // pictures in `content`; `markdown` is a plain post (the iOS app's).
+  format: 'markdown' | 'blocks'
+  content: StoryContent | null
+  kicker: string | null
+  topic: string | null
+  layout: StoryLayout
+  access: 'free' | 'paid'
+  cover_asset_id: string | null
+  byline: string | null
+  word_count: number
+  reading_minutes: number
+  hidden: boolean
+}
+
+// ── Magazine stories (services/magazine/story_schema.py) ─────────────────────
+export type StoryLayout = 'standard' | 'cover_story' | 'photo_essay' | 'interview' | 'dispatch' | 'lookbook'
+
+export type StoryBlock =
+  | { type: 'cover'; asset_id: string | null; style: 'overlay' | 'stacked' | 'split'; tone: 'light' | 'dark'; focal: { x: number; y: number } }
+  | { type: 'text'; md: string; dropcap: boolean; columns: 1 | 2 }
+  | { type: 'photo'; asset_id: string | null; caption: string; size: 'column' | 'wide' | 'full' }
+  | { type: 'photos'; layout: 'pair' | 'trio' | 'grid' | 'mosaic'; items: { asset_id: string | null; caption: string }[] }
+  | { type: 'quote'; text: string; attribution: string; style: 'big' | 'side' }
+  | { type: 'sidebar'; title: string; md: string }
+  | { type: 'qa'; items: { q: string; a_md: string }[] }
+  | { type: 'divider' }
+  | { type: 'paywall' }
+
+export type StoryContent = { blocks: StoryBlock[] }
+
+export type CappeStoryOptions = {
+  layouts: { key: StoryLayout; label: string; content: StoryContent }[]
+  topics: { key: string; label: string }[]
+}
+
+export type CappeMagazine = {
+  site_id: string
+  enabled: boolean
+  name: string
+  tagline: string | null
+  about: string | null
+  masthead_style: 'classic' | 'literary' | 'modern' | 'elegant' | 'display'
+  accent: string | null
+  topics: string[]
+  front_at_root: boolean
+  nav_label: string
+  cover_post_id: string | null
+  follow_enabled: boolean
+  created_at: string | null
+  updated_at: string | null
+  /** Pages render now: turned on AND the plan includes a magazine. */
+  live: boolean
+  plan_includes_magazine: boolean
 }
 
 // A saved reusable look: kind='theme' → a theme_config style subset;

@@ -297,6 +297,30 @@ What is built so far:
 - **The library upload (`POST /sites/{id}/assets/upload`) needs `rights_attested`** ("I took this
   or may publish it"), takes up to 15 MB, stores the sizes under `cappe/library`, and its row is the
   point of the request (not best-effort, unlike the editor upload's catalog row).
+- **A story is a `cappe_posts` row with `format='blocks'`** (`cappemag02`): its words and pictures are
+  `content = {"blocks": [...]}` (vocabulary and limits in `services/magazine/story_schema.py`; one
+  cover, first; one paywall; pictures by library `asset_id` only, never a URL). Its `body` is DERIVED
+  from the blocks on every save so the iOS app (which reads/writes only the old fields) always has
+  text to show; an app edit that changes a story's `body` is 409 `edit_on_web`. A plain post
+  (`format='markdown'`) is untouched and renders as one text block. `cappe_post_assets` records
+  which pictures a story uses, so the library refuses to delete one (409).
+- **Stories render server-side on the tenant host** (`routes/render.py` → `services/magazine/pages.py`
+  through `render_site_html(body_override=…)`, their own `mz-` CSS in `render/assets/magazine.css`,
+  not the page-block registry): `/magazine` (`?page=`), `/stories/<slug>`, `/topics/<key>`,
+  `/feed.xml`, plus sitemap entries and a header link. A magazine-only site (`front_at_root`) serves
+  its front at `/` and `/magazine` 308s there. Cache keys `cappe:render:{site}:__mag__:*`, dropped
+  by every post/magazine write (`routes/blog.py` now invalidates on every write).
+- **The pages exist only while the magazine is live** (`magazines.live_magazine`: turned on AND the
+  owner's plan has the `magazine` feature — business, pro, creator, writer; `_legacy_fallback` too).
+  The plan is checked at render, never at save, so losing it takes pages down without touching
+  anything the owner wrote. A hidden story (`hidden_at`) is a 404 everywhere a reader can reach.
+- **A paid story's words are never in the server-rendered page, the cache, the feed or the public
+  JSON** (`story_render.split_at_paywall`; `routes/public/blog.py` nulls `body`/`content`). Writing
+  `access='paid'` is refused until reader subscriptions ship (PR 6).
+- **Rich text is constrained Markdown** (`richtext.render_md`: `<` escaped before Markdown, then our
+  own `html.parser` allowlist of p/em/strong/a/h2/h3/lists/blockquote — not bleach, which several
+  test modules stub; h1→h2; links http(s)/mailto with `rel="nofollow ugc noopener"`). Credits come
+  from the library row, never the block.
 
 ## Site templates (`services/site_templates/`)
 

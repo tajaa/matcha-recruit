@@ -220,6 +220,12 @@ class CappeClientImportResult(BaseModel):
 # Blog
 # ===========================================================================
 
+# A post is also a magazine story (cappemag02). Every story field is optional
+# and every old field keeps its shape: the iOS app creates and edits posts with
+# only title/slug/excerpt/body/cover_image_url/status.
+StoryLayout = Literal["standard", "cover_story", "photo_essay", "interview", "dispatch", "lookbook"]
+
+
 class CappePostCreate(BaseModel):
     title: str = Field(min_length=1, max_length=255)
     slug: Optional[str] = Field(default=None, max_length=160)
@@ -227,6 +233,16 @@ class CappePostCreate(BaseModel):
     body: Optional[str] = None
     cover_image_url: Optional[str] = None
     status: Literal["draft", "published", "archived"] = "draft"
+    # Story fields (services/magazine). `content` is `{"blocks": [...]}`;
+    # sending it (or format="blocks") makes the post a block story.
+    format: Optional[Literal["markdown", "blocks"]] = None
+    content: Optional[dict[str, Any]] = None
+    kicker: Optional[str] = Field(default=None, max_length=60)
+    topic: Optional[str] = Field(default=None, max_length=40)
+    layout: Optional[StoryLayout] = None
+    access: Optional[Literal["free", "paid"]] = None
+    cover_asset_id: Optional[UUID] = None
+    byline: Optional[str] = Field(default=None, max_length=160)
 
 
 class CappePostUpdate(BaseModel):
@@ -236,6 +252,14 @@ class CappePostUpdate(BaseModel):
     body: Optional[str] = None
     cover_image_url: Optional[str] = None
     status: Optional[Literal["draft", "published", "archived"]] = None
+    format: Optional[Literal["markdown", "blocks"]] = None
+    content: Optional[dict[str, Any]] = None
+    kicker: Optional[str] = Field(default=None, max_length=60)
+    topic: Optional[str] = Field(default=None, max_length=40)
+    layout: Optional[StoryLayout] = None
+    access: Optional[Literal["free", "paid"]] = None
+    cover_asset_id: Optional[UUID] = None
+    byline: Optional[str] = Field(default=None, max_length=160)
 
 
 class CappePost(BaseModel):
@@ -250,6 +274,17 @@ class CappePost(BaseModel):
     published_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
+    format: str = "markdown"
+    content: Optional[dict[str, Any]] = None
+    kicker: Optional[str] = None
+    topic: Optional[str] = None
+    layout: str = "standard"
+    access: str = "free"
+    cover_asset_id: Optional[UUID] = None
+    byline: Optional[str] = None
+    word_count: int = 0
+    reading_minutes: int = 0
+    hidden: bool = False
 
 
 # ===========================================================================
@@ -328,6 +363,7 @@ __all__ = [
     "CappeClientCreate",
     "CappeClientImportError",
     "CappeClientImportResult",
+    "StoryLayout",
     "CappePostCreate",
     "CappePostUpdate",
     "CappePost",

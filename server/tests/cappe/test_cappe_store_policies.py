@@ -156,7 +156,7 @@ SITE_ROW = {"id": SITE, "name": "Bloom", "slug": "bloom", "subdomain": "bloom", 
 
 def _request(path, host="bloom.gummfit.com"):
     return Request({"type": "http", "method": "GET", "path": path, "client": ("127.0.0.1", 1),
-                    "headers": [(b"host", host.encode())]})
+                    "query_string": b"", "headers": [(b"host", host.encode())]})
 
 
 def _wire(monkeypatch, *, policy=None, kinds=("refund", "terms")):
