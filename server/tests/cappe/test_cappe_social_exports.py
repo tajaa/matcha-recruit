@@ -24,7 +24,9 @@ os.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost/test")
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-cappe")
 
 import pytest  # noqa: E402
+import httpx  # noqa: E402
 from celery.exceptions import SoftTimeLimitExceeded  # noqa: E402
+from google.genai import errors as genai_errors  # noqa: E402
 from google.genai import types as genai_types  # noqa: E402
 
 from app.cappe.dependencies import require_cappe_account  # noqa: E402
@@ -320,13 +322,32 @@ async def test_transcribe_says_not_now_without_a_key_or_with_a_full_bucket(monke
 
 @pytest.mark.asyncio
 async def test_transcribe_failures_are_errors_not_crashes(monkeypatch):
-    _gemini(monkeypatch, FakeModels(error=RuntimeError("500")))
+    _gemini(monkeypatch, FakeModels(error=RuntimeError("boom")))
+    with pytest.raises(transcribe.TranscribeError):
+        await transcribe.transcribe(b"x")
+    _gemini(monkeypatch, FakeModels(error=genai_errors.ClientError(400, {"error": {"message": "bad audio"}}, None)))
     with pytest.raises(transcribe.TranscribeError):
         await transcribe.transcribe(b"x")
     _gemini(monkeypatch, FakeModels(response=None, delay=0.2))
     monkeypatch.setattr(transcribe, "CALL_TIMEOUT", 0.01)
     with pytest.raises(transcribe.TranscribeError):
         await transcribe.transcribe(b"x")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error", [
+    genai_errors.ClientError(429, {"error": {"message": "quota"}}, None),
+    genai_errors.ServerError(503, {"error": {"message": "overloaded"}}, None),
+    httpx.ConnectError("refused"),
+])
+async def test_a_busy_or_unreachable_gemini_is_not_now_rather_than_no_words(monkeypatch, error):
+    """A 429, a 5xx or a dead connection is tried again later; it must never
+    stamp the video as having no words."""
+    _gemini(monkeypatch, FakeModels(error=error))
+    with pytest.raises(transcribe.TranscribeUnavailable):
+        await transcribe.transcribe(b"x")
+    assert transcribe.passing(error) and not transcribe.passing(ValueError("x"))
+    assert not transcribe.passing(genai_errors.ClientError("weird", {"error": {}}, None))
 
 
 @pytest.mark.asyncio
@@ -383,6 +404,15 @@ def test_next_step_walks_probe_words_cuts_captions_done():
     assert export_store.next_step(quiet, asset()).kind == "done"
     silent = export(facts=FACTS, targets={"tiktok": V_CAP}, outputs={V_CAP: made(V_CAP)})
     assert export_store.next_step(silent, asset(transcript={"words": [], "reason": "no_audio"})).kind == "done"
+    # A passing failure on the video is tried again by a later export — but
+    # not by one that already gave up on the words.
+    again = export(facts=FACTS, targets={"tiktok": V_CAP})
+    for reason in export_store.TRANSIENT_NO_WORDS:
+        assert export_store.next_step(again, asset(transcript={"words": [], "reason": reason})).kind == "transcribe"
+    gave_up = export(facts=FACTS, targets={"tiktok": V_CAP}, warnings=[export_store.CAPTIONS_UNAVAILABLE])
+    assert export_store.next_step(gave_up, asset()) == export_store.Step("encode", V_CAP)
+    assert export_store.next_step(gave_up, asset(transcript={"words": [], "reason": "failed"})) == export_store.Step(
+        "encode", V_CAP)
     assert export_store.Step("encode", V_CAP).as_json() == {"kind": "encode", "recipe": V_CAP}
 
 
@@ -504,6 +534,7 @@ class Steps:
             return path
         monkeypatch.setattr(render, "encode", encode)
         monkeypatch.setattr(render, "has_filter", lambda name: True)
+        monkeypatch.setattr(transcribe, "configured", lambda: True)
 
     def _rec(self, name):
         async def record(*args, **kw):
@@ -545,7 +576,9 @@ async def test_listening_keeps_the_words_on_the_video(monkeypatch):
 @pytest.mark.parametrize("has_audio,heard,error,attempts,warning,reason,next_run", [
     (False, None, None, 1, media_task.NO_AUDIO, "no_audio", 0),
     (True, transcribe.Transcript(words=[], text="mm"), None, 1, media_task.NO_WORDS, "no_timings", 0),
-    (True, None, transcribe.TranscribeError("bad"), 1, media_task.NO_WORDS, "no_timings", 0),
+    # Google refusing the audio is not "the words were unclear": this export
+    # goes on without captions, and a later one may try again.
+    (True, None, transcribe.TranscribeError("bad"), 1, media_task.NO_CAPTIONS_NOW, "failed", 0),
     (True, None, transcribe.TranscribeUnavailable("busy"), 1, None, None, media_task.TRANSCRIBE_RETRY_SECONDS),
     (True, None, transcribe.TranscribeUnavailable("busy"), media_task.TRANSCRIBE_MAX_RUNS,
      media_task.NO_CAPTIONS_NOW, "unavailable", 0),
@@ -559,6 +592,20 @@ async def test_when_the_words_cant_be_had(monkeypatch, has_audio, heard, error, 
     assert out["next"] == next_run
     assert [w[1] for w in steps.get("add_warning")] == ([warning] if warning else [])
     assert [t[1]["reason"] for t in steps.get("record_transcript")] == ([reason] if reason else [])
+
+
+@pytest.mark.asyncio
+async def test_without_a_gemini_key_the_files_dont_wait(monkeypatch):
+    """No key is a setting, not a passing state: no five-minute retries, and
+    nothing on the video, so an export made once a key exists listens."""
+    steps = Steps(monkeypatch, export(facts=FACTS, targets={"tiktok": V_CAP}))
+    monkeypatch.setattr(transcribe, "configured", lambda: False)
+    listened = AsyncMock()
+    monkeypatch.setattr(transcribe, "extract_audio", listened)
+    out = await media_task.prepare_step(str(EXPORT))
+    assert out["step"] == "transcribe" and out["next"] == 0 and not listened.await_count
+    assert [w[1] for w in steps.get("add_warning")] == [media_task.NO_CAPTIONS_NOW]
+    assert steps.get("record_transcript") == []
 
 
 @pytest.mark.asyncio

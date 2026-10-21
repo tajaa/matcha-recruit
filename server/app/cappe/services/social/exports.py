@@ -32,6 +32,11 @@ COLUMNS = ("id, site_id, account_id, asset_id, status, platforms, captions, fact
 OPEN = ("queued", "working")
 # One step per run; a healthy export of two cuts with captions takes five.
 MAX_RUNS = 12
+# The note an export carries once it has given up on the words (Gemini busy,
+# not set up, or the step failed). The video keeps no lasting "no words" from
+# that — `TRANSIENT_NO_WORDS` — so a later export tries again.
+CAPTIONS_UNAVAILABLE = "Captions couldn't be made right now, so the files have none."
+TRANSIENT_NO_WORDS = ("unavailable", "failed")
 
 
 def _row(row) -> Optional[dict[str, Any]]:
@@ -62,11 +67,23 @@ def _words(asset: dict[str, Any]) -> list:
     return list(((asset.get("transcript") or {}).get("words")) or [])
 
 
+def wants_words(export: dict[str, Any], asset: dict[str, Any]) -> bool:
+    """Whether the next run should listen for the words: captions were asked
+    for, this export hasn't given up on them, and the video has none yet (or
+    only a passing failure's worth)."""
+    if not export.get("captions") or CAPTIONS_UNAVAILABLE in (export.get("warnings") or []):
+        return False
+    transcript = asset.get("transcript")
+    if transcript is None:
+        return True
+    return not transcript.get("words") and transcript.get("reason") in TRANSIENT_NO_WORDS
+
+
 def next_step(export: dict[str, Any], asset: dict[str, Any]) -> Step:
     """The one thing the next run does."""
     if not export.get("facts") or not export.get("targets"):
         return Step("probe")
-    if export.get("captions") and asset.get("transcript") is None:
+    if wants_words(export, asset):
         return Step("transcribe")
     outputs = export.get("outputs") or {}
     for key in dict.fromkeys(export["targets"].values()):
@@ -297,7 +314,8 @@ def public_view(export: dict[str, Any], asset: Optional[dict[str, Any]]) -> dict
 
 
 __all__ = [
-    "OPEN", "MAX_RUNS", "Step", "next_step", "rollup", "create", "get", "get_by_id", "list_for_site", "load_many",
+    "OPEN", "MAX_RUNS", "CAPTIONS_UNAVAILABLE", "TRANSIENT_NO_WORDS", "Step", "wants_words", "next_step", "rollup",
+    "create", "get", "get_by_id", "list_for_site", "load_many",
     "claim", "set_step", "record_facts", "record_output", "record_srt", "add_warning", "finish", "requeue",
     "delete", "stuck", "expired", "mark_deleted", "delete_files", "public_view",
 ]

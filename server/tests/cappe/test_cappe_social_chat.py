@@ -675,6 +675,15 @@ def _video_model(**post):
     ("cut to the chase and post it", False, True, False, set(), None),
     ("download our app! post this tomorrow", False, True, False, set(), None),
     ("new shorts just dropped, post them", False, True, False, set(), None),
+    # "prepare" on its own is getting ready, and "caption" is the post's text.
+    ("prepare a post for friday with a fun caption", False, True, False, set(), None),
+    ("prepare a post for instagram", False, True, False, {"instagram"}, None),
+    ("prepare captions for these and post them tomorrow", False, True, False, set(), None),
+    ("prepare it for tiktok with captions", True, False, False, {"tiktok"}, True),
+    ("prepare the video for youtube", True, False, False, {"youtube"}, None),
+    ("prepare files for all three", True, False, True, set(), None),
+    ("prepare a tiktok version with captions and post it to instagram at 2", True, True, False,
+     {"instagram", "tiktok"}, None),
     ("", False, False, False, set(), None),
 ])
 def test_intent_reads_what_the_owner_asked_for(text, prepare, post, everywhere, platforms, captions):

@@ -21,8 +21,12 @@ _PLATFORMS = {
 _PLATFORM_NAMES = "|".join(_PLATFORMS.values())
 
 _PREPARE = re.compile(
-    r"\b(prepare|export|downloadable|resize|re-?size|reformat"
+    r"\b(export|downloadable|resize|re-?size|reformat"
     r"|(?:for|to) download|download (?:it|them|the (?:files?|videos?|versions?|cuts?)|versions?|files?|copies|cuts?)"
+    # "prepare" on its own is any kind of getting ready ("prepare a post for
+    # Friday"); it means files when it has a thing to cut or a place to fit.
+    r"|prepare (?:it|this|these|them|that|those|the (?:videos?|clips?)|(?:a |the |some )?(?:files?|versions?|cuts?|exports?|downloads?))"
+    rf"|prepare (?!(?:an? |the |my |our |some )?(?:posts?|captions?|stor(?:y|ies))\b)(?:\w+ ){{0,3}}?(?:for|to fit) (?:{_PLATFORM_NAMES}|all|every|each|download)"
     r"|cut (?:it|this|these|them|that|those|the (?:video|clip)s?) (?:for|to|into)"
     rf"|cut (?:for|to fit) (?:{_PLATFORM_NAMES}|all|every|each)"
     rf"|(?:versions?|files?|formats?|cuts?|copies) (?:for|of it for|to post on|to upload to) (?:{_PLATFORM_NAMES}|all|every|each)"
@@ -67,16 +71,19 @@ def parse(text: str) -> Ask:
     words = text or ""
     platforms = frozenset(name for name, pattern in _PLATFORMS.items()
                           if re.search(rf"\b(?:{pattern})\b", words, re.I))
-    captions: bool | None = None
-    if _NO_CAPTIONS.search(words):
-        captions = False
-    elif _CAPTIONS.search(words) and (_ON_VIDEO.search(words) or _PREPARE.search(words)):
-        captions = True
     prepare = bool(_PREPARE.search(words))
     post = bool(_POST.search(words))
     # "post it myself" asks for files, not a post.
     if post and re.search(r"\b(?:post|upload) (?:it |them )?(?:myself|manually|by hand)\b", words, re.I):
         post = False
+    captions: bool | None = None
+    if _NO_CAPTIONS.search(words):
+        captions = False
+    # "captions" alone is the post's text ("prepare a post with a fun
+    # caption"); the words go on the video when the owner says so, or when
+    # nothing is posted and only files are being made.
+    elif _CAPTIONS.search(words) and (_ON_VIDEO.search(words) or (prepare and not post)):
+        captions = True
     if captions and not prepare and not post:
         prepare = True  # "make sure they have word-for-word captions" is about the files
     return Ask(prepare=prepare, post=post, everywhere=bool(_ALL.search(words)), platforms=platforms,

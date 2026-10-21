@@ -58,7 +58,7 @@ TRANSCRIBE_RETRY_SECONDS = 300
 TRANSCRIBE_MAX_RUNS = 6
 NO_AUDIO = "That video has no sound, so there are no captions."
 NO_WORDS = "We couldn't make out the words clearly enough for captions."
-NO_CAPTIONS_NOW = "Captions couldn't be made right now, so the files have none."
+NO_CAPTIONS_NOW = export_store.CAPTIONS_UNAVAILABLE
 NO_LIBASS = "Captions aren't available on this server yet, so the files have none."
 TRIMMED = "Only the first 3 minutes are in the files."
 _EXPORT_FAILURE = "We couldn't make that file. Try preparing the video again."
@@ -173,10 +173,17 @@ def _facts(export: dict) -> render.VideoFacts:
 
 async def _listen(conn, export: dict, asset: dict, source: str, facts: render.VideoFacts, work: Path) -> Optional[int]:
     """The clip's words, kept on the video. Returns a delay when Gemini
-    said not now."""
+    said not now. A video with no sound, or whose words can't be made out,
+    keeps that for good; Gemini busy, missing or failing is noted on this
+    export only, so a later one tries again."""
     if not facts.has_audio:
         await asset_store.record_transcript(conn, asset["id"], {"words": [], "reason": "no_audio"})
         await export_store.add_warning(conn, export["id"], NO_AUDIO)
+        return None
+    if not transcribe.configured():
+        # Not a passing state: the files don't wait on a key nobody set.
+        logger.info("cappe social export %s: no Gemini key on this server; files without captions", export["id"])
+        await export_store.add_warning(conn, export["id"], NO_CAPTIONS_NOW)
         return None
     try:
         audio = await transcribe.extract_audio(source, work, max_seconds=presets.MAX_EXPORT_SECONDS)
@@ -188,8 +195,11 @@ async def _listen(conn, export: dict, asset: dict, source: str, facts: render.Vi
         await export_store.add_warning(conn, export["id"], NO_CAPTIONS_NOW)
         await asset_store.record_transcript(conn, asset["id"], {"words": [], "reason": "unavailable"})
         return None
-    except transcribe.TranscribeError:
-        heard = transcribe.Transcript(words=[], text="")
+    except transcribe.TranscribeError as exc:
+        logger.warning("cappe social export %s: no captions: %s", export["id"], exc)
+        await export_store.add_warning(conn, export["id"], NO_CAPTIONS_NOW)
+        await asset_store.record_transcript(conn, asset["id"], {"words": [], "reason": "failed"})
+        return None
     if not heard.words:
         await asset_store.record_transcript(conn, asset["id"], {"words": [], "reason": "no_timings"})
         await export_store.add_warning(conn, export["id"], NO_WORDS)

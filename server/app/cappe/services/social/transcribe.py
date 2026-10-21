@@ -46,7 +46,8 @@ _OFFSET = re.compile(r"\s*(\d+(?:\.\d+)?)\s*(ms|s)?\s*")
 
 
 class TranscribeUnavailable(RuntimeError):
-    """No key on this server, or the bucket is full: try again later."""
+    """No key on this server, the bucket is full, or Google is busy or down:
+    try again later."""
 
 
 class TranscribeError(RuntimeError):
@@ -58,6 +59,29 @@ class Transcript:
     words: list[Word]
     text: str
     language: Optional[str] = None
+
+
+def configured() -> bool:
+    """Whether this server can transcribe at all: a Gemini key, or Vertex."""
+    settings = get_settings()
+    return bool(settings.gemini_api_key or getattr(settings, "use_vertex_ai", False))
+
+
+def passing(exc: BaseException) -> bool:
+    """A failure worth another try later — Google busy (429) or down (5xx),
+    or the connection itself — as against a reply that says the audio can't
+    be used."""
+    from google.genai import errors
+
+    if isinstance(exc, errors.APIError):
+        try:
+            code = int(getattr(exc, "code", 0) or 0)
+        except (TypeError, ValueError):
+            return False
+        return code == 429 or code >= 500
+    import httpx
+
+    return isinstance(exc, httpx.TransportError)
 
 
 def audio_args(source: str, out_path: str, *, max_seconds: float) -> list[str]:
@@ -147,8 +171,7 @@ async def _limit() -> None:
 async def transcribe(audio: bytes) -> Transcript:
     """The words in `audio` (FLAC). Raises TranscribeUnavailable or
     TranscribeError."""
-    settings = get_settings()
-    if not (settings.gemini_api_key or getattr(settings, "use_vertex_ai", False)):
+    if not configured():
         raise TranscribeUnavailable("Captions need a Gemini key on this server")
     await _limit()
     from google.genai import types
@@ -165,6 +188,9 @@ async def transcribe(audio: bytes) -> Transcript:
     except asyncio.TimeoutError:
         raise TranscribeError("Listening to the video took too long.") from None
     except Exception as exc:  # noqa: BLE001 — the SDK raises many shapes
+        if passing(exc):
+            logger.info("cappe social transcribe: Gemini isn't answering (%s); later", type(exc).__name__)
+            raise TranscribeUnavailable(f"Gemini isn't answering right now ({type(exc).__name__})") from None
         logger.warning("cappe social transcribe failed: %s", exc)
         raise TranscribeError("We couldn't listen to that video just now.") from None
     found = _transcriptions(response)
@@ -175,6 +201,6 @@ async def transcribe(audio: bytes) -> Transcript:
 
 
 __all__ = [
-    "MODEL", "TranscribeUnavailable", "TranscribeError", "Transcript", "audio_args", "extract_audio", "offset_ms",
-    "words_from", "transcribe",
+    "MODEL", "TranscribeUnavailable", "TranscribeError", "Transcript", "configured", "passing", "audio_args",
+    "extract_audio", "offset_ms", "words_from", "transcribe",
 ]

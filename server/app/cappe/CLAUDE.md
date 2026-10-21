@@ -390,9 +390,13 @@ now, and answer comments/DMs from an inbox where Claude Haiku 5.5 drafts replies
     presigned GET with `Content-Disposition: attachment; filename="<site>-<clip>-tiktok.mp4"`.
   - **Captions**: the words come from **Gemini 3.5 Transcribe** (`transcribe.py`, the
     `gemini-3.5-transcribe` model with `word_timestamp=True`; Claude doesn't take audio), fed 16 kHz
-    mono FLAC inline, counted in the `gemini` bucket; a full bucket or no key means "try again in
-    5 min" (6 runs, then the files go out without captions). The timed words are kept on the video
-    (`cappe_social_assets.transcript`) so it is transcribed once. `subtitles.py` groups them (≤18
+    mono FLAC inline, counted in the `gemini` bucket; a full bucket, a 429/5xx or a dead
+    connection means "try again in 5 min" (6 runs, then the files go out without captions); no key
+    on the server skips captions at once (`transcribe.configured`). The timed words are kept on the
+    video (`cappe_social_assets.transcript`) so it is transcribed once — except a passing failure
+    (`reason` in `exports.TRANSIENT_NO_WORDS`), which only the export that hit it gives up on
+    (`exports.CAPTIONS_UNAVAILABLE` in its `warnings`); a later export listens again.
+    `subtitles.py` groups them (≤18
     characters / 4 words a line, breaking on pauses and sentence ends) into an ASS file — white
     DejaVu Sans Bold with a black outline, the spoken word lit in Gummfit lime — burned in by
     ffmpeg's `ass` filter after the frame is fitted, and a phrase-level `.srt` for YouTube. The
