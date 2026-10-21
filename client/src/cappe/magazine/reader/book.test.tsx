@@ -109,6 +109,76 @@ describe('wireBook', () => {
   })
 })
 
+const ISSUE = '<div class="mz-reader" data-mz-book data-mz-issue><button class="mz-turn" data-mz-prev hidden></button>'
+  + '<div class="mz-spread"><div class="mz-book"><div class="mz-pages">'
+  + '<div class="mz-issue__face"><a class="mzc__link" href="#mz-s-two">Cover line</a></div>'
+  + '<div class="mz-issue" data-mz-flow><div class="mz-issue__mat" data-mz-skip></div><div class="mz-issue__cover"></div>'
+  + '<div class="mz-issue__contents"><a class="mz-toc" href="#mz-s-one"><span class="mz-toc__no" data-mz-pageno="one"></span>One</a>'
+  + '<a class="mz-toc" href="#mz-s-two"><span class="mz-toc__no" data-mz-pageno="two"></span>Two</a>'
+  + '<a class="mz-toc" href="#mz-s-gone">Gone</a></div>'
+  + '<article id="mz-s-one">One</article><article id="mz-s-two">Two</article></div>'
+  + '<i class="mz-end"></i></div></div></div><button class="mz-turn" data-mz-next hidden></button><p data-mz-folio></p></div>'
+
+/** An issue on a two-page spread 800 wide: the mat is the first column, story
+ *  one starts in column 2 (page 2) and story two in column 5 (page 5). */
+function issueDoc() {
+  const frame = document.createElement('iframe')
+  document.body.appendChild(frame)
+  const doc = frame.contentDocument!
+  doc.body.innerHTML = ISSUE
+  const sized = sizeBook(doc, 800, 3200)
+  const win = doc.defaultView!
+  const real = win.getComputedStyle.bind(win)
+  vi.spyOn(win, 'getComputedStyle').mockImplementation((el: Element) => {
+    const style = real(el)
+    return (el as HTMLElement).classList?.contains('mz-pages') ? { ...style, columnCount: '2' } as CSSStyleDeclaration : style
+  })
+  // Where an element is on screen moves as the pages scroll.
+  const at = (sel: string, x: number) => {
+    const node = doc.querySelector(sel)!
+    node.getClientRects = () => {
+      const left = x - sized.book.scrollLeft
+      return [{ left, right: left + 300, top: 0, bottom: 10, width: 300, height: 10 }] as unknown as DOMRectList
+    }
+  }
+  at('[data-mz-skip]', 0)
+  at('#mz-s-one', 800)
+  at('#mz-s-two', 2000)
+  return { doc, ...sized }
+}
+
+describe('an issue', () => {
+  it('calls the first spread the cover, counts no mat, and numbers the contents', () => {
+    const { doc } = issueDoc()
+    const ctl = wireBook(doc)!
+    expect(ctl.state()).toEqual({ spread: 0, spreads: 4, folio: 'Cover' })
+    ctl.go(1)
+    expect(ctl.state().folio).toBe('Pages 2–3 of 7')
+    expect(Array.from(doc.querySelectorAll('[data-mz-pageno]')).map((el) => el.textContent)).toEqual(['2', '5'])
+    ctl.dispose()
+  })
+
+  it('turns to a story from its contents entry or its cover line', () => {
+    vi.useFakeTimers()
+    const { doc, book } = issueDoc()
+    prepareFrame(doc, { follow: false })
+    // Each entry is now a label for one hidden radio per story; a missing story's link goes dead.
+    expect(doc.querySelectorAll('label.mz-toc')).toHaveLength(2)
+    expect(doc.querySelectorAll('input[name="mz-jump"]')).toHaveLength(2)
+    expect(doc.querySelector('label.mzc__link')!.getAttribute('for')).toBe('mz-j-two')
+    expect(doc.querySelector('a.mz-toc')!.hasAttribute('href')).toBe(false)
+    const ctl = wireBook(doc)!
+    ;(doc.querySelector('label[for="mz-j-two"].mz-toc') as HTMLElement).click()
+    settle()
+    expect(book.scrollLeft).toBe(1600)
+    expect((doc.getElementById('mz-j-two') as HTMLInputElement).checked).toBe(false)
+    ;(doc.querySelector('label.mz-toc') as HTMLElement).click()
+    settle()
+    expect(book.scrollLeft).toBe(800)
+    ctl.dispose()
+  })
+})
+
 describe('prepareFrame and followedLink', () => {
   it('hides the page’s own controls and points its links out of the frame', () => {
     const { doc } = frameDoc(800, 800)

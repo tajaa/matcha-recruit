@@ -226,7 +226,9 @@ def test_a_dispatch_is_a_news_article_and_a_paid_story_hides_its_paid_part():
     html = pages.render_story(SITE, NAV, MAG, p, {}, more=[], more_covers={}, origin="https://b.test")
     assert '"@type": "NewsArticle"' in html
     assert "Free words." in html and SENTINEL not in html
-    assert 'class="mz-paywall mz-measure" id="mz-paywall"' in html and '<div class="mz-story__body mz-paid" data-mz-paid hidden></div>' in html
+    assert 'class="mz-paywall mz-measure" id="mz-paywall" data-mz-paywall data-mz-story="harbour-at-dawn"' in html
+    assert '<div class="mz-story__body mz-paid" data-mz-paid="harbour-at-dawn" hidden></div>' in html
+    assert html.count("<script>(function(){\n// A paid story's paywall") == 1
 
 
 def test_a_legacy_markdown_post_renders_as_one_text_block():

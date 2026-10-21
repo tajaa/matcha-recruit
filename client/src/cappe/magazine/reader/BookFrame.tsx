@@ -11,7 +11,7 @@ const ARROW = 'flex h-9 w-9 items-center justify-center rounded-full border bord
  *  (`book.ts`). A link the page follows comes back as `onLink` with its path
  *  on the magazine (`/stories/low-tide`), and the page is put back. */
 export default function BookFrame({
-  html, title, onLink, openExternal = false, prepare, keys = false, keepPlace = false, className = '', style,
+  html, title, onLink, openExternal = false, prepare, keys = false, keepPlace = false, spread, className = '', style,
 }: {
   html: string
   title: string
@@ -25,6 +25,8 @@ export default function BookFrame({
   keys?: boolean
   /** A new page opens on the spread the last one was showing (a live preview). */
   keepPlace?: boolean
+  /** Turn to this spread whenever it changes (an editor showing what is being edited). */
+  spread?: number
   className?: string
   style?: CSSProperties
 }) {
@@ -38,6 +40,11 @@ export default function BookFrame({
   useEffect(() => { latest.current = { onLink, prepare, keepPlace, openExternal } })
 
   useEffect(() => () => book.current?.dispose(), [])
+  useEffect(() => {
+    if (spread === undefined) return
+    place.current = spread
+    book.current?.go(spread)
+  }, [spread])
 
   const onLoad = () => {
     const el = frame.current

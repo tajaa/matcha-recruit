@@ -244,6 +244,105 @@ class CappeIssue(BaseModel):
     created_at: datetime
 
 
+
+# ── Issues: a designed cover and contents (cappemag07) ──────────────────────
+
+class CappeIssueStoryRef(BaseModel):
+    """A story in an issue, in the order sent: its section and contents line."""
+    post_id: UUID
+    section: Optional[str] = Field(default=None, max_length=40)
+    contents_line: Optional[str] = Field(default=None, max_length=200)
+
+
+class CappeMagazineIssueCreate(BaseModel):
+    template: Optional[str] = Field(default=None, max_length=20)
+
+
+class CappeMagazineIssueSave(BaseModel):
+    """What changed. `cover` and `contents` are checked and reshaped by
+    `services/magazine/issue_schema.py`; `stories` replaces the whole list."""
+    title: Optional[str] = Field(default=None, max_length=120)
+    number: Optional[int] = Field(default=None, ge=1, le=9999)
+    cover: Optional[dict[str, Any]] = None
+    contents: Optional[dict[str, Any]] = None
+    stories: Optional[list[CappeIssueStoryRef]] = Field(default=None, max_length=40)
+
+
+class CappeMagazineIssuePreview(BaseModel):
+    """An unsaved issue to render as its book would look."""
+    issue_id: Optional[UUID] = None
+    number: int = Field(default=1, ge=1, le=9999)
+    title: Optional[str] = Field(default=None, max_length=120)
+    cover: dict[str, Any] = Field(default_factory=dict)
+    contents: dict[str, Any] = Field(default_factory=dict)
+    stories: list[CappeIssueStoryRef] = Field(default_factory=list, max_length=40)
+
+
+class CappeMagazineIssueStory(BaseModel):
+    post_id: UUID
+    title: str
+    slug: str
+    status: str
+    access: str = "free"
+    hidden: bool = False
+    excerpt: Optional[str] = None
+    section: Optional[str] = None
+    contents_line: Optional[str] = None
+    picture: Optional[dict[str, Any]] = None
+
+
+class CappeMagazineIssue(BaseModel):
+    """An issue as its editor needs it. `published`: the drafts this save or
+    release just published."""
+    id: UUID
+    number: int
+    title: Optional[str] = None
+    status: Literal["draft", "released"]
+    released_at: Optional[datetime] = None
+    cover: dict[str, Any]
+    contents: dict[str, Any]
+    stories: list[CappeMagazineIssueStory] = Field(default_factory=list)
+    cover_picture: Optional[dict[str, Any]] = None
+    hidden: bool = False
+    published: list[str] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+
+
+class CappeMagazineIssueSummary(BaseModel):
+    id: UUID
+    number: int
+    title: Optional[str] = None
+    status: Literal["draft", "released"]
+    released_at: Optional[datetime] = None
+    story_count: int = 0
+    cover: dict[str, Any]
+    cover_picture: Optional[dict[str, Any]] = None
+    hidden: bool = False
+    updated_at: datetime
+
+
+class CappeMagazineIssueTemplate(BaseModel):
+    key: str
+    label: str
+    cover: dict[str, Any]
+
+
+class CappeMagazineIssueTaken(BaseModel):
+    post_id: UUID
+    issue_id: UUID
+    number: int
+
+
+class CappeMagazineIssueOptions(BaseModel):
+    """What the issue editor offers: the cover templates, the limits, and
+    which stories are already in an issue."""
+    templates: list[CappeMagazineIssueTemplate]
+    max_lines: int
+    max_stories: int
+    next_number: int
+    taken: list[CappeMagazineIssueTaken]
+
 __all__ = [
     "MastheadStyle",
     "CappeMagazine",
@@ -272,4 +371,14 @@ __all__ = [
     "CappeIssue",
     "CappeMagazineCheckout",
     "CappeMagazineCompCreate",
+    "CappeIssueStoryRef",
+    "CappeMagazineIssueCreate",
+    "CappeMagazineIssueSave",
+    "CappeMagazineIssuePreview",
+    "CappeMagazineIssueStory",
+    "CappeMagazineIssue",
+    "CappeMagazineIssueSummary",
+    "CappeMagazineIssueTemplate",
+    "CappeMagazineIssueTaken",
+    "CappeMagazineIssueOptions",
 ]

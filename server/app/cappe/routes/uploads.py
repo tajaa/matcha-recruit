@@ -29,6 +29,7 @@ from ..models.cappe import (
 from ..services import cappe_assets, image_quota, media, upload_guard
 from ..services.design_gate import is_premium_plan
 from ..services.image_prompting import build_image_prompt
+from ..services.magazine.issues import issues_using
 from ..services.magazine.stories import stories_using
 from ..services.merlin.catalog import AI_IMAGE_SIZES, DEFAULT_AI_IMAGE_SIZE
 from ._shared import get_owned_site, read_capped
@@ -339,6 +340,12 @@ async def delete_site_asset(
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=f"A story uses this picture ({used_by[0]}). Take it out of the story first.",
+            )
+        covers = await issues_using(conn, site_id, asset_id)
+        if covers:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"The cover of No. {covers[0]} uses this picture. Change the cover first.",
             )
         deleted = await cappe_assets.delete_asset(conn, site_id, asset_id)
     if not deleted:

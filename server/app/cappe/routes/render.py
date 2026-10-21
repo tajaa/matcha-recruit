@@ -29,8 +29,10 @@ from ..services.commerce import release_abandoned_checkout
 from ..services.common import normalize_host_header, site_public_origin
 from ..services.discounts import apply_discount_cents, best_discount_percent, fetch_active_discounts, site_today
 from ..services.entitlements import resolve_entitlements, sells
-from ..services.magazine import pages as mag_pages, reader as mag_reader
+from ..services.magazine import issue_pages, issues as mag_issues, pages as mag_pages, reader as mag_reader
+from ..services.magazine.issue_schema import cover_asset_ids
 from ..services.magazine.magazines import live_magazine, nav_entry, preview_blocks
+from ..services.magazine.stories import site_assets
 from ..services.magazine.topics import TOPICS
 from ..services.product_pages import SLUG_RE, fetch_images, product_path
 from ..services.policies import KINDS as POLICY_KINDS, links as policy_links, policy_kinds, policy_path
@@ -599,10 +601,24 @@ def _origin(site, host: str | None) -> str:
     return site_public_origin(site) or f"https://{_norm_host(host)}"
 
 
+async def _current_issue(conn, site, magazine: dict) -> tuple[str, str | None]:
+    """The current issue's lead for the front page (and its picture), or ""."""
+    issue = await mag_issues.current_issue(conn, site["id"])
+    if issue is None:
+        return "", None
+    stories = await mag_issues.issue_stories(conn, issue["id"], live=True)
+    assets = await site_assets(conn, site["id"], cover_asset_ids(issue["cover"]))
+    return (issue_pages.current_issue_html(magazine, issue, stories, assets),
+            issue_pages.current_issue_image(issue, assets))
+
+
 async def _front_html(conn, site, magazine: dict, *, page: int, host: str | None) -> str:
+    """The front: the current issue leads it when there is one (its stories
+    stay in the list below), else the cover story."""
     size = mag_pages.PAGE_SIZE
     lead = None
-    if page == 1:
+    current_html, current_image = await _current_issue(conn, site, magazine) if page == 1 else ("", None)
+    if page == 1 and not current_html:
         if magazine.get("cover_post_id"):
             lead = await mag_reader.live_story(conn, site["id"], post_id=magazine["cover_post_id"])
         if lead is None:
@@ -619,7 +635,8 @@ async def _front_html(conn, site, magazine: dict, *, page: int, host: str | None
     kinds = await policy_kinds(conn, site["id"])
     return mag_pages.render_front(
         _site_dict(site, kinds, magazine), nav, magazine, lead=lead, posts=posts, covers=covers, topics=topics,
-        page=page, has_more=has_more, origin=_origin(site, host),
+        page=page, has_more=has_more, origin=_origin(site, host), current_html=current_html,
+        current_image=current_image,
     )
 
 
@@ -691,13 +708,59 @@ async def story_page(story_slug: str, request: Request):
         assets = await mag_reader.story_assets(conn, site["id"], post)
         more = await mag_reader.live_stories(conn, site["id"], exclude=post["id"], limit=3)
         more_covers = await mag_reader.covers(conn, site["id"], more)
+        issue = await mag_issues.issue_for_story(conn, site["id"], post["id"])
         nav = await _nav(conn, site["id"])
         kinds = await policy_kinds(conn, site["id"])
         return mag_pages.render_story(_site_dict(site, kinds, magazine), nav, magazine, post, assets, more=more,
                                       more_covers=more_covers, origin=_origin(site, host),
-                                      preview_blocks=preview_blocks(magazine), currency=site.get("currency"))
+                                      preview_blocks=preview_blocks(magazine), currency=site.get("currency"),
+                                      issue=issue)
 
     return await _cached_magazine_page(request, f"story:{story_slug}", build)
+
+
+@router.get("/issues", response_class=HTMLResponse)
+async def issues_page(request: Request):
+    """Every released issue, as its cover."""
+    page = _page_number(request)
+
+    async def build(conn, site, magazine, host):
+        size = mag_issues.ARCHIVE_PAGE
+        found = await mag_issues.live_issues(conn, site["id"], limit=size + 1, offset=(page - 1) * size)
+        if not found:
+            return None
+        shown = found[:size]
+        ids = [a for i in shown for a in cover_asset_ids(i["cover"])]
+        assets = await site_assets(conn, site["id"], ids)
+        nav = await _nav(conn, site["id"])
+        kinds = await policy_kinds(conn, site["id"])
+        return issue_pages.render_archive(_site_dict(site, kinds, magazine), nav, magazine, shown, assets, page=page,
+                                          has_more=len(found) > size, origin=_origin(site, host))
+
+    return await _cached_magazine_page(request, f"issues:{page}", build)
+
+
+@router.get("/issues/{number}", response_class=HTMLResponse)
+async def issue_page(number: int, request: Request):
+    """An issue as one book: its cover, its contents, every story in order.
+    A paid story's paid part is never in it; a subscriber's browser fetches
+    each, as on the story's own page."""
+    if not 1 <= number <= 9999:
+        return _not_found_html("Issue not found")
+
+    async def build(conn, site, magazine, host):
+        issue = await mag_issues.live_issue(conn, site["id"], number)
+        if issue is None:
+            return None
+        stories = await mag_issues.issue_stories(conn, issue["id"], live=True)
+        assets = await mag_issues.book_assets(conn, site["id"], issue["cover"], stories)
+        nav = await _nav(conn, site["id"])
+        kinds = await policy_kinds(conn, site["id"])
+        return issue_pages.render_issue(_site_dict(site, kinds, magazine), nav, magazine, issue, stories, assets,
+                                        origin=_origin(site, host), currency=site.get("currency"),
+                                        preview_blocks=preview_blocks(magazine))
+
+    return await _cached_magazine_page(request, f"issue:{number}", build)
 
 
 @router.get("/topics/{topic}", response_class=HTMLResponse)
@@ -796,6 +859,11 @@ async def tenant_seo(request: Request, kind: str):
             "AND hidden_at IS NULL ORDER BY published_at DESC NULLS LAST LIMIT 5000",
             site["id"],
         ) if magazine else []
+        issues = await conn.fetch(
+            "SELECT number, updated_at FROM cappe_magazine_issues WHERE site_id = $1 AND status = 'released' "
+            "AND hidden_at IS NULL ORDER BY number DESC LIMIT 2000",
+            site["id"],
+        ) if magazine else []
 
     def day(ts):
         return ts.strftime("%Y-%m-%d") if ts else None
@@ -810,6 +878,9 @@ async def tenant_seo(request: Request, kind: str):
         urls += [(f"{origin}{mag_pages.story_path(r['slug'])}", day(r["updated_at"])) for r in stories]
         urls += [(f"{origin}{mag_pages.topic_path(t)}", None)
                  for t in sorted({r["topic"] for r in stories if r["topic"] in TOPICS})]
+        if issues:
+            urls.append((f"{origin}/issues", day(max(r["updated_at"] for r in issues))))
+            urls += [(f"{origin}{issue_pages.issue_path(r['number'])}", day(r["updated_at"])) for r in issues]
     if products:
         urls.append((f"{origin}/shop", day(max(r["updated_at"] for r in products))))
         urls += [(f"{origin}{product_path(r['slug'])}", day(r["updated_at"])) for r in products]

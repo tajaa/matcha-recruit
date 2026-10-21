@@ -1,5 +1,6 @@
-"""Magazine issues: a published story emailed to the magazine's followers
-(cappemag04).
+"""Magazine emails ("issues" in cappemag04's tables): a published story
+emailed to the magazine's followers. The owner's "Emails" page; an issue in
+print — a numbered book with a cover and contents — is `routes/issues.py`.
 
   * `POST /sites/{id}/posts/{post_id}/issue` — send it. An issue is a
     campaign (`kind='issue'`), so it shares the newsletter's send budget

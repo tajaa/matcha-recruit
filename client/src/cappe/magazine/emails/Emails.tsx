@@ -5,10 +5,11 @@ import { cappeApi } from '../../api'
 import { ui } from '../../components/ui'
 import type { CappeIssue, CappePost, CappeSubscriber } from '../../types'
 
-/** `sites/:siteId/issues` — send a published story to the magazine's
+/** `sites/:siteId/emails` — send a published story to the magazine's
  *  followers, try it on yourself first, and see what went out. The email is
- *  Gummfit's template; a story goes out once. */
-export default function Issues() {
+ *  Gummfit's template; a story goes out once. (The API still calls these
+ *  "issues"; an issue in print is `../issues/IssuesPage.tsx`.) */
+export default function Emails() {
   const { siteId } = useParams<{ siteId: string }>()
   const [issues, setIssues] = useState<CappeIssue[] | null>(null)
   const [stories, setStories] = useState<CappePost[]>([])
@@ -31,7 +32,7 @@ export default function Issues() {
       setIssues(i)
       setStories(p.filter((x) => x.status === 'published' && x.format === 'blocks' && !x.hidden))
       setFollowers(s.filter((x) => x.status === 'subscribed').length)
-    }).catch((e) => { if (live) setError(e instanceof Error ? e.message : 'Could not load your issues') })
+    }).catch((e) => { if (live) setError(e instanceof Error ? e.message : 'Could not load your emails') })
     return () => { live = false }
   }, [siteId])
 
@@ -70,13 +71,13 @@ export default function Issues() {
   return (
     <div className="mx-auto max-w-3xl space-y-6 p-6">
       <div>
-        <h1 className={ui.heading}>Issues</h1>
+        <h1 className={ui.heading}>Emails</h1>
         <p className={ui.subtitle}>Send a published story to the {followers} {followers === 1 ? 'person who follows' : 'people who follow'} your magazine. Replies go to your account email.</p>
       </div>
 
       <section className={`${ui.card} space-y-4 p-5`} aria-label="Send a story">
         {unsent.length === 0 ? (
-          <p className="text-sm text-zinc-400">Publish a story to send it as an issue. Each story goes out once.</p>
+          <p className="text-sm text-zinc-400">Publish a story to email it. Each story goes out once.</p>
         ) : (
           <>
             <label className="block">
@@ -110,7 +111,7 @@ export default function Issues() {
       </section>
 
       {issues && issues.length > 0 && (
-        <ul className="divide-y divide-zinc-800 rounded-2xl border border-zinc-800 bg-zinc-900" aria-label="Sent issues">
+        <ul className="divide-y divide-zinc-800 rounded-2xl border border-zinc-800 bg-zinc-900" aria-label="Sent emails">
           {issues.map((i) => (
             <li key={i.id} className="flex items-center gap-4 px-5 py-3">
               <div className="min-w-0 flex-1">

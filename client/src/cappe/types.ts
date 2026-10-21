@@ -1773,6 +1773,78 @@ export type CappeIssue = {
   created_at: string
 }
 
+// ── Issues in print (cappemag07; services/magazine/issue_schema.py) ─────────
+// An issue is a numbered book of stories with a cover and contents the writer
+// designs. Not CappeIssue above, which is a story emailed to followers.
+export type CoverTemplateKey = 'classic' | 'headline' | 'minimal' | 'boxed' | 'poster'
+export type CoverFilter = 'none' | 'bw' | 'sepia'
+export type CoverScrim = 'none' | 'top' | 'bottom' | 'full'
+export type CoverAlign = 'left' | 'center' | 'right'
+export type CoverWeight = 'bold' | 'regular' | 'black'
+export type CoverCase = 'asis' | 'upper'
+export type CoverTracking = 'normal' | 'tight' | 'wide'
+export type CoverFont = 'heading' | 'body'
+export type CoverBox = 'none' | 'solid'
+export type CoverCorner = 'br' | 'bl' | 'tr' | 'tl'
+export type CoverTone = 'light' | 'dark'
+export type ContentsLayout = 'list' | 'grid' | 'feature'
+/** Where an element sits (percent of the 4:5 cover) and how its words look;
+ *  `size` is percent of the cover's width. A colour is `#rrggbb` or `accent`. */
+export type CoverElement = {
+  x: number; y: number; w: number
+  size: number; color: string; align: CoverAlign; weight: CoverWeight; case: CoverCase; italic: boolean
+  tracking: CoverTracking; font: CoverFont
+}
+export type CoverLine = CoverElement & { text: string; sub: string; post_id: string | null; box: CoverBox; box_color: string }
+export type CoverDesign = {
+  v: 1
+  template: CoverTemplateKey
+  background: string
+  photo: { asset_id: string | null; focal: { x: number; y: number }; zoom: number; filter: CoverFilter }
+  scrim: { kind: CoverScrim; strength: number }
+  masthead: CoverElement
+  issue_line: CoverElement & { text: string; hidden: boolean }
+  lines: CoverLine[]
+  credit: { corner: CoverCorner; tone: CoverTone }
+}
+export type ContentsDesign = {
+  v: 1; layout: ContentsLayout; heading: string; show_numbers: boolean; show_pictures: boolean; show_deks: boolean
+  show_bylines: boolean; accent: string
+}
+export type IssueStoryRef = { post_id: string; section: string | null; contents_line: string | null }
+export type CappeIssuePicture = { url: string; alt: string; credit: string; id?: string }
+export type CappeMagazineIssueStory = IssueStoryRef & {
+  title: string; slug: string; status: CappePost['status']; access: 'free' | 'paid'; hidden: boolean
+  excerpt: string | null; picture: CappeIssuePicture | null
+}
+export type CappeMagazineIssue = {
+  id: string
+  number: number
+  title: string | null
+  status: 'draft' | 'released'
+  released_at: string | null
+  cover: CoverDesign
+  contents: ContentsDesign
+  stories: CappeMagazineIssueStory[]
+  cover_picture: CappeIssuePicture | null
+  hidden: boolean
+  /** The drafts this save or release just published. */
+  published: string[]
+  created_at: string
+  updated_at: string
+}
+export type CappeMagazineIssueSummary = Pick<CappeMagazineIssue,
+  'id' | 'number' | 'title' | 'status' | 'released_at' | 'cover' | 'cover_picture' | 'hidden' | 'updated_at'> & {
+  story_count: number
+}
+export type CappeMagazineIssueOptions = {
+  templates: { key: CoverTemplateKey; label: string; cover: CoverDesign }[]
+  max_lines: number
+  max_stories: number
+  next_number: number
+  taken: { post_id: string; issue_id: string; number: number }[]
+}
+
 export type IllustrationAspect = '16:9' | '3:2' | '4:3' | '1:1' | '3:4' | '2:3' | '9:16'
 
 export type StoryAssistAction = 'draft' | 'headlines' | 'captions' | 'tighten' | 'search_terms'

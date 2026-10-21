@@ -40,7 +40,7 @@ from app.config import load_settings  # noqa: E402
 
 load_settings()
 
-from app.cappe.routes import billing, magazine as magazine_routes, magazine_issues, render, sites  # noqa: E402
+from app.cappe.routes import billing, magazine as magazine_routes, magazine_emails as magazine_issues, render, sites  # noqa: E402
 from app.cappe.routes.public import magazine as public_magazine, pricing  # noqa: E402
 from app.cappe.services import campaigns, readiness  # noqa: E402
 from app.cappe.services.catalog import plan_offered  # noqa: E402

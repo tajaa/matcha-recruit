@@ -1,0 +1,113 @@
+/* An issue (services/magazine/issue_render.py, issue_pages.py): its cover,
+   its contents, the issue as one book, the archive and the front's lead.
+   Loaded after magazine.css on the pages that show an issue. */
+
+/* The cover: a 4:5 artboard. Elements are placed in percent of it and their
+   type is sized in its width (cqw), so it draws the same at any size. */
+.mzc{position:relative;aspect-ratio:4/5;overflow:hidden;background:var(--mzc-bg,#1b1916);color:#fff;isolation:isolate}
+.mzc__photo,.mzc__scrim{position:absolute;inset:0}
+.mzc__photo{overflow:hidden}
+.mzc__img{display:block;width:100%;height:100%;max-width:none;object-fit:cover}
+.mzc__photo.mz-filter--bw img{filter:grayscale(1) contrast(1.05)}
+.mzc__photo.mz-filter--sepia img{filter:sepia(.85) contrast(1.02)}
+.mzc__art{position:absolute;inset:0;container-type:inline-size}
+.mzc__el{position:absolute;margin:0;line-height:1.04;overflow-wrap:break-word}
+.mzc__mast{line-height:.86}
+.mzc__text{margin:0}
+.mzc__sub{margin:.35em 0 0;font-family:var(--mz-b);font-size:.42em;font-weight:400;font-style:normal;line-height:1.28;
+  letter-spacing:0;text-transform:none}
+.mzc__box{padding:.04em .2em;-webkit-box-decoration-break:clone;box-decoration-break:clone}
+.mzc__link{display:block;color:inherit;text-decoration:none;cursor:pointer}
+.mzc__link:hover .mzc__text,.mzc__link:focus-visible .mzc__text{text-decoration:underline;text-decoration-thickness:.06em}
+.mzc__credit{position:absolute;margin:0;max-width:62%;font:400 max(8px,1.45cqw)/1.25 var(--mz-b);letter-spacing:.02em;opacity:.88}
+.mzc__credit a{color:inherit;text-decoration:none}
+.mzc__credit--br{right:2.6%;bottom:1.8%;text-align:right}
+.mzc__credit--bl{left:2.6%;bottom:1.8%}
+.mzc__credit--tr{right:2.6%;top:1.8%;text-align:right}
+.mzc__credit--tl{left:2.6%;top:1.8%}
+.mzc__credit--light{color:#fff;text-shadow:0 0 3px rgba(0,0,0,.55)}
+.mzc__credit--dark{color:#141210}
+
+/* The issue as a book. On a two-page spread the cover lies alone on the
+   right, a closed magazine on the mat (the left half is cut away while the
+   first spread shows, and opens with the first turn); on a phone it is the
+   first page. Its face is drawn over that page from outside the columns
+   (.mz-issue__face), so it bleeds to the paper's edges and is never split
+   across pages; in the flow the page is an empty placeholder. */
+.mz-book .mz-issue{--ink:var(--mz-paper-ink);--muted:var(--mz-paper-muted);--line:rgba(31,28,24,.14)}
+.mz-issue__mat{display:none}
+.mz-issue__cover{height:var(--mz-col-h);break-after:column}
+.mz-issue__face{position:absolute;top:0;bottom:0;left:calc(-1 * var(--mz-margin));width:calc(100% + 2 * var(--mz-margin));z-index:1;
+  display:flex;align-items:center;justify-content:center;overflow:hidden}
+.mz-issue__face .mzc{position:static;width:min(100%,calc(var(--mz-page-h) * .8));aspect-ratio:auto;overflow:visible;background:none}
+.mz-issue__face .mzc::before{content:"";position:absolute;inset:0;background:var(--mzc-bg,#1b1916)}
+.mz-issue__face .mzc__art{position:relative;width:100%;aspect-ratio:4/5}
+.mz-issue__face .mzc__img{filter:saturate(.9) contrast(.94) brightness(1.03)}
+@media (min-width:960px){
+  .mz-issue__mat{display:block;height:var(--mz-col-h);break-after:column}
+  .mz-issue__face{left:50%;width:calc(50% + var(--mz-margin))}
+  .mz-reader[data-mz-issue] .mz-spread{clip-path:inset(-6rem);transition:clip-path .6s cubic-bezier(.3,.7,.2,1)}
+  .mz-reader[data-mz-issue][data-mz-at="0"] .mz-spread{clip-path:inset(-6rem -6rem -6rem 50%)}
+  .mz-reader[data-mz-issue][data-mz-at="0"] .mz-folio{padding-left:50%}
+}
+@media (prefers-reduced-motion:reduce){.mz-reader[data-mz-issue] .mz-spread{transition:none}}
+.mz-issue__contents{break-before:column}
+.mz-book .mz-issue__story{break-before:column}
+.mz-issue__all{text-align:center;margin:1.2rem 0 0}
+
+/* The contents. */
+.mz-contents{color:var(--ink)}
+.mz-contents__issue{margin:0 0 .5rem;font:600 .7rem/1.3 var(--mz-b);letter-spacing:.16em;text-transform:uppercase;color:var(--mz-c)}
+.mz-contents__heading{margin:0 0 1.3rem;font-family:var(--mz-h);font-size:clamp(2.2rem,4vw,3.4rem);line-height:.96}
+.mz-contents__group{margin:0 0 .4rem}
+.mz-contents__sec{margin:1.3rem 0 .4rem;padding-top:.45rem;border-top:2px solid var(--mz-c);color:var(--mz-c);
+  font:700 .72rem/1.2 var(--mz-b);letter-spacing:.14em;text-transform:uppercase;break-after:avoid}
+.mz-toc{display:grid;grid-template-columns:2.6rem minmax(0,1fr) auto;grid-template-areas:"no words pic";gap:0 .9rem;align-items:start;
+  padding:.75rem 0;border-bottom:1px solid var(--line);color:inherit;text-decoration:none;cursor:pointer;break-inside:avoid}
+.mz-toc:hover .mz-toc__title,.mz-toc:focus-visible .mz-toc__title{text-decoration:underline;text-decoration-thickness:1px}
+.mz-toc__no{grid-area:no;font:700 1.45rem/1 var(--mz-h);color:var(--mz-c);font-variant-numeric:lining-nums tabular-nums}
+.mz-toc__words{grid-area:words;min-width:0}
+.mz-toc__pic{grid-area:pic;display:block;width:4.75rem;aspect-ratio:1;overflow:hidden;background:var(--line)}
+.mz-toc__img{display:block;width:100%;height:100%;object-fit:cover}
+.mz-toc__kicker{display:block;margin-bottom:.15rem;font:600 .66rem/1.3 var(--mz-b);letter-spacing:.14em;text-transform:uppercase;color:var(--mz-c)}
+.mz-toc__title{display:block;font:700 1.12rem/1.2 var(--mz-h)}
+.mz-toc__dek{display:block;margin-top:.2rem;font-size:.88rem;line-height:1.4;color:var(--muted)}
+.mz-toc__by{display:block;margin-top:.25rem;font-size:.76rem;color:var(--muted)}
+.mz-contents--nonum .mz-toc{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"words pic"}
+/* A grid of pictures, two to a row (inline cards: a grid container isn't
+   split across pages in every browser). */
+.mz-contents__keep{break-inside:avoid}
+.mz-contents--grid .mz-contents__group{margin-right:-1rem}
+.mz-contents--grid .mz-contents__sec{margin-right:1rem}
+.mz-contents--grid .mz-toc{display:inline-flex;flex-direction:column;gap:.3rem;box-sizing:border-box;width:50%;vertical-align:top;
+  padding:0 1rem 1.1rem 0;border:0}
+.mz-contents--grid .mz-toc__pic{order:-1;width:100%;aspect-ratio:3/2;max-height:calc(var(--mz-col-h,40rem) * .2)}
+.mz-contents--grid .mz-toc__no{font-size:1rem}
+.mz-contents--grid .mz-toc__title{font-size:1rem}
+.mz-contents--grid .mz-toc__dek{font-size:.8rem}
+/* A feature: the first story large, the rest listed. */
+.mz-toc--feature{display:flex;flex-direction:column;gap:.35rem;padding-top:0}
+.mz-toc--feature .mz-toc__pic{order:-1;width:100%;aspect-ratio:4/3;max-height:calc(var(--mz-col-h,40rem) * .42)}
+.mz-toc--feature .mz-toc__title{font-size:1.5rem}
+
+/* The archive: every issue as its cover. */
+.mz-issues{max-width:var(--mz-wide);margin:1rem auto 2.5rem;padding:0 1.25rem;display:grid;gap:2.2rem 1.6rem;
+  grid-template-columns:repeat(auto-fill,minmax(12.5rem,1fr))}
+.mz-issuecard{display:block;color:inherit;text-decoration:none}
+.mz-issuecard .mzc{box-shadow:0 12px 26px rgba(0,0,0,.24);transition:transform .2s ease}
+.mz-issuecard:hover .mzc{transform:translateY(-3px)}
+.mz-issuecard__no{display:block;margin-top:.8rem;font:600 .72rem/1.3 var(--mz-b);letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.mz-issuecard__title{display:block;margin-top:.15rem;font:700 1.05rem/1.25 var(--mz-h)}
+
+/* The front page's lead: the current issue. */
+.mz-current{max-width:var(--mz-wide);margin:2rem auto 3rem;padding:0 1.25rem;display:grid;gap:2rem;align-items:center}
+@media (min-width:860px){.mz-current{grid-template-columns:minmax(0,5fr) minmax(0,4fr);gap:3rem}}
+.mz-current__cover{display:block;width:100%;max-width:32rem;justify-self:center}
+.mz-current__cover .mzc{box-shadow:0 20px 44px rgba(0,0,0,.3)}
+.mz-current__title{margin:.35rem 0 1rem;font-family:var(--mz-h);font-size:clamp(1.8rem,3.4vw,2.8rem);line-height:1.05}
+.mz-current__list{margin:0 0 1.3rem;padding-left:1.2rem;font-size:1.05rem}
+.mz-current__list li{margin:.4rem 0}
+.mz-current__list a{color:inherit}
+.mz-current__links{display:flex;flex-wrap:wrap;gap:.6rem 1.4rem;margin:0}
+.mz-current__links a{color:inherit}
+.mz-current__open{font-weight:700}
