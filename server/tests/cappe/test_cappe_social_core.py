@@ -612,6 +612,8 @@ AUTO = {"autoreply_mode": "auto", "max_auto_per_hour": 20}
     (AUTO, draft(), "consider", 0, "send"),
     (AUTO, draft(intent="spam"), "consider", 0, "skip"),
     (AUTO, draft(), "escalate", 0, "escalate"),
+    # A hard-stop hit escalates even when the model calls it spam.
+    (AUTO, draft(intent="spam"), "escalate", 0, "escalate"),
     (AUTO, draft(needs_human=True), "consider", 0, "escalate"),
     (AUTO, draft(reply=None), "consider", 0, "escalate"),
     ({**AUTO, "autoreply_mode": "review"}, draft(), "consider", 0, "draft"),
@@ -813,7 +815,7 @@ async def test_refresh_connection_records_or_marks_the_failure(monkeypatch):
     assert await metrics.refresh_connection(None, object(), CRED) == {"ok": True, "followers_count": 5}
     record.assert_awaited_once()
     for error, status in ((ProviderError("bad token", code=190), "expired"),
-                          (ProviderError("gone"), "error"),
+                          (ProviderError("unknown field", code=100), "connected"),
                           (ProviderError("busy", retryable=True), "connected")):
         provider.account_metrics = AsyncMock(side_effect=error)
         assert (await metrics.refresh_connection(None, object(), CRED))["ok"] is False

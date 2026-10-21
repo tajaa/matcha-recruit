@@ -58,10 +58,13 @@ async def process_events(conn, cfg: MetaConfig, events: list[InboundEvent]) -> d
         if not connections:
             outcomes["unmatched"] += len(group)
             continue
-        for connection in connections:
+        for index, connection in enumerate(connections):
             new_items = await inbox_store.ingest_events(conn, connection=connection, events=group)
             outcomes["stored"] += len(new_items)
-            if not new_items:
+            # One Page connected on several sites is one account: every site
+            # sees the comment, but only the first-connected one answers it,
+            # so a customer never gets the same reply twice.
+            if not new_items or index > 0:
                 continue
             settings = await effective_settings(conn, connection["site_id"])
             for item in new_items:
