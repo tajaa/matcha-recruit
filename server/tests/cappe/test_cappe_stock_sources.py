@@ -382,3 +382,17 @@ def test_a_thumbnail_is_re_encoded_small():
         assert img.format == "WEBP" and max(img.size) == thumbs.THUMB_SIDE
     with pytest.raises(Exception):
         thumbs.to_webp(b"not an image")
+
+
+def test_archive_pictures_are_asked_for_like_a_browser_asks():
+    """Openverse's thumbnail endpoint answers a bare `image/*` with 406, which
+    left every search result blank (2026-10-21)."""
+    import inspect
+
+    from app.cappe.routes.public import stock as stock_route
+    from app.cappe.services.magazine import imports
+    from app.cappe.services.magazine.sources.base import IMAGE_ACCEPT
+
+    assert IMAGE_ACCEPT != "image/*" and "*/*" in IMAGE_ACCEPT
+    for module in (stock_route, imports):
+        assert 'accept="image/*"' not in inspect.getsource(module) and "accept=IMAGE_ACCEPT" in inspect.getsource(module)

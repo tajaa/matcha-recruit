@@ -26,6 +26,11 @@ from .....core.services.safe_fetch import fetch_public
 
 logger = logging.getLogger(__name__)
 
+# The Accept header for downloading an archive picture. A bare "image/*" gets
+# 406 from Openverse's thumbnail endpoint (checked 2026-10-21), which left
+# every search result blank; a browser's header gets the JPEG.
+IMAGE_ACCEPT = "image/webp,image/*,*/*;q=0.8"
+
 ALLOWED_LICENSES = frozenset({"cc0", "pdm", "by", "by-sa"})
 USER_AGENT = "Gummfit/1.0 (+https://gummfit.com; magazines)"
 MAX_JSON_BYTES = 3 * 1024 * 1024

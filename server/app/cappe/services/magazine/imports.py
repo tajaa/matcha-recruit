@@ -34,6 +34,7 @@ from ....core.services.safe_fetch import fetch_public
 from .. import media
 from ..cappe_assets import COLUMNS as ASSET_COLUMNS, row as asset_row
 from . import sources
+from .sources.base import IMAGE_ACCEPT
 
 logger = logging.getLogger(__name__)
 
@@ -207,7 +208,7 @@ async def import_one(conn, row: dict) -> str:
     urls = [result.image_url] + ([result.thumb_url] if result.source == "met" and result.thumb_url else [])
     try:
         for url in urls:
-            fetched = await fetch_public(url, max_bytes=MAX_IMAGE_BYTES, accept="image/*",
+            fetched = await fetch_public(url, max_bytes=MAX_IMAGE_BYTES, accept=IMAGE_ACCEPT,
                                          total_timeout=DOWNLOAD_SECONDS)
             if not fetched.truncated:
                 break

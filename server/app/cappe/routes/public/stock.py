@@ -17,6 +17,7 @@ from fastapi.responses import Response
 from ....core.services.redis_cache import cache_get, cache_set, check_rate_limit, client_ip, get_redis_cache
 from ....core.services.safe_fetch import fetch_public
 from ...services.magazine.sources import thumbs
+from ...services.magazine.sources.base import IMAGE_ACCEPT
 from ._body_limit import limited_public_router
 
 router = limited_public_router()
@@ -40,7 +41,7 @@ async def stock_thumb(token: str, request: Request):
             webp = base64.b64decode(cached)
     if webp is None:
         try:
-            fetched = await fetch_public(url, max_bytes=thumbs.MAX_SOURCE_BYTES, accept="image/*", total_timeout=20)
+            fetched = await fetch_public(url, max_bytes=thumbs.MAX_SOURCE_BYTES, accept=IMAGE_ACCEPT, total_timeout=20)
         except Exception:  # noqa: BLE001 — unsafe host, network error, timeout
             return Response(status_code=status.HTTP_502_BAD_GATEWAY)
         if fetched.status != 200 or fetched.truncated or not fetched.content_type.startswith("image/"):
