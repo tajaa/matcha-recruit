@@ -26,7 +26,8 @@ from ..models.cappe import (
     CappeSubscriptionAddon,
 )
 from ..services import billing as billing_svc
-from ..services.catalog import build_catalog
+from ..services.catalog import build_catalog, plan_offered
+from ..services.entitlements import decode_features
 from ..services.email import dashboard_url
 from ..services.entitlements import mailbox_quota, resolve_entitlements
 from ..services.stripe_connect import CappeStripeError, get_cappe_stripe
@@ -54,6 +55,7 @@ async def get_catalog(account: CappeAccount = Depends(require_cappe_account)):
     async with get_connection() as conn:
         plans, addons = await build_catalog(conn)
         intro_ok = await billing_svc.intro_eligible(conn, account.id)
+    plans = [p for p in plans if plan_offered(p.code, p.features, account.account_type)]
     return CappeCatalog(plans=plans, addons=addons, intro_available=intro_ok)
 
 
@@ -149,10 +151,11 @@ async def start_checkout(
     account has never had a subscription — never on client request."""
     async with get_connection() as conn:
         product = await conn.fetchrow(
-            "SELECT code, name, status, kind FROM cappe_billing_products WHERE code = $1",
+            "SELECT code, name, status, kind, features FROM cappe_billing_products WHERE code = $1",
             body.plan_code,
         )
-        if product is None or product["kind"] != "plan":
+        if product is None or product["kind"] != "plan" or not plan_offered(
+                product["code"], decode_features(product.get("features")), account.account_type):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Unknown plan"
             )
@@ -359,10 +362,11 @@ async def change_plan(
                 detail="No active subscription to change. Subscribe first.",
             )
         product = await conn.fetchrow(
-            "SELECT code, status, kind FROM cappe_billing_products WHERE code = $1",
+            "SELECT code, status, kind, features FROM cappe_billing_products WHERE code = $1",
             body.plan_code,
         )
-        if product is None or product["kind"] != "plan":
+        if product is None or product["kind"] != "plan" or not plan_offered(
+                product["code"], decode_features(product.get("features")), account.account_type):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Unknown plan"
             )

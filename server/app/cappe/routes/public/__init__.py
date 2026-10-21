@@ -19,6 +19,7 @@ from . import (
     creators,
     directory,
     forms,
+    magazine,
     messages,
     newsletter,
     pricing,
@@ -51,3 +52,4 @@ router.include_router(booking_selfserve.router)
 router.include_router(messages.router)
 router.include_router(blog.router)
 router.include_router(stock.router)
+router.include_router(magazine.router)

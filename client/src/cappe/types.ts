@@ -18,7 +18,7 @@ export type CappeShopperSubscription = {
 // Cappe is a separate product from matcha; these types are independent of the
 // matcha MeResponse / dashboard types.
 
-export type CappeAccountType = 'business' | 'personal' | 'creator'
+export type CappeAccountType = 'business' | 'personal' | 'creator' | 'writer'
 
 export type CappeAccount = {
   id: string
@@ -1677,6 +1677,30 @@ export type CappeStockImports = {
   imports: CappeStockImport[]
   /** Pictures the account may still import today (only on a new import). */
   remaining_today?: number | null
+}
+
+export type MastheadStyle = 'classic' | 'literary' | 'modern' | 'elegant' | 'display'
+
+/** What a new magazine can be (GET /magazine/options). */
+export type CappeMagazineOptions = {
+  topics: { key: string; label: string }[]
+  mastheads: { key: MastheadStyle; heading: string; body: string }[]
+}
+
+export type CappeHandleCheck = { handle: string; available: boolean; reason: string | null }
+
+/** A story sent to a magazine's followers (cappemag04). */
+export type CappeIssue = {
+  id: string
+  story_id: string | null
+  story_title: string | null
+  subject: string
+  status: 'draft' | 'scheduled' | 'sending' | 'sent' | 'cancelled'
+  include_body: boolean
+  recipient_count: number
+  failed_count: number
+  sent_at: string | null
+  created_at: string
 }
 
 export type IllustrationAspect = '16:9' | '3:2' | '4:3' | '1:1' | '3:4' | '2:3' | '9:16'

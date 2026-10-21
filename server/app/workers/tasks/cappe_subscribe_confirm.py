@@ -1,6 +1,8 @@
-"""Celery task: send double-opt-in confirmations for imported Cappe contacts.
+"""Celery task: send double-opt-in confirmations for imported Cappe contacts
+and for readers who follow a magazine (`source='follow'`, cappemag04).
 
-On-demand (`.delay(site_id)` from the client-import routes), not scheduled.
+On-demand (`.delay(site_id)` from the client-import routes and the public
+follow route), not scheduled.
 
 Why a worker and not a FastAPI BackgroundTask: a 5,000-row import is minutes of
 paced sending, and an in-process task dies with the container on the next
@@ -60,7 +62,7 @@ async def _run(site_id: str) -> dict:
                                    AND id <> ALL($2::uuid[])
                                  ORDER BY created_at
                                  LIMIT 1 FOR UPDATE SKIP LOCKED)
-                RETURNING id, email, name, confirm_token""",
+                RETURNING id, email, name, confirm_token, source""",
                 site_id, released,
             )
             if row is None:
@@ -69,6 +71,7 @@ async def _run(site_id: str) -> dict:
                 ok = await send_cappe_subscribe_confirm_email(
                     row["email"], row["name"], site_name,
                     subscribe_confirm_url(str(row["confirm_token"])),
+                    follow=row.get("source") == "follow",
                 )
             except Exception as exc:
                 ok = False

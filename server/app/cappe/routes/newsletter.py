@@ -25,19 +25,17 @@ from ..models.cappe import (
     CappeSubscriber,
     CappeSubscriberCreate,
 )
+from ..services.campaigns import RECIPIENTS_PER_DAY, SENDS_PER_DAY, send_cap_problem
 from ._shared import build_patch, get_owned_site
 
 router = APIRouter()
 
 _SUB_COLS = "id, site_id, email, name, status, source, created_at, unsubscribed_at"
 
-# Campaigns go out through the platform's shared transactional sender, the same
-# one every other product's mail uses. A compromised or malicious tenant with an
-# uploaded address list is therefore a spam relay on OUR sending reputation, so
-# a send is bounded twice: how often an account may send at all, and how many
-# addresses it may reach in a day across all of its sites.
-_SENDS_PER_DAY = 3
-_RECIPIENTS_PER_DAY = 5000
+# The send budget (how often, how many people a day) is shared with magazine
+# issues; see services/campaigns.py.
+_SENDS_PER_DAY = SENDS_PER_DAY
+_RECIPIENTS_PER_DAY = RECIPIENTS_PER_DAY
 _CAMPAIGN_COLS = (
     "id, site_id, subject, body_html, from_name, status, scheduled_at, "
     "sent_at, recipient_count, created_at, updated_at"
@@ -128,7 +126,8 @@ async def list_campaigns(
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
         rows = await conn.fetch(
-            f"SELECT {_CAMPAIGN_COLS} FROM cappe_campaigns WHERE site_id = $1 ORDER BY created_at DESC",
+            f"SELECT {_CAMPAIGN_COLS} FROM cappe_campaigns WHERE site_id = $1 AND kind = 'campaign' "
+            "ORDER BY created_at DESC",
             site_id,
         )
     return [dict(r) for r in rows]
@@ -276,36 +275,9 @@ async def send_campaign(
                 status_code=status.HTTP_409_CONFLICT, detail="Campaign already sent"
             )
 
-        # Daily recipient ceiling across every site this account owns. A campaign
-        # still `sending` has recipient_count 0 until the worker finalizes it, so
-        # counting finished ones alone let three back-to-back sends (3 × 5k) all
-        # clear a 5k cap. An in-flight campaign is charged its site's current
-        # subscriber count — the audience the worker is about to mail.
-        already_sent = await conn.fetchval(
-            """SELECT COALESCE(SUM(
-                        CASE WHEN c.status = 'sending'
-                             THEN (SELECT COUNT(*) FROM cappe_subscribers sub
-                                    WHERE sub.site_id = c.site_id AND sub.status = 'subscribed')
-                             ELSE c.recipient_count END), 0)
-                 FROM cappe_campaigns c
-                 JOIN cappe_sites s ON s.id = c.site_id
-                WHERE s.account_id = $1
-                  AND (c.status = 'sending' OR c.sent_at > NOW() - INTERVAL '24 hours')""",
-            account.id,
-        )
-        pending = await conn.fetchval(
-            "SELECT COUNT(*) FROM cappe_subscribers WHERE site_id = $1 AND status = 'subscribed'",
-            site_id,
-        )
-        if int(already_sent or 0) + int(pending or 0) > _RECIPIENTS_PER_DAY:
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail=(
-                    f"That would reach more than {_RECIPIENTS_PER_DAY:,} people in 24 hours "
-                    f"(already sent to {int(already_sent or 0):,}). Try again tomorrow, "
-                    "or split the list."
-                ),
-            )
+        problem = await send_cap_problem(conn, account.id, site_id)
+        if problem:
+            raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=problem)
 
     await check_rate_limit(str(account.id), "cappe_campaign_send", _SENDS_PER_DAY, 86400)
 

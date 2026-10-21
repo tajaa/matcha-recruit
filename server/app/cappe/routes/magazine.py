@@ -1,23 +1,40 @@
-"""A site's magazine settings (`cappe_magazines`, cappemag02) — owner side.
+"""A site's magazine settings (`cappe_magazines`, cappemag02) — owner side,
+and a writer's magazine site (cappemag04).
 
 Turning the magazine on is the owner's switch; whether its pages render also
 depends on the plan (`services/magazine/magazines.live_magazine`). The
 response says both, so the editor can tell an owner "your plan doesn't include
 a magazine" instead of showing a switch that does nothing.
+
+A writer account gets its magazine from `POST /magazine/sites`: a
+magazine-only site at exactly the handle they chose (`services/magazine/
+writers.py`), created under the same account lock and site limit as any site.
 """
+import json
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+import asyncpg
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
+from ...core.services.redis_cache import check_rate_limit
 from ...database import get_connection
 from ..dependencies import require_cappe_account
-from ..models.cappe import CappeAccount, CappeMagazine, CappeMagazineUpdate
+from ..models.cappe import (
+    CappeAccount,
+    CappeHandleCheck,
+    CappeMagazine,
+    CappeMagazineSiteCreate,
+    CappeMagazineUpdate,
+    CappeSite,
+)
 from ..services.entitlements import resolve_entitlements
-from ..services.magazine.magazines import get_magazine, save_magazine
-from ..services.magazine.topics import normalize_topic
-from ._shared import get_owned_site
+from ..services.magazine import writers
+from ..services.magazine.magazines import MASTHEADS, get_magazine, save_magazine
+from ..services.magazine.topics import TOPICS, normalize_topic
+from ._shared import get_owned_site, site_row_to_dict
 from .render import invalidate_render_cache
+from .sites import _SITE_COLS, _enforce_site_limit, _lock_account_for_site_creation
 
 router = APIRouter()
 
@@ -65,3 +82,74 @@ async def update_site_magazine(site_id: UUID, body: CappeMagazineUpdate,
         view = await _view(conn, site, mag, account.plan)
     await invalidate_render_cache(site_id)
     return view
+
+
+# --- A writer's magazine site -------------------------------------------------
+
+@router.get("/magazine/options")
+async def magazine_options(account: CappeAccount = Depends(require_cappe_account)):
+    """What a new magazine can be: its topics and masthead styles (with the
+    fonts each sets), for the writer's onboarding before any site exists."""
+    return {
+        "topics": [{"key": k, "label": v} for k, v in TOPICS.items()],
+        "mastheads": [{"key": k, "heading": h, "body": b} for k, (h, b) in MASTHEADS.items()],
+    }
+
+
+@router.get("/magazine/handle-available", response_model=CappeHandleCheck)
+async def handle_available(handle: str = Query(..., max_length=60),
+                           account: CappeAccount = Depends(require_cappe_account)):
+    """Whether a handle can be a magazine's address, and why not."""
+    await check_rate_limit(str(account.id), "cappe_mag_handle", 30, 60)
+    wanted = writers.normalize_handle(handle)
+    problem = writers.handle_problem(wanted)
+    if problem is None:
+        async with get_connection() as conn:
+            if await writers.handle_taken(conn, wanted):
+                problem = writers.TAKEN
+    return {"handle": wanted, "available": problem is None, "reason": problem}
+
+
+@router.post("/magazine/sites", response_model=CappeSite, status_code=status.HTTP_201_CREATED)
+async def create_magazine_site(body: CappeMagazineSiteCreate, account: CappeAccount = Depends(require_cappe_account)):
+    """A writer's magazine: a site at `<handle>.gummfit.com` whose front page
+    is the magazine, with a draft About page. Business accounts turn on a
+    magazine from their own site instead."""
+    if account.account_type != "writer":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail="Magazine sites are for writer accounts. Turn on a magazine from your site.")
+    handle = writers.normalize_handle(body.handle)
+    problem = writers.handle_problem(handle)
+    if problem:
+        raise HTTPException(status_code=422, detail=problem)
+    topics = [normalize_topic(t) for t in body.topics]
+    if any(t is None for t in topics):
+        raise HTTPException(status_code=422, detail="Pick the magazine's topics from the list.")
+    heading, text = MASTHEADS[body.masthead_style]
+    name = body.name.strip()
+    async with get_connection() as conn:
+        try:
+            async with conn.transaction():
+                await _lock_account_for_site_creation(conn, account.id)
+                await _enforce_site_limit(conn, account)
+                if await writers.handle_taken(conn, handle):
+                    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=writers.TAKEN)
+                row = await conn.fetchrow(
+                    f"""INSERT INTO cappe_sites (account_id, name, slug, subdomain, source_type, theme_config)
+                        VALUES ($1, $2, $3, $3, 'magazine', $4::jsonb)
+                        RETURNING {_SITE_COLS}""",
+                    account.id, name, handle, json.dumps({"fonts": {"heading": heading, "body": text}}),
+                )
+                await save_magazine(conn, row["id"], {
+                    "enabled": True, "name": name, "tagline": (body.tagline or "").strip() or None,
+                    "masthead_style": body.masthead_style, "accent": body.accent,
+                    "topics": list(dict.fromkeys(topics)), "front_at_root": True,
+                }, default_name=name)
+                await conn.execute(
+                    """INSERT INTO cappe_pages (site_id, title, slug, content, sort_order, status)
+                       VALUES ($1, 'About', 'about', '{}', 1, 'draft')""",
+                    row["id"],
+                )
+        except asyncpg.UniqueViolationError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=writers.TAKEN) from exc
+    return site_row_to_dict(row, page_count=1)

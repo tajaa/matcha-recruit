@@ -378,6 +378,35 @@ What is built so far:
   proposed draft goes through `normalize_story`, and a picture id the model wasn't given is dropped
   (`_scrub`). 5 a day without the `magazine` feature, 60 with; a request the writer has to fix (422)
   spends none.
+- **Writers are an account type** (`account_type='writer'`, `cappemag04`): sign up at
+  `/cappe/magazines/signup`, then `POST /magazine/sites` makes their one magazine-only site
+  (`source_type='magazine'`, `front_at_root`, a draft About page) at EXACTLY the handle chosen
+  (`services/magazine/writers.py`: 3–30 lowercase letters/digits/single hyphens, not a
+  `RESERVED_SUBDOMAINS` label; taken is 409, never a "-2"), under the same account lock and site limit
+  as any site. Business accounts get a magazine by turning it on for their site instead (403 here).
+- **The Writer plan is offered only to writers** (`catalog.plan_offered`: `features.audience='writer'`
+  keeps it off everyone else's lists and checkout; a writer sees Writer, Free and Business). $9/month,
+  `can_sell=false`, one site, `magazine`. Its Stripe Price needs `server/scripts/seed_cappe_plans.py`
+  after the migration; until then a writer checkout is 503. `GET /public/pricing?for=writer` is the
+  magazines landing page's lineup.
+- **A magazine site publishes with a published story on a plan with `magazine`**
+  (`readiness._magazine_readiness`; the publish route answers a missing plan with 402
+  `plan_required` naming the Writer plan first). It is never sent for business-listing inference.
+- **Following is double opt-in** (`POST /public/sites/{slug}/follow`, `routes/public/magazine.py`): a
+  `pending_confirmation` row with `source='follow'`, confirmed by the existing confirmation worker and
+  page (worded as the reader's own ask). It never touches a `subscribed` or `bounced` row, the answer is
+  always the same 202, and an address gets at most three confirmation emails a day per magazine.
+- **An issue is a campaign** (`cappe_campaigns.kind='issue'`, `routes/magazine_issues.py`): a published
+  story emailed to followers from our template (`services/magazine/issue_email.py`: tables and inline
+  styles, the 1200 px JPEG for pictures, credits from the library row, "AI illustration" for AI). A paid
+  story only ever sends its opening. A story goes out once. Newsletters and issues share one send budget
+  (`services/campaigns.py`: `SENDS_PER_DAY` and `send_cap_problem`'s 5,000 recipients a day). The send
+  worker gives each reader their own links: a page on the magazine's address
+  (`GET /unsubscribe/{token}` in `routes/render.py` changes nothing; its button POSTs) and the RFC 8058
+  one-click address in `List-Unsubscribe` + `List-Unsubscribe-Post`, sent in the magazine's name with
+  the writer as Reply-To. Those headers go out on the Gmail path only
+  (`EmailService.send_email_with_fallback(extra_headers=)`); MailerSend drops them, so the body always
+  carries the link too. Unsubscribing works whatever the site's status.
 
 ## Site templates (`services/site_templates/`)
 

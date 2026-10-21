@@ -3,12 +3,10 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Loader2, CheckCircle2, XCircle } from 'lucide-react'
 import { CappeApiError, cappePublicPost, setCappeTokens } from '../api'
 import { invalidateCappeMeCache } from '../hooks/useCappeMe'
-import { creatorPaths } from '../creators/creatorPaths'
 import ResendVerification from '../components/ResendVerification'
 import { billingStartPath } from './CappeBilling/paths'
 import type { CappeVerifyResponse } from '../types'
-
-const postAuthHome = (t?: string) => (t === 'creator' ? creatorPaths.home : '/cappe/sites')
+import { postAuthHome } from '../utils/postAuthHome'
 
 // Landing for the emailed confirmation link (/cappe/verify?token=…). Exchanges
 // the token for a session and drops the user straight into their dashboard.

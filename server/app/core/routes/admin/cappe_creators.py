@@ -186,7 +186,7 @@ async def admin_suspend_cappe_account(
                     WHERE id=$1 AND status='active'
                       AND account_type = ANY($2::text[]) AND is_platform_admin=false
                 RETURNING id, email, name, account_type""",
-                account_id, ["business", "creator"],
+                account_id, ["business", "creator", "writer"],
             )
             if row is None:
                 raise HTTPException(
@@ -210,7 +210,7 @@ async def admin_restore_cappe_account(account_id: UUID, current_user=Depends(req
                     WHERE id=$1 AND status='suspended'
                       AND account_type = ANY($2::text[]) AND is_platform_admin=false
                 RETURNING id, email, name, account_type""",
-                account_id, ["business", "creator"],
+                account_id, ["business", "creator", "writer"],
             )
             if row is None:
                 raise HTTPException(

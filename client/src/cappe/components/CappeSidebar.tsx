@@ -3,11 +3,12 @@ import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import {
   LayoutGrid, LayoutTemplate, LogOut, Globe, ArrowLeft, FileText, ShoppingBag,
   Receipt, Calendar, MessageSquare, Users, Mail, Inbox, Newspaper, UserCircle, Star, MapPin,
-  Handshake, Wallet, Compass, CreditCard, Landmark, Images,
+  Handshake, Wallet, Compass, CreditCard, Landmark, Images, Send, Settings2,
 } from 'lucide-react'
 import { cappeApi, clearCappeTokens } from '../api'
 import { invalidateCappeMeCache } from '../hooks/useCappeMe'
 import { creatorPaths } from '../creators/creatorPaths'
+import { writerPaths } from '../magazine/writers/writerPaths'
 import { confirmLeave } from '../utils/unsavedGuard'
 import { BILLING_PATH } from '../pages/CappeBilling/paths'
 import type { CappeAccount, CappeThread } from '../types'
@@ -59,6 +60,16 @@ const SITE_NAV: { to: string; label: string; icon: typeof Globe; end?: boolean }
   { to: 'library', label: 'Library', icon: Images },
 ]
 
+// A writer's account is one magazine: its nav is the magazine, not a site's shop.
+const WRITER_SITE_NAV: typeof SITE_NAV = [
+  { to: 'stories', label: 'Stories', icon: Newspaper },
+  { to: 'library', label: 'Library', icon: Images },
+  { to: 'subscribers', label: 'Followers', icon: Users },
+  { to: 'issues', label: 'Issues', icon: Send },
+  { to: 'magazine', label: 'Magazine settings', icon: Settings2 },
+  { to: '', label: 'Site & domain', icon: Globe, end: true },
+]
+
 export default function CappeSidebar({ account, open = false, onClose }: {
   account: CappeAccount | null
   /** Phone-width drawer state; ignored from md up, where the rail is always shown. */
@@ -94,7 +105,8 @@ export default function CappeSidebar({ account, open = false, onClose }: {
     await cappeApi.post('/auth/logout').catch(() => {})
     clearCappeTokens()
     invalidateCappeMeCache()
-    navigate(account?.account_type === 'creator' ? creatorPaths.login : '/cappe/login')
+    navigate(account?.account_type === 'creator' ? creatorPaths.login
+      : account?.account_type === 'writer' ? writerPaths.login : '/cappe/login')
   }
 
   return (
@@ -114,13 +126,18 @@ export default function CappeSidebar({ account, open = false, onClose }: {
           G
         </span>
         <span className="text-lg font-semibold tracking-tight text-zinc-50">
-          {account?.account_type === 'creator' ? 'Gummfit Creators' : 'Gummfit'}
+          {account?.account_type === 'creator' ? 'Gummfit Creators' : account?.account_type === 'writer' ? 'Gummfit Magazines' : 'Gummfit'}
         </span>
       </div>
 
       {/* Any nav click closes the drawer, including a link to the page already open. */}
       <nav onClick={onClose} className="flex flex-1 flex-col gap-1 overflow-y-auto px-3">
-        {siteId ? (
+        {siteId && account?.account_type === 'writer' ? (
+          WRITER_SITE_NAV.map((n) => (
+            <Item key={n.to} to={n.to ? `/cappe/sites/${siteId}/${n.to}` : `/cappe/sites/${siteId}`}
+              icon={n.icon} label={n.label} end={n.end} />
+          ))
+        ) : siteId ? (
           <>
             <NavLink to="/cappe/sites" onClick={guardNav} className={`${linkBase} ${linkIdle} mb-1`}>
               <ArrowLeft className="h-4 w-4" /> All sites
@@ -136,6 +153,8 @@ export default function CappeSidebar({ account, open = false, onClose }: {
               />
             ))}
           </>
+        ) : account?.account_type === 'writer' ? (
+          <Item to={writerPaths.home} icon={Newspaper} label="My magazine" end />
         ) : account?.account_type === 'creator' ? (
           <>
             <Item to={creatorPaths.home} icon={UserCircle} label="My Profile" end />

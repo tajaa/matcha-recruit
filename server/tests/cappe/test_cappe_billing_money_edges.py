@@ -253,7 +253,7 @@ class BillingStripe:
 
 
 def _billing_route(monkeypatch, rows, fresh):
-    account = SimpleNamespace(id=ACCOUNT, email="owner@example.com")
+    account = SimpleNamespace(id=ACCOUNT, email="owner@example.com", account_type="business")
     stripe, synced = BillingStripe(fresh), []
 
     async def _current(_conn, account_id):

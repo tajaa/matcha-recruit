@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom'
 import { Loader2, Plus, Trash2, Users } from 'lucide-react'
 import { cappeApi } from '../../api'
 import SurfaceShell from '../../components/SurfaceShell'
+import { useCappeMe } from '../../hooks/useCappeMe'
 import type { CappeSubscriber } from '../../types'
 
 const statusStyle: Record<string, string> = {
@@ -52,9 +53,12 @@ export default function Subscribers() {
   }
 
   const activeCount = (subs || []).filter((s) => s.status === 'subscribed').length
+  // A writer's list is the people who follow their magazine.
+  const writer = useCappeMe().account?.account_type === 'writer'
 
   return (
-    <SurfaceShell title="Subscribers" subtitle={subs ? `${activeCount} active of ${subs.length}` : 'Newsletter list.'}>
+    <SurfaceShell title={writer ? 'Followers' : 'Subscribers'}
+      subtitle={subs ? `${activeCount} active of ${subs.length}` : writer ? 'People who follow your magazine.' : 'Newsletter list.'}>
       {error && <p className="mb-4 text-sm text-red-400">{error}</p>}
 
       <form onSubmit={add} className="mb-6 flex flex-wrap gap-2 rounded-2xl border border-zinc-800 bg-zinc-900 p-4 shadow-sm">
@@ -93,6 +97,7 @@ export default function Subscribers() {
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-medium text-zinc-100">{s.email}</div>
                 {s.name && <div className="text-xs text-zinc-400">{s.name}</div>}
+                {s.source === 'follow' && <div className="text-[11px] text-zinc-500">Followed from the magazine</div>}
               </div>
               <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${statusStyle[s.status]}`}>{s.status}</span>
               <button onClick={() => remove(s.id)} className="text-zinc-400 hover:text-red-400">

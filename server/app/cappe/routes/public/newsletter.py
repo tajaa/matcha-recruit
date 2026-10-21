@@ -56,7 +56,8 @@ async def public_unsubscribe(slug: str, token: str, request: Request):
 
 
 def _confirm_page(
-    heading: str, message: str, status_code: int = 200, *, confirm_action: str | None = None
+    heading: str, message: str, status_code: int = 200, *, confirm_action: str | None = None,
+    button: str = "Confirm subscription",
 ) -> HTMLResponse:
     """Minimal standalone page for a link clicked out of an email client.
 
@@ -75,7 +76,7 @@ def _confirm_page(
             f"<form method=\"post\" action=\"{escape(confirm_action)}\">"
             "<button type=\"submit\" style=\"margin-top:1rem;padding:.75rem 1.5rem;border:0;"
             "border-radius:.5rem;background:#c6f16b;color:#0b0b0d;font:600 16px system-ui,"
-            "sans-serif;cursor:pointer\">Confirm subscription</button></form>"
+            f"sans-serif;cursor:pointer\">{escape(button)}</button></form>"
             if confirm_action else ""
         )
         + "</main></body></html>",
@@ -104,9 +105,12 @@ async def public_confirm_subscription_page(token: str, request: Request):
     await _read_rate_limit(request)
     confirm_token = _parse_confirm_token(token)
     async with get_connection() as conn:
-        state = await conn.fetchval(
-            "SELECT status FROM cappe_subscribers WHERE confirm_token = $1", confirm_token
+        row = await conn.fetchrow(
+            "SELECT status, source, (SELECT name FROM cappe_sites s WHERE s.id = site_id) AS site_name "
+            "FROM cappe_subscribers WHERE confirm_token = $1",
+            confirm_token,
         )
+    state = row["status"] if row else None
     if state is None:
         return _confirm_page(
             "Link not found",
@@ -115,6 +119,13 @@ async def public_confirm_subscription_page(token: str, request: Request):
         )
     if state == "subscribed":
         return _confirm_page("You're subscribed", "This address is already confirmed.")
+    if row["source"] == "follow":
+        # A reader asked to follow a magazine from its pages (cappemag04).
+        return _confirm_page(
+            f"Follow {row['site_name'] or 'this magazine'}",
+            "You asked to get its new stories by email. Nothing is sent to you unless you confirm.",
+            confirm_action=request.url.path, button="Confirm and follow",
+        )
     return _confirm_page(
         "Confirm your subscription",
         "A business added this address to its mailing list. Nothing is sent to you "
@@ -140,7 +151,7 @@ async def public_confirm_subscription(token: str, request: Request):
             """UPDATE cappe_subscribers
                   SET status = 'subscribed', unsubscribed_at = NULL, updated_at = NOW()
                 WHERE confirm_token = $1 AND status = 'pending_confirmation'
-             RETURNING id""",
+             RETURNING source""",
             confirm_token,
         )
         if confirmed is None:
@@ -155,6 +166,9 @@ async def public_confirm_subscription(token: str, request: Request):
                     "This confirmation link is no longer valid.",
                     status_code=status.HTTP_404_NOT_FOUND,
                 )
+    if confirmed == "follow":
+        return _confirm_page("You're following", "New stories will come to your inbox. "
+                             "Every email has a link to stop them.")
     return _confirm_page(
         "You're subscribed",
         "Thanks — you'll start receiving emails from this business. "

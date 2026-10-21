@@ -11,7 +11,9 @@ paid plan left with none) is simply omitted. A plan with no price rows at all
 is the free tier and stays.
 """
 
-from fastapi import Request
+from typing import Literal, Optional
+
+from fastapi import Query, Request
 
 from ....core.services.redis_cache import check_rate_limit, client_ip
 from ....database import get_connection
@@ -22,7 +24,7 @@ from ...models.cappe import (
     CappePublicPlan,
     CappePublicPricing,
 )
-from ...services.catalog import build_catalog
+from ...services.catalog import build_catalog, plan_offered
 
 from ._body_limit import limited_public_router
 
@@ -67,12 +69,16 @@ def _public_addon(addon: CappeAddon) -> CappePublicAddon | None:
 
 
 @router.get("/public/pricing", response_model=CappePublicPricing)
-async def public_pricing(request: Request):
+async def public_pricing(request: Request, for_: Optional[Literal["writer"]] = Query(default=None, alias="for")):
+    """The lineup a landing page shows. `?for=writer` is the magazines page's:
+    the Writer plan with Free and Business; without it, every plan not made
+    for one audience."""
     await check_rate_limit(
         client_ip(request), "cappe_pub_pricing", _RATE_LIMIT_CALLS, _RATE_LIMIT_WINDOW_S
     )
     async with get_connection() as conn:
         plans, addons = await build_catalog(conn)
+    plans = [p for p in plans if plan_offered(p.code, p.features, for_)]
     return CappePublicPricing(
         plans=[p for p in map(_public_plan, plans) if p is not None],
         addons=[a for a in map(_public_addon, addons) if a is not None],

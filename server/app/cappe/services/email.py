@@ -1075,10 +1075,11 @@ async def send_cappe_account_exists_email(to_email: str, to_name: str | None) ->
 
 
 async def send_cappe_subscribe_confirm_email(
-    to_email: str, to_name: str | None, site_name: str, confirm_url: str
+    to_email: str, to_name: str | None, site_name: str, confirm_url: str, *, follow: bool = False,
 ) -> bool:
     """Double opt-in for a subscriber a business imported rather than one who
-    signed up on the site themselves.
+    signed up on the site themselves — or for a reader who asked to follow a
+    magazine (`follow`), worded as their own request.
 
     An imported contact never asked us for email. Until this link is clicked the
     row stays `pending_confirmation`, and the campaign worker only ever selects
@@ -1086,6 +1087,8 @@ async def send_cappe_subscribe_confirm_email(
     shared sender.
     """
     greeting = f"Hi {to_name}," if to_name else "Hi there,"
+    if follow:
+        return await _send_follow_confirm(to_email, to_name, greeting, site_name, confirm_url)
     e_site = escape(site_name or "this business")
     html = _email_shell(
         f"Confirm your subscription to {e_site}",
@@ -1107,6 +1110,28 @@ async def send_cappe_subscribe_confirm_email(
     # the confirmation is retried instead of stranding the row pending forever.
     return await _send(to_email, to_name, f"Confirm your subscription to {site_name}", html, text,
                        label="subscribe confirm", log_recipient=False)
+
+
+async def _send_follow_confirm(to_email: str, to_name: str | None, greeting: str, site_name: str,
+                               confirm_url: str) -> bool:
+    name = site_name or "this magazine"
+    html = _email_shell(
+        f"Confirm you want to follow {escape(name)}",
+        f'<p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:#a1a1aa;">'
+        f"{escape(greeting)} you asked to get new stories from {escape(name)} by email. "
+        "Confirm and they'll come to your inbox; every one has a link to stop them.</p>"
+        '<p style="margin:0;font-size:12px;line-height:1.6;color:#71717a;">'
+        "If this wasn't you, ignore this email and you won't hear from us.</p>",
+        cta_label="Confirm and follow",
+        cta_url=confirm_url,
+        footer=name,
+    )
+    text = (
+        f"{greeting}\n\nYou asked to get new stories from {name} by email. Confirm here:\n{confirm_url}\n\n"
+        "If this wasn't you, ignore this email and you won't hear from us."
+    )
+    return await _send(to_email, to_name, f"Confirm you want to follow {name}", html, text,
+                       label="follow confirm", log_recipient=False)
 
 
 # ── transactional: domain renewals ───────────────────────────────────────────

@@ -56,6 +56,10 @@ export default function SetupGuide({ site, pages, publishing, onPublish, refresh
       case 'policies': case 'shipping': case 'tax': case 'identity':
         return `/cappe/sites/${site.id}/shop#${action}`
       case 'payments': return `/cappe/sites/${site.id}/orders`
+      // A magazine site's checklist (services/readiness.py).
+      case 'stories': return `/cappe/sites/${site.id}/stories`
+      case 'magazine': return `/cappe/sites/${site.id}/magazine`
+      case 'billing': return '/cappe/billing'
       default: return `/cappe/sites/${site.id}`
     }
   }

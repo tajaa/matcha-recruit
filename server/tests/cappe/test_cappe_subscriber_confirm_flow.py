@@ -211,23 +211,41 @@ def _body(resp):
     return resp.body.decode()
 
 
+def _pending(status="pending_confirmation", source="import"):
+    return {"status": status, "source": source, "site_name": "The Harbour Review"}
+
+
 def test_get_renders_a_button_and_changes_nothing(monkeypatch, public):
-    conn = _use(monkeypatch, public_mod, ScriptedConn(vals=["pending_confirmation"]))
+    conn = _use(monkeypatch, public_mod, ScriptedConn(rows=[_pending()]))
     resp = asyncio.run(public_mod.public_confirm_subscription_page(TOKEN, public))
     assert resp.status_code == 200
     assert "<form method=\"post\"" in _body(resp) and "Confirm subscription" in _body(resp)
-    assert [c[0] for c in conn.calls] == ["fetchval"]
+    assert "added this address to its mailing list" in _body(resp)
+    assert [c[0] for c in conn.calls] == ["fetchrow"]
     assert conn.calls[0][1].lstrip().startswith("SELECT")
 
 
 def test_get_for_an_already_confirmed_address_says_so(monkeypatch, public):
-    _use(monkeypatch, public_mod, ScriptedConn(vals=["subscribed"]))
+    _use(monkeypatch, public_mod, ScriptedConn(rows=[_pending(status="subscribed")]))
     resp = asyncio.run(public_mod.public_confirm_subscription_page(TOKEN, public))
     assert "already confirmed" in _body(resp) and "<form" not in _body(resp)
 
 
+def test_a_reader_following_a_magazine_is_asked_to_follow(monkeypatch, public):
+    _use(monkeypatch, public_mod, ScriptedConn(rows=[_pending(source="follow")]))
+    resp = asyncio.run(public_mod.public_confirm_subscription_page(TOKEN, public))
+    assert "Follow The Harbour Review" in _body(resp) and "Confirm and follow" in _body(resp)
+    assert "added this address" not in _body(resp)
+
+
+def test_confirming_a_follow_says_so(monkeypatch, public):
+    _use(monkeypatch, public_mod, ScriptedConn(vals=["follow"]))
+    resp = asyncio.run(public_mod.public_confirm_subscription(TOKEN, public))
+    assert "re following" in _body(resp) and "New stories will come to your inbox" in _body(resp)
+
+
 def test_get_unknown_token_is_404(monkeypatch, public):
-    _use(monkeypatch, public_mod, ScriptedConn(vals=[None]))
+    _use(monkeypatch, public_mod, ScriptedConn(rows=[None]))
     resp = asyncio.run(public_mod.public_confirm_subscription_page(TOKEN, public))
     assert resp.status_code == 404
 
