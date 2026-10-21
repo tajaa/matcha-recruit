@@ -155,3 +155,54 @@
 .mz-follow__msg.ok{color:var(--mz-accent)}
 .mz-follow__msg.err{color:#b91c1c}
 .mz-sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+
+/* The story as a book: pages turned left and right (pages.book_html, book.js).
+   Matte paper on a darker mat; every page has the same margins, so words and
+   pictures sit on one surface. The pages are columns of the page's height that
+   run off to the right: one page on a phone, a two-page spread from 960 px. */
+.mz-reader{--mz-paper:#f3eee4;--mz-paper-ink:#1f1c18;--mz-paper-muted:#6f675c;--mz-margin:1.4rem;
+  --mz-page-h:calc(100svh - 8.5rem);--mz-col-h:calc(var(--mz-page-h) - 2 * var(--mz-margin) - 1.2rem);
+  position:relative;background:#26231f;padding:1.25rem .5rem 2.75rem}
+@media (min-width:960px){.mz-reader{--mz-margin:3rem;padding:1.75rem 3.5rem 3rem}}
+.mz-book{position:relative;max-width:78rem;height:var(--mz-page-h);min-height:26rem;margin:0 auto;overflow-x:auto;overflow-y:hidden;
+  overscroll-behavior-x:contain;scrollbar-width:thin;color:var(--mz-paper-ink);outline:none;
+  background:var(--mz-paper);box-shadow:0 18px 50px rgba(0,0,0,.5)}
+.mz-book:focus-visible{box-shadow:0 0 0 3px var(--mz-accent),0 18px 50px rgba(0,0,0,.5)}
+@media (min-width:960px){.mz-book{background:linear-gradient(90deg,transparent calc(50% - 40px),rgba(0,0,0,.07) calc(50% - 2px),rgba(0,0,0,.12) 50%,rgba(0,0,0,.05) calc(50% + 3px),transparent calc(50% + 40px)),var(--mz-paper)}}
+.mz-pages{box-sizing:border-box;height:100%;width:100%;padding:var(--mz-margin) var(--mz-margin) calc(var(--mz-margin) + 1.2rem);
+  column-count:1;column-gap:calc(2 * var(--mz-margin));column-fill:auto}
+@media (min-width:960px){.mz-pages{column-count:2}}
+.mz-book .mz-story{--ink:var(--mz-paper-ink);--muted:var(--mz-paper-muted);--line:rgba(31,28,24,.14)}
+.mz-book .mz-story__body{font-size:1.05rem;line-height:1.62;hyphens:auto}
+/* On a page, everything takes the page's measure. */
+.mz-book .mz-measure,.mz-book .mz-fig--column,.mz-book .mz-fig--wide,.mz-book .mz-cover__words,.mz-book .mz-cover--stacked .mz-cover__media,
+.mz-book .mz-cover__credit,.mz-book .mz-story__topic,.mz-book .mz-paywall,.mz-book .mz-text--cols{max-width:none;padding-left:0;padding-right:0;margin-left:0;margin-right:0}
+.mz-book .mz-fig,.mz-book .mz-pull,.mz-book .mz-sidebar,.mz-book .mz-qa__item,.mz-book .mz-photos,.mz-book .mz-cover,.mz-book .mz-paywall{break-inside:avoid}
+.mz-book .mz-text--cols{column-count:1}
+@media (min-width:960px){.mz-book .mz-text--cols{column-count:2;column-gap:1.5rem}}
+/* A picture is never taller than its page, and prints matte. */
+.mz-book .mz-fig{margin:1.4rem auto;width:min(100%,calc((var(--mz-col-h) - 3rem) * var(--mz-ar,1.5)))}
+.mz-book .mz-fig--full{break-before:column;break-after:column;margin-top:0}
+.mz-book img{filter:saturate(.93) contrast(.97)}
+.mz-book .mz-filter--bw img{filter:grayscale(1) contrast(.97)}
+.mz-book .mz-filter--sepia img{filter:sepia(.85) contrast(.97)}
+.mz-book .mz-photos img{max-height:calc(var(--mz-col-h) * .42);object-fit:contain}
+.mz-book .mz-row{margin:1.4rem 0}
+/* The cover is the opening page; the story starts on the next. */
+.mz-book .mz-cover{margin:0;break-after:column;max-height:var(--mz-col-h)}
+.mz-book .mz-cover--overlay{min-height:0;height:var(--mz-col-h)}
+.mz-book .mz-cover--overlay .mz-cover__words{padding:0 1.5rem 1.75rem}
+.mz-book .mz-cover--stacked .mz-cover__img,.mz-book .mz-cover--split .mz-cover__img{max-height:calc(var(--mz-col-h) * .55);object-fit:cover}
+.mz-book .mz-cover--split{display:block;padding:0}
+.mz-book .mz-headline{font-size:clamp(2rem,4.2vw,3.6rem)}
+.mz-book .mz-story__topic{border-top:0;margin-top:1.5rem;padding-top:0}
+.mz-turn{position:absolute;top:calc(1.25rem + var(--mz-page-h) / 2);z-index:2;transform:translateY(-50%);width:2.6rem;height:2.6rem;border:0;border-radius:50%;
+  background:rgba(243,238,228,.92);color:#1f1c18;font-size:1.7rem;line-height:1;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.35)}
+.mz-turn[hidden]{display:none}
+.mz-turn--prev{left:.4rem}
+.mz-turn--next{right:.4rem}
+/* On a phone the arrows sit under the page, beside the page count, not on the words. */
+@media (max-width:959px){.mz-reader{padding-bottom:.6rem}.mz-turn{top:auto;bottom:.6rem;transform:none;width:2.3rem;height:2.3rem;font-size:1.45rem}
+  .mz-turn--prev{left:calc(50% - 8.5rem)}.mz-turn--next{right:calc(50% - 8.5rem)}.mz-folio{margin-top:.6rem;line-height:2.3rem}}
+@media (min-width:960px){.mz-turn{top:calc(1.75rem + var(--mz-page-h) / 2)}.mz-turn--prev{left:.6rem}.mz-turn--next{right:.6rem}}
+.mz-folio{margin:.8rem 0 0;text-align:center;font-size:.72rem;letter-spacing:.16em;text-transform:uppercase;color:rgba(243,238,228,.7);min-height:1em}

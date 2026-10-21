@@ -40,6 +40,25 @@ export function moveBlock(blocks: StoryBlock[], from: number, to: number): Story
   return next
 }
 
+/** `block` added at `at`. A cover only ever goes first (and there is only
+ *  one); nothing else goes in front of a cover. */
+export function insertBlock(blocks: StoryBlock[], at: number, block: StoryBlock): StoryBlock[] {
+  if (block.type === 'cover') return blocks[0]?.type === 'cover' ? blocks : [block, ...blocks]
+  if (block.type === 'paywall' && blocks.some((b) => b.type === 'paywall')) return blocks
+  const i = Math.max(blocks[0]?.type === 'cover' ? 1 : 0, Math.min(blocks.length, at))
+  return [...blocks.slice(0, i), block, ...blocks.slice(i)]
+}
+
+/** A copy of block `index` right after it. The cover and the paywall are one
+ *  of a kind, so they aren't copied. */
+export function duplicateBlock(blocks: StoryBlock[], index: number): StoryBlock[] {
+  const b = blocks[index]
+  if (!b || !canDuplicate(b)) return blocks
+  return [...blocks.slice(0, index + 1), structuredClone(b), ...blocks.slice(index + 1)]
+}
+
+export const canDuplicate = (b: StoryBlock) => b.type !== 'cover' && b.type !== 'paywall'
+
 /** The blocks with `caption` under every use of the picture `assetId`. */
 export function withCaption(blocks: StoryBlock[], assetId: string, caption: string): StoryBlock[] {
   return blocks.map((b) => {

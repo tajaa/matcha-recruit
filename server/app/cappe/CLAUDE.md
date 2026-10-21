@@ -324,6 +324,17 @@ What is built so far:
   `story_render.photo_html` draws a crop by scaling the picture inside a frame of the crop's aspect, and a
   crop, circle or arch adds "(cropped)" to a CC BY/BY-SA credit. Overlay words are escaped, count as story
   text, and go under the picture in an issue email (email can't lay them over it). A circle ignores the crop.
+- **A story page is a book turned left and right** (`pages.book_html`, `render/assets/book.js`, the book
+  section of `magazine.css`): the article flows through CSS columns of the page's height inside a
+  horizontally scrolling `.mz-book` (one page on a phone, a two-page spread from 960 px), matte paper on
+  a dark mat. A spread is the book's width, so the script turns by `clientWidth` (arrows, ←/→/Page keys,
+  a swipe settled on the nearest spread) and a ResizeObserver recounts when the paid part arrives. Each
+  figure carries `--mz-ar` (its shown ratio) so a picture is sized to fit the page height. The front,
+  topic pages, the feed and issue emails are not paged.
+- **The story editor keeps one undoable document** (`editor/history.ts`: headline fields + blocks; edits
+  within 1 s fold into one step, structural edits are their own), ⌘Z/⇧⌘Z/⌘S, insert-anywhere, duplicate,
+  drag to reorder, a Markdown toolbar (`editor/MarkdownField.tsx`, `editor/markdown.ts`) and the shared
+  `useUnsavedGuard`.
 - **Rich text is constrained Markdown** (`richtext.render_md`: `<` escaped before Markdown, then our
   own `html.parser` allowlist of p/em/strong/a/h2/h3/lists/blockquote — not bleach, which several
   test modules stub; h1→h2; links http(s)/mailto with `rel="nofollow ugc noopener"`). Credits come

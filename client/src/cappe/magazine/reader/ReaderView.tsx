@@ -3,6 +3,7 @@ import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, Loader2 } from 'lucide-react'
 import { cappeApi } from '../../api'
 import { ui } from '../../components/ui'
+import { wireBook } from './book'
 
 /** `sites/:siteId/magazine/view` (`?story=<id>`) — the magazine as a reader
  *  will see it, rendered by the server's own page code, for the writer: a
@@ -33,8 +34,10 @@ export default function ReaderView() {
 
   // The frame shares our origin (allow-same-origin, no scripts), so its
   // clicks can be read here.
+  // The story's pages turn from here too: the frame can't run the page's own script.
   const wireLinks = () => {
     const doc = frame.current?.contentDocument
+    wireBook(doc)
     doc?.addEventListener('click', (e) => {
       const a = (e.target as Element | null)?.closest?.('a')
       if (!a) return

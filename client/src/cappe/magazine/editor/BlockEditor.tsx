@@ -1,8 +1,10 @@
-import { ArrowDown, ArrowUp, ImagePlus, Trash2, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, Copy, GripVertical, ImagePlus, Trash2, X } from 'lucide-react'
+import type { DragEvent } from 'react'
 import { ui } from '../../components/ui'
 import type { CappeAsset, StoryBlock } from '../../types'
 import { thumbUrl } from '../library/assets'
-import { BLOCK_LABELS } from './blocks'
+import { BLOCK_LABELS, canDuplicate } from './blocks'
+import MarkdownField from './MarkdownField'
 import PhotoDesigner from './PhotoDesigner'
 
 const small = 'rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-sm text-zinc-100'
@@ -38,7 +40,7 @@ function PictureSlot({ assetId, assets, onPick, onClear, label = 'Picture' }: {
   )
 }
 
-export default function BlockEditor({ block, index, count, assets, onChange, onMove, onRemove, onPickAsset }: {
+export default function BlockEditor({ block, index, count, assets, onChange, onMove, onRemove, onDuplicate, onPickAsset, onDragStart }: {
   block: StoryBlock
   index: number
   count: number
@@ -46,6 +48,9 @@ export default function BlockEditor({ block, index, count, assets, onChange, onM
   onChange: (block: StoryBlock) => void
   onMove: (delta: -1 | 1) => void
   onRemove: () => void
+  onDuplicate?: () => void
+  /** The grip was picked up: the story editor moves the block where it's dropped. */
+  onDragStart?: (e: DragEvent) => void
   /** Open the picker; `done(asset)` is called with the choice. */
   onPickAsset: (done: (asset: CappeAsset) => void) => void
 }) {
@@ -87,8 +92,8 @@ export default function BlockEditor({ block, index, count, assets, onChange, onM
       case 'text':
         return (
           <div className="space-y-2">
-            <textarea value={block.md} onChange={(e) => onChange({ ...block, md: e.target.value })} rows={8}
-              placeholder="Write in Markdown: **bold**, *italic*, ## heading, > quote, - list" className={`${ui.input} font-mono text-[13px]`} />
+            <MarkdownField value={block.md} onChange={(md) => onChange({ ...block, md })} label="Text"
+              placeholder="Write here. Select words and use the bar above, or type Markdown: **bold**, *italic*, ## heading, > quote, - list" />
             <div className="flex flex-wrap gap-3 text-sm text-zinc-300">
               <label className="flex items-center gap-2">Style
                 <select value={block.variant || 'body'} onChange={(e) => onChange({ ...block, variant: e.target.value as typeof block.variant })} className={small}>
@@ -182,7 +187,7 @@ export default function BlockEditor({ block, index, count, assets, onChange, onM
         return (
           <div className="space-y-2">
             <input value={block.title} onChange={(e) => onChange({ ...block, title: e.target.value })} maxLength={120} placeholder="Sidebar title" className={ui.input} />
-            <textarea value={block.md} onChange={(e) => onChange({ ...block, md: e.target.value })} rows={4} placeholder="Facts, a timeline, where to go (Markdown)" className={`${ui.input} font-mono text-[13px]`} />
+            <MarkdownField value={block.md} onChange={(md) => onChange({ ...block, md })} rows={4} label="Sidebar" placeholder="Facts, a timeline, where to go" />
           </div>
         )
       case 'qa':
@@ -196,8 +201,8 @@ export default function BlockEditor({ block, index, count, assets, onChange, onM
                   <button type="button" aria-label={`Remove question ${i + 1}`} onClick={() => onChange({ ...block, items: block.items.filter((_, j) => j !== i) })}
                     className="text-zinc-500 hover:text-red-400"><Trash2 className="h-4 w-4" /></button>
                 </div>
-                <textarea value={item.a_md} onChange={(e) => onChange({ ...block, items: block.items.map((x, j) => (j === i ? { ...x, a_md: e.target.value } : x)) })}
-                  rows={3} placeholder="Answer (Markdown)" className={`${ui.input} font-mono text-[13px]`} />
+                <MarkdownField value={item.a_md} onChange={(a_md) => onChange({ ...block, items: block.items.map((x, j) => (j === i ? { ...x, a_md } : x)) })}
+                  rows={3} label={`Answer ${i + 1}`} placeholder="Answer" />
               </div>
             ))}
             {block.items.length < 40 && (
@@ -215,12 +220,22 @@ export default function BlockEditor({ block, index, count, assets, onChange, onM
   return (
     <section className={`${ui.card} p-4`} aria-label={`${BLOCK_LABELS[block.type]} block`}>
       <div className="mb-3 flex items-center gap-2">
+        {onDragStart && block.type !== 'cover' && (
+          <span draggable onDragStart={onDragStart} title="Drag to move" aria-hidden
+            className="-ml-1 cursor-grab rounded p-0.5 text-zinc-600 hover:bg-zinc-800 hover:text-zinc-300 active:cursor-grabbing">
+            <GripVertical className="h-4 w-4" />
+          </span>
+        )}
         <span className="text-xs font-semibold uppercase tracking-widest text-zinc-400">{BLOCK_LABELS[block.type]}</span>
         <div className="ml-auto flex gap-1">
           <button type="button" aria-label="Move up" disabled={index === 0 || block.type === 'cover'} onClick={() => onMove(-1)}
             className="rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200 disabled:opacity-30"><ArrowUp className="h-4 w-4" /></button>
           <button type="button" aria-label="Move down" disabled={index >= count - 1} onClick={() => onMove(1)}
             className="rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200 disabled:opacity-30"><ArrowDown className="h-4 w-4" /></button>
+          {onDuplicate && canDuplicate(block) && (
+            <button type="button" aria-label="Duplicate block" title="Duplicate" onClick={onDuplicate}
+              className="rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"><Copy className="h-4 w-4" /></button>
+          )}
           <button type="button" aria-label="Remove block" onClick={onRemove}
             className="rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-red-400"><Trash2 className="h-4 w-4" /></button>
         </div>

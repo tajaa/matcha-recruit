@@ -32,6 +32,7 @@ from .topics import topic_label
 _ASSETS = Path(__file__).resolve().parent.parent / "render" / "assets"
 _CSS = (_ASSETS / "magazine.css").read_text(encoding="utf-8")
 _FOLLOW_JS = (_ASSETS / "follow.js").read_text(encoding="utf-8")
+_BOOK_JS = (_ASSETS / "book.js").read_text(encoding="utf-8")
 
 PAGE_SIZE = 12
 MAX_PAGE = 50
@@ -228,13 +229,12 @@ def render_story(site: dict, nav: list[dict], mag: dict, post: dict, assets: dic
         cards = "".join(card_html(p, more_covers.get(_key(p))) for p in more)
         more_html = (f'<section class="mz-more"><h2 class="mz-more__title">More from {escape(mag.get("name") or "")}'
                      f'</h2><div class="mz-grid">{cards}</div></section>')
-    body = (
-        _masthead(mag, small=True)
-        + f'<article class="mz-story mz-layout-{escape(post.get("layout") or "standard")}">'
+    article = (
+        f'<article class="mz-story mz-layout-{escape(post.get("layout") or "standard")}">'
         + cover_html(post, cover, cover_asset, byline_html=_meta(post))
         + f'<div class="mz-story__body">{render_blocks(free, assets)}</div>{paywall}{topic_link}</article>'
-        + follow_html(mag) + more_html
     )
+    body = _masthead(mag, small=True) + book_html(article) + follow_html(mag) + more_html
     url = f"{origin}{story_path(post['slug'])}"
     image = share_image(cover_asset)
     extra = article_ld(post, mag, url=url, image=image)
@@ -247,6 +247,23 @@ def render_story(site: dict, nav: list[dict], mag: dict, post: dict, assets: dic
         "title": f"{post.get('title')} — {mag.get('name')}", "description": post.get("excerpt") or "",
         "image": image, "type": "article", "url": url,
     })
+
+
+def book_html(article: str) -> str:
+    """The story as pages turned left and right, on matte paper inside a mat.
+    The words flow from page to page in columns of the page's height (a
+    two-page spread from 960 px, one page on a phone); `render/assets/book.js`
+    turns them with the arrows, the keys or a swipe and counts the pages.
+    Without it the pages still scroll sideways."""
+    return (
+        '<div class="mz-reader" data-mz-book>'
+        '<button type="button" class="mz-turn mz-turn--prev" data-mz-prev aria-label="Previous page" hidden>&#8249;</button>'
+        '<div class="mz-book" tabindex="0" role="region" aria-label="The story. Use the left and right arrow keys to turn pages.">'
+        f'<div class="mz-pages">{article}</div></div>'
+        '<button type="button" class="mz-turn mz-turn--next" data-mz-next aria-label="Next page" hidden>&#8250;</button>'
+        '<p class="mz-folio" data-mz-folio aria-live="polite"></p>'
+        f"</div><script>{_BOOK_JS}</script>"
+    )
 
 
 def _cdata(html: str) -> str:
