@@ -5,10 +5,12 @@ depends on the plan (`services/magazine/magazines.live_magazine`). The
 response says both, so the editor can tell an owner "your plan doesn't include
 a magazine" instead of showing a switch that does nothing.
 """
-from typing import Any
+from typing import Any, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import HTMLResponse
+from pydantic import BaseModel, Field
 
 from ...database import get_connection
 from ..dependencies import require_cappe_account
@@ -16,8 +18,10 @@ from ..models.cappe import CappeAccount, CappeMagazine, CappeMagazineUpdate
 from ..services.entitlements import resolve_entitlements
 from ..services.magazine.magazines import get_magazine, save_magazine
 from ..services.magazine.topics import normalize_topic
+from ..services.magazine import pages as mag_pages, reader as mag_reader
+from ..services.magazine.stories import POST_COLS, post_row
 from ._shared import get_owned_site
-from .render import invalidate_render_cache
+from .render import _front_html, _nav, _site_dict, invalidate_render_cache, tenant_security_headers
 
 router = APIRouter()
 
@@ -65,3 +69,43 @@ async def update_site_magazine(site_id: UUID, body: CappeMagazineUpdate,
         view = await _view(conn, site, mag, account.plan)
     await invalidate_render_cache(site_id)
     return view
+
+
+class CappeReaderView(BaseModel):
+    """A story by `story_id` or `slug` (a link clicked inside the view); neither
+    for the magazine's front."""
+    story_id: Optional[UUID] = None
+    slug: Optional[str] = Field(default=None, max_length=160)
+
+
+@router.post("/sites/{site_id}/magazine/view", response_class=HTMLResponse)
+async def reader_view(site_id: UUID, body: CappeReaderView, account: CappeAccount = Depends(require_cappe_account)):
+    """The magazine as a reader will see it, for its owner: the front, or a
+    saved story, rendered by the same code as the public pages. Unlike them it
+    shows a site that isn't published, a magazine that's off or not on the
+    plan yet, and a story that is still a draft. Nothing here is public: it is
+    the owner's own request, never cached. A paid story shows what a reader
+    without a subscription sees."""
+    async with get_connection() as conn:
+        site = await get_owned_site(conn, site_id, account.id)
+        mag = await get_magazine(conn, site_id) or {"site_id": site_id, "name": site["name"],
+                                                    "masthead_style": "classic", "front_at_root": False}
+        if body.story_id is None and not body.slug:
+            html = await _front_html(conn, site, mag, page=1, host=None)
+        else:
+            row = await conn.fetchrow(
+                f"SELECT {POST_COLS} FROM cappe_posts WHERE site_id = $1 AND "
+                + ("id = $2" if body.story_id else "slug = $2"),
+                site_id, body.story_id or body.slug,
+            )
+            if row is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Story not found")
+            post = post_row(row)
+            assets = await mag_reader.story_assets(conn, site_id, post)
+            more = await mag_reader.live_stories(conn, site_id, exclude=post["id"], limit=3)
+            more_covers = await mag_reader.covers(conn, site_id, more)
+            nav = await _nav(conn, site_id)
+            html = mag_pages.render_story(_site_dict(site, magazine=mag), nav, mag, post, assets, more=more,
+                                          more_covers=more_covers, origin="",
+                                          preview_blocks=int(mag.get("preview_blocks") or 3))
+    return HTMLResponse(html, headers={**tenant_security_headers(), "Cache-Control": "no-store"})

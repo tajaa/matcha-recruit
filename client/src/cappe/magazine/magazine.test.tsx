@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import Stories from './stories/Stories'
 import StoryEditor from './editor/StoryEditor'
 import MagazineSettings from './settings/MagazineSettings'
+import ReaderView from './reader/ReaderView'
 import { assetIdsIn, moveBlock, newBlock } from './editor/blocks'
 import type { CappeAsset, CappeMagazine, CappePost, CappeStoryOptions, StoryBlock } from '../types'
 
@@ -248,5 +249,25 @@ describe('MagazineSettings', () => {
     await screen.findByDisplayValue('Salt & Light')
     fireEvent.click(screen.getByRole('button', { name: 'F' }))
     expect(screen.getByRole('button', { name: 'F' })).toHaveAttribute('aria-pressed', 'false')
+  })
+})
+
+describe('ReaderView', () => {
+  it('shows the page as a reader sees it and follows story links inside', async () => {
+    api.postHtml.mockResolvedValue('<!doctype html><a href="/stories/low-tide">Low tide</a><a href="https://elsewhere.test/">x</a>')
+    render(
+      <MemoryRouter initialEntries={['/cappe/sites/s-1/magazine/view']}>
+        <Routes><Route path="/cappe/sites/:siteId/magazine/view" element={<ReaderView />} /></Routes>
+      </MemoryRouter>,
+    )
+    const frame = await screen.findByTitle('Reader view') as HTMLIFrameElement
+    expect(api.postHtml).toHaveBeenCalledWith('/sites/s-1/magazine/view', {})
+    expect(frame).toHaveAttribute('sandbox', 'allow-same-origin')
+    expect(screen.getByText(/Only you can see this until you publish/)).toBeInTheDocument()
+    // jsdom doesn't load srcDoc, so the page's link is written into the frame here.
+    frame.contentDocument!.body.innerHTML = '<a href="/stories/low-tide">Low tide</a>'
+    fireEvent.load(frame)
+    fireEvent.click(frame.contentDocument!.querySelector('a')!)
+    await waitFor(() => expect(api.postHtml).toHaveBeenLastCalledWith('/sites/s-1/magazine/view', { slug: 'low-tide' }))
   })
 })
