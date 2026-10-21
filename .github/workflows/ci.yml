@@ -213,9 +213,6 @@ jobs:
       # matcha suite opens a redis client — init_redis_cache() runs in the app
       # lifespan, which these unit tests never enter.
       OPENSSL_armcap: "0"
-      # coverage's sys.monitoring core (Python 3.12+): the default settrace
-      # tracer made the suite about 3.5x slower here than without coverage.
-      COVERAGE_CORE: sysmon
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
