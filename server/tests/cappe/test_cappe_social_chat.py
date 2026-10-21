@@ -171,9 +171,10 @@ def _model(**plan):
 ITEMS = [{"kind": "image", "url": IMG}, {"kind": "image", "url": IMG2}]
 
 
-def resolve(out, message="post these tomorrow at 2pm", items=ITEMS, accounts=ACCOUNTS):
+def resolve(out, message="post these tomorrow at 2pm", items=ITEMS, accounts=ACCOUNTS, current=None):
     return planner.resolve(out, message=message, items=items, accounts=accounts, products=PRODUCTS,
-                           origin="https://po.example.test", now_local=NOW, tz_name="America/Los_Angeles")
+                           origin="https://po.example.test", now_local=NOW, tz_name="America/Los_Angeles",
+                           current=current)
 
 
 def test_resolve_builds_a_postable_plan():
@@ -391,11 +392,17 @@ def test_items_pictures_and_staged_actions(monkeypatch):
     assert items[3]["shape"] is None
     assert chat._shape({"width": 100, "height": 100}) == "square"
     # A chat that goes on after a confirm plans only what's new.
-    done = {**chat.staged({"posts": [{"media": [{"kind": "image", "url": IMG}, {"kind": "video", "asset_id": "v1"},
-                                                 {"kind": "image"}]}]}, revision=1, model="m"), "status": "executed"}
+    done = {**chat.staged({"posts": [{"items": [1, 2, 3], "media": [
+        {"kind": "image", "url": IMG}, {"kind": "video", "asset_id": "v1"}, {"kind": "image"}]}]}, revision=1, model="m"),
+        "status": "executed", "post_ids": ["p1"]}
     keys = chat.posted_keys([done, chat.staged({"posts": [{"media": [{"url": IMG2}]}]}, revision=2, model="m"),
                              {"kind": "other", "status": "executed"}])
     assert keys == {IMG, "v1"}
+    # Files only: the video was used, the photo is still there to post.
+    files_only = {**chat.staged({"exports": {"items": [2]}, "posts": [{"items": [1, 2], "media": [
+        {"kind": "image", "url": IMG}, {"kind": "video", "asset_id": "v1"}]}]}, revision=1, model="m"),
+        "status": "executed", "export_ids": ["e1"]}
+    assert chat.posted_keys([files_only]) == {"v1"}
     assert [i.get("url") or i.get("asset_id") for i in chat.items_from(messages, assets, exclude=keys)] == ["v3", "v4"]
     blocks, numbers = chat.pictures(items)
     assert numbers == [1, 2] and blocks[1]["source"]["url"] == "f1"
@@ -713,3 +720,330 @@ def test_dismiss(world):
     assert res.status_code == 200 and res.json()["status"] == "dismissed"
     assert world.client.post(f"{BASE}/conversations/{CONVO}/plans/other/dismiss").status_code == 404
 
+
+
+# ── files to download: "prepare this for all platforms" ─────────────────────
+
+from app.cappe.services.social import exports as export_store  # noqa: E402
+from app.cappe.services.social.chat import intent  # noqa: E402
+
+VIDEO = {"kind": "video", "asset_id": str(ASSET), "poster": IMG, "name": "latte.mov", "duration_ms": 30_000,
+         "shape": "vertical", "status": "ready"}
+VIDEO_ITEMS = [VIDEO, {"kind": "image", "url": IMG}]
+
+
+def _video_model(**post):
+    return _model(networks=["instagram", "facebook"], posts=[
+        {"items": [1], "instagram": {"caption": "Fresh oat lattes are back. Come try one!",
+                                     "hashtags": ["#oatlatte", "#coffee"]},
+         "facebook": {"text": "Oat lattes are back"}, "alt_text": "A latte", **post},
+        {"items": [2], "instagram": {"caption": "A photo"}, "facebook": {"text": "A photo"}}])
+
+
+@pytest.mark.parametrize("text,prepare,post,everywhere,platforms,captions", [
+    ("Prepare for all platforms", True, False, True, set(), None),
+    ("prepare this for all platforms with cool word for word captions", True, False, True, set(), True),
+    ("cut this for TikTok and YouTube", True, False, False, {"tiktok", "youtube"}, None),
+    ("make sure they have word-for-word transcripts", True, False, False, set(), True),
+    ("give me a tiktok cut with subtitles", True, False, False, {"tiktok"}, True),
+    ("export versions for every platform, no captions", True, False, True, set(), False),
+    ("I'll upload them myself to youtube shorts", True, False, False, {"youtube"}, None),
+    ("post this to instagram and prepare a tiktok version", True, True, False, {"instagram", "tiktok"}, None),
+    ("post these everywhere at 2pm tomorrow", False, True, True, set(), None),
+    ("write captions for these and post tomorrow", False, True, False, set(), None),
+    ("a cut above the rest, post it now", False, True, False, set(), None),
+    ("the new version of our latte is here, post it", False, True, False, set(), None),
+    ("post to ig and fb", False, True, False, {"instagram", "facebook"}, None),
+    ("downloadable files for all 3 please", True, False, True, set(), None),
+    ("I'll post it myself on tiktok", True, False, False, {"tiktok"}, None),
+    ("give me files to download for each app", True, False, False, set(), None),
+    ("our meal prep boxes are back, post it", False, True, False, set(), None),
+    ("cut to the chase and post it", False, True, False, set(), None),
+    ("download our app! post this tomorrow", False, True, False, set(), None),
+    ("new shorts just dropped, post them", False, True, False, set(), None),
+    # "prepare" on its own is getting ready, and "caption" is the post's text.
+    ("prepare a post for friday with a fun caption", False, True, False, set(), None),
+    ("prepare a post for instagram", False, True, False, {"instagram"}, None),
+    ("prepare captions for these and post them tomorrow", False, True, False, set(), None),
+    ("prepare it for tiktok with captions", True, False, False, {"tiktok"}, True),
+    ("prepare the video for youtube", True, False, False, {"youtube"}, None),
+    ("prepare files for all three", True, False, True, set(), None),
+    ("prepare a tiktok version with captions and post it to instagram at 2", True, True, False,
+     {"instagram", "tiktok"}, None),
+    ("", False, False, False, set(), None),
+])
+def test_intent_reads_what_the_owner_asked_for(text, prepare, post, everywhere, platforms, captions):
+    ask = intent.parse(text)
+    assert (ask.prepare, ask.post, ask.everywhere, set(ask.platforms), ask.captions) == (
+        prepare, post, everywhere, platforms, captions)
+    assert ask.files_only is (prepare and not post)
+
+
+def test_files_only_when_asked_with_every_platform_and_no_time_needed():
+    plan = resolve(_video_model(), message="prepare this for all platforms with word for word captions",
+                   items=VIDEO_ITEMS)
+    exports = plan["exports"]
+    assert exports["platforms"] == ["instagram", "tiktok", "youtube"] and exports["items"] == [1]
+    assert exports["captions"] is True and exports["reason"] == "asked" and exports["files_only"] is True
+    assert "Nothing is posted" in exports["note"] and "burned in as captions" in exports["note"]
+    assert "when" not in plan["needs"] and plan["warnings"] == []
+    video_post, photo_post = plan["posts"]
+    assert video_post["tiktok"] == {"caption": "Fresh oat lattes are back. Come try one!",
+                                    "hashtags": ["#oatlatte", "#coffee"]}
+    assert video_post["youtube"] == {"title": "Fresh oat lattes are back.",
+                                     "description": "Fresh oat lattes are back. Come try one!",
+                                     "tags": ["oatlatte", "coffee"]}
+    assert "tiktok" not in photo_post and "youtube" not in photo_post
+    assert planner.summary(plan) == "Planned files for Instagram, TikTok and YouTube for 1 video"
+
+
+def test_posting_everywhere_also_makes_tiktok_and_youtube_files():
+    plan = resolve(_video_model(), message="post these everywhere at 2pm tomorrow", items=VIDEO_ITEMS)
+    assert [a["platform"] for a in plan["accounts"]] == ["instagram", "facebook"]
+    assert plan["exports"]["platforms"] == ["tiktok", "youtube"] and plan["exports"]["reason"] == "coming_soon"
+    assert plan["exports"]["files_only"] is False and not any("can't be posted" in w for w in plan["warnings"])
+    assert planner.summary(plan).endswith(", and files for TikTok and YouTube")
+    # Only YouTube named: only its file.
+    named = resolve(_video_model(), message="post to instagram and youtube tomorrow at 2pm", items=VIDEO_ITEMS)
+    assert named["exports"]["platforms"] == ["youtube"]
+    # The model naming TikTok counts when the owner's words didn't name a platform we caught.
+    by_model = resolve(_model(networks=["instagram", "tiktok"], posts=[{"items": [1], "instagram": {"caption": "x"}}]),
+                       message="share it tomorrow at 2pm", items=[VIDEO])
+    assert by_model["exports"]["platforms"] == ["tiktok"]
+    # Plain posting with accounts connected: no files.
+    assert resolve(_video_model(), message="post this tomorrow at 2pm", items=VIDEO_ITEMS)["exports"] is None
+
+
+def test_with_no_account_connected_a_video_still_gets_its_files():
+    plan = resolve(_video_model(), message="post this tomorrow at 2pm", items=VIDEO_ITEMS, accounts=[])
+    assert plan["exports"]["reason"] == "no_accounts" and plan["exports"]["platforms"] == ["instagram", "tiktok",
+                                                                                           "youtube"]
+    assert not any("No account is connected" in w for w in plan["warnings"])
+    photos = resolve(_model(), message="prepare these for all platforms", accounts=[])
+    assert photos["exports"] is None and any("Only videos get files" in w for w in photos["warnings"])
+    assert any("No account is connected" in w for w in photos["warnings"])
+
+
+def test_the_models_tiktok_and_youtube_words_are_kept_within_limits():
+    words = {"tiktok": {"caption": "POV: oat latte season", "hashtags": [f"#t{i}" for i in range(9)]},
+             "youtube": {"title": "word " * 40, "description": "Back for fall.", "tags": ["#oat latte", "Oat Latte",
+                                                                                         "x" * 120] + [f"{i}" * 99 for i in range(6)]}}
+    plan = resolve(_video_model(**words), message="prepare for all platforms", items=VIDEO_ITEMS)
+    post = plan["posts"][0]
+    assert post["tiktok"] == {"caption": "POV: oat latte season", "hashtags": [f"#t{i}" for i in range(6)]}
+    yt = post["youtube"]
+    assert len(yt["title"]) <= 100 and yt["title"].endswith("word") and yt["description"] == "Back for fall."
+    assert yt["tags"][:2] == ["oat latte", "x" * 100] and len(" ".join(yt["tags"])) <= 500
+    assert planner._title("") == "" and planner._title("A" * 120) == "A" * 100
+    assert planner._tags("nope") == []
+
+
+def test_the_owners_edited_words_are_pasted_as_written():
+    post = resolve(_video_model(), message="prepare for all platforms", items=VIDEO_ITEMS)["posts"][0]
+    edited = confirmer.apply_edits({"posts": [post]}, [{
+        "instagram": post["instagram"], "facebook": post["facebook"], "alt_text": None,
+        "tiktok": {"caption": "Oat latte!", "hashtags": [f"#t{i}" for i in range(10)]},
+        "youtube": {"title": "Oat latte. Now in every store!", "description": "D" * 4990, "tags": []}}],
+        keep_link=True)["posts"][0]
+    tiktok = planner.texts_for(edited, "tiktok", None)
+    assert tiktok["text"].count("#t") == 10  # not cut to six
+    link = "https://po.example.test/shop/oat-latte"
+    yt = planner.texts_for(edited, "youtube", link)
+    assert yt["title"] == "Oat latte. Now in every store!"  # not cut to its first sentence
+    assert yt["tags"] == []  # cleared on purpose stays cleared
+    assert len(yt["description"]) <= planner.YOUTUBE_DESCRIPTION
+    assert yt["description"].endswith(planner.with_utm(link, "youtube"))  # the link survives whole
+
+
+def test_a_follow_up_keeps_the_plans_files():
+    first = resolve(_video_model(), message="prepare this for all platforms with word for word captions",
+                    items=VIDEO_ITEMS)
+    again = resolve(_video_model(), message="make the TikTok caption funnier", items=VIDEO_ITEMS, current=first)
+    assert again["exports"]["platforms"] == ["instagram", "tiktok", "youtube"]
+    assert again["exports"]["captions"] is True and again["exports"]["files_only"] is True
+    assert "when" not in again["needs"]
+    assert planner.export_hint("make the TikTok caption funnier", VIDEO_ITEMS, [], first) == [
+        "instagram", "tiktok", "youtube"]
+    # Saying something new about files or posting re-decides.
+    posting = resolve(_video_model(), message="actually post it to instagram at 3pm", items=VIDEO_ITEMS,
+                      current=first)
+    assert posting["exports"] is None or not posting["exports"]["files_only"]
+
+
+def test_texts_to_paste_keep_links_where_they_work():
+    post = resolve(_video_model(), message="prepare for all platforms", items=VIDEO_ITEMS)["posts"][0]
+    link = "https://po.example.test/shop/oat-latte"
+    ig = planner.texts_for(post, "instagram", link)
+    assert ig["text"] == "Fresh oat lattes are back. Come try one!\n\n#oatlatte #coffee"
+    assert ig["link"].endswith("utm_source=instagram&utm_medium=social&utm_campaign=gummfit_social")
+    tiktok = planner.texts_for(post, "tiktok", link)
+    assert "http" not in tiktok["text"] and "utm_source=tiktok" in tiktok["link"]
+    yt = planner.texts_for(post, "youtube", link)
+    assert yt["description"].endswith("utm_source=youtube&utm_medium=social&utm_campaign=gummfit_social")
+    assert yt["title"] == "Fresh oat lattes are back." and yt["tags"] == ["oatlatte", "coffee"]
+    assert planner.texts_for(post, "youtube", None)["description"] == "Fresh oat lattes are back. Come try one!"
+    assert planner.texts_for(post, "tiktok", None)["link"] is None
+
+
+def test_the_prompt_asks_for_tiktok_and_youtube_words_only_when_files_are_made():
+    base = dict(site=SITE_ROW, settings={}, accounts=ACCOUNTS, products=[], items=VIDEO_ITEMS, pictures=[1],
+                history=[], current_plan=None, message="prep", now_local=NOW)
+    plain = planner.build_prompt(**base)
+    assert "TikTok and YouTube can't be posted to yet." in plain and '"tiktok":' not in plain
+    both = planner.build_prompt(**base, export_platforms=["instagram", "tiktok", "youtube"])
+    assert "download files for Instagram, TikTok and YouTube" in both
+    assert '"tiktok": {"caption": "...", "hashtags": ["#tag"]}' in both
+    assert '"youtube": {"title": "...", "description": "...", "tags": ["tag"]}' in both
+    assert '"alt_text": "what the first picture shows"}]}}. ' in both
+    only_yt = planner.build_prompt(**base, export_platforms=["youtube"])
+    assert '"youtube":' in only_yt and '"tiktok":' not in only_yt
+    assert planner.export_hint("cut it for tiktok", VIDEO_ITEMS, ACCOUNTS) == ["tiktok"]
+    assert planner.export_hint("post it", VIDEO_ITEMS, ACCOUNTS) == []
+    assert planner.export_hint("cut it for tiktok", ITEMS, ACCOUNTS) == []
+
+
+@pytest.mark.asyncio
+async def test_think_writes_the_tiktok_and_youtube_words_when_files_are_coming(monkeypatch):
+    monkeypatch.setattr(chat, "model_for", AsyncMock(return_value="claude-haiku-5-5"))
+    generate = AsyncMock(return_value=json.dumps(_video_model()))
+    monkeypatch.setattr(chat.anthropic_messages, "generate_text", generate)
+    _, plan, _ = await chat.think(site=SITE_ROW, settings={}, accounts=ACCOUNTS, products=[], items=VIDEO_ITEMS,
+                                  history=[], current_plan=None, message="prepare for all platforms", now_local=NOW,
+                                  tz_name="America/Los_Angeles", origin="https://po.example.test")
+    assert plan["exports"]["platforms"] == ["instagram", "tiktok", "youtube"]
+    assert generate.await_args.kwargs["max_tokens"] == 8_000 and '"youtube":' in generate.await_args.args[0]
+    assert chat.staged(plan, revision=1, model="m")["export_ids"] == []
+
+
+def test_confirm_edits_the_files_and_their_words():
+    plan = resolve(_video_model(), message="prepare for all platforms", items=VIDEO_ITEMS)
+    edit = {"instagram": {"caption": "IG", "hashtags": []}, "facebook": {"text": "FB"}, "alt_text": None,
+            "tiktok": {"caption": "TT", "hashtags": ["#tt"]}, "youtube": None}
+    photo = {"instagram": {"caption": "P", "hashtags": []}, "facebook": {"text": "P"}, "alt_text": None}
+    out = confirmer.apply_edits(plan, [edit, photo], keep_link=True,
+                                exports={"platforms": ["youtube", "tiktok", "facebook"], "captions": True})
+    assert out["exports"]["platforms"] == ["tiktok", "youtube"] and out["exports"]["captions"] is True
+    assert out["posts"][0]["tiktok"] == {"caption": "TT", "hashtags": ["#tt"], "by_owner": True}
+    assert out["posts"][0]["youtube"] == plan["posts"][0]["youtube"]  # not edited, kept
+    assert confirmer.apply_edits(plan, None, keep_link=True, exports={"platforms": []})["exports"] is None
+    # Files can be asked for on the card even when the plan didn't propose any.
+    posting = resolve(_video_model(), message="post this tomorrow at 2pm", items=VIDEO_ITEMS)
+    added = confirmer.apply_edits(posting, None, keep_link=True, exports={"platforms": ["tiktok"], "captions": False})
+    assert added["exports"]["items"] == [1] and added["exports"]["platforms"] == ["tiktok"]
+    assert confirmer.apply_edits(resolve(_model()), None, keep_link=True,
+                                 exports={"platforms": ["tiktok"]})["exports"] is None  # photos only
+
+
+def test_files_only_checks_and_has_no_schedule():
+    plan = resolve(_video_model(), message="prepare for all platforms", items=VIDEO_ITEMS)
+    confirmer.check(plan, [], mode="export")
+    with pytest.raises(confirmer.PlanError, match="Pick at least one platform"):
+        confirmer.check({**plan, "exports": {**plan["exports"], "platforms": []}}, [], mode="export")
+    with pytest.raises(confirmer.PlanError, match="Only videos"):
+        confirmer.check({**plan, "exports": None}, [], mode="export")
+    assert confirmer.schedule("export", None, LA) is None
+
+
+@pytest.mark.asyncio
+async def test_create_exports_makes_one_per_video_with_each_platforms_words(monkeypatch):
+    out = _video_model()
+    out["plan"]["link"] = {"kind": "product", "product_id": str(PRODUCTS[0]["id"])}
+    plan = resolve(out, message="prepare for tiktok and youtube with captions", items=VIDEO_ITEMS)
+    create = AsyncMock(side_effect=lambda conn, **kw: {"id": uuid4(), **kw})
+    monkeypatch.setattr(export_store, "create", create)
+    made = await confirmer.create_exports(None, site_id=SITE, account_id=ACCOUNT.id, plan=plan,
+                                          provenance={"plan_id": "p1"})
+    assert len(made) == 1
+    kw = create.await_args.kwargs
+    assert kw["asset_id"] == ASSET and kw["platforms"] == ["tiktok", "youtube"] and kw["captions"] is True
+    assert set(kw["texts"]) == {"tiktok", "youtube"} and "shop/oat-latte" in kw["texts"]["youtube"]["description"]
+    assert kw["provenance"] == {"plan_id": "p1"}
+    assert await confirmer.create_exports(None, site_id=SITE, account_id=ACCOUNT.id, plan={**plan, "exports": None},
+                                          provenance={}) == []
+
+
+def _export_row(**over):
+    return {"id": uuid4(), "site_id": SITE, "account_id": ACCOUNT.id, "asset_id": ASSET, "status": "queued",
+            "platforms": ["tiktok"], "captions": False, "facts": None, "targets": {}, "outputs": {}, "srt": None,
+            "texts": {}, "warnings": [], "step": None, "provenance": {}, "error": None, "attempts": 0,
+            "started_at": None, "expires_at": NOW, "created_at": NOW, "updated_at": NOW, **over}
+
+
+def test_confirm_files_only_makes_exports_and_no_posts(world):
+    plan = resolve(_video_model(), message="prepare for all platforms", items=VIDEO_ITEMS)
+    action = {**chat.staged(plan, revision=1, model="m"), "id": "p1"}
+    _confirm_world(world, [action])
+    row = _export_row()
+    world.mp.setattr(social_chat.confirmer, "create_exports", AsyncMock(return_value=[row]))
+    world.mp.setattr(asset_store, "load_many", AsyncMock(return_value={}))
+    from app.cappe.routes import social_exports
+
+    queued = []
+    world.mp.setattr(social_exports, "queue", lambda ids: queued.extend(ids))
+    res = world.client.post(f"{BASE}/conversations/{CONVO}/plans/p1/confirm", json={
+        "revision": 1, "mode": "export", "exports": {"platforms": ["tiktok", "youtube"], "captions": True}})
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["posts"] == [] and body["exports"][0]["id"] == str(row["id"])
+    assert body["plan"]["export_ids"] == [str(row["id"])] and body["plan"]["status"] == "executed"
+    assert social_chat.confirmer.create_posts.await_count == 0 and queued == [row["id"]]
+    sent = social_chat.confirmer.create_exports.await_args.kwargs
+    assert sent["plan"]["exports"]["platforms"] == ["tiktok", "youtube"] and sent["account_id"] == ACCOUNT.id
+    # Files need the video feature too.
+    _confirm_world(world, [{**chat.staged(plan, revision=1, model="m"), "id": "p1"}])
+    world.mp.setattr(social_chat, "resolve_entitlements", AsyncMock(return_value=ent("social")))
+    assert world.client.post(f"{BASE}/conversations/{CONVO}/plans/p1/confirm",
+                             json={"revision": 1, "mode": "export"}).status_code == 402
+
+
+def test_confirm_posts_and_files_together(world):
+    plan = resolve(_video_model(), message="post everywhere tomorrow at 2pm", items=VIDEO_ITEMS)
+    _confirm_world(world, [{**chat.staged(plan, revision=1, model="m"), "id": "p1"}])
+    world.mp.setattr(social_chat.confirmer, "create_exports", AsyncMock(return_value=[_export_row()]))
+    from app.cappe.routes import social_exports
+
+    world.mp.setattr(social_exports, "queue", lambda ids: None)
+    from app.workers.tasks import cappe_social_publisher as publisher
+
+    world.mp.setattr(publisher.run_cappe_social_publish_post, "delay", Mock())
+    # The video is still usable at confirm (check_media).
+    world.mp.setattr(asset_store, "load_many", AsyncMock(return_value={str(ASSET): {
+        "id": ASSET, "site_id": SITE, "status": "ready", "error": None, "filename": "latte.mov", "frames": []}}))
+    res = world.client.post(f"{BASE}/conversations/{CONVO}/plans/p1/confirm", json=CONFIRM)
+    assert res.status_code == 200, res.text
+    assert len(res.json()["posts"]) == 2 and len(res.json()["exports"]) == 1
+
+
+def test_chat_list_shows_the_last_message_and_a_waiting_plan(world):
+    waiting = chat.staged(PLAN, revision=1, model="m")
+    world.conn.set("fetch", "FROM cappe_merlin_conversations", [
+        {"id": CONVO, "title": "Latte", "created_at": NOW, "updated_at": NOW,
+         "staged_actions": json.dumps([waiting]), "last": "  Here's a plan —\n check it.  "},
+        {"id": uuid4(), "title": "Old", "created_at": None, "updated_at": NOW, "staged_actions": None, "last": None}])
+    body = world.client.get(f"{BASE}/conversations").json()
+    assert body[0]["last"] == "Here's a plan — check it." and body[0]["plan_status"] == "proposed"
+    assert body[1]["last"] is None and body[1]["plan_status"] is None
+    sql = [c[1] for c in world.conn.calls if "FROM cappe_merlin_conversations" in c[1]][-1]
+    assert "FROM cappe_merlin_messages m WHERE m.conversation_id = c.id" in sql
+
+
+def test_chats_can_be_renamed_and_deleted(world):
+    rename, delete = AsyncMock(), AsyncMock()
+    world.mp.setattr(convo_store, "rename_conversation", rename)
+    world.mp.setattr(convo_store, "delete_conversation", delete)
+    res = world.client.patch(f"{BASE}/conversations/{CONVO}", json={"title": "  Fall   launch "})
+    assert res.status_code == 200 and res.json()["title"] == "Fall launch"
+    assert rename.await_args.args[1:] == (CONVO, "Fall launch")
+    assert world.client.patch(f"{BASE}/conversations/{CONVO}", json={"title": ""}).status_code == 422
+    assert world.client.delete(f"{BASE}/conversations/{CONVO}").status_code == 204
+    assert delete.await_args.args[1] == CONVO
+    world.mp.setattr(convo_store, "get_owned_conversation", AsyncMock(return_value=convo(kind="page")))
+    assert world.client.delete(f"{BASE}/conversations/{CONVO}").status_code == 404
+
+
+def test_youtube_tags_on_the_card_are_cleaned_and_capped():
+    from app.cappe.models.social import CappeSocialYouTubeWords
+
+    assert CappeSocialYouTubeWords(tags=["#Oat  latte", "oat latte", " ", "coffee"]).tags == ["Oat latte", "coffee"]
+    with pytest.raises(ValueError, match="500 characters"):
+        CappeSocialYouTubeWords(tags=[f"{i}" * 99 for i in range(6)])

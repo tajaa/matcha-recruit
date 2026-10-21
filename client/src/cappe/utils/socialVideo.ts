@@ -5,7 +5,7 @@ import { cappeApi } from '../api'
 import type { CappeSocialAsset, CappeSocialAssetUpload } from '../types'
 
 export const VIDEO_TYPES = ['video/mp4', 'video/quicktime', 'video/webm']
-export const MAX_VIDEO_MB = 200
+export const MAX_VIDEO_MB = 500
 
 /** Why this file can't be dropped as a video, or null. */
 export function videoProblem(file: File): string | null {

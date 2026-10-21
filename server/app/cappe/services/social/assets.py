@@ -4,7 +4,7 @@ Phone clips are bigger than nginx lets through (20 MB), so the browser posts
 the original directly to S3 with a presigned POST pinned to the exact size it
 declared (`presign_upload`). `verify_upload` then checks what landed — size,
 type and the container's first bytes — before ffmpeg ever reads it, and the
-render (`render.py`, run by `workers/tasks/cappe_social_render.py`) fills in
+render (`render.py`, run by `workers/tasks/cappe_social_media.py`) fills in
 the facts, the poster frames and the cuts.
 
 Everything lives in the public bucket, like every other Cappe upload: the
@@ -15,8 +15,9 @@ are read by the renderer through a short presigned GET, and are removed with
 the cuts when the row expires.
 
 Files expire with the row (`expires_at`, 30 days): the sweep removes them
-once no post is still waiting on them. A post already published keeps its
-copy on the network.
+once no post is still waiting on them and no export still offers them for
+download (`exports.py`). A post already published keeps its copy on the
+network.
 """
 from __future__ import annotations
 
@@ -35,17 +36,20 @@ from ..common import loads, loads_list
 logger = logging.getLogger(__name__)
 
 VIDEO_TYPES = {"video/mp4": ".mp4", "video/quicktime": ".mov", "video/webm": ".webm"}
-MAX_VIDEO_BYTES = 200 * 1024 * 1024
+# Three minutes of phone video (what an export takes) runs 150–400 MB.
+MAX_VIDEO_BYTES = 500 * 1024 * 1024
 SOURCE_PREFIX = "cappe/social/sources"
 RENDER_PREFIX = "cappe/social/renders"
 FRAME_PREFIX = "cappe/social/frames"
 PRESIGN_TTL_SECONDS = 900
 # The renderer reads the original over HTTPS while it works.
 SOURCE_READ_TTL_SECONDS = 3600
+# A download link is handed to the browser and used at once.
+DOWNLOAD_TTL_SECONDS = 600
 
 COLUMNS = ("id, site_id, account_id, kind, status, filename, source_path, content_type, bytes, duration_ms, "
            "width, height, has_audio, trimmed, frames, renders, error, render_attempts, render_started_at, "
-           "expires_at, created_at, updated_at")
+           "transcript, expires_at, created_at, updated_at")
 
 # ISO-BMFF boxes an MP4/MOV may open with; QuickTime files from older
 # cameras start with something other than `ftyp`.
@@ -63,6 +67,7 @@ def _row(row) -> Optional[dict[str, Any]]:
     d = dict(row)
     d["frames"] = loads_list(d.get("frames")) or []
     d["renders"] = loads(d.get("renders")) or {}
+    d["transcript"] = loads(d.get("transcript"))
     return d
 
 
@@ -81,6 +86,12 @@ def _split(path: str) -> tuple[str, str]:
 def _public_key(url: str, domain: str) -> Optional[str]:
     prefix = f"https://{domain}/"
     return url[len(prefix):] if url.startswith(prefix) else None
+
+
+def public_key(url: Optional[str]) -> Optional[str]:
+    """The public bucket's key for one of our CloudFront URLs."""
+    domain = get_storage().cloudfront_domain
+    return _public_key(url or "", domain) if domain else None
 
 
 def looks_like_video(head: bytes, content_type: str) -> bool:
@@ -143,6 +154,24 @@ def source_read_url(path: str) -> str:
     return url
 
 
+def download_url(key: str, *, filename: str, content_type: str, bucket: Optional[str] = None) -> str:
+    """A short presigned GET that makes the browser save the file under
+    `filename` (CloudFront URLs can't carry a Content-Disposition)."""
+    storage = _storage()
+    safe = filename.replace('"', "").replace("\\", "")
+    return storage.s3_client.generate_presigned_url(
+        "get_object",
+        Params={"Bucket": bucket or storage.bucket, "Key": key,
+                "ResponseContentDisposition": f'attachment; filename="{safe}"', "ResponseContentType": content_type},
+        ExpiresIn=DOWNLOAD_TTL_SECONDS,
+    )
+
+
+def source_location(asset: dict[str, Any]) -> tuple[str, str]:
+    """(bucket, key) of the original."""
+    return _split(asset["source_path"])
+
+
 def _upload_path_sync(local_path: str, key: str, content_type: str) -> str:
     from boto3.s3.transfer import TransferConfig
 
@@ -162,7 +191,15 @@ async def upload_render(local_path: str, asset_id: UUID, name: str) -> dict[str,
     key = f"{RENDER_PREFIX}/{asset_id}/{name}-{uuid4().hex[:8]}.mp4"
     size = os.path.getsize(local_path)
     url = await asyncio.to_thread(_upload_path_sync, local_path, key, "video/mp4")
-    return {"url": url, "bytes": size}
+    return {"url": url, "key": key, "bytes": size}
+
+
+async def upload_text(local_path: str, asset_id: UUID, name: str, ext: str, content_type: str) -> dict[str, Any]:
+    """A small text file next to the cuts (the captions for YouTube)."""
+    key = f"{RENDER_PREFIX}/{asset_id}/{name}-{uuid4().hex[:8]}{ext}"
+    size = os.path.getsize(local_path)
+    url = await asyncio.to_thread(_upload_path_sync, local_path, key, content_type)
+    return {"url": url, "key": key, "bytes": size}
 
 
 async def upload_frame(local_path: str, asset_id: UUID, index: int) -> str:
@@ -262,6 +299,14 @@ async def record_frames(conn, asset_id: UUID, frames: list[dict[str, Any]]) -> N
     )
 
 
+async def record_transcript(conn, asset_id: UUID, transcript: dict[str, Any]) -> None:
+    """The clip's timed words (`subtitles.compact`), or why there are none."""
+    await conn.execute(
+        "UPDATE cappe_social_assets SET transcript = $2::jsonb, updated_at = NOW() WHERE id = $1",
+        asset_id, json.dumps(transcript),
+    )
+
+
 async def record_render(conn, asset_id: UUID, name: str, render: dict[str, Any]) -> None:
     await conn.execute(
         "UPDATE cappe_social_assets SET renders = renders || jsonb_build_object($2::text, $3::jsonb), "
@@ -287,12 +332,13 @@ async def mark_failed(conn, asset_id: UUID, error: str) -> None:
 
 
 async def delete(conn, site_id: UUID, asset_id: UUID) -> Optional[dict[str, Any]]:
-    """Forget a video no post uses. Returns the row so the caller can remove
-    the files once the connection is released."""
+    """Forget a video no post or export uses. Returns the row so the caller
+    can remove the files once the connection is released."""
     return _row(await conn.fetchrow(
         """DELETE FROM cappe_social_assets a WHERE a.id = $1 AND a.site_id = $2
              AND NOT EXISTS (SELECT 1 FROM cappe_social_posts p
                              WHERE p.media @> jsonb_build_array(jsonb_build_object('asset_id', $3::text)))
+             AND NOT EXISTS (SELECT 1 FROM cappe_social_exports e WHERE e.asset_id = a.id AND e.status <> 'deleted')
            RETURNING a.*""",
         asset_id, site_id, str(asset_id),
     ))
@@ -337,13 +383,15 @@ async def take_abandoned_uploads(conn, *, limit: int) -> list[dict[str, Any]]:
 
 
 async def expired(conn, *, limit: int) -> list[dict[str, Any]]:
-    """Videos past `expires_at` that no live post still needs."""
+    """Videos past `expires_at` that no live post or export still needs."""
     rows = await conn.fetch(
         f"""SELECT {COLUMNS} FROM cappe_social_assets a
             WHERE a.expires_at < NOW() AND a.status <> 'deleted'
               AND NOT EXISTS (SELECT 1 FROM cappe_social_posts p
                               WHERE p.status = ANY($2::text[])
                                 AND p.media @> jsonb_build_array(jsonb_build_object('asset_id', a.id::text)))
+              AND NOT EXISTS (SELECT 1 FROM cappe_social_exports e
+                              WHERE e.asset_id = a.id AND e.status <> 'deleted')
             ORDER BY a.expires_at LIMIT $1""",
         limit, list(_LIVE_POSTS),
     )
@@ -373,8 +421,9 @@ def poster(asset: Optional[dict[str, Any]]) -> Optional[str]:
 
 __all__ = [
     "VIDEO_TYPES", "MAX_VIDEO_BYTES", "AssetStorageUnavailable", "looks_like_video", "presign_upload",
-    "verify_upload", "source_read_url", "upload_render", "upload_frame", "delete_files",
+    "verify_upload", "source_read_url", "public_key", "download_url", "source_location", "upload_render",
+    "upload_text", "upload_frame", "delete_files",
     "create", "get", "get_by_id", "load_many", "mark_rendering", "start_render", "record_facts", "record_frames",
-    "record_render", "mark_ready", "mark_failed", "delete", "stuck_renders", "touch_render",
+    "record_transcript", "record_render", "mark_ready", "mark_failed", "delete", "stuck_renders", "touch_render",
     "take_abandoned_uploads", "expired", "mark_deleted", "public_view", "poster",
 ]

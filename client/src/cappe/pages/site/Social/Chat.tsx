@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
-import { Film, Loader2, MessageSquarePlus, Paperclip, Send, Sparkles, X } from 'lucide-react'
+import { Film, Loader2, MessageSquarePlus, MessagesSquare, Paperclip, Send, Sparkles, X } from 'lucide-react'
 import { cappeApi } from '../../../api'
 import type {
-  CappeSocialChat, CappeSocialChatAttachment, CappeSocialChatMessage, CappeSocialChatTurn, CappeSocialConnection,
-  CappeSocialPlanCard, CappeSocialSettings, CappeSocialUpload,
+  CappeSocialChat, CappeSocialChatAttachment, CappeSocialChatMessage, CappeSocialChatSummary, CappeSocialChatTurn,
+  CappeSocialConnection, CappeSocialPlanCard, CappeSocialSettings, CappeSocialUpload,
 } from '../../../types'
 import { posterOf, uploadVideo, VIDEO_TYPES, videoProblem } from '../../../utils/socialVideo'
+import ChatList from './ChatList'
 import PlanCard from './PlanCard'
 
 // Something dropped into the chat, on its way to the server. A photo is
@@ -28,6 +29,7 @@ const IMAGE_ACCEPT = 'image/jpeg,image/png,image/webp,image/gif'
 const MAX_DROPS = 10
 const EXAMPLES = [
   'Post these everywhere tomorrow at 2pm',
+  'Prepare this video for all platforms with word-for-word captions',
   'One a day for the next week, starting Monday morning',
   'Link the product and keep it playful',
 ]
@@ -48,12 +50,15 @@ function save(siteId: string, id: string | null) {
 
 /** The chat composer: drop photos and videos, say what to post, where and
  *  when; Claude plans it and writes each network's copy, and nothing goes
- *  out until the plan card is confirmed. Server side: routes/social_chat.py. */
+ *  out until the plan card is confirmed. A video can also be prepared as
+ *  files to download for Instagram, TikTok and YouTube ("prepare this for
+ *  all platforms"). Past chats are listed alongside. Server side:
+ *  routes/social_chat.py. */
 export default function Chat({ siteId, connections, settings, onPosted }: {
   siteId: string
   connections: CappeSocialConnection[]
   settings: CappeSocialSettings | null
-  onPosted: (message: string) => void
+  onPosted: (message: string, where?: 'queue' | 'exports') => void
 }) {
   const [conversationId, setConversationId] = useState<string | null>(() => readSaved(siteId))
   const [messages, setMessages] = useState<CappeSocialChatMessage[]>([])
@@ -64,22 +69,76 @@ export default function Chat({ siteId, connections, settings, onPosted }: {
   const [loading, setLoading] = useState(() => !!readSaved(siteId))
   const [dragging, setDragging] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [chats, setChats] = useState<CappeSocialChatSummary[] | null>(null)
+  const [showChats, setShowChats] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
+  const opening = useRef(0)
   const previews = useRef<Set<string>>(new Set())
   const end = useRef<HTMLDivElement>(null)
   const videoOk = !!settings?.video_available
   const aiReady = settings?.ai_available !== false
 
+  function loadChats() {
+    cappeApi.get<CappeSocialChatSummary[]>(`/sites/${siteId}/social/chat/conversations`)
+      .then((list) => setChats(Array.isArray(list) ? list : []))
+      .catch(() => setChats((c) => c ?? []))
+  }
+
+  async function open(id: string) {
+    const ticket = ++opening.current
+    setLoading(true)
+    setError(null)
+    setShowChats(false)
+    try {
+      const chat = await cappeApi.get<CappeSocialChat>(`/sites/${siteId}/social/chat/conversations/${id}`)
+      if (ticket !== opening.current) return
+      setConversationId(id)
+      save(siteId, id)
+      setMessages(chat.messages)
+      setCard(chat.plan)
+    } catch {
+      if (ticket !== opening.current) return
+      if (readSaved(siteId) === id) save(siteId, null)
+      setChats((list) => list?.filter((c) => c.id !== id) ?? list)
+      setError('That chat is gone')
+    } finally {
+      if (ticket === opening.current) setLoading(false)
+    }
+  }
+
   useEffect(() => {
-    const saved = readSaved(siteId)
-    if (!saved) return
     let live = true
-    cappeApi.get<CappeSocialChat>(`/sites/${siteId}/social/chat/conversations/${saved}`)
-      .then((chat) => { if (live) { setMessages(chat.messages); setCard(chat.plan) } })
-      .catch(() => { if (live) { save(siteId, null); setConversationId(null) } })
-      .finally(() => { if (live) setLoading(false) })
+    const saved = readSaved(siteId)
+    if (saved) {
+      cappeApi.get<CappeSocialChat>(`/sites/${siteId}/social/chat/conversations/${saved}`)
+        .then((chat) => { if (live) { setMessages(chat.messages); setCard(chat.plan) } })
+        .catch(() => { if (live) { save(siteId, null); setConversationId(null) } })
+        .finally(() => { if (live) setLoading(false) })
+    }
+    cappeApi.get<CappeSocialChatSummary[]>(`/sites/${siteId}/social/chat/conversations`)
+      .then((list) => { if (live) setChats(Array.isArray(list) ? list : []) })
+      .catch(() => { if (live) setChats([]) })
     return () => { live = false }
   }, [siteId])
+
+  async function rename(id: string, title: string) {
+    setChats((list) => list?.map((c) => (c.id === id ? { ...c, title } : c)) ?? list)
+    try {
+      await cappeApi.patch(`/sites/${siteId}/social/chat/conversations/${id}`, { title })
+    } catch {
+      loadChats()
+    }
+  }
+
+  async function forget(id: string) {
+    try {
+      await cappeApi.delete(`/sites/${siteId}/social/chat/conversations/${id}`)
+      setChats((list) => list?.filter((c) => c.id !== id) ?? list)
+      if (id === conversationId) newChat()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Couldn’t delete that chat')
+    }
+  }
 
   useEffect(() => {
     const urls = previews.current
@@ -138,11 +197,14 @@ export default function Chat({ siteId, connections, settings, onPosted }: {
   }
 
   function newChat() {
+    opening.current++
     save(siteId, null)
     setConversationId(null)
     setMessages([])
     setCard(null)
     setError(null)
+    setLoading(false)
+    setShowChats(false)
   }
 
   async function send() {
@@ -169,6 +231,7 @@ export default function Chat({ siteId, connections, settings, onPosted }: {
       save(siteId, res.conversation_id)
       setMessages((m) => [...m, res.message])
       if (res.plan) setCard(res.plan)
+      loadChats()
     } catch (e) {
       // Put it back so nothing typed or dropped is lost.
       setMessages((m) => m.filter((x) => x.id !== mine.id))
@@ -183,20 +246,33 @@ export default function Chat({ siteId, connections, settings, onPosted }: {
   const posterFor = (att: CappeSocialChatAttachment) =>
     att.kind === 'video' ? card?.plan.posts.flatMap((p) => p.media).find((m) => m.asset_id === att.asset_id)?.poster : att.url
 
+  const list = (
+    <ChatList chats={chats} current={conversationId} onOpen={(id) => void open(id)} onNew={newChat}
+      onRename={(id, title) => void rename(id, title)} onDelete={(id) => void forget(id)} />
+  )
+
   return (
+    <div className="grid gap-4 sm:grid-cols-[13rem_minmax(0,1fr)]">
+    <aside className="hidden max-h-[40rem] overflow-y-auto sm:block">{list}</aside>
     <div
       onDragOver={(e) => { e.preventDefault(); setDragging(true) }}
       onDragLeave={() => setDragging(false)}
       onDrop={(e) => { e.preventDefault(); setDragging(false); void addFiles(e.dataTransfer.files) }}
-      className={`rounded-2xl border p-4 transition ${dragging ? 'border-lime-400 bg-lime-400/5' : 'border-zinc-800 bg-zinc-900/60'}`}
+      className={`min-w-0 rounded-2xl border p-4 transition ${dragging ? 'border-lime-400 bg-lime-400/5' : 'border-zinc-800 bg-zinc-900/60'}`}
     >
-      <div className="mb-3 flex items-center justify-between">
+      <div className="mb-3 flex items-center justify-between gap-2">
         <span className="inline-flex items-center gap-1.5 text-sm font-medium text-zinc-300"><Sparkles className="h-4 w-4 text-lime-400" /> Post with a message</span>
-        {(messages.length > 0 || card) && (
-          <button type="button" onClick={newChat} className="inline-flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-200">
-            <MessageSquarePlus className="h-3.5 w-3.5" /> New chat</button>
-        )}
+        <span className="flex items-center gap-3">
+          <button type="button" onClick={() => setShowChats((v) => !v)} aria-expanded={showChats}
+            className="inline-flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-200 sm:hidden">
+            <MessagesSquare className="h-3.5 w-3.5" /> Chats</button>
+          {(messages.length > 0 || card) && (
+            <button type="button" onClick={newChat} className="inline-flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-200">
+              <MessageSquarePlus className="h-3.5 w-3.5" /> New chat</button>
+          )}
+        </span>
       </div>
+      {showChats && <div className="mb-3 rounded-xl border border-zinc-800 p-2 sm:hidden">{list}</div>}
 
       {!aiReady && (
         <p className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/[0.06] px-3 py-2 text-xs text-amber-300">
@@ -244,7 +320,7 @@ export default function Chat({ siteId, connections, settings, onPosted }: {
         )}
         {card && conversationId && (
           <PlanCard key={card.id} siteId={siteId} conversationId={conversationId} card={card} connections={connections}
-            onDone={(next, message) => { setCard(next); if (message) onPosted(message) }} />
+            onDone={(next, message, where) => { setCard(next); loadChats(); if (message) onPosted(message, where) }} />
         )}
         <div ref={end} />
       </div>
@@ -287,6 +363,7 @@ export default function Chat({ siteId, connections, settings, onPosted }: {
           {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
         </button>
       </div>
+    </div>
     </div>
   )
 }

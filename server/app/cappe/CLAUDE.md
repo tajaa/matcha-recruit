@@ -271,7 +271,7 @@ DB safety rules, test-data email domain rules, and deploy rules are in root `CLA
 - **Merlin's `create_product` takes `inventory`/`sku`/`weight_g`**; a physical product with no
   `inventory` key (nobody said the stock) is created a draft — `null` means made to order.
 
-## Social growth (2026-10, `services/social/`, migrations `cappesocial01`–`02`)
+## Social growth (2026-10, `services/social/`, migrations `cappesocial01`–`03`)
 
 Owners connect the Instagram business account and Facebook Page they already run, drop photos
 into a composer (one carousel post, or one post per photo spread across days), schedule or post
@@ -354,9 +354,10 @@ now, and answer comments/DMs from an inbox where Claude Haiku 5.5 drafts replies
   writes words and picks from lists; code decides the rest** (`chat/plan.py:resolve`): the time is
   read from the owner's words first by `chat/when.py` (deterministic, the store's timezone —
   "2pm tomorrow", weekdays, dates, "in 2 hours", "tonight"), the model's reading only when they
-  name none; accounts are the site's connected ones for the networks named (TikTok/YouTube get a
-  warning, not a post); the link is a real `/shop/<slug>` page or the store; photos may share a
-  carousel (≤10), a video goes alone, and nothing dropped is left out of the plan.
+  name none; accounts are the site's connected ones for the networks named (TikTok/YouTube get
+  files to download, below — a photos-only plan still gets a warning); the link is a real
+  `/shop/<slug>` page or the store; photos may share a carousel (≤10), a video goes alone, and
+  nothing dropped is left out of the plan.
   - The conversation reuses Merlin's tables (`kind='social'`, no page; no migration) and the plan
     is a staged action (`social_plan`: proposed → executed / dismissed / replaced). A new turn
     replaces the open plan and bumps `revision`; confirm must name it and runs under
@@ -365,9 +366,70 @@ now, and answer comments/DMs from an inbox where Claude Haiku 5.5 drafts replies
     UTM-tagged link on its target (`post_targets.content`); `outbound` prefers it over the post's
     caption. Photos handed to the model must be our own `cappe/social/` uploads (Claude fetches
     them by URL); a video is shown by its poster frame.
+  - The Create tab lists the owner's chats (`GET …/chat/conversations` with the last message and
+    whether a plan is waiting; `PATCH`/`DELETE …/chat/conversations/{id}` rename and delete,
+    scoped to `kind='social'` and the site).
+- **Exports (`cappesocial03`, `routes/social_exports.py`, `services/social/exports.py`; the Exports
+  tab).** TikTok and YouTube can't be posted to through their APIs until their app audits pass, so
+  a video is cut into files the owner downloads and uploads by hand, with the words to paste. The
+  chat makes them when the owner asks in their own words (`chat/intent.py`, deterministic, before
+  the model: "prepare this for all platforms", "cut it for TikTok", "export", "word-for-word
+  captions"), when they post "everywhere" or name TikTok/YouTube (posts go to Instagram/Facebook,
+  files for the other two), and for any video when no account is connected. `plan.exports`
+  carries `{platforms, captions, items, reason, files_only, note}`; the card's **Files only**
+  mode (`mode: "export"`) posts nothing; a plan with posts makes both. The model writes TikTok
+  (caption + hashtags) and YouTube (title, description, tags) words only when files are coming
+  (`plan.export_hint`); code fills them from the Instagram words when it doesn't and enforces the
+  limits. Links: YouTube's description gets the UTM link; Instagram/TikTok captions don't make
+  links clickable, so theirs is shown apart "for your bio" (`plan.texts_for`).
+  - **Cuts** (`presets.py`): one 1080x1920 file serves Instagram, TikTok and Shorts — a single
+    caption box (`VERTICAL_BOX`, bottom edge at y=1400, 140 px sides) clears all three apps'
+    buttons and text — plus 1920x1080 for YouTube when the clip is clearly landscape. Up to 180 s
+    (Shorts' limit); `-fs` 240 MB. A cut identical to the video's posting render (no captions,
+    clip ≤ 90 s) is reused (`shared`) rather than encoded again. A download is a 10-minute
+    presigned GET with `Content-Disposition: attachment; filename="<site>-<clip>-tiktok.mp4"`.
+  - **Captions**: the words come from **Gemini 3.5 Transcribe** (`transcribe.py`, the
+    `gemini-3.5-transcribe` model with `word_timestamp=True`; Claude doesn't take audio), fed 16 kHz
+    mono FLAC inline, counted in the `gemini` bucket; a full bucket, a 429/5xx or a dead
+    connection means "try again in 5 min" (6 runs, then the files go out without captions); no key
+    on the server skips captions at once (`transcribe.configured`). The timed words are kept on the
+    video (`cappe_social_assets.transcript`) so it is transcribed once — except a passing failure
+    (`reason` in `exports.TRANSIENT_NO_WORDS`), which only the export that hit it gives up on
+    (`exports.CAPTIONS_UNAVAILABLE` in its `warnings`); a later export listens again.
+    `subtitles.py` groups them (≤18
+    characters / 4 words a line, breaking on pauses and sentence ends) into an ASS file — white
+    DejaVu Sans Bold with a black outline, the spoken word lit in Gummfit lime — burned in by
+    ffmpeg's `ass` filter after the frame is fitted, and a phrase-level `.srt` for YouTube. The
+    image's ffmpeg must have libass; `server/Dockerfile` fails the build if it doesn't, and
+    `render.has_filter("ass")` makes a build without it ship plain files with a note. Homebrew's
+    ffmpeg has no libass, so the caption e2e test is skipped on a Mac. DejaVu covers Latin, Greek
+    and Cyrillic only.
+  - **Invariants from the 2026-10-21 review** (keep them):
+    - A post never waits in `rendering` on an event alone: `posts.settle_renders` re-derives every
+      held post from its videos' current state (ready → `scheduled`, failed/gone → `failed`); the
+      media sweep runs it, and `set_schedule`/`update_post` run it for the one post.
+    - `recover_stale_claims` resumes only targets with a `state` handle; one with none may already
+      be live, so it fails with `posts.INTERRUPTED` instead of posting twice. A Facebook Reel saves
+      its `video_id` (`facebook_uploading`) before uploading.
+    - Chat confirm reads what the chat already posted from `cappe_social_posts.ai_meta.chat`
+      (`confirm.posted_from_chat`), under the plan lock, and 409s a repeat; it re-checks every
+      video is still usable. Spread posts add days on the store's wall clock.
+    - A follow-up turn keeps the open plan's `exports` unless the message says something new about
+      files or posting (`plan.carried_exports`). Owner-edited TikTok/YouTube words carry
+      `by_owner` and are pasted as written.
+    - `exports.record_output`/`record_srt` write only to an open export and say so; a file cut for
+      an export deleted meanwhile is removed. Giving up a step never overwrites a file that landed.
+  - **One step per task run** (`prepare_cappe_social_export`: probe → transcribe → each cut → the
+    `.srt`), each recorded as it lands (`next_step` reads what's left), then the task queues the
+    next, so the minute publisher gets the worker between steps. `step` records what's running: a
+    soft time-limit or a second failure gives up that step only (that file shows its error; the
+    export ends `partial`). The media sweep re-queues exports idle 30 min and fails them after 12
+    runs; files expire after 30 days. A video an export uses can't be deleted and outlives its
+    own expiry until the export goes. A video made into files by a confirmed chat plan counts as
+    used, like a posted one.
 - **Plan features:** `social` (posting, scheduling, captions) on every plan; `social_video`
-  (dropped videos) and `social_autoreply` (the AI inbox) on business / pro / creator. All 402 at
-  the route.
+  (dropped videos, and their export files) and `social_autoreply` (the AI inbox) on business / pro
+  / creator. All 402 at the route.
 - **Schedules are the store's wall clock.** A `scheduled_at` with no zone is read in
   `cappe_sites.timezone` (`routes/social.py:check_schedule`), so "2pm" is the store's 2pm; the
   chat's plan card edits times the same way. The form composer still sends an aware time from the
