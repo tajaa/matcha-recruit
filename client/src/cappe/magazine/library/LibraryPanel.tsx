@@ -113,7 +113,7 @@ export default function LibraryPanel({ siteId, onPick, postId, stockQuery }: {
           <Sparkles className="h-4 w-4" /> Illustrate
         </button>
         <button type="button" className={ui.btnPrimary} onClick={() => toggle('upload')}>
-          <ImagePlus className="h-4 w-4" /> Add a picture
+          <ImagePlus className="h-4 w-4" /> Upload a picture
         </button>
       </div>
 
@@ -212,7 +212,7 @@ function UploadForm({ siteId, onDone, onCancel }: {
   }
 
   return (
-    <form onSubmit={submit} className={`${ui.card} grid gap-3 p-4 sm:grid-cols-2`} aria-label="Add a picture">
+    <form onSubmit={submit} className={`${ui.card} grid gap-3 p-4 sm:grid-cols-2`} aria-label="Upload a picture">
       <label className="sm:col-span-2">
         <span className={ui.label}>Picture</span>
         <input
