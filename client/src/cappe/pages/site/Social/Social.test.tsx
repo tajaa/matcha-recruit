@@ -19,7 +19,7 @@ const CONN: CappeSocialConnection = {
 const SETTINGS: CappeSocialSettings = {
   autoreply_mode: 'review', reply_to_comments: true, reply_to_messages: true, tone: 'friendly', business_facts: '',
   signature: null, default_hashtags: [], max_auto_per_hour: 20, escalate_words: [], autoreply_available: true,
-  ai_available: true,
+  video_available: false, ai_available: true,
 }
 const OVERVIEW: CappeSocialOverview = {
   connections: 1, scheduled: 2, published_30d: 5, inbox_new: 1, drafts_waiting: 0,
@@ -149,6 +149,122 @@ describe('Social', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     expect(await screen.findByText('Saved')).toBeInTheDocument()
     expect(api.put.mock.calls[0][1]).toMatchObject({ tone: 'playful', autoreply_mode: 'review' })
+  })
+
+  it('takes a dropped video, uploads it straight to storage and posts it by its asset', async () => {
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: vi.fn(() => 'blob:clip'), revokeObjectURL: vi.fn() }))
+    class Xhr {
+      status = 204
+      upload = {}
+      onload?: () => void
+      open() {}
+      send() { this.onload?.() }
+    }
+    vi.stubGlobal('XMLHttpRequest', Xhr)
+    api.get.mockImplementation((path: string) => path.endsWith('/social/settings')
+      ? Promise.resolve({ ...SETTINGS, video_available: true })
+      : answer()(path))
+    api.post.mockImplementation((path: string) => {
+      if (path.endsWith('/assets/presign')) {
+        return Promise.resolve({ asset_id: 'a-1', upload_url: 'https://bucket.example.test/', fields: {}, max_bytes: 1 })
+      }
+      if (path.endsWith('/complete')) {
+        return Promise.resolve({ id: 'a-1', status: 'rendering', frames: [], trimmed: false, error: null })
+      }
+      return Promise.resolve({ ...POST, status: 'rendering' })
+    })
+    render(
+      <MemoryRouter initialEntries={['/sites/s-1/social']}>
+        <Routes><Route path="/sites/:siteId/social" element={<Social />} /></Routes>
+      </MemoryRouter>,
+    )
+    expect(await screen.findByText(/Drop photos or videos here/)).toBeInTheDocument()
+    const clip = new File([new Uint8Array(8)], 'latte.mov', { type: 'video/quicktime' })
+    fireEvent.change(screen.getByLabelText('Choose photos or videos'), { target: { files: [clip] } })
+    expect(await screen.findByText('Preparing…')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Schedule post' }))
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith('/sites/s-1/social/posts', expect.objectContaining({
+      media: [{ kind: 'video', asset_id: 'a-1', alt: null }],
+    })))
+    expect(await screen.findByText(/Videos go out once they’re ready/)).toBeInTheDocument()
+    vi.unstubAllGlobals()
+  })
+
+  it('posts a carousel and a video together at one time, and keeps the video when only it fails', async () => {
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: vi.fn(() => 'blob:x'), revokeObjectURL: vi.fn() }))
+    class Xhr {
+      status = 204
+      upload = {}
+      onload?: () => void
+      open() {}
+      send() { this.onload?.() }
+    }
+    vi.stubGlobal('XMLHttpRequest', Xhr)
+    api.get.mockImplementation((path: string) => path.endsWith('/social/settings')
+      ? Promise.resolve({ ...SETTINGS, video_available: true })
+      : answer()(path))
+    api.upload.mockResolvedValue({ url: 'https://cdn.example.test/a.jpg', width: 1080, height: 1080 })
+    let saved = 0
+    api.post.mockImplementation((path: string) => {
+      if (path.endsWith('/assets/presign')) {
+        return Promise.resolve({ asset_id: 'a-1', upload_url: 'https://bucket.example.test/', fields: {}, max_bytes: 1 })
+      }
+      if (path.endsWith('/complete')) {
+        return Promise.resolve({ id: 'a-1', status: 'ready', frames: [], trimmed: false, error: null })
+      }
+      saved += 1
+      return saved === 1 ? Promise.resolve(POST) : Promise.reject(new Error('Video failed'))
+    })
+    render(
+      <MemoryRouter initialEntries={['/sites/s-1/social']}>
+        <Routes><Route path="/sites/:siteId/social" element={<Social />} /></Routes>
+      </MemoryRouter>,
+    )
+    await screen.findByText(/Drop photos or videos here/)
+    const photo = new File([new Uint8Array(8)], 'a.jpg', { type: 'image/jpeg' })
+    const clip = new File([new Uint8Array(8)], 'latte.mov', { type: 'video/quicktime' })
+    fireEvent.change(screen.getByLabelText('Choose photos or videos'), { target: { files: [photo, clip] } })
+    await waitFor(() => expect(api.upload).toHaveBeenCalled())
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith(expect.stringMatching(/complete$/)))
+    fireEvent.click(await screen.findByRole('button', { name: 'Schedule 2 posts' }))
+    expect(await screen.findByText(/Saved 1 of 2/)).toBeInTheDocument()
+    const bodies = api.post.mock.calls.filter(([p]) => p === '/sites/s-1/social/posts').map(([, b]) => b)
+    expect(bodies).toHaveLength(2)
+    expect(bodies[0].scheduled_at).toBe(bodies[1].scheduled_at)
+    // The saved carousel is gone; the video that failed is still there to try again.
+    expect(await screen.findByRole('button', { name: 'Schedule post' })).toBeInTheDocument()
+    vi.unstubAllGlobals()
+  })
+
+  it('says video needs a paid plan instead of uploading it', async () => {
+    load()
+    await screen.findByText(/Drop photos here/)
+    const clip = new File([new Uint8Array(8)], 'latte.mp4', { type: 'video/mp4' })
+    fireEvent.change(screen.getByLabelText('Choose photos'), { target: { files: [clip] } })
+    expect(await screen.findByRole('alert')).toHaveTextContent('Video posts are part of the Business, Pro and Creator plans.')
+    expect(api.post).not.toHaveBeenCalled()
+  })
+
+  it('shows a video post being prepared and one Instagram is processing', async () => {
+    const video = { kind: 'video' as const, asset_id: 'a-1', poster: 'https://cdn.example.test/f.jpg' }
+    api.get.mockImplementation((path: string) => path.includes('/social/posts')
+      ? Promise.resolve([
+        { ...POST, id: 'p-2', caption: 'Latte art', status: 'rendering', media: [video] },
+        { ...POST, id: 'p-3', caption: 'Pour over', status: 'publishing', media: [video],
+          targets: [{ ...POST.targets[0], phase: 'instagram_processing' }] },
+      ])
+      : answer()(path))
+    render(
+      <MemoryRouter initialEntries={['/sites/s-1/social']}>
+        <Routes><Route path="/sites/:siteId/social" element={<Social />} /></Routes>
+      </MemoryRouter>,
+    )
+    fireEvent.click(await screen.findByRole('button', { name: /^Queue/ }))
+    const card = (await screen.findByText('Latte art')).closest('div.rounded-2xl') as HTMLElement
+    expect(within(card).getByText('preparing video')).toBeInTheDocument()
+    expect(card.querySelector('img')).toHaveAttribute('src', 'https://cdn.example.test/f.jpg')
+    expect(within(card).getByLabelText('Video')).toBeInTheDocument()
+    expect(screen.getByText(/Instagram is processing the video/)).toBeInTheDocument()
   })
 
   it('offers a retry on a post one network took and another did not', async () => {

@@ -7,8 +7,10 @@ same Page token. So the OAuth round-trip yields one `ConnectionDraft` per Page
 and one per Instagram account found on it.
 
 Everything here is a thin, typed wrapper over the documented endpoints:
-  * publishing — `/{ig}/media` + `/{ig}/media_publish` (single image or
-    carousel), `/{page}/photos` + `/{page}/feed` (one or several photos);
+  * publishing — `/{ig}/media` + `/{ig}/media_publish` (single image,
+    carousel or Reel), `/{page}/photos` + `/{page}/feed` (one or several
+    photos), `/{page}/video_reels` (a Reel) and `/{page}/videos` (a landscape
+    video);
   * replies — `/{comment}/replies` (Instagram), `/{comment}/comments`
     (Facebook), `/{page|ig}/messages` for DMs;
   * webhooks — the `GET` challenge, the `X-Hub-Signature-256` HMAC, and the
@@ -16,7 +18,13 @@ Everything here is a thin, typed wrapper over the documented endpoints:
   * metrics — follower counts and per-post insights.
 
 No call here retries by itself: the publisher decides from `retryable`.
-Images must be reachable by Meta's fetchers, which our CloudFront URLs are.
+Images and videos must be reachable by Meta's fetchers, which our CloudFront
+URLs are.
+
+Video takes Meta minutes to process, so a video publish is resumable: the
+first call starts it and returns `Pending` with the container/video id, and
+each later call (the publisher's next sweep, `state` passed back) checks on
+it once — no call here waits.
 """
 from __future__ import annotations
 
@@ -32,12 +40,20 @@ import httpx
 
 from app.config import get_settings
 
-from .base import ConnectionDraft, InboundEvent, ProviderError, PublishResult
+from .base import ConnectionDraft, InboundEvent, Pending, ProviderError, PublishResult
 
 logger = logging.getLogger(__name__)
 
 GRAPH_HOST = "https://graph.facebook.com"
 LOGIN_HOST = "https://www.facebook.com"
+RUPLOAD_HOST = "https://rupload.facebook.com"
+
+# Meta asks for a container's status at most once a minute; processing a
+# short clip usually takes well under that, so the first look is sooner.
+FIRST_CHECK_SECONDS = 30
+CHECK_SECONDS = 60
+IG_MAX_CHECKS = 10
+FB_MAX_CHECKS = 30
 
 # The permissions one Connect asks for. Publishing + engagement on Pages, and
 # the Instagram trio (read, publish, comments/messages).
@@ -236,10 +252,49 @@ async def _ig_permalink(cfg, media_id: str, token: str, client) -> Optional[str]
     return out.get("permalink")
 
 
-async def _publish_instagram(cfg, ig_id: str, token: str, caption: str, media: list[dict], client) -> PublishResult:
+async def _publish_ig_reel(cfg, ig_id: str, token: str, caption: str, video: dict, state: dict,
+                           client) -> PublishResult | Pending:
+    """A Reel: create the container from the hosted video, then — on later
+    calls — check whether Meta has finished processing it and publish."""
+    container_id = state.get("container_id")
+    if not container_id:
+        data = {"media_type": "REELS", "video_url": video["url"], "caption": caption, "share_to_feed": "true"}
+        if isinstance(video.get("thumb_offset_ms"), int):
+            data["thumb_offset"] = str(video["thumb_offset_ms"])
+        container = await call(cfg, "POST", f"{ig_id}/media", token=token, data=data, client=client)
+        container_id = str(container.get("id") or "")
+        if not container_id:
+            raise ProviderError("Instagram returned no media container", retryable=True)
+        return Pending("instagram_processing", {"container_id": container_id, "checks": 0}, FIRST_CHECK_SECONDS)
+    out = await call(cfg, "GET", container_id, token=token, params={"fields": "status_code,status"}, client=client)
+    code = out.get("status_code")
+    if code in ("ERROR", "EXPIRED"):
+        detail = str(out.get("status") or code)[:200]
+        raise ProviderError(f"Instagram couldn't process the video ({detail})", retryable=False)
+    if code == "PUBLISHED":
+        # An earlier call published it and the outcome was never recorded.
+        return PublishResult(external_post_id=container_id)
+    if code != "FINISHED":
+        checks = int(state.get("checks") or 0) + 1
+        if checks >= IG_MAX_CHECKS:
+            raise ProviderError("Instagram was still processing the video after 10 minutes", retryable=False)
+        return Pending("instagram_processing", {**state, "checks": checks}, CHECK_SECONDS)
+    published = await call(cfg, "POST", f"{ig_id}/media_publish", token=token,
+                           data={"creation_id": container_id}, client=client)
+    media_id = str(published.get("id") or "")
+    if not media_id:
+        raise ProviderError("Instagram returned no media id", retryable=True)
+    return PublishResult(external_post_id=media_id, permalink=await _ig_permalink(cfg, media_id, token, client))
+
+
+async def _publish_instagram(cfg, ig_id: str, token: str, caption: str, media: list[dict], state: dict,
+                             client) -> PublishResult | Pending:
+    videos = [m for m in media if m.get("kind") == "video" and m.get("url")]
+    if videos:
+        return await _publish_ig_reel(cfg, ig_id, token, caption, videos[0], state, client)
     images = [m for m in media if (m.get("kind") or "image") == "image" and m.get("url")]
     if not images:
-        raise ProviderError("Instagram needs at least one image (video posts aren't supported yet)", retryable=False)
+        raise ProviderError("Instagram needs a photo or a video", retryable=False)
     if len(images) == 1:
         container = await call(cfg, "POST", f"{ig_id}/media", token=token,
                                data={"image_url": images[0]["url"], "caption": caption}, client=client)
@@ -271,8 +326,103 @@ async def _fb_permalink(cfg, post_id: str, token: str, client) -> Optional[str]:
     return out.get("permalink_url")
 
 
+async def _rupload(cfg, video_id: str, token: str, file_url: str, client) -> None:
+    """Hand Facebook the hosted file for a Reel upload session. This host
+    takes `Authorization: OAuth <token>` (not Bearer) and the file's URL as a
+    header."""
+    url = f"{RUPLOAD_HOST}/video-upload/{cfg.version}/{video_id}"
+    try:
+        response = await client.post(url, headers={"Authorization": f"OAuth {token}", "file_url": file_url})
+    except httpx.HTTPError as exc:
+        raise ProviderError(f"Meta unreachable: {exc.__class__.__name__}", retryable=True) from exc
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = {}
+    if response.status_code >= 400 or (isinstance(payload, dict) and "error" in payload):
+        raise _error_from(payload, response.status_code)
+    if not (isinstance(payload, dict) and payload.get("success")):
+        raise ProviderError("Facebook didn't take the video upload", retryable=True)
+
+
+def _absolute_fb_url(path: Optional[str]) -> Optional[str]:
+    if not path:
+        return None
+    return f"https://www.facebook.com{path}" if path.startswith("/") else path
+
+
+def _fb_video_failure(status: dict) -> Optional[str]:
+    """Why Facebook gave up on a video, or None while it hasn't."""
+    video_status = status.get("video_status")
+    for phase in ("uploading_phase", "processing_phase", "publishing_phase"):
+        info = status.get(phase) or {}
+        if isinstance(info, dict) and (info.get("status") == "error" or info.get("publish_status") == "error"):
+            err = info.get("error")
+            message = err.get("message") if isinstance(err, dict) else None
+            return str(message) if message else f"{phase.split('_')[0]} failed"
+    if video_status in ("error", "upload_failed", "expired"):
+        return str(video_status)
+    return None
+
+
+def _fb_video_done(status: dict) -> bool:
+    if status.get("video_status") != "ready":
+        return False
+    publishing = status.get("publishing_phase")
+    if not isinstance(publishing, dict) or not publishing:
+        return True  # a Page video reports no publishing phase
+    return publishing.get("status") in ("complete", "completed") or publishing.get("publish_status") == "published"
+
+
+async def _publish_fb_video(cfg, page_id: str, token: str, caption: str, video: dict, state: dict,
+                            client) -> PublishResult | Pending:
+    """A Reel (vertical cut) or a Page video (landscape cut). Both are pulled
+    by Facebook from our URL; later calls check on processing."""
+    video_id = state.get("video_id")
+    if not video_id:
+        if video.get("format") == "video":
+            out = await call(cfg, "POST", f"{page_id}/videos", token=token,
+                             data={"file_url": video["url"], "description": caption, "published": "true"}, client=client)
+            video_id = str(out.get("id") or "")
+        else:
+            # The Reel's id is kept before anything is uploaded, so a retry
+            # (a lost response, a killed worker) finishes this same Reel
+            # instead of starting a second one.
+            start = await call(cfg, "POST", f"{page_id}/video_reels", token=token,
+                               data={"upload_phase": "start"}, client=client)
+            video_id = str(start.get("video_id") or "")
+            if not video_id:
+                raise ProviderError("Facebook returned no video id", retryable=True)
+            return Pending("facebook_uploading", {"video_id": video_id, "upload": True, "checks": 0}, 0)
+        if not video_id:
+            raise ProviderError("Facebook returned no video id", retryable=True)
+        return Pending("facebook_processing", {"video_id": video_id, "checks": 0}, FIRST_CHECK_SECONDS)
+    if state.get("upload"):
+        await _rupload(cfg, video_id, token, video["url"], client)
+        done = await call(cfg, "POST", f"{page_id}/video_reels", token=token, data={
+            "video_id": video_id, "upload_phase": "finish", "video_state": "PUBLISHED", "description": caption,
+        }, client=client)
+        if not done.get("success"):
+            raise ProviderError("Facebook didn't publish the Reel", retryable=True)
+        return Pending("facebook_processing", {"video_id": video_id, "checks": 0}, FIRST_CHECK_SECONDS)
+    out = await call(cfg, "GET", video_id, token=token, params={"fields": "status,permalink_url"}, client=client)
+    status = out.get("status") if isinstance(out.get("status"), dict) else {}
+    failure = _fb_video_failure(status)
+    if failure:
+        raise ProviderError(f"Facebook couldn't process the video ({failure[:200]})", retryable=False)
+    if not _fb_video_done(status):
+        checks = int(state.get("checks") or 0) + 1
+        if checks >= FB_MAX_CHECKS:
+            raise ProviderError("Facebook was still processing the video after 30 minutes", retryable=False)
+        return Pending("facebook_processing", {**state, "checks": checks}, CHECK_SECONDS)
+    return PublishResult(external_post_id=str(video_id), permalink=_absolute_fb_url(out.get("permalink_url")))
+
+
 async def _publish_facebook(cfg, page_id: str, token: str, caption: str, media: list[dict],
-                            link_url: Optional[str], client) -> PublishResult:
+                            link_url: Optional[str], state: dict, client) -> PublishResult | Pending:
+    videos = [m for m in media if m.get("kind") == "video" and m.get("url")]
+    if videos:
+        return await _publish_fb_video(cfg, page_id, token, caption, videos[0], state, client)
     images = [m for m in media if (m.get("kind") or "image") == "image" and m.get("url")]
     if len(images) == 1:
         out = await call(cfg, "POST", f"{page_id}/photos", token=token,
@@ -303,15 +453,17 @@ async def _publish_facebook(cfg, page_id: str, token: str, caption: str, media: 
 async def publish(
     cfg: MetaConfig, *, platform: str, external_id: str, token: str,
     caption: str, media: list[dict], link_url: Optional[str] = None,
-    client: Optional[httpx.AsyncClient] = None,
-) -> PublishResult:
+    state: Optional[dict[str, Any]] = None, client: Optional[httpx.AsyncClient] = None,
+) -> PublishResult | Pending:
+    """Publish, or for a video start/continue publishing: `state` is what the
+    previous call's `Pending` carried."""
     text = _with_link(caption, link_url)
     http, own = _client(client)
     try:
         if platform == "instagram":
-            return await _publish_instagram(cfg, external_id, token, text, media, http)
+            return await _publish_instagram(cfg, external_id, token, text, media, dict(state or {}), http)
         if platform == "facebook":
-            return await _publish_facebook(cfg, external_id, token, text, media, link_url, http)
+            return await _publish_facebook(cfg, external_id, token, text, media, link_url, dict(state or {}), http)
         raise ProviderError(f"Unknown platform {platform!r}", retryable=False)
     finally:
         if own:

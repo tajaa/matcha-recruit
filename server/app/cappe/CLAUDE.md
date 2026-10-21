@@ -271,7 +271,7 @@ DB safety rules, test-data email domain rules, and deploy rules are in root `CLA
 - **Merlin's `create_product` takes `inventory`/`sku`/`weight_g`**; a physical product with no
   `inventory` key (nobody said the stock) is created a draft — `null` means made to order.
 
-## Social growth (2026-10, `services/social/`, migration `cappesocial01`)
+## Social growth (2026-10, `services/social/`, migrations `cappesocial01`–`02`)
 
 Owners connect the Instagram business account and Facebook Page they already run, drop photos
 into a composer (one carousel post, or one post per photo spread across days), schedule or post
@@ -297,7 +297,7 @@ now, and answer comments/DMs from an inbox where Claude Haiku 5.5 drafts replies
   the `schedule_break_reminders` shape) and claims due targets `FOR UPDATE SKIP LOCKED`; "Post now"
   dispatches `run_cappe_social_publish_post` for one post. Retryable failures back off
   2/10/30 min, three attempts; the post's status rolls up from its targets
-  (`posts.rollup_status`). Instagram is photo-only here (no video yet).
+  (`posts.rollup_status`).
 - **Replies: deterministic first, model second, owner's mode last** (`autoreply.py`). The
   hard-stop list (refunds, disputes, legal, injury/allergy) and the owner's escalate words run
   before any model call and can only ever escalate. The draft is grounded ONLY on the store's
@@ -313,8 +313,46 @@ now, and answer comments/DMs from an inbox where Claude Haiku 5.5 drafts replies
   Anthropic key, nothing without one (no Gemini fallback for words sent under the owner's name).
   Every call counts in the `anthropic` bucket via `social/ai.py`; a full bucket means "not now".
 - **No pooled connection is held across a model or network call** in the routes (draft, reply).
-- **Plan features:** `social` (posting, scheduling, captions) on every plan; `social_autoreply`
-  (the AI inbox) on business / pro / creator. Both 402 at the route.
+- **Video (`cappesocial02`, plan feature `social_video` on business / pro / creator).** The
+  browser posts the original straight to S3 with a presigned POST pinned to the declared size
+  (`assets.presign_upload`; nginx caps proxied bodies at 20 MB) into the public bucket under an
+  unguessable key — that bucket's CORS must list the dashboard origin (`https://gummfit.com`,
+  `https://www.gummfit.com`), or the browser's POST is blocked. `assets/{id}/complete` HEADs it and checks the container's first bytes, then queues
+  `render_cappe_social_video` (`workers/tasks/cappe_social_media.py`), which reads the original
+  through a presigned GET and cuts a 1080x1920 vertical render (plus 1920x1080 for a clearly
+  landscape clip) — fitted on a blurred copy of itself, never cropped, trimmed to 90 s, H.264 High
+  / AAC 48 kHz stereo, `+faststart`, a silent track added when there's none. Renders and three
+  poster frames go to the public bucket (Meta fetches by URL).
+  - **It runs on the shared default worker** (one slot, 768 MB) — Diego chose that over a media
+    host for now. So `render.py` bounds everything: `veryfast`, two threads, short lookahead, a
+    timeout per ffmpeg with the whole process group killed, one output on disk at a time; the
+    task is idempotent (stored frames/renders are skipped) and retried once. A long render delays
+    the minute publisher while it runs. If renders start to hurt, move the task to its own queue
+    on separate compute (the recaps worker pattern, `docs/ops/ESPRESSO_RECAPS.md`).
+  - **ffmpeg input is untrusted:** every `-i` carries `-protocol_whitelist https,tls,tcp` and
+    `-format_whitelist` (MP4/MOV + Matroska/WebM demuxers only), so a playlist posing as a video
+    can't make the worker read `file:` paths or fetch other URLs. Keep both on any new ffmpeg call.
+  - **A post names a video by `asset_id`**; `variants.media_for` swaps in the cut each network
+    takes at publish time (Instagram → Reel from the vertical cut; Facebook → Reel, or a Page
+    video from the landscape cut). A video always goes out alone (`validate_for_targets`). A
+    scheduled post whose video isn't ready is `rendering` and never claimed; the render flips it
+    to `scheduled` and publishes any that are already due.
+  - **Meta processes video for minutes, so publishing is resumable.** A provider returns
+    `Pending(phase, state, retry_after_s)`; the target goes back to `pending` with its `state`
+    (container / video id) and the claim's attempt handed back (`record_pending`), and the next
+    sweep checks once — no call waits. Instagram: `REELS` container → poll `status_code` (≤10
+    checks) → `media_publish`. Facebook Reel: `video_reels` start → `rupload` with `file_url`
+    (header auth `OAuth <token>`, not Bearer) → finish `PUBLISHED` → poll `status`.
+  - **`cappe_social_media_sweep`** (every 5 min, seeded on) re-queues renders stuck 30 min (fails
+    them after two attempts), deletes uploads never completed after a day, puts back targets a
+    killed worker left `publishing` for 20 min (`claimed_at`), and removes files 30 days on
+    (`expires_at`) once no live post needs them. Frames are kept for the queue.
+- **Plan features:** `social` (posting, scheduling, captions) on every plan; `social_video`
+  (dropped videos) and `social_autoreply` (the AI inbox) on business / pro / creator. All 402 at
+  the route.
+- **Schedules are the store's wall clock.** A `scheduled_at` with no zone is read in
+  `cappe_sites.timezone` (`routes/social.py:check_schedule`), so "2pm" is the store's 2pm. The
+  composer still sends an aware time from the browser.
 - **Consumer data:** `scripts/sql/anonymize_dev.sql` turns every token into `dev_<id>` (connection
   `revoked`) and strips inbox author ids/raw payloads; `refresh-dev-from-prod.sh` gates on both.
 

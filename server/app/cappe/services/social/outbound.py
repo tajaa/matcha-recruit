@@ -1,17 +1,23 @@
 """The two network writes: publish a claimed target, send a reply.
 
 Both load the connection's token here and nowhere else, call the provider,
-and record the outcome on the row that was written before the call.
+and record the outcome on the row that was written before the call. A video
+is swapped for the cut its network takes (`variants.media_for`), and a
+publish Meta is still processing comes back `Pending` and is checked on by a
+later sweep.
 """
 from __future__ import annotations
 
 import logging
 from typing import Any
 
+from ..common import loads, loads_list
+from . import assets as asset_store
 from . import connections as conn_store
 from . import posts as post_store
+from . import variants
 from .providers import provider_for
-from .providers.base import ProviderError
+from .providers.base import Pending, ProviderError
 from .providers.meta import MetaConfig
 
 logger = logging.getLogger(__name__)
@@ -22,7 +28,8 @@ _TOKEN_CODES = frozenset({190, 102})
 
 async def publish_target(conn, cfg: MetaConfig, claim: dict[str, Any]) -> str:
     """Publish one claimed target. Returns the status it ended in
-    (published / pending / failed) after rolling the post up."""
+    (published / pending / failed) after rolling the post up; `pending`
+    also covers a video the network is still processing."""
     target_id, post_id, attempts = claim["id"], claim["post_id"], int(claim.get("attempts") or 1)
     post = await conn.fetchrow(
         "SELECT id, site_id, caption, media, link_url, status FROM cappe_social_posts WHERE id = $1", post_id,
@@ -37,15 +44,17 @@ async def publish_target(conn, cfg: MetaConfig, claim: dict[str, Any]) -> str:
             raise ProviderError("Account is no longer connected", retryable=False)
         if cred["status"] != "connected":
             raise ProviderError(f"Account needs reconnecting ({cred['status']})", retryable=False)
-        from ..common import loads_list
-
         media = loads_list(post["media"]) or []
         reason = post_store.validate_for_targets(post["caption"] or "", media, [cred["platform"]])
         if reason:
             raise ProviderError(reason, retryable=False)
+        video_ids = [m["asset_id"] for m in media if m.get("kind") == "video" and m.get("asset_id")]
+        if video_ids:
+            media = variants.media_for(cred["platform"], media, await asset_store.load_many(conn, video_ids))
         result = await provider_for(cred["platform"]).publish(
             cfg, platform=cred["platform"], external_id=cred["external_id"], token=cred["token"],
             caption=post["caption"] or "", media=media, link_url=post["link_url"],
+            state=loads(claim.get("state")),
         )
     except ProviderError as exc:
         if exc.code in _TOKEN_CODES and cred:
@@ -56,8 +65,12 @@ async def publish_target(conn, cfg: MetaConfig, claim: dict[str, Any]) -> str:
         logger.exception("cappe social: target %s crashed", target_id)
         ended = await post_store.record_failure(conn, target_id, attempts, exc)
     else:
-        await post_store.record_success(conn, target_id, result)
-        ended = "published"
+        if isinstance(result, Pending):
+            await post_store.record_pending(conn, target_id, result)
+            ended = "pending"
+        else:
+            await post_store.record_success(conn, target_id, result)
+            ended = "published"
     await post_store.rollup_post(conn, post_id)
     return ended
 
