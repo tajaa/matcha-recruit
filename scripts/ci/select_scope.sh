@@ -7,7 +7,8 @@
 # Prints GitHub-output lines (key=value):
 #
 #   full=true|false          everything runs (push to main, ci:full, a CI edit)
-#   server=true|false        any server code changed (Markdown doesn't count)
+#   server=true|false        any server code changed (Markdown, the Dockerfile and
+#                            .env.example don't count)
 #   server_scope=all|cappe|tellus|oceanlab|none
 #   server_tests=<paths>     what pytest runs from server/ ("tests" = the whole
 #                            suite; empty = skip the matcha suite)
@@ -60,7 +61,10 @@ if grep -qE '^(\.github/workflows/ci\.yml|scripts/ci/)' <<< "$changed"; then
     exit 0
 fi
 
-server_files="$(grep -E '^server/' <<< "$changed" | grep -vE '\.md$' || true)"
+# Files the tests can't see: Markdown, and the image/env files the
+# docker-build job already checks.
+server_files="$(grep -E '^server/' <<< "$changed" \
+    | grep -vE '\.md$|^server/(Dockerfile|\.dockerignore|\.env\.example)$' || true)"
 server=false
 [ -n "$server_files" ] && server=true
 

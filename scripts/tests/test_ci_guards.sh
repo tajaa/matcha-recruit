@@ -495,6 +495,9 @@ check "select_scope: a client-only change skips the server suite" $?
 out="$(scope_of server/app/cappe/CLAUDE.md docs/notes.md)"
 grep -qx 'server=false' <<< "$out" && grep -qx 'ops=false' <<< "$out"
 check "select_scope: Markdown alone runs no server tests" $?
+out="$(scope_of server/app/cappe/a.py server/Dockerfile server/.env.example)"
+grep -qx 'server_scope=cappe' <<< "$out"
+check "select_scope: the Dockerfile and .env.example don't widen the scope" $?
 out="$(CI_FULL=1 "$SELECT" </dev/null)"
 grep -qx 'full=true' <<< "$out" && grep -qx 'server_tests=tests' <<< "$out" && grep -qx 'oceanlab_tests=true' <<< "$out"
 check "select_scope: CI_FULL (push to main, ci:full) runs everything" $?
