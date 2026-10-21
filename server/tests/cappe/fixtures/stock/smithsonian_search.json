@@ -1,0 +1,395 @@
+{
+ "status": 200,
+ "responseCode": 1,
+ "response": {
+  "rows": [
+   {
+    "id": "ld1-1643381040022-1643381057543-0",
+    "title": "Valparaiso Harbor",
+    "unitCode": "SAAM",
+    "type": "edanmdm",
+    "url": "edanmdm:saam_1929.6.159",
+    "content": {
+     "freetext": {
+      "date": [
+       {
+        "label": "Date",
+        "content": "1866"
+       }
+      ],
+      "name": [
+       {
+        "label": "Artist",
+        "content": "James McNeill Whistler, born Lowell, MA 1834-died London, England 1903"
+       }
+      ],
+      "topic": [
+       {
+        "label": "Topic",
+        "content": "Figure group"
+       },
+       {
+        "label": "Topic",
+        "content": "Waterscape\\boat"
+       },
+       {
+        "label": "Topic",
+        "content": "Cityscape\\Chile\\Valparaiso"
+       },
+       {
+        "label": "Topic",
+        "content": "Waterscape\\harbor\\Valparaiso Harbor"
+       }
+      ],
+      "setName": [
+       {
+        "label": "See more items in",
+        "content": "Smithsonian American Art Museum Collection"
+       },
+       {
+        "label": "Department",
+        "content": "Painting and Sculpture"
+       }
+      ],
+      "creditLine": [
+       {
+        "label": "Credit Line",
+        "content": "Smithsonian American Art Museum, Gift of John Gellatly"
+       }
+      ],
+      "dataSource": [
+       {
+        "label": "Data Source",
+        "content": "Smithsonian American Art Museum"
+       }
+      ],
+      "identifier": [
+       {
+        "label": "Object number",
+        "content": "1929.6.159"
+       }
+      ],
+      "objectType": [
+       {
+        "label": "Type",
+        "content": "Painting"
+       }
+      ],
+      "objectRights": [
+       {
+        "label": "Restrictions & Rights",
+        "content": "CC0"
+       }
+      ],
+      "physicalDescription": [
+       {
+        "label": "Medium",
+        "content": "oil on canvas"
+       },
+       {
+        "label": "Dimensions",
+        "content": "30 1/8 x 20 1/8 in. (76.6 x 51.1 cm)"
+       }
+      ]
+     },
+     "indexedStructured": {
+      "date": [
+       "1860s"
+      ],
+      "name": [
+       "Whistler, James McNeill"
+      ],
+      "topic": [
+       "Boats and boating",
+       "Figure group",
+       "Valparaiso",
+       "Cityscapes",
+       "Harbors",
+       "Waterscapes",
+       "Valparaiso Harbor"
+      ],
+      "culture": [
+       "Chileans"
+      ],
+      "usage_flag": [
+       "permcoll"
+      ],
+      "object_type": [
+       "Paintings"
+      ],
+      "online_media_type": [
+       "Images"
+      ]
+     },
+     "descriptiveNonRepeating": {
+      "guid": "http://n2t.net/ark:/65665/vk7e039903c-10dd-4680-886d-be583a2d4783",
+      "title": {
+       "label": "Title",
+       "content": "Valparaiso Harbor"
+      },
+      "record_ID": "saam_1929.6.159",
+      "unit_code": "SAAM",
+      "title_sort": "VALPARAISO HARBOR",
+      "data_source": "Smithsonian American Art Museum",
+      "record_link": "https://americanart.si.edu/collections/search/artwork/?id=27615",
+      "online_media": {
+       "media": [
+        {
+         "id": "media:SAAM-1929.6.159_1",
+         "guid": "http://n2t.net/ark:/65665/bj9fe7f36c7-fa71-47e5-acd6-bb1e2ec62df3",
+         "type": "Images",
+         "idsId": "SAAM-1929.6.159_1",
+         "usage": {
+          "access": "CC0"
+         },
+         "content": "https://ids.si.edu/ids/deliveryService?id=SAAM-1929.6.159_1",
+         "thumbnail": "https://ids.si.edu/ids/deliveryService?id=SAAM-1929.6.159_1",
+         "altTextAccessibility": "",
+         "extDescrAccessibility": "",
+         "resources": [
+          {
+           "label": "High-resolution TIFF",
+           "url": "https://ids.si.edu/ids/download?id=SAAM-1929.6.159_1.tif",
+           "width": 1996,
+           "height": 3000,
+           "dimensions": "1996x3000"
+          },
+          {
+           "label": "High-resolution JPEG",
+           "url": "https://ids.si.edu/ids/download?id=SAAM-1929.6.159_1.jpg",
+           "width": 1996,
+           "height": 3000,
+           "dimensions": "1996x3000"
+          },
+          {
+           "label": "Screen Image",
+           "url": "https://ids.si.edu/ids/download?id=SAAM-1929.6.159_1_screen"
+          },
+          {
+           "label": "Thumbnail Image",
+           "url": "https://ids.si.edu/ids/download?id=SAAM-1929.6.159_1_thumb"
+          }
+         ]
+        }
+       ],
+       "mediaCount": 1
+      },
+      "metadata_usage": {
+       "access": "CC0"
+      }
+     }
+    },
+    "hash": "e5703d76ddffb6362772767809a37d61cc10ff37",
+    "docSignature": "c9e656e92c3592c3cb8fd014f5890dbc",
+    "timestamp": "1663786513",
+    "lastTimeUpdated": "1792145682",
+    "version": "1792142417"
+   },
+   {
+    "id": "ld1-1643409877537-1643409946246-1",
+    "title": "Cakile edentula (Bigelow) Hook. var. edentula",
+    "unitCode": "NMNHBOTANY",
+    "type": "edanmdm",
+    "url": "edanmdm:nmnhbotany_15178353",
+    "content": {
+     "freetext": {
+      "date": [
+       {
+        "label": "Collection Date",
+        "content": "15 Aug 1969"
+       }
+      ],
+      "name": [
+       {
+        "label": "Biogeographical Region",
+        "content": "73 - Northwestern U.S.A."
+       },
+       {
+        "label": "Collector",
+        "content": "J. E. Rodman"
+       }
+      ],
+      "notes": [
+       {
+        "label": "Record Last Modified",
+        "content": "17 Nov 2025"
+       },
+       {
+        "label": "Specimen Count",
+        "content": "1"
+       }
+      ],
+      "place": [
+       {
+        "label": "Place",
+        "content": "Grays Harbor Co., ocean strand of Twin Harbors State Park., Grays Harbor, Washington, United States, North America"
+       }
+      ],
+      "setName": [
+       {
+        "label": "See more items in",
+        "content": "Botany"
+       },
+       {
+        "label": "See more items in",
+        "content": "Angiosperms"
+       }
+      ],
+      "publisher": [
+       {
+        "label": "Published Name",
+        "content": "Cakile edentula (Bigelow) Hook. var. edentula"
+       }
+      ],
+      "dataSource": [
+       {
+        "label": "Data Source",
+        "content": "NMNH - Botany Dept."
+       }
+      ],
+      "identifier": [
+       {
+        "label": "Barcode",
+        "content": "03583824"
+       },
+       {
+        "label": "USNM Number",
+        "content": "2974271"
+       }
+      ],
+      "taxonomicName": [
+       {
+        "label": "Taxonomy",
+        "content": "Plantae Dicotyledonae Brassicales Brassicaceae Brassicoideae"
+       }
+      ]
+     },
+     "indexedStructured": {
+      "date": [
+       "1960s"
+      ],
+      "name": [
+       "Rodman, J. E."
+      ],
+      "place": [
+       "United States",
+       "Grays Harbor",
+       "North America",
+       "Washington"
+      ],
+      "topic": [
+       "Dicotyledonae"
+      ],
+      "tax_class": [
+       "Dicotyledonae"
+      ],
+      "tax_order": [
+       "Brassicales"
+      ],
+      "tax_family": [
+       "Brassicaceae"
+      ],
+      "geoLocation": [
+       {
+        "L1": {
+         "type": "Continent",
+         "content": "North America"
+        },
+        "L2": {
+         "type": "Country",
+         "content": "United States"
+        },
+        "L3": {
+         "type": "State",
+         "content": "Washington"
+        },
+        "L4": {
+         "type": "County",
+         "content": "Grays Harbor"
+        },
+        "Other": {
+         "type": "Locality",
+         "content": "Grays Harbor Co., ocean strand of Twin Harbors State Park."
+        }
+       }
+      ],
+      "tax_kingdom": [
+       "Plantae"
+      ],
+      "scientific_name": [
+       "Cakile edentula (Bigelow) Hook. var. edentula"
+      ],
+      "online_media_type": [
+       "Images"
+      ]
+     },
+     "descriptiveNonRepeating": {
+      "guid": "http://n2t.net/ark:/65665/3d59dc71d-5792-4069-8c1c-7725a376c1f9",
+      "title": {
+       "label": "title",
+       "content": "Cakile edentula (Bigelow) Hook. var. edentula"
+      },
+      "record_ID": "nmnhbotany_15178353",
+      "unit_code": "NMNHBOTANY",
+      "title_sort": "CAKILE EDENTULA BIGELOW HOOK VAR EDENTULA",
+      "data_source": "NMNH - Botany Dept.",
+      "record_link": "http://n2t.net/ark:/65665/3d59dc71d-5792-4069-8c1c-7725a376c1f9",
+      "online_media": {
+       "media": [
+        {
+         "id": "media:NMNH-03583824",
+         "guid": "http://n2t.net/ark:/65665/m3f2416468-895d-4f69-baec-fc93605a6d54",
+         "type": "Images",
+         "idsId": "ark:/65665/m3f2416468895d4f69baecfc93605a6d54",
+         "usage": {
+          "access": "CC0"
+         },
+         "content": "https://ids.si.edu/ids/deliveryService/id/ark:/65665/m3f2416468895d4f69baecfc93605a6d54",
+         "thumbnail": "https://ids.si.edu/ids/deliveryService/id/ark:/65665/m3f2416468895d4f69baecfc93605a6d54/90",
+         "altTextAccessibility": "",
+         "extDescrAccessibility": "",
+         "resources": [
+          {
+           "label": "High-resolution TIFF",
+           "url": "https://ids.si.edu/ids/download?id=NMNH-03583824.tif",
+           "width": 6743,
+           "height": 8921,
+           "dimensions": "6743x8921"
+          },
+          {
+           "label": "High-resolution JPEG",
+           "url": "https://ids.si.edu/ids/download?id=NMNH-03583824.jpg",
+           "width": 6743,
+           "height": 8921,
+           "dimensions": "6743x8921"
+          },
+          {
+           "label": "Screen Image",
+           "url": "https://ids.si.edu/ids/download?id=NMNH-03583824_screen"
+          },
+          {
+           "label": "Thumbnail Image",
+           "url": "https://ids.si.edu/ids/download?id=NMNH-03583824_thumb"
+          }
+         ]
+        }
+       ],
+       "mediaCount": 1
+      },
+      "metadata_usage": {
+       "access": "CC0"
+      }
+     }
+    },
+    "hash": "6060dab051ca98f05f8de619826604cc2d15f0fa",
+    "docSignature": "d9c34f72f09c434c980b632661a015c5",
+    "timestamp": "1663782090",
+    "lastTimeUpdated": "1764162510",
+    "version": "1764151678"
+   }
+  ],
+  "facets": {},
+  "rowCount": 13317,
+  "message": "content found"
+ }
+}

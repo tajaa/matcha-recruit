@@ -27,6 +27,7 @@ from . import (
     shopper,
     shopper_web,
     site,
+    stock,
 )
 from ._common import _validate_intake  # noqa: F401  (test_cappe_offerings imports this)
 
@@ -49,3 +50,4 @@ router.include_router(bookings.suggestions_router)
 router.include_router(booking_selfserve.router)
 router.include_router(messages.router)
 router.include_router(blog.router)
+router.include_router(stock.router)

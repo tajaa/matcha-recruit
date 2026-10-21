@@ -16,6 +16,7 @@ from .auth import router as auth_router
 from .billing import router as billing_router
 from .blog import router as blog_router
 from .magazine import router as magazine_router
+from .library import router as library_router
 from .bookings import router as bookings_router
 from .clients import router as clients_router
 from .collab import router as collab_router
@@ -108,6 +109,7 @@ cappe_router.include_router(creators_router)
 cappe_router.include_router(collab_router)
 cappe_router.include_router(blog_router)
 cappe_router.include_router(magazine_router)
+cappe_router.include_router(library_router)
 cappe_router.include_router(uploads_router)
 
 __all__ = ["cappe_router"]

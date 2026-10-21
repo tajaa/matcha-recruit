@@ -302,6 +302,13 @@ class Settings:
     # docs/ops/CAPPE_CUSTOM_DOMAINS.md is done — search/purchase/connect 503
     # while this is false.
     cappe_custom_domains_enabled: bool = False
+    # Magazine stock imagery (services/magazine/sources). Openverse works
+    # anonymously (throttled); a registered client gets higher limits.
+    # Smithsonian Open Access needs an api.data.gov key; without one the
+    # throttled DEMO_KEY is used (fine for dev, not for prod).
+    openverse_client_id: Optional[str] = None
+    openverse_client_secret: Optional[str] = None
+    smithsonian_api_key: Optional[str] = None
     # Espresso Tasks (`services/matcha_work/agent_tasks/`). Off until the Mac
     # Tasks tab ships; admins can use it either way.
     espresso_tasks_enabled: bool = False
@@ -510,6 +517,9 @@ def load_settings() -> Settings:
         porkbun_secret_key=os.getenv("PORKBUN_SECRET_KEY"),
         cappe_domain_markup_cents=int(os.getenv("CAPPE_DOMAIN_MARKUP_CENTS", "800")),
         cappe_platform_webhook_secret=os.getenv("CAPPE_PLATFORM_WEBHOOK_SECRET"),
+        openverse_client_id=os.getenv("OPENVERSE_CLIENT_ID") or None,
+        openverse_client_secret=os.getenv("OPENVERSE_CLIENT_SECRET") or None,
+        smithsonian_api_key=os.getenv("SMITHSONIAN_API_KEY") or None,
         cappe_custom_domains_enabled=os.getenv("CAPPE_CUSTOM_DOMAINS_ENABLED", "").strip().lower()
         in ("1", "true", "yes"),
         espresso_tasks_enabled=os.getenv("ESPRESSO_TASKS_ENABLED", "").strip().lower()

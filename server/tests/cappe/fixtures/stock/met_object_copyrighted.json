@@ -1,0 +1,84 @@
+{
+ "objectID": 490097,
+ "isHighlight": false,
+ "accessionNumber": "1998.450",
+ "accessionYear": "1998",
+ "isPublicDomain": false,
+ "primaryImage": "",
+ "primaryImageSmall": "",
+ "additionalImages": [],
+ "constituents": [
+  {
+   "constituentID": 164361,
+   "role": "Artist",
+   "name": "Wyndham Lewis",
+   "constituentULAN_URL": "http://vocab.getty.edu/page/ulan/500025826",
+   "constituentWikidata_URL": "https://www.wikidata.org/wiki/Q780102",
+   "gender": ""
+  }
+ ],
+ "department": "Modern and Contemporary Art",
+ "objectName": "Painting",
+ "title": "Harbour",
+ "culture": "",
+ "period": "",
+ "dynasty": "",
+ "reign": "",
+ "portfolio": "",
+ "artistRole": "Artist",
+ "artistPrefix": "",
+ "artistDisplayName": "Wyndham Lewis",
+ "artistDisplayBio": "British (born Canada), Amherst 1882\u20131957 London",
+ "artistSuffix": "",
+ "artistAlphaSort": "Lewis, Wyndham",
+ "artistNationality": "British, born Canada",
+ "artistBeginDate": "1882",
+ "artistEndDate": "1957",
+ "artistGender": "",
+ "artistWikidata_URL": "https://www.wikidata.org/wiki/Q780102",
+ "artistULAN_URL": "http://vocab.getty.edu/page/ulan/500025826",
+ "objectDate": "1936",
+ "objectBeginDate": 1936,
+ "objectEndDate": 1936,
+ "medium": "Oil on canvas",
+ "dimensions": "16 \u00d7 20 in. (40.6 \u00d7 50.8 cm)",
+ "measurements": [
+  {
+   "elementName": "Overall",
+   "elementDescription": null,
+   "elementMeasurements": {
+    "Depth": 1.2700025,
+    "Height": 40.64008,
+    "Width": 50.800102
+   }
+  }
+ ],
+ "creditLine": "Anonymous Gift, in memory of William Gaddis, 1998",
+ "geographyType": "",
+ "city": "",
+ "state": "",
+ "county": "",
+ "country": "",
+ "region": "",
+ "subregion": "",
+ "locale": "",
+ "locus": "",
+ "excavation": "",
+ "river": "",
+ "classification": "Paintings",
+ "rightsAndReproduction": "\u00a9 By kind permission of the Wyndham Lewis Memorial Trust (a registered charity)",
+ "linkResource": "",
+ "metadataDate": "2025-09-27T04:50:39.59Z",
+ "repository": "Metropolitan Museum of Art, New York, NY",
+ "objectURL": "https://www.metmuseum.org/art/collection/search/490097",
+ "tags": [
+  {
+   "term": "Boats",
+   "AAT_URL": "http://vocab.getty.edu/page/aat/300178749",
+   "Wikidata_URL": "https://www.wikidata.org/wiki/Q35872"
+  }
+ ],
+ "objectWikidata_URL": "https://www.wikidata.org/wiki/Q19922928",
+ "isTimelineWork": false,
+ "GalleryNumber": ""
+}

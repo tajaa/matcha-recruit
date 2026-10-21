@@ -1627,3 +1627,54 @@ export type CappeAsset = {
   moderation: 'unchecked' | 'ok' | 'flagged' | 'blocked'
   updated_at: string | null
 }
+
+/** Open-image archives the Library searches (cappemag03). */
+export type CappeStockSource = 'openverse' | 'smithsonian' | 'met' | 'nasa'
+
+/** One archive picture, already filtered to licenses a magazine can publish.
+ *  `thumb` is a signed path under the Cappe API (our origin, not the archive's). */
+export type CappeStockResult = {
+  source: CappeStockSource
+  source_id: string
+  title: string
+  creator: string
+  /** cc0 | pdm | by | by-sa */
+  license: string
+  license_version: string
+  license_url: string
+  provider_label: string
+  landing_url: string
+  credit_line: string
+  width: number | null
+  height: number | null
+  thumb: string
+  imported: boolean
+}
+
+export type CappeStockSearch = {
+  source: CappeStockSource
+  query: string
+  page: number
+  results: CappeStockResult[]
+  has_more: boolean
+}
+
+export type CappeStockImportStatus = 'pending' | 'working' | 'ready' | 'failed' | 'refused'
+
+export type CappeStockImport = {
+  id: string
+  source: CappeStockSource
+  source_id: string
+  status: CappeStockImportStatus
+  error: string | null
+  asset_id: string | null
+  /** The library picture, once the import is ready. */
+  asset: CappeAsset | null
+  created_at: string
+}
+
+export type CappeStockImports = {
+  imports: CappeStockImport[]
+  /** Pictures the account may still import today (only on a new import). */
+  remaining_today?: number | null
+}

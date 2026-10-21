@@ -1,0 +1,252 @@
+{
+ "result_count": 240,
+ "page_count": 48,
+ "page_size": 5,
+ "page": 1,
+ "results": [
+  {
+   "id": "2df75d75-7772-46c2-918a-2f2af893690d",
+   "title": "Street fashion",
+   "indexed_on": "2020-04-03T20:56:27.228944Z",
+   "foreign_landing_url": "https://www.flickr.com/photos/87690240@N03/14029430420",
+   "url": "https://live.staticflickr.com/5233/14029430420_e4eb6f876b_b.jpg",
+   "creator": "Giuseppe Milo (www.pixael.com)",
+   "creator_url": "https://www.flickr.com/photos/87690240@N03",
+   "license": "by",
+   "license_version": "2.0",
+   "license_url": "https://creativecommons.org/licenses/by/2.0/",
+   "provider": "flickr",
+   "source": "flickr",
+   "category": null,
+   "filesize": null,
+   "filetype": null,
+   "tags": [
+    {
+     "name": "blackandwhite",
+     "accuracy": null,
+     "unstable__provider": "flickr"
+    },
+    {
+     "name": "bw",
+     "accuracy": null,
+     "unstable__provider": "flickr"
+    },
+    {
+     "name": "candid",
+     "accuracy": null,
+     "unstable__provider": "flickr"
+    },
+    {
+     "name": "dublin",
+     "accuracy": null,
+     "unstable__provider": "flickr"
+    },
+    {
+     "name": "europe",
+     "accuracy": null,
+     "unstable__provider": "flickr"
+    },
+    {
+     "name": "fashion",
+     "accuracy": null,
+     "unstable__provider": "flickr"
+    },
+    {
+     "name": "ireland",
+     "accuracy": null,
+     "unstable__provider": "flickr"
+    },
+    {
+     "name": "manequine",
+     "accuracy": null,
+     "unstable__provider": "flickr"
+    },
+    {
+     "name": "onsale",
+     "accuracy": null,
+     "unstable__provider": "flickr"
+    },
+    {
+     "name": "photo",
+     "accuracy": null,
+     "unstable__provider": "flickr"
+    },
+    {
+     "name": "photography",
+     "accuracy": null,
+     "unstable__provider": "flickr"
+    },
+    {
+     "name": "shop",
+     "accuracy": null,
+     "unstable__provider": "flickr"
+    },
+    {
+     "name": "sony",
+     "accuracy": null,
+     "unstable__provider": "flickr"
+    },
+    {
+     "name": "street",
+     "accuracy": null,
+     "unstable__provider": "flickr"
+    },
+    {
+     "name": "streetphotography",
+     "accuracy": null,
+     "unstable__provider": "flickr"
+    },
+    {
+     "name": "window",
+     "accuracy": null,
+     "unstable__provider": "flickr"
+    },
+    {
+     "name": "woman",
+     "accuracy": null,
+     "unstable__provider": "flickr"
+    }
+   ],
+   "attribution": "\"Street fashion\" by Giuseppe Milo (www.pixael.com) is licensed under CC BY 2.0. To view a copy of this license, visit https://creativecommons.org/licenses/by/2.0/.",
+   "fields_matched": [
+    "title",
+    "tags.name"
+   ],
+   "mature": false,
+   "height": 1024,
+   "width": 683,
+   "thumbnail": "https://api.openverse.org/v1/images/2df75d75-7772-46c2-918a-2f2af893690d/thumb/",
+   "detail_url": "https://api.openverse.org/v1/images/2df75d75-7772-46c2-918a-2f2af893690d/",
+   "related_url": "https://api.openverse.org/v1/images/2df75d75-7772-46c2-918a-2f2af893690d/related/",
+   "unstable__sensitivity": []
+  },
+  {
+   "id": "74e19cdd-6760-461f-a467-0b972edcbf9d",
+   "title": "Street fashion",
+   "indexed_on": "2020-03-31T04:07:25.364653Z",
+   "foreign_landing_url": "https://www.flickr.com/photos/44093058@N06/22599008757",
+   "url": "https://live.staticflickr.com/775/22599008757_01f106f5a8_b.jpg",
+   "creator": "blondinrikard",
+   "creator_url": "https://www.flickr.com/photos/44093058@N06",
+   "license": "by",
+   "license_version": "2.0",
+   "license_url": "https://creativecommons.org/licenses/by/2.0/",
+   "provider": "flickr",
+   "source": "flickr",
+   "category": null,
+   "filesize": null,
+   "filetype": null,
+   "tags": [
+    {
+     "name": "dumpster",
+     "accuracy": null,
+     "unstable__provider": "flickr"
+    },
+    {
+     "name": "fashion",
+     "accuracy": null,
+     "unstable__provider": "flickr"
+    },
+    {
+     "name": "gata",
+     "accuracy": null,
+     "unstable__provider": "flickr"
+    },
+    {
+     "name": "gatufoto",
+     "accuracy": null,
+     "unstable__provider": "flickr"
+    },
+    {
+     "name": "g\u00f6teborg",
+     "accuracy": null,
+     "unstable__provider": "flickr"
+    },
+    {
+     "name": "gu00f6teborg",
+     "accuracy": null,
+     "unstable__provider": "flickr"
+    },
+    {
+     "name": "haga",
+     "accuracy": null,
+     "unstable__provider": "flickr"
+    },
+    {
+     "name": "husargatan",
+     "accuracy": null,
+     "unstable__provider": "flickr"
+    },
+    {
+     "name": "street",
+     "accuracy": null,
+     "unstable__provider": "flickr"
+    }
+   ],
+   "attribution": "\"Street fashion\" by blondinrikard is licensed under CC BY 2.0. To view a copy of this license, visit https://creativecommons.org/licenses/by/2.0/.",
+   "fields_matched": [
+    "title",
+    "tags.name"
+   ],
+   "mature": false,
+   "height": 622,
+   "width": 1024,
+   "thumbnail": "https://api.openverse.org/v1/images/74e19cdd-6760-461f-a467-0b972edcbf9d/thumb/",
+   "detail_url": "https://api.openverse.org/v1/images/74e19cdd-6760-461f-a467-0b972edcbf9d/",
+   "related_url": "https://api.openverse.org/v1/images/74e19cdd-6760-461f-a467-0b972edcbf9d/related/",
+   "unstable__sensitivity": []
+  },
+  {
+   "id": "51417bf4-b772-40ea-a9ce-07a5703e1b8a",
+   "title": "oldschool street fashion photography",
+   "indexed_on": "2020-04-29T13:30:32.641541Z",
+   "foreign_landing_url": "https://www.flickr.com/photos/39404164@N00/3091544576",
+   "url": "https://live.staticflickr.com/3077/3091544576_ae1df601a3_b.jpg",
+   "creator": "acht&siebzig",
+   "creator_url": "https://www.flickr.com/photos/39404164@N00",
+   "license": "by-sa",
+   "license_version": "2.0",
+   "license_url": "https://creativecommons.org/licenses/by-sa/2.0/",
+   "provider": "flickr",
+   "source": "flickr",
+   "category": null,
+   "filesize": null,
+   "filetype": null,
+   "tags": [
+    {
+     "name": "fashion",
+     "accuracy": null,
+     "unstable__provider": "flickr"
+    },
+    {
+     "name": "oldschool",
+     "accuracy": null,
+     "unstable__provider": "flickr"
+    },
+    {
+     "name": "photography",
+     "accuracy": null,
+     "unstable__provider": "flickr"
+    },
+    {
+     "name": "street",
+     "accuracy": null,
+     "unstable__provider": "flickr"
+    }
+   ],
+   "attribution": "\"oldschool street fashion photography\" by acht&siebzig is licensed under CC BY-SA 2.0. To view a copy of this license, visit https://creativecommons.org/licenses/by-sa/2.0/.",
+   "fields_matched": [
+    "description",
+    "title",
+    "tags.name"
+   ],
+   "mature": false,
+   "height": 1024,
+   "width": 680,
+   "thumbnail": "https://api.openverse.org/v1/images/51417bf4-b772-40ea-a9ce-07a5703e1b8a/thumb/",
+   "detail_url": "https://api.openverse.org/v1/images/51417bf4-b772-40ea-a9ce-07a5703e1b8a/",
+   "related_url": "https://api.openverse.org/v1/images/51417bf4-b772-40ea-a9ce-07a5703e1b8a/related/",
+   "unstable__sensitivity": []
+  }
+ ]
+}
