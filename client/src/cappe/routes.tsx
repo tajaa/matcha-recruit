@@ -55,6 +55,10 @@ const WritersLanding = lazy(() => import('./magazine/writers/WritersLanding'))
 const WriterHome = lazy(() => import('./magazine/writers/WriterHome'))
 const MagazineOnboarding = lazy(() => import('./magazine/onboarding/MagazineOnboarding'))
 const ReaderView = lazy(() => import('./magazine/reader/ReaderView'))
+const ReaderLayout = lazy(() => import('./magazine/shelf/ReaderLayout'))
+const Shelf = lazy(() => import('./magazine/shelf/Shelf'))
+const ShelfMagazine = lazy(() => import('./magazine/shelf/ShelfMagazine'))
+const ShelfStory = lazy(() => import('./magazine/shelf/ShelfStory'))
 
 // The Blog page became the magazine's Stories (cappemag02); old links land there.
 function BlogRedirect() {
@@ -93,6 +97,15 @@ export default function CappeRoutes() {
         <Route path="magazines/start" element={<WritersLanding />} />
         <Route path="magazines/signup" element={<CappeSignup writerOnly />} />
         <Route path="magazines/login" element={<CappeLogin writerOnly />} />
+        {/* A reader's way in, and their dashboard of magazines. Outside
+            CappeLayout: a reader has no sites, so no site-building sidebar. */}
+        <Route path="reader/signup" element={<CappeSignup readerOnly />} />
+        <Route path="reader/login" element={<CappeLogin readerOnly />} />
+        <Route path="reader" element={<ReaderLayout />}>
+          <Route index element={<Shelf />} />
+          <Route path="m/:slug" element={<ShelfMagazine />} />
+          <Route path="m/:slug/:story" element={<ShelfStory />} />
+        </Route>
         <Route path="website-setup" element={<CappeSignup />} />
         {/* The address people type. */}
         <Route path="signup" element={<CappeSignup />} />

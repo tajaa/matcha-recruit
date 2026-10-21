@@ -449,6 +449,19 @@ What is built so far:
   `cappe_comp_expiry` task) stamps `lapsed_at`; the sweep then sets each reader's subscription to end with the
   month they paid for and emails them, retrying what Stripe refused on the next run. A lapsed magazine stays
   up for `magazines.GRACE_DAYS` (31) without the plan, so paid readers keep what they paid for.
+- **Reader accounts** (`account_type='reader'`, `cappemag06`) subscribe to magazines and sell nothing:
+  `plan_offered` offers them no plan and `_enforce_site_limit` refuses them a site (403 `reader_account`).
+  Their dashboard is `routes/reader.py` over `services/magazine/shelf.py`. **No new identity table**: on
+  each magazine a reader is still that site's `cappe_shoppers` row, matched by the account's **confirmed**
+  email (`shelf.confirmed_email` re-checks `email_verified_at`; `idx_cappe_shoppers_email` serves the
+  cross-site lookup). So a subscription started on the magazine's site shows on the dashboard and one
+  started on the dashboard works there; any account type can use these routes. Subscribing makes the
+  shopper row if needed and runs the same `billing.checkout` with `return_origins=[app_origin()]` (a
+  return off gummfit.com becomes the magazine's dashboard page). Reading returns the story page as JSON
+  `{html}` for a script-less frame, whole when the reader has paid access (rendered as a free story: the
+  paywall marker prints nothing), cut at the paywall otherwise; `no-store, private`. The shelf keeps a
+  magazine that is down so its reader can still cancel; resume needs one still taking subscribers. The
+  paywall on the magazine's own page links to the dashboard (`pages.reader_path`, `data-mz-alt`).
 
 ## Site templates (`services/site_templates/`)
 

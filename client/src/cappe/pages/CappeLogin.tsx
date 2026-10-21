@@ -1,18 +1,21 @@
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { CappeApiError, cappePublicPost, clearCappeTokens, setCappeTokens } from '../api'
 import { invalidateCappeMeCache } from '../hooks/useCappeMe'
 import { creatorPaths } from '../creators/creatorPaths'
 import { writerPaths } from '../magazine/writers/writerPaths'
+import { readerNext, readerPaths } from '../magazine/shelf/readerPaths'
 import { postAuthHome } from '../utils/postAuthHome'
 import ResendVerification from '../components/ResendVerification'
 import type { CappeTokenResponse } from '../types'
 
-export default function CappeLogin({ creatorOnly = false, brandOnly = false, writerOnly = false }: {
-  creatorOnly?: boolean; brandOnly?: boolean; writerOnly?: boolean
+export default function CappeLogin({ creatorOnly = false, brandOnly = false, writerOnly = false, readerOnly = false }: {
+  creatorOnly?: boolean; brandOnly?: boolean; writerOnly?: boolean; readerOnly?: boolean
 }) {
   const navigate = useNavigate()
+  const [params] = useSearchParams()
+  const next = params.get('next')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -43,7 +46,10 @@ export default function CappeLogin({ creatorOnly = false, brandOnly = false, wri
         setError('This sign-in is for brand accounts that collaborate with Gummfit Creators.')
         return
       }
-      navigate(creatorOnly ? creatorPaths.home : brandOnly ? creatorPaths.brandHome : postAuthHome(res.account?.account_type), { replace: true })
+      // Any account can read magazines, so the reader sign-in takes them all
+      // to the dashboard (or the magazine they came from).
+      navigate(creatorOnly ? creatorPaths.home : brandOnly ? creatorPaths.brandHome
+        : readerOnly ? readerNext(next) : postAuthHome(res.account?.account_type), { replace: true })
     } catch (err) {
       if (err instanceof CappeApiError && err.code === 'email_unverified') setNeedsVerify(true)
       setError(err instanceof Error ? err.message : 'Something went wrong.')
@@ -60,7 +66,7 @@ export default function CappeLogin({ creatorOnly = false, brandOnly = false, wri
             G
           </span>
           <h1 className="text-2xl font-semibold tracking-tight text-zinc-50">
-            Sign in to {creatorOnly ? 'Gummfit Creators' : brandOnly ? 'Gummfit for Brands' : writerOnly ? 'Gummfit Magazines' : 'Gummfit'}
+            Sign in to {creatorOnly ? 'Gummfit Creators' : brandOnly ? 'Gummfit for Brands' : writerOnly ? 'Gummfit Magazines' : readerOnly ? 'your magazines' : 'Gummfit'}
           </h1>
         </div>
 
@@ -110,9 +116,9 @@ export default function CappeLogin({ creatorOnly = false, brandOnly = false, wri
         </form>
 
         <p className="mt-4 text-center text-sm text-zinc-500">
-          {creatorOnly ? 'New to Gummfit Creators?' : brandOnly ? 'New to Gummfit for Brands?' : writerOnly ? 'New to Gummfit Magazines?' : 'New to Gummfit?'}{' '}
-          <Link to={creatorOnly ? creatorPaths.signup : brandOnly ? creatorPaths.brandSignup : writerOnly ? writerPaths.signup : '/cappe/website-setup'} className="font-medium text-lime-400 hover:text-lime-300">
-            {creatorOnly ? 'Create your creator profile' : brandOnly ? 'Create a brand profile' : writerOnly ? 'Start your magazine' : 'Create an account'}
+          {creatorOnly ? 'New to Gummfit Creators?' : brandOnly ? 'New to Gummfit for Brands?' : writerOnly ? 'New to Gummfit Magazines?' : readerOnly ? 'No reader account yet?' : 'New to Gummfit?'}{' '}
+          <Link to={creatorOnly ? creatorPaths.signup : brandOnly ? creatorPaths.brandSignup : writerOnly ? writerPaths.signup : readerOnly ? (next ? `${readerPaths.signup}?next=${encodeURIComponent(next)}` : readerPaths.signup) : '/cappe/website-setup'} className="font-medium text-lime-400 hover:text-lime-300">
+            {creatorOnly ? 'Create your creator profile' : brandOnly ? 'Create a brand profile' : writerOnly ? 'Start your magazine' : readerOnly ? 'Create one' : 'Create an account'}
           </Link>
         </p>
         {(creatorOnly || brandOnly) && (
@@ -123,7 +129,7 @@ export default function CappeLogin({ creatorOnly = false, brandOnly = false, wri
             </Link>
           </p>
         )}
-        {!creatorOnly && !brandOnly && !writerOnly && (
+        {!creatorOnly && !brandOnly && !writerOnly && !readerOnly && (
           <div className="mt-5 flex items-center justify-center gap-3 text-xs text-zinc-500">
             <Link to={creatorPaths.login} className="font-medium text-lime-400 hover:text-lime-300">Creator sign in</Link>
             <span aria-hidden="true">·</span>

@@ -58,7 +58,8 @@ class CappeMagazineUpdate(BaseModel):
 
 
 class CappeMagazineCheckout(BaseModel):
-    """Where Stripe Checkout returns the reader: the magazine's own pages."""
+    """Where Stripe Checkout returns the reader: the magazine's own pages, or
+    their dashboard on gummfit.com when they subscribe from there."""
     success_url: str = Field(min_length=1, max_length=2000)
     cancel_url: str = Field(min_length=1, max_length=2000)
 

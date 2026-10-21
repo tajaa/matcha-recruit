@@ -24,6 +24,8 @@ def plan_offered(code: str, features: dict[str, Any] | None, account_type: str |
     that kind of account; a writer sees their plan plus Free and Business.
     Lists and checkout both ask this, so a plan can't be bought around it."""
     audience = (features or {}).get("audience")
+    if account_type == "reader":
+        return False  # a reader pays magazines, never Gummfit
     if account_type == "writer":
         return audience == "writer" or code in WRITER_ALSO
     return not audience

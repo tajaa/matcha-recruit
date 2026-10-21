@@ -18,7 +18,7 @@ export type CappeShopperSubscription = {
 // Cappe is a separate product from matcha; these types are independent of the
 // matcha MeResponse / dashboard types.
 
-export type CappeAccountType = 'business' | 'personal' | 'creator' | 'writer'
+export type CappeAccountType = 'business' | 'personal' | 'creator' | 'writer' | 'reader'
 
 export type CappeAccount = {
   id: string
@@ -1787,3 +1787,62 @@ export type CappeStoryAssist = {
   terms?: { source: CappeStockSource; query: string }[]
   draft?: { title: string; excerpt: string; kicker: string; content: StoryContent }
 }
+
+// ── A reader account's dashboard (cappemag06; server/app/cappe/routes/reader.py) ──
+
+export type CappeReaderSubscription = {
+  id: string
+  status: string
+  current_period_end: string | null
+  cancel_at_period_end: boolean
+  total_cents: number
+  currency: string
+}
+
+export type CappeReaderStoryCard = {
+  slug: string
+  title: string
+  kicker: string | null
+  excerpt: string | null
+  topic: string | null
+  access: 'free' | 'paid' | string
+  published_at: string | null
+  reading_minutes: number | null
+  cover: { url: string; alt: string; credit: string } | null
+}
+
+/** One magazine on the reader's shelf: a subscription still paying, or free
+ *  months from the writer. `live` is false while the magazine is down. */
+export type CappeShelfMagazine = {
+  site_id: string
+  slug: string
+  name: string
+  tagline: string | null
+  accent: string | null
+  origin: string | null
+  live: boolean
+  subscription: CappeReaderSubscription | null
+  comp: { expires_at: string | null } | null
+  latest: CappeReaderStoryCard | null
+}
+
+export type CappeReaderMagazine = {
+  site_id: string
+  slug: string
+  name: string
+  tagline: string | null
+  accent: string | null
+  origin: string | null
+  price_cents: number | null
+  currency: string
+  paid_pitch: string | null
+  taking_subscribers: boolean
+  has_access: boolean
+  subscription: CappeReaderSubscription | null
+  comp: { expires_at: string | null } | null
+  stories: CappeReaderStoryCard[]
+  has_more: boolean
+  page: number
+}
+
+export type CappeReaderStory = { html: string; paid: boolean; has_access: boolean; title: string }

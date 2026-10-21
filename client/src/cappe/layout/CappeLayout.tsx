@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
-import { Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { Loader2, Menu, X } from 'lucide-react'
 import { useCappeMe } from '../hooks/useCappeMe'
 import { getCappeToken } from '../api'
 import CappeSidebar from '../components/CappeSidebar'
 import { creatorPaths } from '../creators/creatorPaths'
+import { readerPaths } from '../magazine/shelf/readerPaths'
 
 // Authenticated Cappe shell. Independent of TenantSidebar — Cappe is its own
 // product. Redirects to /cappe/login when there is no live Cappe session.
@@ -47,6 +48,8 @@ export default function CappeLayout() {
   }
 
   if (!account) return null
+  // A reader has no sites: their whole Gummfit is the magazines dashboard.
+  if (account.account_type === 'reader') return <Navigate replace to={readerPaths.home} />
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-zinc-950 text-zinc-100 md:flex-row">

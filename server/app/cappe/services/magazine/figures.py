@@ -103,3 +103,16 @@ def share_image(asset: Optional[dict]) -> Optional[str]:
         return None
     share = (asset.get("variants") or {}).get("share")
     return (_safe_image(share.get("url")) if isinstance(share, dict) else None) or _safe_image(asset.get("url"))
+
+
+def card_image(asset: Optional[dict], *, width: int = 960) -> Optional[dict]:
+    """A picture for a card outside a magazine page (the reader's dashboard):
+    the smallest stored size at least `width` wide, else the largest, with its
+    alt text and credit."""
+    if not asset:
+        return None
+    sizes = _variants(asset)
+    url = next((u for w, u in sizes if w >= width), sizes[-1][1] if sizes else None) or share_image(asset)
+    if not url:
+        return None
+    return {"url": url, "alt": asset.get("alt") or "", "credit": credit_text(asset)}

@@ -40,6 +40,13 @@ Website-builder frontend for the consumer brand **Gummfit**, host-routed on gumm
   `settings/price.ts`), "Who can read it" in the story editor (a Paywall block is offered once a story is
   for subscribers), `readers/Readers.tsx` (subscriptions and free comps) and `earnings/Earnings.tsx`
   (the ledger and `StripeConnectCard magazineFeeBps`, which names the magazine share, not the plan fee).
+  Reader accounts (cappemag06, `account_type='reader'`): `shelf/` is their dashboard, outside
+  `CappeLayout` (which sends a reader there): `CappeSignup readerOnly` / `CappeLogin readerOnly` at
+  `/cappe/reader/signup|login` (a `next` inside `/cappe/reader` is honoured, `shelf/readerPaths.ts`),
+  `shelf/ReaderLayout.tsx` (bar + sign-in gate), `Shelf.tsx` (`/cappe/reader`: every magazine held, open one
+  by its address), `ShelfMagazine.tsx` (`/cappe/reader/m/:slug`: subscribe, cancel/keep, stories) and
+  `ShelfStory.tsx` (`…/:story`: the server's page in a `sandbox="allow-same-origin"` frame, turned by
+  `reader/book.ts`; its links and paywall button are wired from the parent).
   `stories/Stories.tsx` (the wall of covers at `sites/:siteId/stories`; `/blog` redirects here),
   `editor/StoryEditor.tsx` + `editor/BlockEditor.tsx` (blocks, a library picker, a live preview
   iframe fed by `POST /stories/preview`), `settings/MagazineSettings.tsx`. `storyBlocks.ts` mirrors
