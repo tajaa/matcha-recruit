@@ -81,7 +81,7 @@ describe('MagazineSettings — paid subscriptions', () => {
     answer({ '/magazine': magazine({ stripe_ready: false, lapsed_at: '2026-10-01T09:00:00Z' }), '/stories/options': OPTIONS })
     mount('/sites/s-1/magazine', <MagazineSettings />, '/sites/:siteId/magazine')
     const box = within(await screen.findByRole('region', { name: 'Paid subscriptions' }))
-    expect(box.getByRole('link', { name: 'Connect Stripe' })).toHaveAttribute('href', '/sites/s-1/earnings')
+    expect(box.getByRole('link', { name: 'Connect Stripe' })).toHaveAttribute('href', '/cappe/sites/s-1/earnings')
     expect(box.getByText(/Paid subscriptions stopped on/)).toBeInTheDocument()
     fireEvent.change(box.getByLabelText('Price a month'), { target: { value: '0.25' } })
     fireEvent.click(screen.getByRole('button', { name: /Save/ }))
@@ -118,7 +118,7 @@ describe('StoryEditor — who can read it', () => {
     mount('/sites/s-1/stories/p-1', <StoryEditor />, '/sites/:siteId/stories/:postId')
     const select = await screen.findByLabelText('Who can read it')
     expect(within(select).getByRole('option', { name: /Subscribers/ })).toBeDisabled()
-    expect(screen.getByRole('link', { name: 'Magazine settings' })).toHaveAttribute('href', '/sites/s-1/magazine')
+    expect(screen.getByRole('link', { name: 'Magazine settings' })).toHaveAttribute('href', '/cappe/sites/s-1/magazine')
   })
 })
 

@@ -192,8 +192,8 @@ export default function MagazineSettings() {
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <h2 className="text-sm font-medium text-zinc-100">Paid subscriptions</h2>
               <span className="flex gap-3 text-xs">
-                <Link to={`/sites/${siteId}/readers`} className="text-emerald-400 hover:text-emerald-300">Readers</Link>
-                <Link to={`/sites/${siteId}/earnings`} className="text-emerald-400 hover:text-emerald-300">Earnings</Link>
+                <Link to={`/cappe/sites/${siteId}/readers`} className="text-emerald-400 hover:text-emerald-300">Readers</Link>
+                <Link to={`/cappe/sites/${siteId}/earnings`} className="text-emerald-400 hover:text-emerald-300">Earnings</Link>
               </span>
             </div>
             {!magazine.plan_includes_paid && (
@@ -201,7 +201,7 @@ export default function MagazineSettings() {
             )}
             {magazine.plan_includes_paid && !magazine.stripe_ready && (
               <p className="text-xs text-amber-200">
-                Readers pay into your Stripe account. <Link to={`/sites/${siteId}/earnings`} className="underline">Connect Stripe</Link> before turning this on.
+                Readers pay into your Stripe account. <Link to={`/cappe/sites/${siteId}/earnings`} className="underline">Connect Stripe</Link> before turning this on.
               </p>
             )}
             {magazine.lapsed_at && !magazine.paid_enabled && (

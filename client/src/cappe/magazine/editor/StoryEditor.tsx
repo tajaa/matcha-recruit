@@ -235,7 +235,7 @@ export default function StoryEditor() {
                 <span className="mt-1 block text-xs text-zinc-500">
                   {paidOn
                     ? 'Readers see everything above the paywall block (or the first few blocks), then are asked to subscribe.'
-                    : <>To charge readers, turn on paid subscriptions in <Link to={`/sites/${siteId}/magazine`} className="underline">Magazine settings</Link>.</>}
+                    : <>To charge readers, turn on paid subscriptions in <Link to={`/cappe/sites/${siteId}/magazine`} className="underline">Magazine settings</Link>.</>}
                 </span>
               </label>
             )}
