@@ -260,7 +260,9 @@ export default function Composer({ siteId, connections, settings, metaConfigured
     setError(null)
     // problem() has checked `start` is a real, future time.
     const first = new Date(localInputToIso(start) as string)
-    const times = spreadTimes(first, groups.length, mode === 'each' ? everyDays : 1)
+    // "One post each" spreads the posts; "together" (a carousel plus any
+    // videos, which always post on their own) all go out at the time picked.
+    const times = mode === 'each' ? spreadTimes(first, groups.length, everyDays) : groups.map(() => first)
     const done: string[] = []
     try {
       for (const [i, group] of groups.entries()) {
@@ -277,8 +279,10 @@ export default function Composer({ siteId, connections, settings, metaConfigured
           alt_text: text.alt,
         }
         const post = await cappeApi.post<CappeSocialPost>(`/sites/${siteId}/social/posts`, body)
-        if (when === 'now') await cappeApi.post(`/sites/${siteId}/social/posts/${post.id}/publish`)
+        // Saved counts as done even if Post now fails next: trying again
+        // must not make a second copy (it is in the Queue to retry).
         done.push(group.key)
+        if (when === 'now') await cappeApi.post(`/sites/${siteId}/social/posts/${post.id}/publish`)
       }
       photos.forEach((p) => { URL.revokeObjectURL(p.preview); previews.current.delete(p.preview) })
       setPhotos([])
@@ -292,7 +296,7 @@ export default function Composer({ siteId, connections, settings, metaConfigured
       const message = e instanceof Error ? e.message : 'Couldn’t save'
       // Drop what already went through, so trying again doesn't post it twice.
       if (done.length) {
-        const doneKeys = new Set(mode === 'together' ? photos.map((p) => p.key) : done)
+        const doneKeys = new Set(groups.filter((g) => done.includes(g.key)).flatMap((g) => g.photos.map((p) => p.key)))
         setPhotos((ps) => ps.filter((p) => !doneKeys.has(p.key)))
       }
       setError(done.length ? `Saved ${done.length} of ${groups.length}. ${message}` : message)

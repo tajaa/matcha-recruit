@@ -162,6 +162,15 @@ async def get_reply(conn, site_id: UUID, reply_id: UUID) -> Optional[dict]:
     return _row_to_reply(row) if row else None
 
 
+async def claim_draft(conn, reply_id: UUID) -> bool:
+    """Take a draft for sending, once: a second click (or another tab) finds
+    it already taken."""
+    row = await conn.fetchrow(
+        "UPDATE cappe_social_replies SET status = 'sending' WHERE id = $1 AND status = 'draft' RETURNING id", reply_id,
+    )
+    return row is not None
+
+
 async def mark_reply(conn, reply_id: UUID, *, status: str, external_reply_id: Optional[str] = None,
                      error: Optional[str] = None) -> None:
     await conn.execute(
@@ -202,6 +211,6 @@ async def counts(conn, site_id: UUID) -> dict[str, int]:
 
 __all__ = [
     "SETTINGS_DEFAULTS", "SETTINGS_COLUMNS", "get_settings", "upsert_settings", "ingest_events", "list_inbox",
-    "get_item", "replies_for", "create_reply", "get_reply", "mark_reply", "set_item_status",
+    "get_item", "replies_for", "create_reply", "get_reply", "claim_draft", "mark_reply", "set_item_status",
     "auto_replies_last_hour", "counts",
 ]

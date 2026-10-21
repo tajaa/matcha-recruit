@@ -224,10 +224,15 @@ async def test_get_and_list_posts_carry_their_targets():
 async def test_update_post_encodes_json_columns_and_refuses_sent_posts():
     conn = QueryConn(
         fetchrow={"UPDATE cappe_social_posts SET": Queue([post_row(caption="New"), None]),
+                  "SET status = 'rendering'": None,
                   "FROM cappe_social_posts WHERE id = $1": post_row()},
-        fetch={"FROM cappe_social_post_targets t": []},
+        fetch={"FROM cappe_social_post_targets t": [], "SET status = 'failed'": [], "SET status = 'scheduled'": []},
+        fetchval={"SELECT status": "scheduled"},
     )
     post = await post_store.update_post(conn, SITE, POST, {"caption": "New", "media": [IMG], "ai_meta": {"a": 1}})
+    # New media: the render hold is taken again from scratch and settled.
+    assert any("status = 'rendering'" in sql for _, sql, _ in conn.calls)
+    assert post["status"] == "scheduled"
     sql = conn.sql_for("fetchrow")[0]
     assert "caption = $4" in sql and "media = $5::jsonb" in sql and "ai_meta = $6::jsonb" in sql
     assert "status = ANY($3::text[])" in sql
@@ -613,6 +618,8 @@ AUTO = {"autoreply_mode": "auto", "max_auto_per_hour": 20}
     (AUTO, draft(), "consider", 0, "send"),
     (AUTO, draft(intent="spam"), "consider", 0, "skip"),
     (AUTO, draft(), "escalate", 0, "escalate"),
+    # A hard-stop hit escalates even when the model calls it spam.
+    (AUTO, draft(intent="spam"), "escalate", 0, "escalate"),
     (AUTO, draft(needs_human=True), "consider", 0, "escalate"),
     (AUTO, draft(reply=None), "consider", 0, "escalate"),
     ({**AUTO, "autoreply_mode": "review"}, draft(), "consider", 0, "draft"),
@@ -814,7 +821,7 @@ async def test_refresh_connection_records_or_marks_the_failure(monkeypatch):
     assert await metrics.refresh_connection(None, object(), CRED) == {"ok": True, "followers_count": 5}
     record.assert_awaited_once()
     for error, status in ((ProviderError("bad token", code=190), "expired"),
-                          (ProviderError("gone"), "error"),
+                          (ProviderError("unknown field", code=100), "connected"),
                           (ProviderError("busy", retryable=True), "connected")):
         provider.account_metrics = AsyncMock(side_effect=error)
         assert (await metrics.refresh_connection(None, object(), CRED))["ok"] is False

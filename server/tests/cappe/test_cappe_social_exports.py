@@ -769,6 +769,7 @@ async def test_the_sweep_restarts_stalled_exports_and_clears_expired_ones(monkey
     from app.cappe.services.social import posts as post_store
 
     monkeypatch.setattr(post_store, "recover_stale_claims", AsyncMock(return_value=[]))
+    monkeypatch.setattr(post_store, "settle_renders", AsyncMock(return_value={"released": [], "failed": []}))
     stalled, hopeless = export(id=uuid4()), export(id=uuid4(), attempts=export_store.MAX_RUNS)
     monkeypatch.setattr(export_store, "stuck", AsyncMock(return_value=[stalled, hopeless]))
     monkeypatch.setattr(export_store, "expired", AsyncMock(return_value=[export(outputs={V_KEY: made(V_KEY)})]))

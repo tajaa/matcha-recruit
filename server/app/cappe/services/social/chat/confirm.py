@@ -15,6 +15,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 from uuid import UUID
 
+from ...common import loads_list
+from .. import assets as asset_store
 from .. import exports as export_store
 from .. import posts as post_store
 from .plan import EXPORTABLE, compose_caption, texts_for, with_utm
@@ -24,6 +26,44 @@ MAX_AHEAD = timedelta(days=365)
 
 class PlanError(ValueError):
     """The plan (as edited) can't be posted; the message says why."""
+
+
+class AlreadyPosted(PlanError):
+    """Something in the plan already went out from this chat."""
+
+
+def _key(item: dict[str, Any]) -> Optional[str]:
+    key = item.get("asset_id") or item.get("url")
+    return str(key) if key else None
+
+
+async def posted_from_chat(conn, site_id: UUID, conversation_id: UUID) -> set[str]:
+    """What this chat has posted (photo URLs, video asset ids), read from the
+    posts themselves — not the conversation's plan history, which is pruned
+    and can be a step behind a confirm made during a turn."""
+    rows = await conn.fetch(
+        """SELECT media FROM cappe_social_posts
+           WHERE site_id = $1 AND ai_meta->'chat'->>'conversation_id' = $2 AND status <> 'cancelled'""",
+        site_id, str(conversation_id),
+    )
+    return {k for r in rows for item in loads_list(r["media"]) if isinstance(item, dict) for k in [_key(item)] if k}
+
+
+async def check_media(conn, site_id: UUID, conversation_id: UUID, plan: dict[str, Any]) -> None:
+    """Before writing: nothing in the plan went out from this chat already,
+    and every video is still usable (not failed, deleted or someone else's).
+    Runs under the plan's lock, so a second confirm sees the first's posts."""
+    keys = {k for post in plan.get("posts") or [] for item in post.get("media") or [] for k in [_key(item)] if k}
+    if keys & await posted_from_chat(conn, site_id, conversation_id):
+        raise AlreadyPosted("Some of this was already posted from this chat — check the Queue")
+    videos = {str(item["asset_id"]) for post in plan.get("posts") or [] for item in post.get("media") or []
+              if item.get("kind") == "video" and item.get("asset_id")}
+    if videos:
+        found = await asset_store.load_many(conn, list(videos))
+        for asset_id in videos:
+            asset = found.get(asset_id)
+            if asset is None or asset["site_id"] != site_id or asset["status"] not in ("rendering", "ready"):
+                raise PlanError((asset or {}).get("error") or "A video in this plan failed or is gone — drop it again")
 
 
 def _video_items(plan: dict[str, Any]) -> list[int]:
@@ -113,7 +153,7 @@ def check(plan: dict[str, Any], platforms: list[str], *, mode: str) -> None:
 
 async def create_posts(
     conn, *, site_id: UUID, plan: dict[str, Any], accounts: list[dict[str, Any]], first_at: Optional[datetime],
-    publish_now: bool, provenance: dict[str, Any],
+    publish_now: bool, provenance: dict[str, Any], tz=None,
 ) -> list[dict[str, Any]]:
     """Write one post per planned post. Returns `[{id, publish_now}]`; the
     caller dispatches publishing for those once the transaction commits."""
@@ -122,7 +162,10 @@ async def create_posts(
     created = []
     for post in plan["posts"]:
         offset = timedelta(days=int(post.get("offset_days") or 0))
-        at = first_at + offset if first_at else None
+        # Days are added on the store's wall clock, so a post spread across a
+        # clock change still goes out at the hour picked.
+        at = ((first_at.astimezone(tz) + offset).astimezone(timezone.utc) if tz else first_at + offset) \
+            if first_at else None
         now_post = publish_now and not offset
         instagram = compose_caption(post.get("instagram") or {})
         facebook = ((post.get("facebook") or {}).get("text") or "").strip() or instagram
@@ -165,4 +208,4 @@ async def create_exports(conn, *, site_id: UUID, account_id: UUID, plan: dict[st
     return created
 
 
-__all__ = ["PlanError", "apply_edits", "schedule", "check", "create_posts", "create_exports"]
+__all__ = ["PlanError", "AlreadyPosted", "posted_from_chat", "check_media", "apply_edits", "schedule", "check", "create_posts", "create_exports"]

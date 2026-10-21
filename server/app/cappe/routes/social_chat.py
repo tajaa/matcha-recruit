@@ -193,7 +193,8 @@ async def chat_turn(site_id: UUID, body: CappeSocialChatTurnInput, account: Capp
         video_ids = [a["asset_id"] for m in messages if m["role"] == "user"
                      for a in (m.get("attachments") or []) if a.get("kind") == "video"]
         items = chat.items_from(messages, await asset_store.load_many(conn, video_ids),
-                                exclude=chat.posted_keys(convo["staged_actions"] or []))
+                                exclude=chat.posted_keys(convo["staged_actions"] or [])
+                                | await confirmer.posted_from_chat(conn, site_id, convo["id"]))
         settings = await inbox_store.get_settings(conn, site_id)
         accounts = await conn_store.list_connections(conn, site_id)
         products = await _products(conn, site_id)
@@ -259,10 +260,18 @@ async def confirm_plan(
                 raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc))
             if plan.get("exports") or any(m.get("kind") == "video" for p in plan["posts"] for m in p.get("media") or []):
                 _video_gate(ent)
+            # Files only post nothing, so there is nothing to have posted twice.
+            if body.mode != "export":
+                try:
+                    await confirmer.check_media(conn, site_id, conversation_id, plan)
+                except confirmer.AlreadyPosted as exc:
+                    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+                except confirmer.PlanError as exc:
+                    raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc))
             provenance = {"conversation_id": str(conversation_id), "plan_id": plan_id, "revision": body.revision}
             created = [] if body.mode == "export" else await confirmer.create_posts(
                 conn, site_id=site_id, plan=plan, accounts=accounts, first_at=first_at,
-                publish_now=body.mode == "now", provenance=provenance,
+                publish_now=body.mode == "now", tz=site_zone(site), provenance=provenance,
             )
             made = await confirmer.create_exports(conn, site_id=site_id, account_id=account.id, plan=plan,
                                                   provenance=provenance)

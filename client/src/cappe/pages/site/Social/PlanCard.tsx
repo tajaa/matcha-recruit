@@ -52,6 +52,9 @@ export default function PlanCard({ siteId, conversationId, card, connections, on
   const [error, setError] = useState<string | null>(null)
   const open = card.status === 'proposed'
   const filesOnly = mode === 'export'
+  // Only accounts still connected count: one that expired since the plan
+  // was made has no checkbox, so it must not ride along to the server.
+  const chosen = filesOnly ? [] : live.filter((c) => picked.has(c.id)).map((c) => c.id)
   const platforms = new Set(filesOnly ? [] : live.filter((c) => picked.has(c.id)).map((c) => c.platform))
   const n = plan.posts.length
   const videos = exports?.items.length ?? 0
@@ -72,7 +75,7 @@ export default function PlanCard({ siteId, conversationId, card, connections, on
 
   async function confirm() {
     if (mode === 'at' && !whenLocal) { setError('Pick a time'); return }
-    if (!filesOnly && mode !== 'draft' && !picked.size) { setError('Pick at least one account to post to'); return }
+    if (!filesOnly && mode !== 'draft' && !chosen.length) { setError('Pick at least one account to post to'); return }
     if (filesOnly && !files.size) { setError('Pick at least one platform to make files for'); return }
     setBusy('confirm')
     setError(null)
@@ -82,7 +85,7 @@ export default function PlanCard({ siteId, conversationId, card, connections, on
           revision: card.revision,
           mode,
           when_local: mode === 'at' ? whenLocal : null,
-          connection_ids: filesOnly ? [] : [...picked],
+          connection_ids: chosen,
           keep_link: keepLink,
           posts: words.map((w, i) => ({
             instagram: { caption: w.caption, hashtags: normalizeHashtags(w.hashtags) },

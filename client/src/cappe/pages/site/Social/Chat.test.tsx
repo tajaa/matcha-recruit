@@ -94,6 +94,33 @@ describe('Chat', () => {
     expect(await screen.findByText(/Done — the post is in the Queue/)).toBeInTheDocument()
   })
 
+  it('leaves out an account that was disconnected since the plan was made', async () => {
+    api.post.mockResolvedValueOnce({ conversation_id: 'conv1', plan: CARD, message: {
+      id: 'm2', role: 'assistant', content: 'Planned.', attachments: [], created_at: '2026-10-20T10:00:00Z' } })
+    render(<Chat siteId="s-1" connections={[IG, { ...FB, status: 'expired' }]} settings={SETTINGS} onPosted={vi.fn()} />)
+    fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'post it' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    const card = await screen.findByLabelText('Plan')
+    api.post.mockResolvedValueOnce({ plan: { ...CARD, status: 'executed', post_ids: ['p-1'] }, posts: [] })
+    fireEvent.click(within(card).getByRole('button', { name: 'Schedule post' }))
+    await waitFor(() => expect(api.post).toHaveBeenCalledTimes(2))
+    expect(api.post.mock.calls[1][1].connection_ids).toEqual(['c-ig'])
+  })
+
+  it('does not start a second turn while one is running', async () => {
+    let finish: (v: unknown) => void = () => {}
+    api.post.mockReturnValueOnce(new Promise((resolve) => { finish = resolve }))
+    show()
+    fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'post it' } })
+    fireEvent.keyDown(screen.getByLabelText('Message'), { key: 'Enter' })
+    fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'and again' } })
+    fireEvent.keyDown(screen.getByLabelText('Message'), { key: 'Enter' })
+    expect(api.post).toHaveBeenCalledTimes(1)
+    finish({ conversation_id: 'conv1', plan: null, message: {
+      id: 'm2', role: 'assistant', content: 'What would you like to post?', attachments: [], created_at: '2026-10-20T10:00:00Z' } })
+    expect(await screen.findByText('What would you like to post?')).toBeInTheDocument()
+  })
+
   it('posts now or saves drafts, and can set a plan aside', async () => {
     api.post.mockResolvedValueOnce({ conversation_id: 'conv1', plan: CARD, message: {
       id: 'm2', role: 'assistant', content: 'Planned.', attachments: [], created_at: '2026-10-20T10:00:00Z' } })

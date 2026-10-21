@@ -239,9 +239,13 @@ def reply_guard(reply: str, grounding: Grounding) -> Optional[str]:
 
 def decide(settings: dict[str, Any], draft: Draft, prefilter_result: str, *, auto_sent_last_hour: int) -> str:
     """'send' | 'draft' | 'escalate' | 'skip'."""
+    # The hard-stop words can only ever escalate: the model calling a
+    # lawsuit or an allergy "spam" must not hide it from the owner.
+    if prefilter_result == "escalate":
+        return "escalate"
     if draft.intent == "spam":
         return "skip"
-    if prefilter_result == "escalate" or draft.needs_human or not draft.reply:
+    if draft.needs_human or not draft.reply:
         return "escalate"
     mode = settings.get("autoreply_mode") or "off"
     if mode != "auto":
