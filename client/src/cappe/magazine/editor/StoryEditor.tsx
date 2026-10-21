@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Eye, Loader2, Plus, Trash2, X } from 'lucide-react'
+import { ArrowLeft, BookOpen, Eye, Loader2, Plus, Trash2, X } from 'lucide-react'
 import { cappeApi } from '../../api'
 import { ui } from '../../components/ui'
 import type { CappeAsset, CappePost, CappeStoryOptions, StoryBlock, StoryContent, StoryLayout } from '../../types'
@@ -154,6 +154,11 @@ export default function StoryEditor() {
         {post.hidden && <span className={`${ui.badge} bg-red-500/15 text-red-400`}>hidden by Gummfit</span>}
         <span className="text-xs text-zinc-500">{isStory ? `${post.reading_minutes || 0} min read · ${post.word_count} words` : 'Plain post'}</span>
         <div className="ml-auto flex items-center gap-2">
+          {isStory && (
+            <Link to={`/cappe/sites/${siteId}/magazine/view?story=${postId}`} className={ui.btnGhost} title="The saved story, as a reader will see it">
+              <BookOpen className="h-4 w-4" /> View as a reader
+            </Link>
+          )}
           {savedAt && !dirty && <span className="text-xs text-emerald-400">Saved</span>}
           {isStory && <button type="button" className={ui.btnGhost} onClick={() => setPreviewOpen((v) => !v)} aria-pressed={previewOpen}><Eye className="h-4 w-4" /> Preview</button>}
           <button type="button" className={ui.btnGhost} disabled={saving || !dirty} onClick={() => save()}>Save</button>
