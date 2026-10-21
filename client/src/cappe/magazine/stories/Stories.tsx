@@ -46,7 +46,7 @@ export default function Stories() {
       const created = await cappeApi.post<CappePost>(`/sites/${siteId}/posts`, {
         title: 'Untitled story', format: 'blocks', layout: 'standard',
       })
-      navigate(`/sites/${siteId}/stories/${created.id}`)
+      navigate(`/cappe/sites/${siteId}/stories/${created.id}`)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not start a story')
       setCreating(false)
@@ -59,7 +59,7 @@ export default function Stories() {
       subtitle={magazine?.live ? 'Live on your site.' : magazine?.enabled ? 'Turned on, but your plan doesn’t include a magazine yet.' : 'Stories told through pictures. Turn the magazine on in its settings to publish them.'}
       actions={
         <div className="flex gap-2">
-          <Link to={`/sites/${siteId}/magazine`} className={ui.btnGhost}><Settings2 className="h-4 w-4" /> Magazine settings</Link>
+          <Link to={`/cappe/sites/${siteId}/magazine`} className={ui.btnGhost}><Settings2 className="h-4 w-4" /> Magazine settings</Link>
           <button type="button" onClick={startStory} disabled={creating} className={ui.btnPrimary}>
             {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} New story
           </button>
@@ -99,7 +99,7 @@ export default function Stories() {
         <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
           {shown.map((p) => (
             <li key={p.id}>
-              <Link to={`/sites/${siteId}/stories/${p.id}`} className={`${ui.cardHover} block overflow-hidden`}>
+              <Link to={`/cappe/sites/${siteId}/stories/${p.id}`} className={`${ui.cardHover} block overflow-hidden`}>
                 <div className="relative aspect-[4/5] bg-zinc-950">
                   {p.cover_image_url
                     ? <img src={p.cover_image_url} alt="" loading="lazy" className="h-full w-full object-cover" />

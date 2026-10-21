@@ -54,7 +54,7 @@ function mount(path: string, element: React.ReactElement, pattern: string) {
     <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path={pattern} element={element} />
-        <Route path="/sites/:siteId/stories" element={<p>stories list</p>} />
+        <Route path="/cappe/sites/:siteId/stories" element={<p>stories list</p>} />
       </Routes>
     </MemoryRouter>,
   )
@@ -87,12 +87,16 @@ describe('Stories', () => {
     answer({ '/posts': [post(), post({ id: 'p-2', title: 'Hidden one', hidden: true, status: 'published', format: 'markdown' })],
              '/magazine': magazine(), '/stories/options': OPTIONS })
     api.post.mockResolvedValue(post({ id: 'p-new' }))
-    mount('/sites/s-1/stories', <Stories />, '/sites/:siteId/stories')
+    mount('/cappe/sites/s-1/stories', <Stories />, '/cappe/sites/:siteId/stories')
     expect(await screen.findByRole('heading', { name: 'Salt & Light' })).toBeInTheDocument()
     expect(screen.getByText('Live on your site.')).toBeInTheDocument()
     expect(screen.getByText('The harbour at dawn')).toBeInTheDocument()
     expect(screen.getByText('hidden')).toBeInTheDocument()
     expect(screen.getByText('Plain post')).toBeInTheDocument()
+    // Under /cappe: on hey-matcha.com Gummfit is mounted there, and a bare
+    // /sites/… link lands on Matcha's 404.
+    expect(screen.getByText('The harbour at dawn').closest('a')).toHaveAttribute('href', '/cappe/sites/s-1/stories/p-1')
+    expect(screen.getByRole('link', { name: /Magazine settings/ })).toHaveAttribute('href', '/cappe/sites/s-1/magazine')
     fireEvent.click(screen.getByRole('tab', { name: 'draft' }))
     expect(screen.queryByText('Hidden one')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /New story/ }))
@@ -101,14 +105,14 @@ describe('Stories', () => {
 
   it('says when the plan has no magazine and shows an empty state', async () => {
     answer({ '/posts': [], '/magazine': magazine({ live: false, plan_includes_magazine: false }), '/stories/options': OPTIONS })
-    mount('/sites/s-1/stories', <Stories />, '/sites/:siteId/stories')
+    mount('/cappe/sites/s-1/stories', <Stories />, '/cappe/sites/:siteId/stories')
     expect(await screen.findByText(/doesn’t include a magazine/)).toBeInTheDocument()
     expect(screen.getByText(/No stories yet/)).toBeInTheDocument()
   })
 
   it('shows a load failure', async () => {
     api.get.mockRejectedValue(new Error('Server error'))
-    mount('/sites/s-1/stories', <Stories />, '/sites/:siteId/stories')
+    mount('/cappe/sites/s-1/stories', <Stories />, '/cappe/sites/:siteId/stories')
     expect(await screen.findByRole('alert')).toHaveTextContent('Server error')
   })
 })
@@ -120,7 +124,7 @@ describe('StoryEditor', () => {
 
   it('edits the blocks, previews, and saves the content with the cover', async () => {
     api.put.mockResolvedValue(post({ title: 'Dawn', status: 'published' }))
-    mount('/sites/s-1/stories/p-1', <StoryEditor />, '/sites/:siteId/stories/:postId')
+    mount('/cappe/sites/s-1/stories/p-1', <StoryEditor />, '/cappe/sites/:siteId/stories/:postId')
     expect(await screen.findByDisplayValue('The harbour at dawn')).toBeInTheDocument()
     expect(screen.getByText('Photo: Ana Ruiz')).toBeInTheDocument()  // the cover slot shows its credit
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
@@ -150,7 +154,7 @@ describe('StoryEditor', () => {
 
   it('picks a picture from the library into a photo block', async () => {
     api.put.mockResolvedValue(post())
-    mount('/sites/s-1/stories/p-1', <StoryEditor />, '/sites/:siteId/stories/:postId')
+    mount('/cappe/sites/s-1/stories/p-1', <StoryEditor />, '/cappe/sites/:siteId/stories/:postId')
     await screen.findByDisplayValue('The harbour at dawn')
     fireEvent.click(screen.getByRole('button', { name: /Add a block/ }))
     fireEvent.click(screen.getByRole('menuitem', { name: 'Photo' }))
@@ -188,7 +192,7 @@ describe('StoryEditor', () => {
   })
 
   it('removes and reorders blocks', async () => {
-    mount('/sites/s-1/stories/p-1', <StoryEditor />, '/sites/:siteId/stories/:postId')
+    mount('/cappe/sites/s-1/stories/p-1', <StoryEditor />, '/cappe/sites/:siteId/stories/:postId')
     await screen.findByDisplayValue('The harbour at dawn')
     fireEvent.click(screen.getByRole('button', { name: /Add a block/ }))
     fireEvent.click(screen.getByRole('menuitem', { name: 'Divider' }))
@@ -203,7 +207,7 @@ describe('StoryEditor', () => {
   it('offers to turn a plain post into a story', async () => {
     answer({ '/posts/p-1': post({ format: 'markdown', content: null, body: 'Old *words*.' }), '/stories/options': OPTIONS, '/assets': { assets: [] } })
     api.put.mockResolvedValue(post({ content: { blocks: [{ type: 'text', md: 'Old *words*.', dropcap: true, columns: 1 }] } }))
-    mount('/sites/s-1/stories/p-1', <StoryEditor />, '/sites/:siteId/stories/:postId')
+    mount('/cappe/sites/s-1/stories/p-1', <StoryEditor />, '/cappe/sites/:siteId/stories/:postId')
     expect(await screen.findByText(/plain post written as Markdown/)).toBeInTheDocument()
     expect(api.postHtml).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: 'Turn into a story' }))
@@ -215,7 +219,7 @@ describe('StoryEditor', () => {
     api.put.mockRejectedValue(new Error('A picture in this story isn’t in your library any more.'))
     api.delete.mockResolvedValue(undefined)
     vi.spyOn(window, 'confirm').mockReturnValue(true)
-    mount('/sites/s-1/stories/p-1', <StoryEditor />, '/sites/:siteId/stories/:postId')
+    mount('/cappe/sites/s-1/stories/p-1', <StoryEditor />, '/cappe/sites/:siteId/stories/:postId')
     await screen.findByDisplayValue('The harbour at dawn')
     fireEvent.click(screen.getByRole('button', { name: /Publish/ }))
     expect(await screen.findByRole('alert')).toHaveTextContent('isn’t in your library')
@@ -226,7 +230,7 @@ describe('StoryEditor', () => {
 
   it('switching layout on an empty story fills in that layout’s blocks', async () => {
     answer({ '/posts/p-1': post({ content: { blocks: [newBlock('cover'), newBlock('text')] } }), '/stories/options': OPTIONS, '/assets': { assets: [] } })
-    mount('/sites/s-1/stories/p-1', <StoryEditor />, '/sites/:siteId/stories/:postId')
+    mount('/cappe/sites/s-1/stories/p-1', <StoryEditor />, '/cappe/sites/:siteId/stories/:postId')
     await screen.findByDisplayValue('The harbour at dawn')
     fireEvent.change(screen.getByLabelText('Layout'), { target: { value: 'photo_essay' } })
     expect(screen.getAllByRole('region').map((s) => s.getAttribute('aria-label'))).toEqual(['Cover block', 'Photo block', 'Text block'])
@@ -237,7 +241,7 @@ describe('MagazineSettings', () => {
   it('loads, edits and saves', async () => {
     answer({ '/magazine': magazine(), '/stories/options': OPTIONS })
     api.put.mockResolvedValue(magazine({ topics: ['city', 'food'], masthead_style: 'display', front_at_root: true }))
-    mount('/sites/s-1/magazine', <MagazineSettings />, '/sites/:siteId/magazine')
+    mount('/cappe/sites/s-1/magazine', <MagazineSettings />, '/cappe/sites/:siteId/magazine')
     expect(await screen.findByDisplayValue('Salt & Light')).toBeInTheDocument()
     expect(screen.getByText(/Live: your stories render/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Food & drink' }))
@@ -254,7 +258,7 @@ describe('MagazineSettings', () => {
   it('warns when the plan has no magazine and shows a save failure', async () => {
     answer({ '/magazine': magazine({ live: false, plan_includes_magazine: false }), '/stories/options': OPTIONS })
     api.put.mockRejectedValue(new Error('Pick the magazine’s topics from the list.'))
-    mount('/sites/s-1/magazine', <MagazineSettings />, '/sites/:siteId/magazine')
+    mount('/cappe/sites/s-1/magazine', <MagazineSettings />, '/cappe/sites/:siteId/magazine')
     expect(await screen.findByText(/Your plan doesn’t include a magazine/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('topics from the list')
@@ -263,7 +267,7 @@ describe('MagazineSettings', () => {
   it('caps topics at five', async () => {
     const many = { ...OPTIONS, topics: ['a', 'b', 'c', 'd', 'e', 'f'].map((k) => ({ key: k, label: k.toUpperCase() })) }
     answer({ '/magazine': magazine({ topics: ['a', 'b', 'c', 'd', 'e'] }), '/stories/options': many })
-    mount('/sites/s-1/magazine', <MagazineSettings />, '/sites/:siteId/magazine')
+    mount('/cappe/sites/s-1/magazine', <MagazineSettings />, '/cappe/sites/:siteId/magazine')
     await screen.findByDisplayValue('Salt & Light')
     fireEvent.click(screen.getByRole('button', { name: 'F' }))
     expect(screen.getByRole('button', { name: 'F' })).toHaveAttribute('aria-pressed', 'false')

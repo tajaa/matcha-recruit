@@ -142,7 +142,7 @@ export default function StoryEditor() {
     if (!window.confirm('Delete this story? This can’t be undone.')) return
     try {
       await cappeApi.delete(`/sites/${siteId}/posts/${postId}`)
-      navigate(`/sites/${siteId}/stories`)
+      navigate(`/cappe/sites/${siteId}/stories`)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not delete')
     }
@@ -154,7 +154,7 @@ export default function StoryEditor() {
   return (
     <div className="flex h-full min-h-screen flex-col">
       <header className="flex flex-wrap items-center gap-3 border-b border-zinc-800 px-5 py-3">
-        <Link to={`/sites/${siteId}/stories`} className="inline-flex items-center gap-1 text-sm text-zinc-400 hover:text-zinc-100"><ArrowLeft className="h-4 w-4" /> Stories</Link>
+        <Link to={`/cappe/sites/${siteId}/stories`} className="inline-flex items-center gap-1 text-sm text-zinc-400 hover:text-zinc-100"><ArrowLeft className="h-4 w-4" /> Stories</Link>
         <span className={`${ui.badge} ${post.status === 'published' ? 'bg-emerald-500/15 text-emerald-400' : 'bg-zinc-800 text-zinc-400'}`}>{post.status}</span>
         {post.hidden && <span className={`${ui.badge} bg-red-500/15 text-red-400`}>hidden by Gummfit</span>}
         <span className="text-xs text-zinc-500">{isStory ? `${post.reading_minutes || 0} min read · ${post.word_count} words` : 'Plain post'}</span>
