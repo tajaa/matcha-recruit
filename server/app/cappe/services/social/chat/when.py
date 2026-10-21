@@ -36,12 +36,25 @@ _NOW = re.compile(r"\b(right now|right away|immediately|asap|straight away|"
                   r"(?:post|share|publish|send|put)(?: (?:it|this|these|them|that|those))?(?: up| out)? now)\b")
 _RELATIVE = re.compile(r"\bin (an?|\d+(?:\.\d+)?) ?(minutes?|mins?|hours?|hrs?|days?)\b")
 _CLOCK = re.compile(r"\b(?:at |@ ?)?(\d{1,2})(?::(\d{2}))? ?(am|pm|a\.m\.|p\.m\.)(?![a-z])")
-_CLOCK_24 = re.compile(r"\b(?:at |@ ?)?([01]?\d|2[0-3]):([0-5]\d)\b")
+# Not a ratio ("this 9:16 video") or part of a longer number.
+_CLOCK_24 = re.compile(r"(?<![\d/:])(?:at |@ ?)?([01]?\d|2[0-3]):([0-5]\d)(?![\d:])"
+                       r"(?! ?(?:videos?|ratio|aspect|format|crop|vertical|clips?)\b)")
+# A part of the day said alongside a bare hour ("tonight at 8", "tomorrow
+# morning at 10") says which half of the clock it is.
+_HINT_PM = re.compile(r"\b(afternoon|evening|tonight|night)\b")
+_HINT_AM = re.compile(r"\bmorning\b")
 _AT_HOUR = re.compile(r"\bat (\d{1,2})(?![\d:])(?! ?(?:%|percent|off|items?|posts?|photos?|people|days?))")
 _MONTH_DAY = re.compile(r"\b(" + "|".join(sorted(_MONTHS, key=len, reverse=True)) + r")\.? (\d{1,2})(?:st|nd|rd|th)?\b")
 _DAY_MONTH = re.compile(r"\b(\d{1,2})(?:st|nd|rd|th)? (?:of )?(" + "|".join(sorted(_MONTHS, key=len, reverse=True)) + r")\b")
-_SLASH_DATE = re.compile(r"\b(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?\b")
-_WEEKDAY = re.compile(r"\b(next |this |on )?(" + "|".join(sorted(_WEEKDAYS, key=len, reverse=True)) + r")\b")
+# Not "1/2 off" or "24/7".
+_SLASH_DATE = re.compile(r"\b(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?\b(?! ?(?:off|price|%|of)\b)")
+_FULL_DAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+_SHORT_DAYS = "|".join(sorted((d for d in _WEEKDAYS if d not in _FULL_DAYS), key=len, reverse=True))
+# Full names anywhere; a short one ("sun", "sat", "mon") is an ordinary word
+# too, so it counts only after "on/next/this" or right before a time.
+_WEEKDAY = re.compile(r"\b(next |this |on )?(" + "|".join(_FULL_DAYS) + r")\b")
+_WEEKDAY_SHORT = re.compile(r"\b(next |this |on )(" + _SHORT_DAYS + r")\b\.?"
+                            r"|\b()(" + _SHORT_DAYS + r")\.?(?= (?:at |@ ?|\d))")
 
 
 @dataclass(frozen=True)
@@ -82,19 +95,38 @@ def _business_hour(hour: int) -> Optional[time]:
     return None
 
 
+def _hinted(hour: int, minute: int, text: str) -> Optional[time]:
+    """A bare 1–12 hour read with the part of the day said around it."""
+    if not 1 <= hour <= 12:
+        return None
+    if _HINT_PM.search(text):
+        return time(hour % 12 + 12, minute)
+    if _HINT_AM.search(text):
+        return time(hour % 12, minute)
+    return None
+
+
 def _clock(text: str) -> Optional[time]:
+    """An hour the owner named beats a part of the day ("tonight at 8" is
+    8 PM, not tonight's default); a bare hour with no am/pm is read like
+    "at 2" — daytime for a shop — unless the words around it say otherwise."""
     m = _CLOCK.search(text)
     if m:
         return _hour(int(m.group(1)), int(m.group(2) or 0), m.group(3).replace(".", ""))
     m = _CLOCK_24.search(text)
     if m:
-        return time(int(m.group(1)), int(m.group(2)))
+        hour, minute = int(m.group(1)), int(m.group(2))
+        if 1 <= hour <= 12:
+            day_hour = _hinted(hour, minute, text) or _business_hour(hour)
+            return day_hour.replace(minute=minute) if day_hour else time(hour, minute)
+        return time(hour, minute)
+    m = _AT_HOUR.search(text)
+    if m:
+        hour = int(m.group(1))
+        return _hinted(hour, 0, text) or _business_hour(hour)
     for word, at in _PARTS_OF_DAY.items():
         if re.search(rf"\b{word}\b", text):
             return at
-    m = _AT_HOUR.search(text)
-    if m:
-        return _business_hour(int(m.group(1)))
     return None
 
 
@@ -123,13 +155,16 @@ def _day(text: str, today: date, clock: Optional[time], now_clock: time) -> Opti
         return _future_date(_MONTHS[m.group(2)], int(m.group(1)), today)
     m = _SLASH_DATE.search(text)
     if m:
-        return _future_date(int(m.group(1)), int(m.group(2)), today, int(m.group(3)) if m.group(3) else None)
-    m = _WEEKDAY.search(text)
+        found = _future_date(int(m.group(1)), int(m.group(2)), today, int(m.group(3)) if m.group(3) else None)
+        if found:  # "24/7" isn't a date; read on
+            return found
+    m = _WEEKDAY.search(text) or _WEEKDAY_SHORT.search(text)
     if m:
-        ahead = (_WEEKDAYS[m.group(2)] - today.weekday()) % 7
+        prefix, name = (m.group(1), m.group(2)) if m.re is _WEEKDAY or m.group(2) else (m.group(3), m.group(4))
+        ahead = (_WEEKDAYS[name] - today.weekday()) % 7
         # Its own weekday means today while the time is still ahead; "next
         # Friday" said on a Friday is a week out.
-        if ahead == 0 and ((m.group(1) or "").strip() == "next" or (clock is not None and clock <= now_clock)):
+        if ahead == 0 and ((prefix or "").strip() == "next" or (clock is not None and clock <= now_clock)):
             ahead = 7
         return today + timedelta(days=ahead)
     return None
@@ -150,6 +185,10 @@ def parse(text: str, now_local: datetime) -> Optional[When]:
         at = (now_local + delta).replace(second=0, microsecond=0)
         return When(day=at.date(), clock=at.time())
     clock = _clock(t)
+    # "post it now" with no time named is now, whatever day-like word is in
+    # the copy ("the friday special is back, post it now").
+    if clock is None and _NOW.search(t):
+        return When(now=True)
     day = _day(t, now_local.date(), clock, now_local.time())
     if day is None and clock is None:
         return When(now=True) if _NOW.search(t) else None

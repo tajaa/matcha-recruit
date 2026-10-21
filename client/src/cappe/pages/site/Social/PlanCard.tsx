@@ -36,6 +36,9 @@ export default function PlanCard({ siteId, conversationId, card, connections, on
   const [busy, setBusy] = useState<'confirm' | 'dismiss' | null>(null)
   const [error, setError] = useState<string | null>(null)
   const open = card.status === 'proposed'
+  // Only accounts still connected count: one that expired since the plan
+  // was made has no checkbox, so it must not ride along to the server.
+  const chosen = live.filter((c) => picked.has(c.id)).map((c) => c.id)
   const platforms = new Set(live.filter((c) => picked.has(c.id)).map((c) => c.platform))
   const n = plan.posts.length
 
@@ -54,7 +57,7 @@ export default function PlanCard({ siteId, conversationId, card, connections, on
 
   async function confirm() {
     if (mode === 'at' && !whenLocal) { setError('Pick a time'); return }
-    if (mode !== 'draft' && !picked.size) { setError('Pick at least one account to post to'); return }
+    if (mode !== 'draft' && !chosen.length) { setError('Pick at least one account to post to'); return }
     setBusy('confirm')
     setError(null)
     try {
@@ -63,7 +66,7 @@ export default function PlanCard({ siteId, conversationId, card, connections, on
           revision: card.revision,
           mode,
           when_local: mode === 'at' ? whenLocal : null,
-          connection_ids: [...picked],
+          connection_ids: chosen,
           keep_link: keepLink,
           posts: words.map((w) => ({
             instagram: { caption: w.caption, hashtags: normalizeHashtags(w.hashtags) },

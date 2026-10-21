@@ -90,13 +90,31 @@ PRODUCTS = [
     ("2 pm", (date(2026, 10, 20), time(14, 0))),
     ("18:00 today", (date(2026, 10, 20), time(18, 0))),
     ("noon on saturday", (date(2026, 10, 24), time(12, 0))),
+    # The hour named beats the part of the day, which picks am or pm.
+    ("post tonight at 8", (date(2026, 10, 20), time(20, 0))),
+    ("tomorrow morning at 10", (date(2026, 10, 21), time(10, 0))),
+    ("friday afternoon at 3", (date(2026, 10, 23), time(15, 0))),
+    ("this evening at 6:30", (date(2026, 10, 20), time(18, 30))),
+    # A bare H:MM is daytime, like "at 2".
+    ("post at 2:30 tomorrow", (date(2026, 10, 21), time(14, 30))),
+    ("at 3:00", (date(2026, 10, 20), time(15, 0))),
+    ("post this 9:16 video tomorrow", (date(2026, 10, 21), None)),
+    # Short day names only as days; "1/2 off" and "24/7" aren't dates.
+    ("she sat by the window, post at 3pm", (date(2026, 10, 20), time(15, 0))),
+    ("1/2 off lattes friday", (date(2026, 10, 23), None)),
+    ("we're open 24/7, post this friday", (date(2026, 10, 23), None)),
+    ("on sat at noon", (date(2026, 10, 24), time(12, 0))),
+    ("fri 3pm", (date(2026, 10, 23), time(15, 0))),
+    ("next sun", (date(2026, 10, 25), None)),
 ])
 def test_parse_reads_the_owners_words(text, expect):
     found = when_parse.parse(text, NOW)
     assert (found.day, found.clock) == expect and not found.now
 
 
-@pytest.mark.parametrize("text", ["post this now", "right now please", "share them now", "ASAP"])
+@pytest.mark.parametrize("text", ["post this now", "right now please", "share them now", "ASAP",
+                                  "the sun is out, post it now", "c'mon post it now",
+                                  "the friday special is back, post it now"])
 def test_parse_now(text):
     assert when_parse.parse(text, NOW) == when_parse.When(now=True)
 
@@ -451,7 +469,8 @@ def convo(**over):
 def world(monkeypatch):
     conn = TxConn(fetchrow={"FROM cappe_sites WHERE id = $1 AND account_id": SITE_ROW},
                   fetch={"FROM cappe_products": PRODUCTS,
-                         "FROM cappe_merlin_conversations": [{"id": CONVO, "title": "Latte", "updated_at": NOW}]})
+                         "FROM cappe_merlin_conversations": [{"id": CONVO, "title": "Latte", "updated_at": NOW}],
+                         "ai_meta->'chat'->>'conversation_id'": []})
     depth = SimpleNamespace(n=0)
 
     class Ctx:
@@ -614,6 +633,66 @@ def test_confirm_refusals(world, actions, body, code, detail):
     _confirm_world(world, actions)
     res = world.client.post(f"{BASE}/conversations/{CONVO}/plans/p1/confirm", json=body)
     assert res.status_code == code and detail in res.json()["detail"]
+
+
+def test_confirm_refuses_what_this_chat_already_posted(world):
+    """A confirm made while a turn was running (or after old plans were
+    pruned) can't post the same photos again: the posts table says what went."""
+    action = {**chat.staged(PLAN, revision=1, model="m"), "id": "p1"}
+    _confirm_world(world, [action])
+    first = PLAN["posts"][0]["media"][0]
+    world.mp.setattr(confirmer, "posted_from_chat", AsyncMock(return_value={str(first.get("asset_id") or first["url"])}))
+    res = world.client.post(f"{BASE}/conversations/{CONVO}/plans/p1/confirm", json=CONFIRM)
+    assert res.status_code == 409 and "already posted" in res.json()["detail"]
+    assert not confirmer.create_posts.await_count
+
+
+@pytest.mark.asyncio
+async def test_posted_from_chat_and_check_media():
+    conn = QueryConn(fetch={"ai_meta->'chat'->>'conversation_id'": [
+        {"media": json.dumps([{"kind": "image", "url": "https://cdn.example.test/a.jpg"},
+                              {"kind": "video", "asset_id": "v1"}])}]})
+    assert await confirmer.posted_from_chat(conn, SITE, CONVO) == {"https://cdn.example.test/a.jpg", "v1"}
+    assert conn.args_for("ai_meta->'chat'->>'conversation_id'") == (SITE, str(CONVO))
+    plan = {"posts": [{"media": [{"kind": "image", "url": "https://cdn.example.test/a.jpg"}]}]}
+    with pytest.raises(confirmer.AlreadyPosted):
+        await confirmer.check_media(conn, SITE, CONVO, plan)
+    fresh = QueryConn(fetch={"ai_meta->'chat'->>'conversation_id'": []})
+    video = {"posts": [{"media": [{"kind": "video", "asset_id": "v2"}]}]}
+    import app.cappe.services.social.assets as assets_module
+
+    for found, ok in (({"v2": {"site_id": SITE, "status": "ready"}}, True),
+                      ({"v2": {"site_id": SITE, "status": "failed", "error": "Too short"}}, False),
+                      ({"v2": {"site_id": uuid4(), "status": "ready"}}, False), ({}, False)):
+        original = assets_module.load_many
+        assets_module.load_many = AsyncMock(return_value=found)
+        try:
+            if ok:
+                await confirmer.check_media(fresh, SITE, CONVO, video)
+            else:
+                with pytest.raises(confirmer.PlanError):
+                    await confirmer.check_media(fresh, SITE, CONVO, video)
+        finally:
+            assets_module.load_many = original
+
+
+@pytest.mark.asyncio
+async def test_spread_posts_keep_the_stores_hour_across_the_clock_change(monkeypatch):
+    made = []
+
+    async def create_post(conn, **kw):
+        made.append(kw["scheduled_at"])
+        return {"id": uuid4()}
+
+    monkeypatch.setattr(post_store, "create_post", create_post)
+    for name in ("set_targets", "set_content", "publish_now"):
+        monkeypatch.setattr(post_store, name, AsyncMock())
+    la = ZoneInfo("America/Los_Angeles")
+    first = datetime(2026, 10, 31, 9, 0, tzinfo=la).astimezone(timezone.utc)
+    plan = {"link": {}, "posts": [{"offset_days": 0, "media": []}, {"offset_days": 2, "media": []}]}
+    await confirmer.create_posts(None, site_id=SITE, plan=plan, accounts=[], first_at=first, publish_now=False,
+                                 provenance={}, tz=la)
+    assert [d.astimezone(la).hour for d in made] == [9, 9]  # Nov 2 is after the change: still 9 AM
 
 
 def test_confirm_a_video_plan_needs_the_video_feature(world):

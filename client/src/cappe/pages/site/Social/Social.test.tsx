@@ -225,6 +225,7 @@ describe('Social', () => {
         <Routes><Route path="/sites/:siteId/social" element={<Social />} /></Routes>
       </MemoryRouter>,
     )
+    fireEvent.click(await screen.findByRole('button', { name: 'Form' }))
     await screen.findByText(/Drop photos or videos here/)
     const photo = new File([new Uint8Array(8)], 'a.jpg', { type: 'image/jpeg' })
     const clip = new File([new Uint8Array(8)], 'latte.mov', { type: 'video/quicktime' })

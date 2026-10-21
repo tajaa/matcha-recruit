@@ -146,6 +146,7 @@ export default function Chat({ siteId, connections, settings, onPosted }: {
   }
 
   async function send() {
+    if (sending) return  // Enter while a turn is in flight would start a second one
     const message = text.trim()
     const ready = drops.filter((d) => !d.error && (d.url || d.assetId))
     if (drops.some((d) => d.uploading)) { setError('Wait for the uploads to finish'); return }
