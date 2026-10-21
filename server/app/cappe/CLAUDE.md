@@ -404,6 +404,21 @@ now, and answer comments/DMs from an inbox where Claude Haiku 5.5 drafts replies
     `render.has_filter("ass")` makes a build without it ship plain files with a note. Homebrew's
     ffmpeg has no libass, so the caption e2e test is skipped on a Mac. DejaVu covers Latin, Greek
     and Cyrillic only.
+  - **Invariants from the 2026-10-21 review** (keep them):
+    - A post never waits in `rendering` on an event alone: `posts.settle_renders` re-derives every
+      held post from its videos' current state (ready → `scheduled`, failed/gone → `failed`); the
+      media sweep runs it, and `set_schedule`/`update_post` run it for the one post.
+    - `recover_stale_claims` resumes only targets with a `state` handle; one with none may already
+      be live, so it fails with `posts.INTERRUPTED` instead of posting twice. A Facebook Reel saves
+      its `video_id` (`facebook_uploading`) before uploading.
+    - Chat confirm reads what the chat already posted from `cappe_social_posts.ai_meta.chat`
+      (`confirm.posted_from_chat`), under the plan lock, and 409s a repeat; it re-checks every
+      video is still usable. Spread posts add days on the store's wall clock.
+    - A follow-up turn keeps the open plan's `exports` unless the message says something new about
+      files or posting (`plan.carried_exports`). Owner-edited TikTok/YouTube words carry
+      `by_owner` and are pasted as written.
+    - `exports.record_output`/`record_srt` write only to an open export and say so; a file cut for
+      an export deleted meanwhile is removed. Giving up a step never overwrites a file that landed.
   - **One step per task run** (`prepare_cappe_social_export`: probe → transcribe → each cut → the
     `.srt`), each recorded as it lands (`next_step` reads what's left), then the task queues the
     next, so the minute publisher gets the worker between steps. `step` records what's running: a

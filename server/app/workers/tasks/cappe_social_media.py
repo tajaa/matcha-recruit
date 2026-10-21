@@ -239,11 +239,13 @@ async def _cut_for_export(conn, export: dict, asset: dict, source: str, facts: r
                               timeout=presets.EXPORT_ENCODE_TIMEOUT)
     stored = await asset_store.upload_render(str(out), asset["id"], key)
     out.unlink(missing_ok=True)
-    await export_store.record_output(conn, export["id"], key, {
+    landed = await export_store.record_output(conn, export["id"], key, {
         **stored, "width": recipe.spec.width, "height": recipe.spec.height,
         "duration_ms": int(render.clip_seconds(facts, recipe.max_seconds) * 1000),
         "trimmed": facts.duration_ms > recipe.max_seconds * 1000, "shared": False,
     })
+    if not landed:  # deleted while it was being cut: nothing else would ever remove it
+        await export_store.delete_files({"outputs": {key: stored}})
 
 
 async def _write_srt(conn, export: dict, asset: dict, work: Path) -> None:
@@ -251,7 +253,8 @@ async def _write_srt(conn, export: dict, asset: dict, work: Path) -> None:
     path = work / "captions.srt"
     path.write_text(subtitles.srt_document(subtitles.srt_lines(words)), encoding="utf-8")
     stored = await asset_store.upload_text(str(path), asset["id"], "captions", ".srt", "application/x-subrip")
-    await export_store.record_srt(conn, export["id"], stored)
+    if not await export_store.record_srt(conn, export["id"], stored):
+        await export_store.delete_files({"srt": stored})
 
 
 async def _run_step(conn, export: dict, asset: dict, step: export_store.Step) -> Optional[int]:
@@ -275,17 +278,27 @@ async def _run_step(conn, export: dict, asset: dict, step: export_store.Step) ->
     return None
 
 
+def _interrupted(export: dict) -> Optional[str]:
+    """The note for an export that ran out of runs — none when every file is
+    there anyway."""
+    return None if export_store.rollup(export) == "ready" else "Preparing kept getting interrupted. Try again."
+
+
 async def _give_up_step(conn, export: dict, step: Optional[dict], message: str) -> bool:
     """Record a failed step on its own file so the rest goes on. Returns
     False when the export as a whole is over."""
     kind = (step or {}).get("kind")
-    if kind == "encode" and step.get("recipe"):
+    landed = (export.get("outputs") or {}).get((step or {}).get("recipe") or "") or {}
+    if kind == "encode" and landed.get("url"):
+        pass  # the file landed before time ran out: keep it, don't mark it failed
+    elif kind == "encode" and step.get("recipe"):
         await export_store.record_output(conn, export["id"], step["recipe"], {"error": message})
     elif kind == "transcribe":
         await asset_store.record_transcript(conn, export["asset_id"], {"words": [], "reason": "failed"})
         await export_store.add_warning(conn, export["id"], NO_CAPTIONS_NOW)
     elif kind == "srt":
-        await export_store.record_srt(conn, export["id"], {"error": message})
+        if not (export.get("srt") or {}).get("url"):
+            await export_store.record_srt(conn, export["id"], {"error": message})
     else:
         await export_store.finish(conn, export["id"], "failed", message)
         return False
@@ -304,7 +317,7 @@ async def prepare_step(export_id: str) -> dict:
             return {"skipped": True, "next": None}
         if int(export["attempts"]) > export_store.MAX_RUNS:
             await export_store.finish(conn, export["id"], export_store.rollup(export),
-                                      "Preparing kept getting interrupted. Try again.")
+                                      _interrupted(export))
             return {"gave_up": True, "next": None}
         asset = await asset_store.get_by_id(conn, export["asset_id"])
         if asset is None or asset["status"] in ("failed", "deleted"):
@@ -360,7 +373,9 @@ def _queue_export(export_id: str, countdown: Optional[int]) -> None:
                        exc_info=True)
 
 
-@celery_app.task(bind=True, max_retries=1, soft_time_limit=540, time_limit=590)
+# Room for the longest step: a 480 s encode, its 30 s check and the upload of
+# up to 240 MB on one thread.
+@celery_app.task(bind=True, max_retries=1, soft_time_limit=660, time_limit=690)
 def prepare_cappe_social_export(self, export_id: str) -> dict:
     """One step of an export, then the next is queued. A step that fails
     twice or runs out of time is given up on its own."""
@@ -417,7 +432,7 @@ async def sweep(conn, limit: int) -> dict:
     for export in await export_store.stuck(conn, minutes=STUCK_RENDER_MINUTES, limit=limit):
         if int(export.get("attempts") or 0) >= export_store.MAX_RUNS:
             await export_store.finish(conn, export["id"], export_store.rollup(export),
-                                      "Preparing kept getting interrupted. Try again.")
+                                      _interrupted(export))
             out["exports_failed"] += 1
         else:
             await export_store.requeue(conn, export["id"])

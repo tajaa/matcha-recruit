@@ -35,7 +35,7 @@ from app.cappe.services.social import assets as asset_store  # noqa: E402
 from app.cappe.services.social import exports as export_store  # noqa: E402
 from app.cappe.services.social import presets, render, subtitles, transcribe  # noqa: E402
 from app.workers.tasks import cappe_social_media as media_task  # noqa: E402
-from tests._helpers.routes import QueryConn, route_client  # noqa: E402
+from tests._helpers.routes import QueryConn, Queue, route_client  # noqa: E402
 from tests.cappe.test_cappe_social_video import (  # noqa: E402
     ACCOUNT, ASSET, NOW, SITE, SITE_ROW, VERTICAL_URL, FakeS3, TxConn, asset, ent, facts, storage,
 )
@@ -442,7 +442,9 @@ async def test_create_keeps_the_video_as_long_as_the_export():
 async def test_store_queries():
     row = export()
     conn = QueryConn(fetchrow={"UPDATE cappe_social_exports SET status = 'working'": row,
-                               "SELECT id, site_id": row, "DELETE FROM cappe_social_exports": row},
+                               "SELECT id, site_id": row, "DELETE FROM cappe_social_exports": row,
+                               "SET outputs = outputs ||": Queue([{"id": EXPORT}, None]),
+                               "SET srt = $2::jsonb": {"id": EXPORT}},
                      fetch={"FROM cappe_social_exports": [row]})
     assert (await export_store.claim(conn, EXPORT))["id"] == EXPORT
     assert (await export_store.get(conn, SITE, EXPORT))["id"] == EXPORT
@@ -455,8 +457,10 @@ async def test_store_queries():
     await export_store.set_step(conn, EXPORT, export_store.Step("encode", V_CAP))
     await export_store.set_step(conn, EXPORT, None)
     await export_store.record_facts(conn, EXPORT, facts(), {"tiktok": V_KEY})
-    await export_store.record_output(conn, EXPORT, V_KEY, made(V_KEY))
-    await export_store.record_srt(conn, EXPORT, {"url": "u"})
+    assert await export_store.record_output(conn, EXPORT, V_KEY, made(V_KEY)) is True
+    # Gone or finished while the file was made: the caller removes the file.
+    assert await export_store.record_output(conn, EXPORT, V_KEY, made(V_KEY)) is False
+    assert await export_store.record_srt(conn, EXPORT, {"url": "u"}) is True
     await export_store.add_warning(conn, EXPORT, "note")
     await export_store.finish(conn, EXPORT, "ready")
     await export_store.requeue(conn, EXPORT)
@@ -464,9 +468,10 @@ async def test_store_queries():
     writes = [c for c in conn.calls if c[0] == "execute"]
     assert writes[0][2][1] == '{"kind": "encode", "recipe": "1080x1920-180-captions"}' and writes[1][2][1] is None
     assert writes[2][2][2] == '{"tiktok": "1080x1920-180"}'
-    assert "jsonb_build_object($2::text, $3::jsonb)" in writes[3][1]
-    assert "NOT warnings @>" in writes[5][1]
-    assert writes[6][2][:3] == (EXPORT, "ready", None)
+    landing = conn.sql_for("fetchrow")
+    assert any("jsonb_build_object($2::text, $3::jsonb)" in s and "status = ANY($4::text[])" in s for s in landing)
+    assert "NOT warnings @>" in writes[3][1]
+    assert writes[4][2][:3] == (EXPORT, "ready", None)
     claim_sql = conn.calls[0][1]
     assert "attempts = attempts + 1" in claim_sql and conn.calls[0][2][1] == ["queued", "working"]
 
@@ -539,6 +544,7 @@ class Steps:
     def _rec(self, name):
         async def record(*args, **kw):
             self.calls.append((name, *args[1:], *kw.values()))
+            return True  # record_output/record_srt: the row was still there
         return record
 
     def names(self):
@@ -621,6 +627,35 @@ async def test_a_captioned_cut_burns_the_words_in(monkeypatch):
     assert key == V_CAP and output == {"url": f"https://cdn.example.test/{V_CAP}.mp4", "key": f"k/{V_CAP}.mp4",
                                        "bytes": 9, "width": 1080, "height": 1920, "duration_ms": 6000,
                                        "trimmed": False, "shared": False}
+
+
+@pytest.mark.asyncio
+async def test_a_file_cut_for_an_export_deleted_meanwhile_is_removed(monkeypatch):
+    steps = Steps(monkeypatch, export(facts=FACTS, targets={"tiktok": V_CAP}), asset(transcript=TRANSCRIPT))
+    monkeypatch.setattr(export_store, "record_output", AsyncMock(return_value=False))
+    removed = AsyncMock()
+    monkeypatch.setattr(export_store, "delete_files", removed)
+    await media_task.prepare_step(str(EXPORT))
+    assert removed.await_args.args[0] == {"outputs": {V_CAP: {
+        "url": f"https://cdn.example.test/{V_CAP}.mp4", "key": f"k/{V_CAP}.mp4", "bytes": 9}}}
+    assert steps.names()[0] == "set_step"
+
+
+@pytest.mark.asyncio
+async def test_giving_up_never_overwrites_a_file_that_landed(monkeypatch):
+    landed = export(step={"kind": "encode", "recipe": V_CAP}, outputs={V_CAP: made(V_CAP)},
+                    srt={"url": "u", "key": "k"})
+    steps = Steps(monkeypatch, landed)
+    assert await media_task.abandon_step(str(EXPORT), "Too long") is True
+    assert "record_output" not in steps.names() and "requeue" in steps.names()
+    steps = Steps(monkeypatch, {**landed, "step": {"kind": "srt", "recipe": None}})
+    assert await media_task.abandon_step(str(EXPORT), "Too long") is True
+    assert "record_srt" not in steps.names()
+    # Out of runs with every file there: ready, with no "interrupted" note.
+    done = export(targets={"tiktok": V_CAP}, outputs={V_CAP: made(V_CAP)}, attempts=export_store.MAX_RUNS + 1)
+    steps = Steps(monkeypatch, done)
+    await media_task.prepare_step(str(EXPORT))
+    assert steps.get("finish")[0][1:] == ("ready", None)
 
 
 @pytest.mark.asyncio

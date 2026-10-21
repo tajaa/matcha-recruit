@@ -327,9 +327,27 @@ def export_platforms(ask: intent_parse.Ask, named: set[str], *, has_video: bool,
     return [p for p in EXPORTABLE if p in soon], "coming_soon"
 
 
-def export_hint(message: str, items: list[dict[str, Any]], accounts: list[dict[str, Any]]) -> list[str]:
+def carried_exports(current: Optional[dict[str, Any]], ask: intent_parse.Ask,
+                    items: list[dict[str, Any]]) -> Optional[dict[str, Any]]:
+    """The open plan's files, kept when the new message says nothing about
+    files or posting ("make the TikTok caption funnier", "at 3pm instead"):
+    a follow-up edits the plan, it doesn't re-decide what gets made. Naming
+    a platform alone is about its words, so it doesn't count."""
+    exports = (current or {}).get("exports")
+    if not exports or ask.prepare or ask.post or ask.everywhere or ask.captions is not None:
+        return None
+    videos = [n for n in exports.get("items") or [] if 1 <= n <= len(items) and items[n - 1].get("kind") == "video"]
+    return {**exports, "items": videos} if videos else None
+
+
+def export_hint(message: str, items: list[dict[str, Any]], accounts: list[dict[str, Any]],
+                current: Optional[dict[str, Any]] = None) -> list[str]:
     """Before the model is asked: which platforms' words it should write."""
-    found = export_platforms(intent_parse.parse(message), set(), has_video=any(i.get("kind") == "video" for i in items),
+    ask = intent_parse.parse(message)
+    carried = carried_exports(current, ask, items)
+    if carried:
+        return list(carried["platforms"])
+    found = export_platforms(ask, set(), has_video=any(i.get("kind") == "video" for i in items),
                              live=bool(_live(accounts)))
     return found[0] if found else []
 
@@ -448,7 +466,7 @@ def youtube_words(post: dict[str, Any]) -> dict[str, Any]:
 def resolve(
     model_out: dict[str, Any], *, message: str, items: list[dict[str, Any]], accounts: list[dict[str, Any]],
     products: list[dict[str, Any]], origin: Optional[str], now_local: datetime, tz_name: str,
-    ask: Optional[intent_parse.Ask] = None,
+    ask: Optional[intent_parse.Ask] = None, current: Optional[dict[str, Any]] = None,
 ) -> Optional[dict[str, Any]]:
     """The plan the card shows, or None when the model proposed none."""
     raw = model_out.get("plan")
@@ -457,7 +475,8 @@ def resolve(
     warnings: list[str] = []
     needs = [n for n in model_out.get("needs") or [] if n in ("when", "what")]
     wanted = _wanted(raw.get("networks"))
-    exports = _exports(ask or intent_parse.parse(message), wanted, items, accounts, warnings)
+    ask = ask or intent_parse.parse(message)
+    exports = carried_exports(current, ask, items) or _exports(ask, wanted, items, accounts, warnings)
     networks = _networks(wanted, accounts, warnings, files=exports is not None,
                          files_only=bool(exports and exports["files_only"]))
     link = _link(raw.get("link"), {str(p["id"]): p for p in products}, origin, warnings)
@@ -520,23 +539,41 @@ def compose_caption(words: dict[str, Any]) -> str:
     return text[:MAX_CAPTION]
 
 
+def _owner_words(post: dict[str, Any], network: str) -> Optional[dict[str, Any]]:
+    """The owner's own edit of a network's words (set by `confirm.apply_edits`
+    and already checked by the request model), used as written — not cut to
+    a first sentence or a hashtag count, and an emptied field stays empty."""
+    raw = post.get(network)
+    return raw if isinstance(raw, dict) and raw.get("by_owner") else None
+
+
 def texts_for(post: dict[str, Any], platform: str, link_url: Optional[str]) -> dict[str, Any]:
     """The words the owner pastes when uploading a file by hand. Instagram
     and TikTok captions don't make links clickable, so the link is kept apart
     ("for your bio"); YouTube's description takes it."""
     link = with_utm(link_url, platform)
     if platform == "youtube":
-        words = youtube_words(post)
-        description = words["description"]
+        owned = _owner_words(post, "youtube")
+        words = ({"title": str(owned.get("title") or "")[:YOUTUBE_TITLE],
+                  "description": str(owned.get("description") or ""), "tags": list(owned.get("tags") or [])}
+                 if owned else youtube_words(post))
+        description = words["description"].strip()
         if link:
-            description = f"{description}\n\n{link}".strip()[:YOUTUBE_DESCRIPTION]
-        return {"title": words["title"], "description": description, "tags": words["tags"]}
-    words = tiktok_words(post) if platform == "tiktok" else (post.get("instagram") or {})
+            # The link goes in whole: the description gives way, not the URL.
+            room = YOUTUBE_DESCRIPTION - len(link) - 2
+            description = f"{description[:max(0, room)].rstrip()}\n\n{link}".strip()
+        return {"title": words["title"], "description": description[:YOUTUBE_DESCRIPTION], "tags": words["tags"]}
+    if platform == "tiktok":
+        owned = _owner_words(post, "tiktok")
+        words = ({"caption": str(owned.get("caption") or ""), "hashtags": list(owned.get("hashtags") or [])}
+                 if owned else tiktok_words(post))
+    else:
+        words = post.get("instagram") or {}
     return {"text": compose_caption(words), "link": link}
 
 
 __all__ = [
     "SYSTEM", "MAX_PICTURES", "EXPORTABLE", "describe_item", "build_prompt", "parse_reply", "with_utm",
-    "resolve_when", "export_platforms", "export_hint", "tiktok_words", "youtube_words", "resolve", "summary",
+    "resolve_when", "export_platforms", "carried_exports", "export_hint", "tiktok_words", "youtube_words", "resolve", "summary",
     "compose_caption", "texts_for",
 ]

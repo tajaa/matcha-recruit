@@ -58,10 +58,15 @@ def posted_keys(actions: list[dict[str, Any]]) -> set[str]:
     for action in actions:
         if action.get("kind") != ACTION_KIND or action.get("status") != "executed":
             continue
-        for post in (action.get("plan") or {}).get("posts") or []:
-            for item in post.get("media") or []:
+        plan = action.get("plan") or {}
+        # A files-only confirm posted nothing: its videos are used (made into
+        # files), its photos are still there to post.
+        posted = bool(action.get("post_ids"))
+        exported = set((plan.get("exports") or {}).get("items") or []) if action.get("export_ids") else set()
+        for post in plan.get("posts") or []:
+            for n, item in zip(post.get("items") or [], post.get("media") or []):
                 key = item.get("asset_id") or item.get("url")
-                if key:
+                if key and (posted or (item.get("kind") == "video" and n in exported)):
                     keys.add(str(key))
     return keys
 
@@ -147,7 +152,7 @@ async def think(
     if not model:
         raise AiUnavailable("The social assistant needs Claude; ask your admin to set ANTHROPIC_API_KEY")
     blocks, numbers = pictures(items)
-    files_for = planner.export_hint(message, items, accounts)
+    files_for = planner.export_hint(message, items, accounts, current_plan)
     prompt = planner.build_prompt(
         site=site, settings=settings, accounts=accounts, products=products, items=items, pictures=numbers,
         history=history, current_plan=current_plan, message=message, now_local=now_local,
@@ -160,7 +165,7 @@ async def think(
     )
     out = planner.parse_reply(raw)
     plan = planner.resolve(out, message=message, items=items, accounts=accounts, products=products,
-                           origin=origin, now_local=now_local, tz_name=tz_name)
+                           origin=origin, now_local=now_local, tz_name=tz_name, current=current_plan)
     reply = str(out.get("reply") or "").strip()[:1000] or (FALLBACK_REPLY if plan else "What would you like to post?")
     return reply, plan, model
 

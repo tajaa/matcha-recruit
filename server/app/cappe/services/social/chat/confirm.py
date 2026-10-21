@@ -85,7 +85,7 @@ def apply_edits(plan: dict[str, Any], edits: Optional[list[dict[str, Any]]], *, 
             post["alt_text"] = edit.get("alt_text")
             for network in ("tiktok", "youtube"):
                 if edit.get(network) is not None:
-                    post[network] = dict(edit[network])
+                    post[network] = {**dict(edit[network]), "by_owner": True}
     if not keep_link:
         out["link"] = {"kind": "none", "product_id": None, "product_name": None, "url": None}
     if exports is not None:

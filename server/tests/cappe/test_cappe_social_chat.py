@@ -171,9 +171,10 @@ def _model(**plan):
 ITEMS = [{"kind": "image", "url": IMG}, {"kind": "image", "url": IMG2}]
 
 
-def resolve(out, message="post these tomorrow at 2pm", items=ITEMS, accounts=ACCOUNTS):
+def resolve(out, message="post these tomorrow at 2pm", items=ITEMS, accounts=ACCOUNTS, current=None):
     return planner.resolve(out, message=message, items=items, accounts=accounts, products=PRODUCTS,
-                           origin="https://po.example.test", now_local=NOW, tz_name="America/Los_Angeles")
+                           origin="https://po.example.test", now_local=NOW, tz_name="America/Los_Angeles",
+                           current=current)
 
 
 def test_resolve_builds_a_postable_plan():
@@ -391,11 +392,17 @@ def test_items_pictures_and_staged_actions(monkeypatch):
     assert items[3]["shape"] is None
     assert chat._shape({"width": 100, "height": 100}) == "square"
     # A chat that goes on after a confirm plans only what's new.
-    done = {**chat.staged({"posts": [{"media": [{"kind": "image", "url": IMG}, {"kind": "video", "asset_id": "v1"},
-                                                 {"kind": "image"}]}]}, revision=1, model="m"), "status": "executed"}
+    done = {**chat.staged({"posts": [{"items": [1, 2, 3], "media": [
+        {"kind": "image", "url": IMG}, {"kind": "video", "asset_id": "v1"}, {"kind": "image"}]}]}, revision=1, model="m"),
+        "status": "executed", "post_ids": ["p1"]}
     keys = chat.posted_keys([done, chat.staged({"posts": [{"media": [{"url": IMG2}]}]}, revision=2, model="m"),
                              {"kind": "other", "status": "executed"}])
     assert keys == {IMG, "v1"}
+    # Files only: the video was used, the photo is still there to post.
+    files_only = {**chat.staged({"exports": {"items": [2]}, "posts": [{"items": [1, 2], "media": [
+        {"kind": "image", "url": IMG}, {"kind": "video", "asset_id": "v1"}]}]}, revision=1, model="m"),
+        "status": "executed", "export_ids": ["e1"]}
+    assert chat.posted_keys([files_only]) == {"v1"}
     assert [i.get("url") or i.get("asset_id") for i in chat.items_from(messages, assets, exclude=keys)] == ["v3", "v4"]
     blocks, numbers = chat.pictures(items)
     assert numbers == [1, 2] and blocks[1]["source"]["url"] == "f1"
@@ -831,6 +838,38 @@ def test_the_models_tiktok_and_youtube_words_are_kept_within_limits():
     assert planner._tags("nope") == []
 
 
+def test_the_owners_edited_words_are_pasted_as_written():
+    post = resolve(_video_model(), message="prepare for all platforms", items=VIDEO_ITEMS)["posts"][0]
+    edited = confirmer.apply_edits({"posts": [post]}, [{
+        "instagram": post["instagram"], "facebook": post["facebook"], "alt_text": None,
+        "tiktok": {"caption": "Oat latte!", "hashtags": [f"#t{i}" for i in range(10)]},
+        "youtube": {"title": "Oat latte. Now in every store!", "description": "D" * 4990, "tags": []}}],
+        keep_link=True)["posts"][0]
+    tiktok = planner.texts_for(edited, "tiktok", None)
+    assert tiktok["text"].count("#t") == 10  # not cut to six
+    link = "https://po.example.test/shop/oat-latte"
+    yt = planner.texts_for(edited, "youtube", link)
+    assert yt["title"] == "Oat latte. Now in every store!"  # not cut to its first sentence
+    assert yt["tags"] == []  # cleared on purpose stays cleared
+    assert len(yt["description"]) <= planner.YOUTUBE_DESCRIPTION
+    assert yt["description"].endswith(planner.with_utm(link, "youtube"))  # the link survives whole
+
+
+def test_a_follow_up_keeps_the_plans_files():
+    first = resolve(_video_model(), message="prepare this for all platforms with word for word captions",
+                    items=VIDEO_ITEMS)
+    again = resolve(_video_model(), message="make the TikTok caption funnier", items=VIDEO_ITEMS, current=first)
+    assert again["exports"]["platforms"] == ["instagram", "tiktok", "youtube"]
+    assert again["exports"]["captions"] is True and again["exports"]["files_only"] is True
+    assert "when" not in again["needs"]
+    assert planner.export_hint("make the TikTok caption funnier", VIDEO_ITEMS, [], first) == [
+        "instagram", "tiktok", "youtube"]
+    # Saying something new about files or posting re-decides.
+    posting = resolve(_video_model(), message="actually post it to instagram at 3pm", items=VIDEO_ITEMS,
+                      current=first)
+    assert posting["exports"] is None or not posting["exports"]["files_only"]
+
+
 def test_texts_to_paste_keep_links_where_they_work():
     post = resolve(_video_model(), message="prepare for all platforms", items=VIDEO_ITEMS)["posts"][0]
     link = "https://po.example.test/shop/oat-latte"
@@ -884,7 +923,7 @@ def test_confirm_edits_the_files_and_their_words():
     out = confirmer.apply_edits(plan, [edit, photo], keep_link=True,
                                 exports={"platforms": ["youtube", "tiktok", "facebook"], "captions": True})
     assert out["exports"]["platforms"] == ["tiktok", "youtube"] and out["exports"]["captions"] is True
-    assert out["posts"][0]["tiktok"] == {"caption": "TT", "hashtags": ["#tt"]}
+    assert out["posts"][0]["tiktok"] == {"caption": "TT", "hashtags": ["#tt"], "by_owner": True}
     assert out["posts"][0]["youtube"] == plan["posts"][0]["youtube"]  # not edited, kept
     assert confirmer.apply_edits(plan, None, keep_link=True, exports={"platforms": []})["exports"] is None
     # Files can be asked for on the card even when the plan didn't propose any.

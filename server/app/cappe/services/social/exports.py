@@ -179,18 +179,25 @@ async def record_facts(conn, export_id: UUID, facts, targets: dict[str, str]) ->
     )
 
 
-async def record_output(conn, export_id: UUID, key: str, output: dict[str, Any]) -> None:
-    await conn.execute(
+async def record_output(conn, export_id: UUID, key: str, output: dict[str, Any]) -> bool:
+    """False when the export was deleted (or finished) while the file was
+    being made — the caller then removes the file it just uploaded."""
+    row = await conn.fetchrow(
         "UPDATE cappe_social_exports SET outputs = outputs || jsonb_build_object($2::text, $3::jsonb), "
-        "updated_at = NOW() WHERE id = $1",
-        export_id, key, json.dumps(output),
+        "updated_at = NOW() WHERE id = $1 AND status = ANY($4::text[]) RETURNING id",
+        export_id, key, json.dumps(output), list(OPEN),
     )
+    return row is not None
 
 
-async def record_srt(conn, export_id: UUID, srt: dict[str, Any]) -> None:
-    await conn.execute(
-        "UPDATE cappe_social_exports SET srt = $2::jsonb, updated_at = NOW() WHERE id = $1", export_id, json.dumps(srt),
+async def record_srt(conn, export_id: UUID, srt: dict[str, Any]) -> bool:
+    """Like `record_output`: False when the export is gone or finished."""
+    row = await conn.fetchrow(
+        "UPDATE cappe_social_exports SET srt = $2::jsonb, updated_at = NOW() "
+        "WHERE id = $1 AND status = ANY($3::text[]) RETURNING id",
+        export_id, json.dumps(srt), list(OPEN),
     )
+    return row is not None
 
 
 async def add_warning(conn, export_id: UUID, warning: str) -> None:
