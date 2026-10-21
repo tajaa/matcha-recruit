@@ -101,7 +101,7 @@ async def by_external_id(conn, platform: str, external_id: str) -> list[dict]:
     Page may be connected on more than one of the owner's sites)."""
     rows = await conn.fetch(
         "SELECT id, site_id, platform, external_id, handle, status "
-        "FROM cappe_social_connections WHERE platform = $1 AND external_id = $2",
+        "FROM cappe_social_connections WHERE platform = $1 AND external_id = $2 ORDER BY created_at, id",
         platform, external_id,
     )
     return [dict(r) for r in rows]

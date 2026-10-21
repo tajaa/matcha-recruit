@@ -215,8 +215,13 @@ async def update_settings(
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
         ent = await resolve_entitlements(account.plan, conn=conn)
+        # Gate only a change of mode: a downgraded owner whose stored mode is
+        # still review/auto can save tone, notes and hashtags (the form sends
+        # the stored mode back), and the worker re-checks the plan anyway.
         if fields.get("autoreply_mode") in ("review", "auto"):
-            _autoreply_gate(ent)
+            stored = await inbox_store.get_settings(conn, site_id)
+            if fields["autoreply_mode"] != (stored or {}).get("autoreply_mode"):
+                _autoreply_gate(ent)
         if fields:
             await inbox_store.upsert_settings(conn, site_id, fields)
         return await _settings_view(conn, site_id, ent)
@@ -527,7 +532,9 @@ async def reply_to_item(
             if draft["status"] == "draft":
                 mode = "approved"
                 if draft["body"] == body.body:
-                    await inbox_store.mark_reply(conn, draft["id"], status="sending")
+                    if not await inbox_store.claim_draft(conn, draft["id"]):
+                        raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                                            detail="That reply is already being sent")
                     reply = draft
                 else:
                     await inbox_store.mark_reply(conn, draft["id"], status="rejected")

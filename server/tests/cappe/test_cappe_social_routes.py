@@ -220,10 +220,15 @@ def test_settings_read_and_the_ai_inbox_gate(world):
     assert upsert.await_args.args[2] == {"autoreply_mode": "auto", "tone": "playful"}
     plan(world, "social")
     assert world.client.put(f"{BASE}/settings", json={"autoreply_mode": "review"}).status_code == 402
+    # Downgraded with review still stored: saving the form (which sends the
+    # stored mode back) works; switching to another paid mode doesn't.
+    world.mp.setattr(inbox_store, "get_settings", AsyncMock(return_value={"autoreply_mode": "review"}))
+    assert world.client.put(f"{BASE}/settings", json={"autoreply_mode": "review", "tone": "playful"}).status_code == 200
+    assert world.client.put(f"{BASE}/settings", json={"autoreply_mode": "auto"}).status_code == 402
     assert world.client.put(f"{BASE}/settings", json={"business_facts": "Ships Mon"}).status_code == 200
     assert world.client.get(f"{BASE}/settings").json()["autoreply_available"] is False
     assert world.client.put(f"{BASE}/settings", json={}).status_code == 200
-    assert upsert.await_count == 2
+    assert upsert.await_count == 3
 
 
 # ── posts ───────────────────────────────────────────────────────────────────
@@ -508,6 +513,11 @@ def replying(world):
 
     world.mp.setattr(inbox_store, "get_item", AsyncMock(return_value=inbox_item()))
     world.mp.setattr(inbox_store, "mark_reply", mark)
+
+    async def claim(conn, reply_id):
+        marks.append((reply_id, "sending"))
+        return True
+    world.mp.setattr(inbox_store, "claim_draft", claim)
     world.mp.setattr(inbox_store, "create_reply", create)
     world.mp.setattr(inbox_store, "set_item_status", AsyncMock())
     world.mp.setattr(outbound, "reply_credentials", AsyncMock(return_value={"id": CONN_ID, "platform": "instagram"}))
@@ -545,6 +555,16 @@ def test_the_owners_own_words_and_a_failed_send(replying):
     assert resp.status_code == 502
     assert replying.created[0]["mode"] == "manual" and replying.marks[-1][1] == "failed"
     outbound.note_send_failure.assert_awaited_once()
+
+
+def test_a_draft_already_taken_is_not_sent_twice(replying):
+    draft = reply()
+    replying.mp.setattr(inbox_store, "get_reply", AsyncMock(return_value=draft))
+    replying.mp.setattr(inbox_store, "claim_draft", AsyncMock(return_value=False))
+    send = AsyncMock(return_value="r9")
+    replying.mp.setattr(outbound, "send_with", send)
+    resp = replying.client.post(f"{BASE}/inbox/{INBOX_ID}/reply", json={"body": draft["body"], "reply_id": str(draft["id"])})
+    assert resp.status_code == 409 and not send.await_count
 
 
 def test_reply_refusals(replying):
@@ -816,6 +836,20 @@ async def test_inbound_stores_handles_and_survives_a_bad_item(monkeypatch):
     out = await inbound_task.process_events(object(), CFG, events)
     assert out == {"stored": 2, "unmatched": 1, "sent": 1, "error": 1}
     send.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_a_page_on_two_sites_is_answered_once(monkeypatch):
+    first, second = connection(), connection(id=uuid4(), site_id=uuid4())
+    monkeypatch.setattr(conn_store, "by_external_id", AsyncMock(return_value=[first, second]))
+    ingest = AsyncMock(side_effect=lambda conn, connection, events: [inbox_item(id=uuid4())])
+    monkeypatch.setattr(inbox_store, "ingest_events", ingest)
+    monkeypatch.setattr(inbound_task, "effective_settings", AsyncMock(return_value={"autoreply_mode": "auto"}))
+    handle = AsyncMock(return_value={"outcome": "sent"})
+    monkeypatch.setattr(autoreply, "handle_item", handle)
+    out = await inbound_task.process_events(object(), CFG, [InboundEvent("instagram", "ig1", "comment", "c", "x")])
+    assert out == {"stored": 2, "unmatched": 0, "sent": 1}
+    assert ingest.await_count == 2 and handle.await_count == 1
 
 
 @pytest.mark.asyncio
