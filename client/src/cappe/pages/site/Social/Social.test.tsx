@@ -68,10 +68,12 @@ beforeEach(() => {
 })
 
 describe('Social', () => {
-  it('opens on Create with the drop zone once an account is connected', async () => {
+  it('opens on Create with the chat, and the form is one click away', async () => {
     load()
-    expect(await screen.findByText(/Drop photos here/)).toBeInTheDocument()
+    expect(await screen.findByLabelText('Message')).toBeInTheDocument()
     expect(screen.getByText('Posted (30 days)')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Form' }))
+    expect(await screen.findByText(/Drop photos here/)).toBeInTheDocument()
     expect(screen.getByLabelText('Choose photos')).toHaveAttribute('multiple')
   })
 
@@ -87,6 +89,7 @@ describe('Social', () => {
 
   it('saves a caption-only draft to no account', async () => {
     load()
+    fireEvent.click(await screen.findByRole('button', { name: 'Form' }))
     fireEvent.change(await screen.findByLabelText('Caption'), { target: { value: 'Back Monday!' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save as draft' }))
     api.post.mockResolvedValue({ ...POST, status: 'draft' })
@@ -99,6 +102,7 @@ describe('Social', () => {
 
   it('will not save an empty post', async () => {
     load()
+    fireEvent.click(await screen.findByRole('button', { name: 'Form' }))
     await screen.findByLabelText('Caption')
     expect(screen.getByRole('button', { name: 'Schedule' })).toHaveAttribute('aria-pressed', 'true')
     fireEvent.click(screen.getByRole('button', { name: 'Schedule post' }))
@@ -178,6 +182,7 @@ describe('Social', () => {
         <Routes><Route path="/sites/:siteId/social" element={<Social />} /></Routes>
       </MemoryRouter>,
     )
+    fireEvent.click(await screen.findByRole('button', { name: 'Form' }))
     expect(await screen.findByText(/Drop photos or videos here/)).toBeInTheDocument()
     const clip = new File([new Uint8Array(8)], 'latte.mov', { type: 'video/quicktime' })
     fireEvent.change(screen.getByLabelText('Choose photos or videos'), { target: { files: [clip] } })
@@ -220,6 +225,7 @@ describe('Social', () => {
         <Routes><Route path="/sites/:siteId/social" element={<Social />} /></Routes>
       </MemoryRouter>,
     )
+    fireEvent.click(await screen.findByRole('button', { name: 'Form' }))
     await screen.findByText(/Drop photos or videos here/)
     const photo = new File([new Uint8Array(8)], 'a.jpg', { type: 'image/jpeg' })
     const clip = new File([new Uint8Array(8)], 'latte.mov', { type: 'video/quicktime' })
@@ -238,6 +244,7 @@ describe('Social', () => {
 
   it('says video needs a paid plan instead of uploading it', async () => {
     load()
+    fireEvent.click(await screen.findByRole('button', { name: 'Form' }))
     await screen.findByText(/Drop photos here/)
     const clip = new File([new Uint8Array(8)], 'latte.mp4', { type: 'video/mp4' })
     fireEvent.change(screen.getByLabelText('Choose photos'), { target: { files: [clip] } })

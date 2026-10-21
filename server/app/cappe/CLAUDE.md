@@ -347,12 +347,31 @@ now, and answer comments/DMs from an inbox where Claude Haiku 5.5 drafts replies
     them after two attempts), deletes uploads never completed after a day, puts back targets a
     killed worker left `publishing` for 20 min (`claimed_at`), and removes files 30 days on
     (`expires_at`) once no live post needs them. Frames are kept for the queue.
+- **Chat composer** (`routes/social_chat.py`, `services/social/chat/`, the Create tab's default;
+  the form stays one click away). The owner drops photos/videos and says what to post, where and
+  when; one Claude call (`gummfit.social`, `ai.model_for("chat")`) per turn writes a reply and,
+  per post, the Instagram caption + hashtags, the Facebook text and alt text. **The model only
+  writes words and picks from lists; code decides the rest** (`chat/plan.py:resolve`): the time is
+  read from the owner's words first by `chat/when.py` (deterministic, the store's timezone —
+  "2pm tomorrow", weekdays, dates, "in 2 hours", "tonight"), the model's reading only when they
+  name none; accounts are the site's connected ones for the networks named (TikTok/YouTube get a
+  warning, not a post); the link is a real `/shop/<slug>` page or the store; photos may share a
+  carousel (≤10), a video goes alone, and nothing dropped is left out of the plan.
+  - The conversation reuses Merlin's tables (`kind='social'`, no page; no migration) and the plan
+    is a staged action (`social_plan`: proposed → executed / dismissed / replaced). A new turn
+    replaces the open plan and bumps `revision`; confirm must name it and runs under
+    `lock_conversation_actions`, so a double click can't post twice.
+  - Confirm makes ordinary posts + targets (`chat/confirm.py`), with each network's copy and
+    UTM-tagged link on its target (`post_targets.content`); `outbound` prefers it over the post's
+    caption. Photos handed to the model must be our own `cappe/social/` uploads (Claude fetches
+    them by URL); a video is shown by its poster frame.
 - **Plan features:** `social` (posting, scheduling, captions) on every plan; `social_video`
   (dropped videos) and `social_autoreply` (the AI inbox) on business / pro / creator. All 402 at
   the route.
 - **Schedules are the store's wall clock.** A `scheduled_at` with no zone is read in
-  `cappe_sites.timezone` (`routes/social.py:check_schedule`), so "2pm" is the store's 2pm. The
-  composer still sends an aware time from the browser.
+  `cappe_sites.timezone` (`routes/social.py:check_schedule`), so "2pm" is the store's 2pm; the
+  chat's plan card edits times the same way. The form composer still sends an aware time from the
+  browser.
 - **Consumer data:** `scripts/sql/anonymize_dev.sql` turns every token into `dev_<id>` (connection
   `revoked`) and strips inbox author ids/raw payloads; `refresh-dev-from-prod.sh` gates on both.
 

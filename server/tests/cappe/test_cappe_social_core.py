@@ -271,7 +271,8 @@ async def test_schedule_publish_cancel_and_delete():
 async def test_claim_takes_due_targets_with_skip_locked_and_marks_posts():
     claimed = [{"id": uuid4(), "post_id": POST, "connection_id": CONN, "attempts": 1, "state": '{"container_id": "c1"}'}]
     conn = QueryConn(fetch={"SET status = 'publishing', attempts": Queue([claimed, []])})
-    assert await post_store.claim_due_targets(conn, 25, post_id=str(POST)) == [{**claimed[0], "state": {"container_id": "c1"}}]
+    assert await post_store.claim_due_targets(conn, 25, post_id=str(POST)) == [
+        {**claimed[0], "state": {"container_id": "c1"}, "content": {}}]
     sql = conn.sql_for("fetch")[0]
     assert "FOR UPDATE SKIP LOCKED" in sql and "next_attempt_at <= NOW()" in sql
     assert conn.args_for("SET status = 'publishing', attempts") == (25, POST)

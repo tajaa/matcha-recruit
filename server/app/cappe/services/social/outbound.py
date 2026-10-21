@@ -51,10 +51,13 @@ async def publish_target(conn, cfg: MetaConfig, claim: dict[str, Any]) -> str:
         video_ids = [m["asset_id"] for m in media if m.get("kind") == "video" and m.get("asset_id")]
         if video_ids:
             media = variants.media_for(cred["platform"], media, await asset_store.load_many(conn, video_ids))
+        # The chat composer writes each network its own copy; the form's posts
+        # share the post's caption and link.
+        content = loads(claim.get("content"))
         result = await provider_for(cred["platform"]).publish(
             cfg, platform=cred["platform"], external_id=cred["external_id"], token=cred["token"],
-            caption=post["caption"] or "", media=media, link_url=post["link_url"],
-            state=loads(claim.get("state")),
+            caption=content.get("text") or post["caption"] or "", media=media,
+            link_url=content.get("link_url") or post["link_url"], state=loads(claim.get("state")),
         )
     except ProviderError as exc:
         if exc.code in _TOKEN_CODES and cred:

@@ -221,6 +221,107 @@ class CappeSocialCaptions(BaseModel):
     model: str
 
 
+class CappeSocialChatAttachment(BaseModel):
+    """Something dropped into the chat: a photo already uploaded through
+    `…/social/media` (by URL) or a video (by its asset)."""
+    kind: Literal["image", "video"]
+    url: Optional[str] = Field(default=None, max_length=1000)
+    asset_id: Optional[UUID] = None
+    name: Optional[str] = Field(default=None, max_length=200)
+
+    _url_https = field_validator("url")(https_url)
+
+    @model_validator(mode="after")
+    def _source(self) -> "CappeSocialChatAttachment":
+        if self.kind == "image" and not self.url:
+            raise ValueError("A photo needs its url")
+        if self.kind == "video" and not self.asset_id:
+            raise ValueError("A video needs its asset_id")
+        return self
+
+
+class CappeSocialChatTurnInput(BaseModel):
+    """The owner's message, with anything dropped alongside it. No
+    `conversation_id` starts a new chat."""
+    conversation_id: Optional[UUID] = None
+    message: str = Field(default="", max_length=4000)
+    attachments: list[CappeSocialChatAttachment] = Field(default_factory=list, max_length=10)
+
+
+class CappeSocialChatMessage(BaseModel):
+    id: UUID
+    role: str
+    content: str
+    attachments: list[dict[str, Any]] = Field(default_factory=list)
+    created_at: datetime
+
+
+class CappeSocialPlanCard(BaseModel):
+    """The plan the owner confirms. `plan` is what `services/social/chat/
+    plan.py:resolve` built (when, accounts, link, posts, warnings, needs);
+    `revision` is what a confirm must name."""
+    id: str
+    status: str
+    revision: int
+    plan: dict[str, Any]
+    post_ids: list[UUID] = Field(default_factory=list)
+    model: Optional[str] = None
+    created_at: Optional[str] = None
+
+
+class CappeSocialChatSummary(BaseModel):
+    id: UUID
+    title: str
+    updated_at: datetime
+
+
+class CappeSocialChat(BaseModel):
+    id: UUID
+    title: str
+    messages: list[CappeSocialChatMessage] = Field(default_factory=list)
+    plan: Optional[CappeSocialPlanCard] = None
+
+
+class CappeSocialChatTurn(BaseModel):
+    conversation_id: UUID
+    message: CappeSocialChatMessage
+    plan: Optional[CappeSocialPlanCard] = None
+
+
+class CappeSocialInstagramWords(BaseModel):
+    caption: str = Field(default="", max_length=MAX_CAPTION_CHARS)
+    hashtags: list[str] = Field(default_factory=list, max_length=MAX_HASHTAGS)
+
+    _tags = field_validator("hashtags")(_clean_hashtags)
+
+
+class CappeSocialFacebookWords(BaseModel):
+    text: str = Field(default="", max_length=MAX_CAPTION_CHARS)
+
+
+class CappeSocialPlanPostEdit(BaseModel):
+    instagram: CappeSocialInstagramWords
+    facebook: CappeSocialFacebookWords
+    alt_text: Optional[str] = Field(default=None, max_length=500)
+
+
+class CappeSocialPlanConfirm(BaseModel):
+    """Post the plan as shown, with the owner's edits. `mode`: `at` needs
+    `when_local` (the store's wall clock, `YYYY-MM-DDTHH:MM`); `now` posts at
+    once; `draft` saves without scheduling."""
+    revision: int
+    mode: Literal["now", "at", "draft"]
+    when_local: Optional[str] = Field(default=None, max_length=32)
+    connection_ids: list[UUID] = Field(default_factory=list, max_length=20)
+    keep_link: bool = True
+    posts: Optional[list[CappeSocialPlanPostEdit]] = Field(default=None, max_length=20)
+
+
+class CappeSocialPlanConfirmed(BaseModel):
+    plan: CappeSocialPlanCard
+    posts: list["CappeSocialPost"] = Field(default_factory=list)
+
+
 class CappeSocialSettings(BaseModel):
     autoreply_mode: SocialAutoreplyMode = "off"
     reply_to_comments: bool = True
@@ -329,6 +430,9 @@ __all__ = [
     "CappeSocialConnection", "CappeSocialConnections", "CappeSocialConnectStart",
     "CappeSocialMediaItem", "CappeSocialUpload", "CappeSocialPostInput", "CappeSocialPostUpdate",
     "CappeSocialAssetPresign", "CappeSocialAssetUpload", "CappeSocialFrame", "CappeSocialRender", "CappeSocialAsset",
+    "CappeSocialChatAttachment", "CappeSocialChatTurnInput", "CappeSocialChatMessage", "CappeSocialPlanCard",
+    "CappeSocialChatSummary", "CappeSocialChat", "CappeSocialChatTurn", "CappeSocialInstagramWords",
+    "CappeSocialFacebookWords", "CappeSocialPlanPostEdit", "CappeSocialPlanConfirm", "CappeSocialPlanConfirmed",
     "CappeSocialTarget", "CappeSocialPost",
     "CappeSocialCaptionRequest", "CappeSocialCaptionOption", "CappeSocialCaptions",
     "CappeSocialSettings", "CappeSocialSettingsUpdate",
