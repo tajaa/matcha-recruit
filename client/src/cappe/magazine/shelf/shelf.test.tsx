@@ -7,11 +7,21 @@ import ShelfStory from './ShelfStory'
 import ReaderLayout from './ReaderLayout'
 import CappeLayout from '../../layout/CappeLayout'
 import { magazineSlugFrom, readerMagazinePath, readerNext, readerStoryPath } from './readerPaths'
+import { LINK_PREFIX } from '../reader/book'
 import type { CappeReaderMagazine, CappeReaderStoryCard, CappeShelfMagazine } from '../../types'
 
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }))
 const token = vi.hoisted(() => ({ value: 'a' as string | null }))
 const me = vi.hoisted(() => ({ account: null as null | Record<string, unknown>, loading: false }))
+const followed = vi.hoisted(() => ({ value: null as string | null }))
+vi.mock('../reader/book', async (importOriginal) => {
+  const real = await importOriginal<typeof import('../reader/book')>()
+  return { ...real, followedLink: (w: Window | null | undefined) => {
+    const v = followed.value
+    followed.value = null
+    return v ?? real.followedLink(w)
+  } }
+})
 vi.mock('../../api', () => ({
   cappeApi: api, clearCappeTokens: vi.fn(), getCappeToken: () => token.value,
 }))
@@ -183,12 +193,11 @@ describe('one magazine', () => {
 })
 
 describe('reading a story', () => {
-  it('shows the magazine’s page and follows its links from here', async () => {
+  it('shows the magazine’s page and points its links where they go', async () => {
     api.get.mockResolvedValue({ html: '<p>page</p>', paid: true, has_access: false, title: 'Low tide' })
-    const open = vi.spyOn(window, 'open').mockReturnValue(null)
     mount('/cappe/reader/m/salt/low-tide', '/cappe/reader/m/:slug/:story', <ShelfStory />)
     const frame = await screen.findByTitle('Low tide') as HTMLIFrameElement
-    expect(frame.getAttribute('sandbox')).toBe('allow-same-origin')
+    expect(frame.getAttribute('sandbox')).toBe('allow-same-origin allow-popups allow-popups-to-escape-sandbox')
     expect(api.get).toHaveBeenCalledWith('/reader/magazines/salt/stories/low-tide')
     const doc = frame.contentDocument!
     doc.head.innerHTML = '<link rel="canonical" href="https://salt.gummfit.test/stories/low-tide" />'
@@ -197,11 +206,16 @@ describe('reading a story', () => {
       + '<a href="/topics/coast">Coast</a><a href="https://example.com/x">elsewhere</a><a href="/stories/high-tide">Next</a>'
     fireEvent.load(frame)
     expect(doc.querySelector('[data-mz-alt]')).toBeNull()
-    fireEvent.click(doc.querySelector('a[href="/topics/coast"]')!)
-    expect(open).toHaveBeenCalledWith('https://salt.gummfit.test/topics/coast', '_blank', 'noopener,noreferrer')
-    fireEvent.click(doc.querySelector('a[href^="https://example.com"]')!)
-    expect(open).toHaveBeenLastCalledWith('https://example.com/x', '_blank', 'noopener,noreferrer')
-    fireEvent.click(doc.querySelector('button')!)
+    const href = (text: string) => Array.from(doc.querySelectorAll('a')).find((a) => a.textContent === text)!
+    // Its own pages open on the magazine's site, the web in a new tab, and
+    // a story or the paywall's button come back here.
+    expect([href('Coast').getAttribute('href'), href('Coast').getAttribute('target')])
+      .toEqual(['https://salt.gummfit.test/topics/coast', '_blank'])
+    expect(href('elsewhere').getAttribute('target')).toBe('_blank')
+    expect(href('Next').getAttribute('href')).toBe(`${LINK_PREFIX}%2Fstories%2Fhigh-tide`)
+    expect(href('Subscribe to read on').getAttribute('href')).toBe(`${LINK_PREFIX}%2Fmagazine`)
+    followed.value = '/magazine'
+    fireEvent.load(frame)
     expect(await screen.findByText('at /cappe/reader/m/salt')).toBeInTheDocument()
   })
 
@@ -211,7 +225,8 @@ describe('reading a story', () => {
     const frame = await screen.findByTitle('Low tide') as HTMLIFrameElement
     frame.contentDocument!.body.innerHTML = '<a href="/stories/high-tide">Next</a>'
     fireEvent.load(frame)
-    fireEvent.click(frame.contentDocument!.querySelector('a')!)
+    followed.value = '/stories/high-tide'
+    fireEvent.load(frame)
     await waitFor(() => expect(api.get).toHaveBeenLastCalledWith('/reader/magazines/salt/stories/high-tide'))
   })
 

@@ -1,22 +1,25 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, Loader2 } from 'lucide-react'
 import { cappeApi } from '../../api'
 import type { CappeReaderStory } from '../../types'
-import { type BookControl, wireBook } from '../reader/book'
+import BookFrame from '../reader/BookFrame'
 import { readerMagazinePath, readerStoryPath } from './readerPaths'
+
+const STORY = /^\/stories\/([^/?#]+)/
+const HOME = (path: string) => path === '/' || path === '/magazine'
 
 /** `/cappe/reader/m/:slug/:story` — a story as its magazine prints it, pages
  *  turning left and right. The server puts the whole story in for a reader
- *  with paid access. Scripts don't run in the frame, so its pages are turned,
- *  its links followed and its paywall's button made from here. */
+ *  with paid access. Scripts don't run in the frame, so its pages are turned
+ *  and its links followed from out here (`BookFrame`): another story opens
+ *  here, the magazine's own pages on its site in a new tab, and the paywall
+ *  gets a button that opens the magazine's page here, where they subscribe. */
 export default function ShelfStory() {
   const { slug = '', story = '' } = useParams<{ slug: string; story: string }>()
   const navigate = useNavigate()
   const key = `${slug}|${story}`
   const [result, setResult] = useState<{ key: string; data?: CappeReaderStory; error?: string } | null>(null)
-  const frame = useRef<HTMLIFrameElement>(null)
-  const book = useRef<BookControl | null>(null)
 
   useEffect(() => {
     let live = true
@@ -26,42 +29,35 @@ export default function ShelfStory() {
     return () => { live = false }
   }, [slug, story, key])
 
-  useEffect(() => () => book.current?.dispose(), [])
-
   const current = result?.key === key ? result : null
   const data = current?.data ?? null
   const error = current?.error ?? null
 
-  const wire = () => {
-    const doc = frame.current?.contentDocument
-    if (!doc) return
-    book.current?.dispose()
-    book.current = wireBook(doc)
-    const origin = doc.querySelector('link[rel="canonical"]')?.getAttribute('href')?.match(/^https?:\/\/[^/]+/)?.[0]
-    // The paywall's own buttons need its script; this one opens the
-    // magazine's page here, where the reader subscribes.
+  const prepare = (doc: Document) => {
     doc.querySelector('[data-mz-alt]')?.remove()
     const actions = doc.querySelector('[data-mz-actions]')
     if (actions) {
       actions.textContent = ''
-      const button = doc.createElement('button')
-      button.type = 'button'
+      const button = doc.createElement('a')
+      button.setAttribute('href', '/magazine')
       button.className = 'mz-paywall__btn mz-paywall__btn--solid'
       button.textContent = 'Subscribe to read on'
-      button.addEventListener('click', () => navigate(readerMagazinePath(slug)))
       actions.appendChild(button)
     }
-    doc.addEventListener('click', (e) => {
-      const a = (e.target as Element | null)?.closest?.('a')
-      if (!a) return
-      e.preventDefault()
+    // The magazine's other pages (a topic, About) open on its own site.
+    const origin = doc.querySelector('link[rel="canonical"]')?.getAttribute('href')?.match(/^https:\/\/[^/]+/)?.[0]
+    doc.querySelectorAll('a[href^="/"]').forEach((a) => {
       const href = a.getAttribute('href') || ''
-      const toStory = href.match(/^\/stories\/([^/?#]+)/)
-      if (toStory) navigate(readerStoryPath(slug, decodeURIComponent(toStory[1])))
-      else if (href === '/' || href === '/magazine') navigate(readerMagazinePath(slug))
-      else if (/^https?:\/\//.test(href)) window.open(href, '_blank', 'noopener,noreferrer')
-      else if (href.startsWith('/') && origin) window.open(`${origin}${href}`, '_blank', 'noopener,noreferrer')
+      if (STORY.test(href) || HOME(href)) return
+      if (origin) a.setAttribute('href', `${origin}${href}`)
+      else a.removeAttribute('href')
     })
+  }
+
+  const follow = (path: string) => {
+    const toStory = path.match(STORY)
+    if (toStory) navigate(readerStoryPath(slug, decodeURIComponent(toStory[1])))
+    else if (HOME(path)) navigate(readerMagazinePath(slug))
   }
 
   return (
@@ -75,8 +71,8 @@ export default function ShelfStory() {
       {error && <p role="alert" className="p-6 text-sm text-red-400">{error}</p>}
       {!data && !error && <div className="flex justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-zinc-500" /></div>}
       {data && (
-        <iframe ref={frame} title={data.title || 'Story'} srcDoc={data.html} sandbox="allow-same-origin" onLoad={wire}
-          className="w-full flex-1 bg-white" style={{ minHeight: '80vh' }} />
+        <BookFrame html={data.html} title={data.title || 'Story'} prepare={prepare} onLink={follow} openExternal keys
+          className="flex-1" style={{ minHeight: '80vh' }} />
       )}
     </div>
   )

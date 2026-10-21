@@ -45,8 +45,8 @@ Website-builder frontend for the consumer brand **Gummfit**, host-routed on gumm
   `/cappe/reader/signup|login` (a `next` inside `/cappe/reader` is honoured, `shelf/readerPaths.ts`),
   `shelf/ReaderLayout.tsx` (bar + sign-in gate), `Shelf.tsx` (`/cappe/reader`: every magazine held, open one
   by its address), `ShelfMagazine.tsx` (`/cappe/reader/m/:slug`: subscribe, cancel/keep, stories) and
-  `ShelfStory.tsx` (`…/:story`: the server's page in a `sandbox="allow-same-origin"` frame, turned by
-  `reader/book.ts`; its links and paywall button are wired from the parent).
+  `ShelfStory.tsx` (`…/:story`: the server's page in `reader/BookFrame.tsx`, with `allow-popups` for web
+  links; its paywall gets a link to the magazine's page here, and its other pages open on the site).
   `stories/Stories.tsx` (the wall of covers at `sites/:siteId/stories`; `/blog` redirects here),
   `editor/StoryEditor.tsx` + `editor/BlockEditor.tsx` (blocks, a library picker, a live preview
   iframe fed by `POST /stories/preview`), `settings/MagazineSettings.tsx`. `storyBlocks.ts` mirrors
