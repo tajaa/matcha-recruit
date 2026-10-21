@@ -326,11 +326,24 @@ What is built so far:
   text, and go under the picture in an issue email (email can't lay them over it). A circle ignores the crop.
 - **A story page is a book turned left and right** (`pages.book_html`, `render/assets/book.js`, the book
   section of `magazine.css`): the article flows through CSS columns of the page's height inside a
-  horizontally scrolling `.mz-book` (one page on a phone, a two-page spread from 960 px), matte paper on
-  a dark mat. A spread is the book's width, so the script turns by `clientWidth` (arrows, ←/→/Page keys,
-  a swipe settled on the nearest spread) and a ResizeObserver recounts when the paid part arrives. Each
-  figure carries `--mz-ar` (its shown ratio) so a picture is sized to fit the page height. The front,
-  topic pages, the feed and issue emails are not paged.
+  horizontally scrolling `.mz-book` (one page on a phone, a two-page spread from 960 px). **A matte cover and
+  glossy pages**: the first spread (the cover sheet) gets a grain and softer photos (`.mz-pages::before`,
+  which scrolls away with it); later spreads are bright coated paper with a sheen (`.mz-gloss`, fixed over
+  the spread, off while `data-mz-at="0"`), a gutter shadow and stacked page edges (`.mz-spread`). A spread
+  is the book's width: the script turns by `clientWidth` (arrows, ←/→/Page keys; a swipe past `FLICK` of a
+  spread turns, short of it springs back). **Browsers never count the space after the last column**, so the
+  script measures the story's column pieces (`getClientRects`, never by changing layout) and places
+  `.mz-end` to end the pages on a whole spread; without it the last page could not be reached. The cover is
+  a flex column of one page's height (the photo fills what the words leave, so every cover is cropped and
+  credited so). In the book, text runs in one column (nested columns break across pages in Safari) and pull
+  quotes are capped, smaller past `story_render.LONG_QUOTE` characters. Each figure carries `--mz-ar` so a
+  picture fits the page height. The front, topic pages, the feed and issue emails are not paged.
+- **Our script-less frames turn the pages from outside** (`client/src/cappe/magazine/reader/BookFrame.tsx`
+  over `book.ts`: the editor preview, "View as a reader", a reader's dashboard). **Safari never calls a
+  listener the parent adds inside a `sandbox="allow-same-origin"` frame without `allow-scripts`**, so
+  nothing listens in the frame: the arrows, page count and keys are the parent's, `book.ts` polls the
+  pages' scroll (`POLL_MS`) to settle swipes, and a link in the page is rewritten to `about:blank#mz-link=…`
+  so following it fires the frame's `load`, which the parent reads (`followedLink`) and puts the page back.
 - **The story editor keeps one undoable document** (`editor/history.ts`: headline fields + blocks; edits
   within 1 s fold into one step, structural edits are their own), ⌘Z/⇧⌘Z/⌘S, insert-anywhere, duplicate,
   drag to reorder, a Markdown toolbar (`editor/MarkdownField.tsx`, `editor/markdown.ts`) and the shared

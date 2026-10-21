@@ -1,16 +1,17 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, Loader2 } from 'lucide-react'
 import { cappeApi } from '../../api'
 import { ui } from '../../components/ui'
-import { wireBook } from './book'
+import BookFrame from './BookFrame'
 
 /** `sites/:siteId/magazine/view` (`?story=<id>`) — the magazine as a reader
  *  will see it, rendered by the server's own page code, for the writer: a
  *  draft, an unpublished site or a magazine not yet on the plan included.
  *  Scripts don't run in the frame, so a paid story shows what a reader
- *  without a subscription sees. A story link clicked inside opens that story
- *  here; other links do nothing. */
+ *  without a subscription sees, and its pages turn from out here
+ *  (`BookFrame`). A story link clicked inside opens that story here; other
+ *  links do nothing. */
 export default function ReaderView() {
   const { siteId } = useParams<{ siteId: string }>()
   const [params, setParams] = useSearchParams()
@@ -19,7 +20,6 @@ export default function ReaderView() {
   // Each answer remembers which page it is for, so a new page shows loading.
   const key = `${siteId}|${story || ''}|${slug || ''}`
   const [result, setResult] = useState<{ key: string; html?: string; error?: string } | null>(null)
-  const frame = useRef<HTMLIFrameElement>(null)
 
   useEffect(() => {
     let live = true
@@ -32,21 +32,11 @@ export default function ReaderView() {
   const html = current?.html ?? null
   const error = current?.error ?? null
 
-  // The frame shares our origin (allow-same-origin, no scripts), so its
-  // clicks can be read here.
-  // The story's pages turn from here too: the frame can't run the page's own script.
-  const wireLinks = () => {
-    const doc = frame.current?.contentDocument
-    wireBook(doc)
-    doc?.addEventListener('click', (e) => {
-      const a = (e.target as Element | null)?.closest?.('a')
-      if (!a) return
-      e.preventDefault()
-      const path = a.getAttribute('href') || ''
-      const m = path.match(/^\/stories\/([^/?#]+)/)
-      if (m) setParams({ slug: decodeURIComponent(m[1]) })
-      else if (path === '/' || path === '/magazine') setParams({})
-    })
+  // The frame's links: a story opens here, the front page too.
+  const follow = (path: string) => {
+    const m = path.match(/^\/stories\/([^/?#]+)/)
+    if (m) setParams({ slug: decodeURIComponent(m[1]) })
+    else if (path === '/' || path === '/magazine') setParams({})
   }
 
   const back = story ? `/cappe/sites/${siteId}/stories/${story}` : `/cappe/sites/${siteId}/stories`
@@ -65,8 +55,7 @@ export default function ReaderView() {
       {error && <p role="alert" className="p-6 text-sm text-red-400">{error}</p>}
       {html === null && !error && <div className="flex justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-zinc-400" /></div>}
       {html !== null && (
-        <iframe ref={frame} title="Reader view" srcDoc={html} sandbox="allow-same-origin" onLoad={wireLinks}
-          className="w-full flex-1 bg-white" style={{ minHeight: '85vh' }} />
+        <BookFrame html={html} title="Reader view" onLink={follow} keys className="flex-1" style={{ minHeight: '85vh' }} />
       )}
     </div>
   )

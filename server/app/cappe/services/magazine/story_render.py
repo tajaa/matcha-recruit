@@ -19,6 +19,8 @@ from .figures import credit_html, figure_html, img_html
 from .richtext import render_md
 
 PAYWALL = "paywall"
+# Characters past which a pull quote is set smaller (mz-pull--long).
+LONG_QUOTE = 110
 
 
 def split_at_paywall(blocks: list[dict], *, preview_blocks: int = 3) -> tuple[list[dict], list[dict]]:
@@ -136,7 +138,9 @@ def render_block(b: dict, assets: dict[str, dict], *, first_text: bool = False) 
         if not b.get("text"):
             return ""
         cite = f'<cite>{escape(b["attribution"])}</cite>' if b.get("attribution") else ""
-        return (f'<blockquote class="mz-pull mz-pull--{escape(b.get("style") or "big")}">'
+        # A long quote is set smaller, so it still fits on one page of the book.
+        long = " mz-pull--long" if len(b["text"]) > LONG_QUOTE else ""
+        return (f'<blockquote class="mz-pull mz-pull--{escape(b.get("style") or "big")}{long}">'
                 f"<p>{escape(b['text'])}</p>{cite}</blockquote>")
     if kind == "sidebar":
         body = render_md(b.get("md"))
@@ -176,9 +180,11 @@ def cover_html(post: dict, cover: Optional[dict], asset: Optional[dict], *, byli
     if not asset:
         return f'<header class="mz-cover mz-cover--plain">{words}</header>'
     position = f"object-position:{int(focal.get('x', 50))}% {int(focal.get('y', 50))}%"
-    cropped = style in ("overlay", "split")
+    # Every cover is cut to fit its page in the book (a stacked one's photo
+    # fills what the words leave), so the focal point always applies.
+    cropped = True
     img = img_html(asset, size="full" if style == "overlay" else ("half" if style == "split" else "wide"),
-                   eager=True, cls="mz-cover__img", style=position if cropped else "")
+                   eager=True, cls="mz-cover__img", style=position)
     credit = credit_html(asset, cropped=cropped)
     return (f'<header class="mz-cover mz-cover--{escape(style)} mz-tone--{escape(tone)}">'
             f'<div class="mz-cover__media">{img}</div>{words}'
