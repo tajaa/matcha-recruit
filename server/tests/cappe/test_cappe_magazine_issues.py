@@ -115,6 +115,13 @@ def test_the_archive_pages_through_the_issues(monkeypatch):
     assert asyncio.run(render_mod.issues_page(_request("/issues"))).status_code == 404
 
 
+def test_the_current_issue_is_the_highest_number_out_not_the_last_released():
+    # No. 2 withdrawn for a typo and released again isn't the current issue.
+    conn = Conn(fetchrow={"FROM cappe_magazine_issues WHERE site_id": None})
+    asyncio.run(mag_issues.current_issue(conn, SITE))
+    assert "ORDER BY number DESC" in conn.sql_for("fetchrow")[0]
+
+
 def test_the_front_leads_with_the_current_issue_and_keeps_every_story_below(monkeypatch):
     _wire(monkeypatch, _issue_render_conn(issue=issue_row(), stories=[in_issue(story_row())]))
     html = asyncio.run(render_mod.magazine_front(_request("/magazine"))).body.decode()
@@ -171,7 +178,7 @@ def _owner(**over):
                 "SELECT plan FROM cappe_accounts": "business"}
     for kind, table in (("fetchrow", fetchrow), ("fetch", fetch), ("fetchval", fetchval)):
         table.update(over.get(kind, {}))
-    return Conn(fetchrow=fetchrow, fetch=fetch, fetchval=fetchval)
+    return Conn(fetchrow=fetchrow, fetch=fetch, fetchval=fetchval, execute=over.get("execute"))
 
 
 @pytest.fixture
@@ -325,6 +332,15 @@ def test_a_taken_number_is_explained(monkeypatch):
 
     with _client(monkeypatch, _owner(fetchrow={"UPDATE cappe_magazine_issues SET": race})) as client:
         assert "another issue" in client.put(f"{BASE}/{ISSUE}", json={"title": "x"}).json()["detail"]
+
+    # The real race: the story went into another issue after check_stories,
+    # so the stories' own insert trips the index — a message, not a 500.
+    def taken(sql, args):
+        raise Exception('duplicate key value violates unique constraint "uq_cappe_magazine_issue_stories_post"')
+
+    with _client(monkeypatch, _owner(execute={"INSERT INTO cappe_magazine_issue_stories": taken})) as client:
+        res = client.put(f"{BASE}/{ISSUE}", json={"stories": [{"post_id": str(POST)}]})
+    assert res.status_code == 422 and "another issue" in res.json()["detail"]
 
     def other(sql, args):
         raise RuntimeError("boom")
