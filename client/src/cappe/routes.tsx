@@ -45,6 +45,7 @@ const Blog = lazy(() => import('./pages/site/Blog'))
 const Messages = lazy(() => import('./pages/site/Messages'))
 const Clients = lazy(() => import('./pages/site/Clients'))
 const Reviews = lazy(() => import('./pages/site/Reviews'))
+const Library = lazy(() => import('./magazine/library/LibraryPage'))
 const Social = lazy(() => import('./pages/site/Social'))
 
 // Cappe — website-builder product, served at /cappe. Self-contained route tree
@@ -107,6 +108,7 @@ export default function CappeRoutes() {
           <Route path="sites/:siteId/clients" element={<Clients />} />
           <Route path="sites/:siteId/reviews" element={<Reviews />} />
           <Route path="sites/:siteId/blog" element={<Blog />} />
+          <Route path="sites/:siteId/library" element={<Library />} />
           {/* Creator marketplace: creator self-service + brand-side collabs.
               Each group is wrapped in RequireAccountType — CappeLayout above
               only proves a session exists, not that it is the right KIND of

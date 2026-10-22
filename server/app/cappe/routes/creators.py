@@ -27,7 +27,7 @@ from ..models.creators import (
     CreatorSocialUpsert,
 )
 from ..models.collab import EarningsRow
-from ..services import upload_guard
+from ..services import media, upload_guard
 from ._shared import build_patch, read_capped
 from ..services.common import loads
 
@@ -316,6 +316,13 @@ async def upload_creator_media(
     content_type = upload_guard.verify_upload(data, file.content_type, allowed)
     filename = file.filename or "upload"
     if content_type in upload_guard.ALLOWED_IMAGE:
+        # Re-encode first so no EXIF (GPS included) reaches the CDN, then
+        # squeeze anything still over the stored-size cap.
+        try:
+            image = await asyncio.to_thread(media.process_image, data, content_type)
+        except media.ImageRejected as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        data, content_type, filename = image.data, image.mime, media.filename_for(filename, image.ext)
         data, content_type, filename = await asyncio.to_thread(
             upload_guard.compress_image_for_storage,
             data,

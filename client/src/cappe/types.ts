@@ -1531,6 +1531,49 @@ export type CappePromoCode = CappePromoCodeInput & { id: string; redemption_coun
 
 export type CappePromoCodes = { enabled: boolean; currency: string; codes: CappePromoCode[] }
 
+// ── Image library (cappe_assets; migrations zzzzcappe23 + cappemag01) ──────
+export type CappeAssetKind = 'generated' | 'upload' | 'stock'
+
+/** Responsive sizes a library upload is stored with: WebP for srcset and one
+ *  JPEG for email and link previews. Older rows have none. */
+export type CappeAssetVariants = {
+  webp?: { w: number; url: string }[]
+  share?: { w: number; url: string }
+}
+
+export type CappeAsset = {
+  id: string
+  kind: CappeAssetKind
+  url: string
+  prompt: string | null
+  aspect: string | null
+  image_size: string | null
+  created_at: string
+  source: string | null
+  source_url: string | null
+  title: string | null
+  creator: string | null
+  creator_url: string | null
+  /** own | cc0 | pdm | by | by-sa | ai */
+  license: string | null
+  license_version: string | null
+  license_url: string | null
+  provider_label: string | null
+  /** What a story prints under the picture. Always "AI illustration" for AI images. */
+  credit_line: string | null
+  alt: string | null
+  caption: string | null
+  width: number | null
+  height: number | null
+  bytes: number | null
+  mime: string | null
+  variants: CappeAssetVariants
+  ai_generated: boolean
+  rights_attested_at: string | null
+  moderation: 'unchecked' | 'ok' | 'flagged' | 'blocked'
+  updated_at: string | null
+}
+
 // --- Social growth (server/app/cappe/models/social.py) ---------------------------
 
 export type CappeSocialPlatform = 'instagram' | 'facebook'
