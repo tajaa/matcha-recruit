@@ -48,7 +48,7 @@ SITE, ACCOUNT_ID = uuid4(), uuid4()
 ASSET, OTHER_ASSET, POST = uuid4(), uuid4(), uuid4()
 NOW = datetime(2026, 10, 20, 9, tzinfo=timezone.utc)
 ACCOUNT = SimpleNamespace(id=ACCOUNT_ID, plan="business", account_type="business")
-SITE_ROW = {"id": SITE, "name": "Bloom", "slug": "bloom", "subdomain": "bloom", "custom_domain": None,
+SITE_ROW = {"id": SITE, "account_plan": "business", "name": "Bloom", "slug": "bloom", "subdomain": "bloom", "custom_domain": None,
             "theme_config": "{}", "meta_config": "{}", "timezone": "UTC", "account_id": ACCOUNT_ID, "status": "published"}
 MAG_ROW = {"site_id": SITE, "enabled": True, "name": "Salt & Light", "tagline": "Harbour stories", "about": None,
            "masthead_style": "classic", "accent": None, "topics": ["city"], "front_at_root": False,
@@ -246,10 +246,38 @@ def test_the_cache_is_written_and_read(monkeypatch):
     monkeypatch.setattr(render_mod, "cache_get", cache_get)
     monkeypatch.setattr(render_mod, "cache_set", cache_set)
     asyncio.run(render_mod.magazine_front(_request("/magazine")))
-    assert f"cappe:render:{SITE}:__mag__:front:0:1" in store
+    assert f"cappe:render:{SITE}:__mag__:business:front:0:1" in store
     reads = len(conn.calls)
     asyncio.run(render_mod.magazine_front(_request("/magazine")))
     assert len(conn.calls) == reads + 1  # the site lookup only
+
+
+@pytest.mark.parametrize("path", ["/magazine", "/"])
+def test_a_cached_magazine_goes_down_with_the_plan(monkeypatch, path):
+    # The plan changes in billing without clearing the render cache; the
+    # cached magazine must not outlive it.
+    store: dict = {}
+
+    async def cache_get(_redis, key):
+        return store.get(key)
+
+    async def cache_set(_redis, key, value, ttl):
+        store[key] = value
+
+    for plan, live in (("business", True), ("free", False)):
+        conn = _render_conn(magazine={**MAG_ROW, "front_at_root": path == "/"})
+        conn._tables["fetchrow"]["FROM cappe_sites WHERE subdomain"] = {**SITE_ROW, "account_plan": plan}
+        conn._tables["fetchval"]["SELECT plan FROM cappe_accounts"] = plan
+        _wire(monkeypatch, conn)
+        monkeypatch.setattr(render_mod, "get_redis_cache", lambda: object())
+        monkeypatch.setattr(render_mod, "cache_get", cache_get)
+        monkeypatch.setattr(render_mod, "cache_set", cache_set)
+        if path == "/":
+            html = asyncio.run(render_mod.render_home(_request("/"))).body.decode()
+            assert ("The harbour at dawn" in html) is live
+        else:
+            resp = asyncio.run(render_mod.magazine_front(_request("/magazine")))
+            assert (resp.status_code == 200) is live
 
 
 # ── the story API ────────────────────────────────────────────────────────────
@@ -386,6 +414,16 @@ def test_a_plain_post_becomes_a_story_keeping_its_words(monkeypatch, invalidated
         assert client.put(f"/sites/{SITE}/posts/{POST}", json={"format": "markdown"}).status_code == 422
 
 
+def test_words_sent_with_the_change_to_a_story_are_the_ones_kept(monkeypatch, invalidated):
+    plain = story_row(format="markdown", content="{}", body="Old *words*.", cover_asset_id=None)
+    conn = _owner_conn(fetchrow={"FOR UPDATE": plain, "UPDATE cappe_posts": story_row()})
+    with _blog_client(monkeypatch, conn) as client:
+        res = client.put(f"/sites/{SITE}/posts/{POST}", json={"format": "blocks", "body": "New words."})
+    assert res.status_code == 200, res.text
+    content = json.loads(conn.args_for("UPDATE cappe_posts")[conn.sql_for("fetchrow")[-1].index("content") and 1])
+    assert content["blocks"][0]["md"] == "New words."
+
+
 def test_the_ios_app_edits_a_plain_posts_body_and_a_taken_slug_is_a_409(monkeypatch, invalidated):
     plain = story_row(format="markdown", content="{}", body="Old.", cover_asset_id=None)
     conn = _owner_conn(fetchrow={"FOR UPDATE": plain, "UPDATE cappe_posts": plain})
@@ -501,6 +539,8 @@ def test_bad_topics_an_empty_name_and_a_foreign_cover_story(monkeypatch, invalid
     with _mag_client(monkeypatch, _owner_conn()) as client:
         assert client.put(f"/sites/{SITE}/magazine", json={"topics": ["crypto"]}).status_code == 422
         assert client.put(f"/sites/{SITE}/magazine", json={"name": None}).status_code == 422
+        assert client.put(f"/sites/{SITE}/magazine", json={"name": "   "}).status_code == 422
+        assert client.put(f"/sites/{SITE}/magazine", json={"nav_label": " \t"}).status_code == 422
         assert client.put(f"/sites/{SITE}/magazine", json={"accent": "red"}).status_code == 422
         assert client.put(f"/sites/{SITE}/magazine", json={"cover_post_id": str(POST)}).status_code == 422
     assert invalidated == []
@@ -546,6 +586,21 @@ def test_a_picture_a_story_uses_cant_be_deleted(monkeypatch):
         res = client.delete(f"/sites/{SITE}/assets/{ASSET}")
     assert res.status_code == 409 and "The harbour at dawn" in res.json()["detail"]
     assert conn.sql_for("execute") == []
+
+
+def test_a_story_taking_the_picture_mid_delete_is_a_409_not_a_500(monkeypatch):
+    from asyncpg.exceptions import ForeignKeyViolationError
+
+    def raced(sql, args):
+        raise ForeignKeyViolationError("cappe_post_assets_asset_id_fkey")
+
+    conn = Conn(fetchrow={"FROM cappe_sites": SITE_ROW},
+                fetch={"JOIN cappe_posts p ON p.id = pa.post_id": [], "FROM cappe_magazine_issue_assets": []},
+                execute={"DELETE FROM cappe_assets": raced})
+    monkeypatch.setattr(uploads_mod, "get_connection", lambda: Ctx(conn))
+    with route_client(uploads_mod.router, overrides={uploads_mod.require_cappe_account: ACCOUNT}) as client:
+        res = client.delete(f"/sites/{SITE}/assets/{ASSET}")
+    assert res.status_code == 409 and "story uses this picture" in res.json()["detail"]
 
 
 # ── the owner's reader view ──────────────────────────────────────────────────
@@ -594,3 +649,77 @@ def test_the_reader_view_of_another_sites_story_is_a_404(monkeypatch):
     conn = _owner_conn(fetchrow={"FROM cappe_posts WHERE site_id = $1 AND": None, "FROM cappe_magazines": None})
     with _reader_view(monkeypatch, conn) as client:
         assert client.post(f"/sites/{SITE}/magazine/view", json={"story_id": str(uuid4())}).status_code == 404
+
+
+@pytest.mark.parametrize("cover_post_id", [None, "a draft"])
+def test_the_front_never_shows_a_story_on_two_pages(monkeypatch, cover_post_id):
+    # No live cover: page 1 leads with the latest story, and page 2 must leave
+    # it out too, or the grid shifts by one and a story shows on both pages.
+    stories = [{"id": n} for n in range(30)]  # newest first
+
+    async def live_stories(conn, site_id, *, exclude=None, limit, offset=0, topic=None):
+        kept = [s for s in stories if s["id"] != exclude]
+        return kept[offset:offset + limit]
+
+    async def nothing(*a, **k):
+        return None
+
+    async def empty(*a, **k):
+        return []
+
+    seen = {}
+    monkeypatch.setattr(render_mod.mag_reader, "live_stories", live_stories)
+    monkeypatch.setattr(render_mod.mag_reader, "live_story", nothing)
+    monkeypatch.setattr(render_mod.mag_issues, "current_issue", nothing)
+    monkeypatch.setattr(render_mod.mag_reader, "covers", AsyncMock(return_value={}))
+    monkeypatch.setattr(render_mod.mag_reader, "topics_in_use", empty)
+    monkeypatch.setattr(render_mod, "_nav", empty)
+    monkeypatch.setattr(render_mod, "policy_kinds", empty)
+    monkeypatch.setattr(render_mod, "_site_dict", lambda *a: {})
+    monkeypatch.setattr(render_mod, "_origin", lambda *a: "https://bloom.gummfit.com")
+    monkeypatch.setattr(render_mod.mag_pages, "render_front",
+                        lambda *a, page, **k: seen.setdefault(page, k) and "")
+    site = {"id": uuid4(), "subdomain": "bloom", "custom_domain": None}
+    for page in (1, 2):
+        asyncio.run(render_mod._front_html(None, site, {"cover_post_id": cover_post_id, "topics": []},
+                                           page=page, host="bloom.gummfit.com"))
+    assert seen[1]["lead"] == {"id": 0} and seen[2]["lead"] is None
+    shown = [s["id"] for s in seen[1]["posts"]] + [s["id"] for s in seen[2]["posts"]]
+    assert shown == list(range(1, 25))
+
+
+def test_when_an_issue_leads_the_front_no_story_is_left_out_of_any_page(monkeypatch):
+    stories = [{"id": n} for n in range(30)]
+
+    async def live_stories(conn, site_id, *, exclude=None, limit, offset=0, topic=None):
+        kept = [s for s in stories if s["id"] != exclude]
+        return kept[offset:offset + limit]
+
+    async def empty(*a, **k):
+        return []
+
+    async def current_issue(conn, site_id):
+        return {"id": "issue-3"}
+
+    async def issue_lead(conn, site, magazine, issue):
+        return "<issue>", None
+
+    seen = {}
+    monkeypatch.setattr(render_mod.mag_reader, "live_stories", live_stories)
+    monkeypatch.setattr(render_mod.mag_reader, "covers", AsyncMock(return_value={}))
+    monkeypatch.setattr(render_mod.mag_reader, "topics_in_use", empty)
+    monkeypatch.setattr(render_mod.mag_issues, "current_issue", current_issue)
+    monkeypatch.setattr(render_mod, "_current_issue", issue_lead)
+    monkeypatch.setattr(render_mod, "_nav", empty)
+    monkeypatch.setattr(render_mod, "policy_kinds", empty)
+    monkeypatch.setattr(render_mod, "_site_dict", lambda *a: {})
+    monkeypatch.setattr(render_mod, "_origin", lambda *a: "https://bloom.gummfit.com")
+    monkeypatch.setattr(render_mod.mag_pages, "render_front",
+                        lambda *a, page, **k: seen.setdefault(page, k) and "")
+    site = {"id": uuid4()}
+    for page in (1, 2):
+        asyncio.run(render_mod._front_html(None, site, {"cover_post_id": 7, "topics": []},
+                                           page=page, host="bloom.gummfit.com"))
+    assert seen[1]["current_html"] == "<issue>" and seen[1]["lead"] is None and seen[2]["current_html"] == ""
+    shown = [s["id"] for s in seen[1]["posts"]] + [s["id"] for s in seen[2]["posts"]]
+    assert shown == list(range(24))  # the cover story included: the issue leads, not it
