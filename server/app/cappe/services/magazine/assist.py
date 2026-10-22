@@ -35,6 +35,7 @@ from uuid import UUID
 from ....core.services import agent_surfaces, anthropic_messages
 from ....core.services.safe_fetch import fetch_public
 from ..cappe_assets import AI_CREDIT
+from .rt import md_to_rt
 from .sources import SOURCES
 from .stories import site_assets, story_text
 from .story_schema import StoryError, normalize_story, referenced_asset_ids
@@ -277,7 +278,8 @@ def _shape(m: Material, data: dict) -> dict:
     elif m.action == "tighten":
         md = str(data.get("md") or "").strip()[:20_000]
         if md:
-            return {"md": md, "block": m.block}
+            # The editor works in documents; the Markdown stays for anything else.
+            return {"md": md, "rt": md_to_rt(md), "block": m.block}
     elif m.action == "search_terms":
         terms = [{"source": t["source"], "query": _text(t.get("query"), 120)}
                  for t in data.get("terms") or []

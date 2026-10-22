@@ -67,13 +67,19 @@ Website-builder frontend for the consumer brand **Gummfit**, host-routed on gumm
   pages (see the Cappe server CLAUDE.md, magazines). Don't add listeners to a frame's document.
   **Editing on the page** (`magazine/canvas/`): the story and issue editors open on **Page** (`?view=outline`
   opens the **Outline**, today's forms; one undo history serves both). `EditFrame.tsx` is the one frame that
-  runs scripts: `sandbox="allow-scripts"` with no same-origin, so the page's own `editor.js` (server
-  `render/assets/`) runs inside it and talks only by `postMessage`. It is double-buffered (a new render
+  runs scripts: `sandbox="allow-scripts"` with no same-origin. It writes the editor runtime
+  (`magazine/frame/`, TypeScript + Tiptap) into each page: `vite-mz-frame.ts` bundles it into one script
+  and its stylesheet (`virtual:mz-frame`, rebuilt when a frame file changes in dev, empty in Vitest; inlined,
+  so no CSP change), and it talks only by `postMessage`. Rich fields are Tiptap editors mounted on the
+  field itself (`frame/rich.ts`, opened from the page's `data-mz-rt` registry); plain fields are
+  `contenteditable`. `frame.test.ts` loads it onto a small edit page in jsdom. It is double-buffered (a new render
   loads hidden, is sent `mz-goto` with the selection or spread, and swaps in on `mz-shown`) and never
   replaced while words are typed (`mz-editing`). Everything the page sends goes through `bridge.ts`
   (source, shape, indexes, field names, lengths); `storyDoc.ts` / `issueEdits.ts` apply it and drop an edit
-  that names a block or field the story doesn't have (`fields.ts`, pinned by the server). Text typed with
-  the toolbar arrives as HTML and is stored as Markdown (`htmlToMd.ts`). The panel beside the page is
+  that names a block or field the story doesn't have (`fields.ts`, pinned by the server). Rich text arrives
+  as a document, cleaned to what the server keeps (`canvas/rt.ts` `cleanRt`, with `rtToMd` for the Markdown
+  beside it; both pinned by `server/tests/cappe/fixtures/magazine_rt_cases.json`), and the Outline types the
+  same documents (`editor/RichField.tsx`, same `frame/extensions.ts` schema). The panel beside the page is
   `BlockPanel.tsx` (over `editor/BlockOptions.tsx`, shared with the Outline's `BlockEditor` minus the
   word boxes), `issues/CoverPanel.tsx`'s exported sections, and `ContentsPanel`. The issue editor keeps an
   unsaved copy of each story edited on its pages (`IssueDoc.drafts`), previews them with the issue

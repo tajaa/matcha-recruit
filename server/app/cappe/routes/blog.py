@@ -42,6 +42,7 @@ from ..services.magazine.stories import (
     reading_stats,
     story_text,
     sync_post_assets,
+    with_documents,
 )
 from ..services.magazine.story_schema import (
     LAYOUTS,
@@ -60,9 +61,14 @@ router = APIRouter()
 EDIT_ON_WEB = "This story has a magazine layout. Edit it on the web at gummfit.com."
 
 
-def _out(row) -> dict[str, Any]:
+def _out(row, *, documents: bool = True) -> dict[str, Any]:
+    """A post for the owner. One story (`documents`) carries a document for
+    every rich field, for the editor; the list doesn't, so it never converts
+    every old story's Markdown on each load."""
     d = post_row(row)
     d["hidden"] = d.pop("hidden_at", None) is not None
+    if documents and d.get("format") == "blocks":
+        d["content"] = with_documents(d["content"])
     return d
 
 
@@ -127,7 +133,7 @@ async def list_posts(site_id: UUID, account: CappeAccount = Depends(require_capp
             f"SELECT {POST_COLS} FROM cappe_posts WHERE site_id = $1 ORDER BY created_at DESC",
             site_id,
         )
-    return [_out(r) for r in rows]
+    return [_out(r, documents=False) for r in rows]
 
 
 @router.post("/sites/{site_id}/posts", response_model=CappePost, status_code=status.HTTP_201_CREATED)
@@ -292,7 +298,7 @@ async def story_options(site_id: UUID, account: CappeAccount = Depends(require_c
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
     return {
-        "layouts": [{"key": k, "label": v, "content": starter_content(k)} for k, v in LAYOUTS.items()],
+        "layouts": [{"key": k, "label": v, "content": with_documents(starter_content(k))} for k, v in LAYOUTS.items()],
         "topics": [{"key": k, "label": v} for k, v in TOPICS.items()],
     }
 

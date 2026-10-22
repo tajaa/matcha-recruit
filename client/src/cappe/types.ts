@@ -1,3 +1,5 @@
+import type { RtDoc } from './magazine/canvas/rt'
+
 // Cappe (website builder) — shared API response types.
 export type CappeShopperSubscription = {
   id: string
@@ -1096,13 +1098,15 @@ export type PhotoOverlay = {
 
 export type StoryBlock =
   | { type: 'cover'; asset_id: string | null; style: 'overlay' | 'stacked' | 'split'; tone: 'light' | 'dark'; focal: { x: number; y: number } }
-  | { type: 'text'; md: string; dropcap: boolean; columns: 1 | 2 | 3; variant?: TextVariant; align?: TextAlign }
+  // Rich text is a document (`rt`, what the editor types) and its Markdown
+  // (`md`, kept beside it for emails, feeds and the app): magazine/canvas/rt.ts.
+  | { type: 'text'; md: string; rt?: RtDoc; dropcap: boolean; columns: 1 | 2 | 3; variant?: TextVariant; align?: TextAlign }
   | { type: 'photo'; asset_id: string | null; caption: string; size: 'column' | 'wide' | 'full'
       border?: PhotoBorder; shape?: PhotoShape; filter?: PhotoFilter; crop?: PhotoCrop | null; overlays?: PhotoOverlay[] }
   | { type: 'photos'; layout: 'pair' | 'trio' | 'grid' | 'mosaic'; items: { asset_id: string | null; caption: string }[] }
   | { type: 'quote'; text: string; attribution: string; style: 'big' | 'side' }
-  | { type: 'sidebar'; title: string; md: string }
-  | { type: 'qa'; items: { q: string; a_md: string }[] }
+  | { type: 'sidebar'; title: string; md: string; rt?: RtDoc }
+  | { type: 'qa'; items: { q: string; a_md: string; a_rt?: RtDoc }[] }
   | { type: 'divider' }
   | { type: 'paywall' }
 
@@ -1855,6 +1859,8 @@ export type CappeStoryAssist = {
   headlines?: { title: string; dek: string; kicker: string }[]
   captions?: { asset_id: string; caption: string; alt: string }[]
   md?: string
+  /** Tighten's passage as a document (what the editor keeps), with its Markdown. */
+  rt?: RtDoc
   block?: number
   terms?: { source: CappeStockSource; query: string }[]
   draft?: { title: string; excerpt: string; kicker: string; content: StoryContent }

@@ -17,6 +17,7 @@ from uuid import UUID
 
 from ..cappe_assets import COLUMNS as ASSET_COLUMNS, row as asset_row
 from .richtext import md_to_text
+from .rt import md_to_rt
 from .story_schema import StoryError, count_words, referenced_asset_ids
 
 POST_COLS = (
@@ -26,6 +27,22 @@ POST_COLS = (
 )
 
 WORDS_PER_MINUTE = 230
+
+
+def with_documents(content: dict) -> dict:
+    """`content` with every rich field's document filled in, for the owner's
+    editor: a story stored before documents has Markdown only."""
+    blocks = []
+    for b in content.get("blocks") or []:
+        if not isinstance(b, dict):
+            continue
+        if b.get("type") in ("text", "sidebar") and not isinstance(b.get("rt"), dict):
+            b = {**b, "rt": md_to_rt(b.get("md"))}
+        elif b.get("type") == "qa":
+            b = {**b, "items": [i if isinstance(i.get("a_rt"), dict) else {**i, "a_rt": md_to_rt(i.get("a_md"))}
+                                for i in b.get("items") or [] if isinstance(i, dict)]}
+        blocks.append(b)
+    return {**content, "blocks": blocks}
 
 
 def post_row(r) -> dict[str, Any]:

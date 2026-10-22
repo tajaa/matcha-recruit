@@ -381,7 +381,10 @@ def test_a_plain_post_becomes_a_story_keeping_its_words(monkeypatch, invalidated
         res = client.put(f"/sites/{SITE}/posts/{POST}", json={"format": "blocks"})
     assert res.status_code == 200, res.text
     content = json.loads(conn.args_for("UPDATE cappe_posts")[conn.sql_for("fetchrow")[-1].index("content") and 1])
-    assert content["blocks"][0] == {"type": "text", "md": "Old *words*.", "dropcap": True, "columns": 1, "variant": "body", "align": "left"}
+    assert content["blocks"][0] == {"type": "text", "md": "Old *words*.", "dropcap": True, "columns": 1, "variant": "body", "align": "left",
+                                    "rt": {"type": "doc", "content": [{"type": "paragraph", "content": [
+                                        {"type": "text", "text": "Old "}, {"type": "text", "text": "words", "marks": [{"type": "italic"}]},
+                                        {"type": "text", "text": "."}]}]}}
     with _blog_client(monkeypatch, _owner_conn(fetchrow={"FOR UPDATE": story_row()})) as client:
         assert client.put(f"/sites/{SITE}/posts/{POST}", json={"format": "markdown"}).status_code == 422
 
@@ -441,6 +444,13 @@ def test_the_list_marks_hidden_stories(monkeypatch):
         res = client.get(f"/sites/{SITE}/posts")
     assert [p["hidden"] for p in res.json()] == [True, False]
     assert "hidden_at" not in res.json()[0]
+    # Words stay as stored in the list; one story opened for editing gets its documents.
+    assert "rt" not in res.json()[0]["content"]["blocks"][1]
+    conn = _owner_conn(fetchrow={"FROM cappe_posts WHERE id = $1": story_row()})
+    with _blog_client(monkeypatch, conn) as client:
+        one = client.get(f"/sites/{SITE}/posts/{POST}").json()
+    assert one["content"]["blocks"][1]["rt"] == {"type": "doc", "content": [{"type": "paragraph", "content": [
+        {"type": "text", "text": "The "}, {"type": "text", "text": "boats", "marks": [{"type": "bold"}]}, {"type": "text", "text": "."}]}]}
 
 
 def test_the_editors_options_and_preview(monkeypatch):

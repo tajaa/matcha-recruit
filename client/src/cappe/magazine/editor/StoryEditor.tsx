@@ -405,7 +405,7 @@ export default function StoryEditor() {
             onHeadline={(h) => setDoc((d) => (d ? { ...d, fields: { ...d.fields, title: h.title, excerpt: h.dek || d.fields.excerpt, kicker: h.kicker || d.fields.kicker } } : d), { step: true })}
             onCaption={(id, caption) => setBlocks((bs) => withCaption(bs, id, caption), true)}
             onAlt={(a) => setAssets((m) => new Map(m).set(a.id, a))}
-            onTighten={(i, md) => setBlocks((bs) => withText(bs, i, md), true)}
+            onTighten={(i, md, rt) => setBlocks((bs) => withText(bs, i, md, rt), true)}
             onDraft={(dr) => setDoc((d) => (d ? {
               fields: { ...d.fields, title: dr.title || d.fields.title, excerpt: dr.excerpt || d.fields.excerpt, kicker: dr.kicker || d.fields.kicker },
               blocks: dr.content.blocks,

@@ -1,4 +1,5 @@
 import type { PhotoCrop, StoryBlock } from '../../types'
+import type { RtDoc } from '../canvas/rt'
 
 export const BLOCK_LABELS: Record<StoryBlock['type'], string> = {
   cover: 'Cover', text: 'Text', photo: 'Photo', photos: 'Photo group', quote: 'Pull quote',
@@ -71,8 +72,15 @@ export function withCaption(blocks: StoryBlock[], assetId: string, caption: stri
 }
 
 /** The blocks with text block `index` rewritten as `md` (any other kind is left alone). */
-export function withText(blocks: StoryBlock[], index: number, md: string): StoryBlock[] {
-  return blocks.map((b, j) => (j === index && b.type === 'text' ? { ...b, md } : b))
+/** A text block's words replaced: the document the server kept with them,
+ *  else none (the server makes one from the Markdown). */
+export function withText(blocks: StoryBlock[], index: number, md: string, rt?: RtDoc): StoryBlock[] {
+  return blocks.map((b, j) => {
+    if (j !== index || b.type !== 'text') return b
+    const next = { ...b, md, rt }
+    if (!rt) delete next.rt
+    return next
+  })
 }
 
 /** The first words of a text block, to name it in a list. */

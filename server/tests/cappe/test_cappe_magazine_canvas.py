@@ -1,21 +1,18 @@
-"""The owner's editor on the page (render/assets/editor.js): the edit renders
-of a story and an issue carry the editor and its markers, and only they do;
-every field the page marks is one the dashboard's editor accepts (client
+"""The owner's editor on the page (client magazine/frame/, injected by the
+dashboard into edit renders): the edit renders of a story and an issue carry
+its markers and the documents behind rich fields, and only they do; every
+field the page marks is one the dashboard's editor accepts (client
 canvas/fields.ts); the edit previews take unsaved stories through the same
-checks as a save; and the Markdown the editor writes renders as the fixture
-both sides share says."""
+checks as a save."""
 import json
 import re
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
-import pytest
-
 from app.cappe.routes import issues as issues_mod  # noqa: E402
 from app.cappe.services.magazine import issue_pages, pages  # noqa: E402
 from app.cappe.services.magazine.issue_schema import normalize_contents, normalize_cover  # noqa: E402
-from app.cappe.services.magazine.richtext import render_md  # noqa: E402
 from app.cappe.services.magazine.story_render import render_block, render_blocks  # noqa: E402
 from tests.cappe.test_cappe_magazine_issues import BASE, _client, _owner, limits, paid_row  # noqa: E402,F401
 from tests.cappe.test_cappe_magazine_routes import (  # noqa: E402
@@ -30,7 +27,6 @@ from tests.cappe.test_cappe_magazine_routes import (  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[3]
 FIELDS_TS = ROOT / "client/src/cappe/magazine/canvas/fields.ts"
-MD_CASES = json.loads((ROOT / "server/tests/cappe/fixtures/magazine_md_cases.json").read_text(encoding="utf-8"))
 WHEN = datetime(2026, 10, 21, tzinfo=timezone.utc)
 
 A = {"a1": {"id": "a1", "url": "https://cdn.example.test/a.jpg", "width": 1200, "height": 800, "alt": "Boats",
@@ -117,8 +113,11 @@ def test_blocks_are_numbered_by_their_place_in_the_story_and_empty_ones_shown():
 
 def test_only_edit_renders_carry_the_editor():
     for edit_html, plain_html in ((render_story(True), render_story(False)), (render_issue(True), render_issue(False))):
-        for mark in ("data-mz-edit", "data-mz-f=", "data-mz-b=", "mz-goto", ".mze-bar"):
+        for mark in ("data-mz-edit", "data-mz-f=", "data-mz-b=", "data-mz-rt"):
             assert mark in edit_html and mark not in plain_html, mark
+    # The editor itself is the dashboard's, never served with a page.
+    for html in (render_story(True), render_issue(True)):
+        assert "postMessage" not in html and "mze-" not in html
     # The owner's page has no paywall: it shows the paid part to edit.
     assert "cz-shopper-refresh" in render_story(False) and "cz-shopper-refresh" not in render_story(True)
     # Only the owner's previews ask for the editor; the reader's routes never do.
@@ -150,11 +149,28 @@ def test_an_issue_marks_its_cover_and_contents():
     assert 'data-mz-f="issue:' not in render_issue(False)
 
 
-# ── the Markdown the editor writes ───────────────────────────────────────────
+# ── the documents behind rich fields ─────────────────────────────────────────
 
-@pytest.mark.parametrize("case", MD_CASES, ids=[c["name"] for c in MD_CASES])
-def test_the_editors_markdown_renders_as_the_fixture_says(case):
-    assert render_md(case["md"]) == case["rendered"]
+def _registry(html: str) -> list[dict]:
+    return [json.loads(m) for m in re.findall(r'<script type="application/json" data-mz-rt>(.*?)</script>', html)]
+
+
+def test_each_story_names_the_document_behind_every_rich_field():
+    doc = {"type": "doc", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "Typed </script><b>"}]}]}
+    post = {"id": "s1", "title": "T", "slug": "t", "format": "blocks", "content": {"blocks": [
+        {"type": "text", "md": "**Old**"}, {"type": "text", "md": "x", "rt": doc}, {"type": "photo", "asset_id": None},
+        {"type": "sidebar", "md": ""}, {"type": "qa", "items": [{"q": "Q", "a_md": "*A*"}]}]}}
+    html = pages.story_article_html(post, {}, mag=MAG, edit=True)
+    assert "</script><b>" not in html.split("data-mz-rt>")[1].split("</script>")[0]  # can't close its own script
+    (reg,) = _registry(html)
+    bold = {"type": "doc", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "Old", "marks": [{"type": "bold"}]}]}]}
+    italic = {"type": "doc", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "A", "marks": [{"type": "italic"}]}]}]}
+    assert reg == {"0|md": bold, "1|md": doc, "3|md": {"type": "doc", "content": [{"type": "paragraph"}]},
+                   "4|items.0.a_md": italic}
+    # Every rich field on the page has its document.
+    rich = re.findall(r'data-mz-b="(\d+)"[^>]*>(?:(?!data-mz-b=).)*?data-mz-f="([^"]+)" data-mz-k="rich"', html, re.S)
+    assert {f"{b}|{f}" for b, f in rich} <= set(reg)
+    assert not _registry(pages.story_article_html(post, {}, mag=MAG))
 
 
 # ── the previews ─────────────────────────────────────────────────────────────
@@ -165,8 +181,8 @@ def test_the_story_preview_marks_the_page_only_when_asked(monkeypatch):
         edit = client.post(f"/sites/{SITE}/stories/preview", json={"title": "Dawn", "content": blocks, "edit": True})
         plain = client.post(f"/sites/{SITE}/stories/preview", json={"title": "Dawn", "content": blocks})
     assert edit.status_code == plain.status_code == 200 and edit.headers["cache-control"] == "no-store"
-    assert 'data-mz-f="@title"' in edit.text and "mz-goto" in edit.text and 'data-mz-s="preview"' in edit.text
-    assert 'data-mz-f="' not in plain.text and "mz-goto" not in plain.text
+    assert 'data-mz-f="@title"' in edit.text and "data-mz-rt" in edit.text and 'data-mz-s="preview"' in edit.text
+    assert 'data-mz-f="' not in plain.text and "data-mz-rt" not in plain.text
 
 
 def _issue_conn():
@@ -188,7 +204,7 @@ def test_the_issue_edit_preview_shows_unsaved_stories_checked_as_a_save(monkeypa
                                                                                str(uuid4()): unsaved}})
     assert res.status_code == 200 and res.headers["cache-control"] == "no-store"
     assert "The night market, later" in res.text and "Unsaved <strong>words</strong>." in res.text
-    assert SENTINEL in res.text and "mz-goto" in res.text  # the owner's page: the paid part, to edit
+    assert SENTINEL in res.text and "data-mz-rt" in res.text  # the owner's page: the paid part, to edit
     assert ("cappe_issue_edit_preview", issues_mod.EDIT_PREVIEWS_PER_HOUR) in limits
     assert ("cappe_issue_preview", issues_mod.PREVIEWS_PER_HOUR) not in limits
     # A picture that isn't in the site's library, or a block that isn't one: refused.

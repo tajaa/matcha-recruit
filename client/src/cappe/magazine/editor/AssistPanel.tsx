@@ -4,6 +4,7 @@ import { cappeApi } from '../../api'
 import { ui } from '../../components/ui'
 import type { CappeAsset, CappeStoryAssist, StoryAssistAction, StoryBlock } from '../../types'
 import { STOCK_SOURCES, thumbUrl } from '../library/assets'
+import type { RtDoc } from '../canvas/rt'
 import { textPreview } from './blocks'
 
 type Term = NonNullable<CappeStoryAssist['terms']>[number]
@@ -35,7 +36,7 @@ export default function AssistPanel({ siteId, postId, title, excerpt, blocks, as
   onHeadline: (h: Headline) => void
   onCaption: (assetId: string, caption: string) => void
   onAlt: (asset: CappeAsset) => void
-  onTighten: (block: number, md: string) => void
+  onTighten: (block: number, md: string, rt?: RtDoc) => void
   onDraft: (draft: Draft) => void
   onFind: (term: Term) => void
   onClose: () => void
@@ -182,7 +183,7 @@ export default function AssistPanel({ siteId, postId, title, excerpt, blocks, as
               <p className="whitespace-pre-wrap rounded-lg bg-zinc-950 p-3 text-sm text-zinc-100">{result.md}</p>
             </div>
           </div>
-          <button type="button" className={ui.btnGhost} onClick={() => { onTighten(result.block!, result.md!); mark('tighten') }}>
+          <button type="button" className={ui.btnGhost} onClick={() => { onTighten(result.block!, result.md!, result.rt); mark('tighten') }}>
             {used.has('tighten') ? <><Check className="h-4 w-4" /> Replaced</> : 'Replace the passage'}
           </button>
         </div>

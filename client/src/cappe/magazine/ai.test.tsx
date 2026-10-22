@@ -114,7 +114,8 @@ describe('AssistPanel', () => {
   })
 
   it('tightens a chosen passage with a before and after', async () => {
-    api.post.mockResolvedValue({ action: 'tighten', md: 'Boats go out at four.', block: 1 })
+    const rt = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Boats go out at four.' }] }] }
+    api.post.mockResolvedValue({ action: 'tighten', md: 'Boats go out at four.', rt, block: 1 })
     const props = panel()
     fireEvent.click(screen.getByRole('tab', { name: 'Tighten' }))
     expect(screen.getByLabelText('Passage')).toHaveDisplayValue(/Block 2: The harbour wakes/)
@@ -122,7 +123,7 @@ describe('AssistPanel', () => {
     expect(await screen.findByText('Tighter')).toBeInTheDocument()
     expect(api.post.mock.calls[0][1]).toMatchObject({ action: 'tighten', block: 1 })
     fireEvent.click(screen.getByRole('button', { name: 'Replace the passage' }))
-    expect(props.onTighten).toHaveBeenCalledWith(1, 'Boats go out at four.')
+    expect(props.onTighten).toHaveBeenCalledWith(1, 'Boats go out at four.', rt)
   })
 
   it('drafts from notes, warns about facts to check, and asks before replacing words', async () => {
