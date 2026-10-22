@@ -170,8 +170,9 @@ def _toc_entry(entry: dict, contents: dict, *, feature: bool, edit: bool = False
              f'<span class="mz-toc__title">{escape(post.get("title") or "")}</span>']
     line = entry.get("line") or (post.get("excerpt") if contents.get("show_deks", True) else None)
     if edit:
-        words.append(f'<span class="mz-toc__dek"{field(f"issue:line:{post["id"]}", ph="A line for the contents")}>'
-                     f'{escape(line or "")}</span>')
+        # Built apart: quotes nested inside an f-string's braces need Python 3.12 (CI checks 3.11).
+        dek = field(f"issue:line:{post['id']}", ph="A line for the contents")
+        words.append(f'<span class="mz-toc__dek"{dek}>{escape(line or "")}</span>')
     elif line:
         words.append(f'<span class="mz-toc__dek">{escape(line)}</span>')
     if contents.get("show_bylines") and post.get("byline"):
