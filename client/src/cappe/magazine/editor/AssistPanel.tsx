@@ -47,6 +47,9 @@ export default function AssistPanel({ siteId, postId, title, excerpt, blocks, as
   const [error, setError] = useState<string | null>(null)
   const [results, setResults] = useState<Partial<Record<StoryAssistAction, CappeStoryAssist>>>({})
   const [used, setUsed] = useState<Set<string>>(new Set())
+  // The words Tighten was asked about: the passage it replaces is found by
+  // them, not by its place (blocks can move while the answer is read).
+  const [tightened, setTightened] = useState<string | null>(null)
 
   const textBlocks = blocks.map((b, i) => ({ b, i })).filter(({ b }) => b.type === 'text' && b.md.trim())
   const chosenBlock = block ?? textBlocks[0]?.i ?? null
@@ -58,8 +61,10 @@ export default function AssistPanel({ siteId, postId, title, excerpt, blocks, as
     const body: Record<string, unknown> = { action: tab, content: { blocks }, title, excerpt }
     if (tab === 'draft') body.notes = notes
     if (tab === 'tighten') body.block = chosenBlock
+    const asked = tab === 'tighten' && chosenBlock !== null ? (blocks[chosenBlock] as Extract<StoryBlock, { type: 'text' }>).md : null
     try {
       const res = await cappeApi.post<CappeStoryAssist>(`/sites/${siteId}/posts/${postId}/assist`, body)
+      if (tab === 'tighten') setTightened(asked)
       setResults((r) => ({ ...r, [tab]: res }))
       setUsed(new Set())
     } catch (e) {
@@ -83,11 +88,15 @@ export default function AssistPanel({ siteId, postId, title, excerpt, blocks, as
   }
 
   const applyDraft = (draft: Draft) => {
-    const hasWords = blocks.some((b) => b.type === 'text' && b.md.trim())
-    if (hasWords && !window.confirm('Replace the story’s blocks with this draft? You can still leave without saving.')) return
+    // Words or pictures anywhere (a photo essay may have no text yet).
+    const hasWork = blocks.some((b) => /"(md|a_md|q|text|caption|asset_id)":"\s*\S/.test(JSON.stringify(b)))
+    if (hasWork && !window.confirm('Replace the story’s blocks with this draft? You can still leave without saving.')) return
     onDraft(draft)
     mark('draft')
   }
+
+  const tightenAt = tightened === null ? -1
+    : blocks.findIndex((b) => b.type === 'text' && b.md === tightened)
 
   const canAsk = tab === 'tighten' ? chosenBlock !== null : tab === 'draft' ? notes.trim().length > 0 || blocks.length > 0 : true
 
@@ -168,13 +177,16 @@ export default function AssistPanel({ siteId, postId, title, excerpt, blocks, as
         </ul>
       )}
 
-      {result?.md !== undefined && result.block !== undefined && blocks[result.block]?.type === 'text' && (
+      {result?.md !== undefined && tab === 'tighten' && tightenAt === -1 && !used.has('tighten') && (
+        <p className="text-sm text-zinc-400">That passage has changed since you asked. Ask again to tighten it as it is now.</p>
+      )}
+      {result?.md !== undefined && tightenAt !== -1 && (
         <div className="space-y-2">
           <div className="grid gap-3 md:grid-cols-2">
             <div>
               <p className={ui.label}>Now</p>
               <p className="whitespace-pre-wrap rounded-lg bg-zinc-950 p-3 text-sm text-zinc-400">
-                {(blocks[result.block] as Extract<StoryBlock, { type: 'text' }>).md}
+                {(blocks[tightenAt] as Extract<StoryBlock, { type: 'text' }>).md}
               </p>
             </div>
             <div>
@@ -182,7 +194,7 @@ export default function AssistPanel({ siteId, postId, title, excerpt, blocks, as
               <p className="whitespace-pre-wrap rounded-lg bg-zinc-950 p-3 text-sm text-zinc-100">{result.md}</p>
             </div>
           </div>
-          <button type="button" className={ui.btnGhost} onClick={() => { onTighten(result.block!, result.md!); mark('tighten') }}>
+          <button type="button" className={ui.btnGhost} onClick={() => { onTighten(tightenAt, result.md!); setTightened(result.md!); mark('tighten') }}>
             {used.has('tighten') ? <><Check className="h-4 w-4" /> Replaced</> : 'Replace the passage'}
           </button>
         </div>
