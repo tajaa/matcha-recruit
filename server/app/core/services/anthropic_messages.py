@@ -223,9 +223,11 @@ async def generate_text(
     max_tokens: int = 8_000,
     effort: str = "low",
     timeout_seconds: float = 60.0,
+    deadline: float | None = None,
 ) -> str:
     """One Messages call; returns the reply text. Raises RuntimeError on any
-    API failure, after writing the ledger row.
+    API failure, after writing the ledger row; with `deadline` (seconds,
+    SDK retries included), asyncio.TimeoutError once it passes.
 
     `attachments` are Messages content blocks (`image_block`/`pdf_block`)
     placed before the prompt. `json_output` adds a JSON-only instruction —
@@ -245,7 +247,7 @@ async def generate_text(
     }
     if system_text:
         params["system"] = system_text
-    return _reply_text(await _create(params, timeout_seconds=timeout_seconds))
+    return _reply_text(await _create(params, timeout_seconds=timeout_seconds, deadline=deadline))
 
 
 def gemini_contents_to_messages(contents: Any) -> list[dict[str, Any]]:

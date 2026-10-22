@@ -125,6 +125,50 @@ describe('AssistPanel', () => {
     expect(props.onTighten).toHaveBeenCalledWith(1, 'Boats go out at four.')
   })
 
+  it('replaces the passage it was asked about wherever it moved, and says when it changed', async () => {
+    api.post.mockResolvedValue({ action: 'tighten', md: 'Boats go out at four.', block: 1 })
+    const onTighten = vi.fn()
+    const props = { siteId: 's-1', postId: 'p-1', title: 't', excerpt: 'e', assets: new Map<string, CappeAsset>(),
+      onHeadline: vi.fn(), onCaption: vi.fn(), onAlt: vi.fn(), onTighten, onDraft: vi.fn(), onFind: vi.fn(),
+      onClose: vi.fn() }
+    const { rerender } = render(<AssistPanel {...props} blocks={BLOCKS} />)
+    fireEvent.click(screen.getByRole('tab', { name: 'Tighten' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Ask' }))
+    expect(await screen.findByText('Tighter')).toBeInTheDocument()
+    // A new paragraph goes in where the asked one was, which moves down.
+    const added: StoryBlock = { type: 'text', md: 'A new opening.', dropcap: false, columns: 1 }
+    rerender(<AssistPanel {...props} blocks={[BLOCKS[0], added, ...BLOCKS.slice(1)]} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Replace the passage' }))
+    expect(onTighten).toHaveBeenCalledWith(2, 'Boats go out at four.')
+    const replaced: StoryBlock = { ...(BLOCKS[1] as Extract<StoryBlock, { type: 'text' }>), md: 'Boats go out at four.' }
+    rerender(<AssistPanel {...props} blocks={[BLOCKS[0], added, replaced, ...BLOCKS.slice(2)]} />)
+    expect(screen.getByText('Replaced')).toBeInTheDocument()
+
+    rerender(<AssistPanel {...props} blocks={BLOCKS} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    await waitFor(() => expect(api.post).toHaveBeenCalledTimes(2))
+    const edited: StoryBlock = { ...(BLOCKS[1] as Extract<StoryBlock, { type: 'text' }>), md: 'Rewritten meanwhile.' }
+    rerender(<AssistPanel {...props} blocks={[BLOCKS[0], edited, ...BLOCKS.slice(2)]} />)
+    expect(screen.getByText(/That passage has changed since you asked/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Replace the passage' })).not.toBeInTheDocument()
+  })
+
+  it('asks before a draft replaces a photo essay with no words yet', async () => {
+    const draft = { title: 'T', excerpt: 'E', kicker: '', content: { blocks: [] } }
+    api.post.mockResolvedValue({ action: 'draft', draft })
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const props = panel({ blocks: [
+      { type: 'photo', asset_id: 'a-1', caption: '', size: 'wide' },
+      { type: 'text', md: '', dropcap: true, columns: 1 },
+    ] })
+    fireEvent.click(screen.getByRole('tab', { name: 'Draft' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Ask' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Use this draft' }))
+    expect(confirm).toHaveBeenCalled()
+    expect(props.onDraft).not.toHaveBeenCalled()
+    confirm.mockRestore()
+  })
+
   it('drafts from notes, warns about facts to check, and asks before replacing words', async () => {
     const draft = { title: 'Four a.m.', excerpt: 'Dawn.', kicker: 'Dispatch', content: { blocks: [
       { type: 'text', md: 'Boats go out at four. [check: how many boats]', dropcap: true, columns: 1 },

@@ -461,7 +461,8 @@ What is built so far:
   (plan without `magazine_paid`, account not active — `services/magazine/lapse.py`, run by the hourly
   `cappe_comp_expiry` task) stamps `lapsed_at`; the sweep then sets each reader's subscription to end with the
   month they paid for and emails them, retrying what Stripe refused on the next run. A lapsed magazine stays
-  up for `magazines.GRACE_DAYS` (31) without the plan, so paid readers keep what they paid for.
+  up for `magazines.GRACE_DAYS` (31) without the plan, so paid readers keep what they paid for — only while it
+  has readers (a subscription still billing or a live comp); with none, losing the plan takes it down at once.
 - **Reader accounts** (`account_type='reader'`, `cappemag06`) subscribe to magazines and sell nothing:
   `plan_offered` offers them no plan and `_enforce_site_limit` refuses them a site (403 `reader_account`).
   Their dashboard is `routes/reader.py` over `services/magazine/shelf.py`. **No new identity table**: on

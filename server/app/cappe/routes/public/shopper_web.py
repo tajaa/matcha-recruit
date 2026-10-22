@@ -95,10 +95,13 @@ async def web_refresh(slug: str, request: Request, response: Response):
     response set the newer cookie this browser now holds — clearing would
     delete that one. `stale: true` tells the page to retry with it."""
     _web_only(request)
-    await check_rate_limit(client_ip(request), "cappe_shopper_refresh", 120, 3600)
     token = request.cookies.get(COOKIE)
     if not token:
+        # Answered before the limit counts it: a paid story asks on every
+        # view, and anonymous readers behind one address (an office, a
+        # carrier's NAT) mustn't spend the budget a subscriber there needs.
         raise HTTPException(401, "Not signed in")
+    await check_rate_limit(client_ip(request), "cappe_shopper_refresh", 120, 3600)
     try:
         async with get_connection() as conn:
             site, store_open = await auth.session_site(conn, slug)

@@ -146,6 +146,8 @@ def test_daily_use_and_stuck_and_claim():
     assert run(imports.claim_next(conn, SITE_ID)) is None
     claim = conn.sql_for("fetchrow")[0]
     assert "FOR UPDATE SKIP LOCKED" in claim and "attempts = attempts + 1" in claim
+    # A retry waits RETRY_SECONDS: a throttled archive isn't asked three times in a second.
+    assert f"updated_at < NOW() - INTERVAL '{imports.RETRY_SECONDS} seconds'" in claim
     assert run(imports.import_next(conn, SITE_ID)) is None
 
 
@@ -206,11 +208,11 @@ def test_a_picture_is_stored_with_its_credit_and_marked_ready_together(worker):
     assert worker.fetches == ["https://live.staticflickr.com/1.jpg"]
 
 
-@pytest.mark.parametrize("outcome", [None, KeyError("unknown source")])
-def test_a_picture_no_longer_offered_is_refused_and_never_downloaded(worker, outcome):
+@pytest.mark.parametrize("outcome, source", [(None, "openverse"), (_result(), "unsplash")])
+def test_a_picture_no_longer_offered_is_refused_and_never_downloaded(worker, outcome, source):
     worker.result = outcome
     conn = _worker_conn()
-    assert run(imports.import_one(conn, _import(attempts=1))) == "refused"
+    assert run(imports.import_one(conn, _import(source=source, attempts=1))) == "refused"
     sql, args = _finished(conn)
     assert args[1:] == ("refused", imports.REFUSED) and worker.fetches == [] and worker.stored == []
 
@@ -253,6 +255,41 @@ def test_a_file_we_cant_read_fails_without_retrying(worker):
     worker.fetch_plan = [_fetched(b"not really a jpeg")]
     conn = _worker_conn()
     assert run(imports.import_one(conn, _import(attempts=1))) == "failed"
+
+
+def test_a_last_attempt_left_working_by_a_dead_worker_is_failed_not_stranded():
+    conn = QueryConn(fetchrow={"UPDATE cappe_asset_imports SET status = 'working'": None})
+    run(imports.claim_next(conn, SITE_ID))
+    sweep = conn.sql_for("execute")[0]
+    assert "SET status = 'failed'" in sweep and "status = 'working' AND attempts >= $2" in sweep
+    assert conn.args_for(sweep) == (SITE_ID, imports.MAX_ATTEMPTS, imports.UNREACHABLE)
+    assert imports.requeueable(_import(status="failed"))  # so asking again starts it afresh
+
+
+def test_an_adapters_surprise_fails_that_import_only(worker, monkeypatch):
+    # A KeyError from a payload the adapter didn't expect is not "refused"
+    # (a refusal is final); it is retried like any other failure.
+    worker.result = KeyError("nested")
+    row = _import(attempts=1)
+    monkeypatch.setattr(imports, "claim_next", AsyncMock(return_value=row))
+    conn = _worker_conn()
+    assert run(imports.import_next(conn, SITE_ID)) == "pending"
+    assert _finished(conn)[1][1:] == ("pending", imports.UNREACHABLE)
+
+
+def test_the_mets_web_large_copy_stands_in_when_the_original_times_out(worker):
+    worker.result = _result(source="met", source_id="1", image_url="https://images.metmuseum.org/orig.jpg",
+                            thumb_url="https://images.metmuseum.org/web-large.jpg", license="cc0")
+    worker.fetch_plan = [TimeoutError(), _fetched(_jpeg((900, 600)))]
+    assert run(imports.import_one(_worker_conn(), _import(source="met", source_id="1", attempts=1))) == "ready"
+    assert worker.fetches == ["https://images.metmuseum.org/orig.jpg", "https://images.metmuseum.org/web-large.jpg"]
+
+
+def test_a_requeued_import_counts_as_a_new_request():
+    conn = QueryConn(fetch={"INSERT INTO cappe_asset_imports": [], "FROM cappe_asset_imports WHERE site_id": []})
+    run(imports.enqueue(conn, site_id=SITE_ID, account_id=ACCOUNT.id, keys=[("openverse", "a")]))
+    upsert = conn.sql_for("fetch")[0]
+    assert "created_at = NOW()" in upsert.split("DO UPDATE", 1)[1]  # daily_used counts by created_at
 
 
 def test_a_storage_hiccup_is_retried(worker):
@@ -317,15 +354,15 @@ def _client():
 def _site_conn(**tables):
     fetchrow = {"FROM cappe_sites": {"id": SITE_ID, "account_id": ACCOUNT.id}}
     fetchrow.update(tables.pop("fetchrow", {}))
-    return QueryConn(fetchrow=fetchrow, **tables)
+    return TxConn(fetchrow=fetchrow, **tables)
 
 
 def test_search_marks_what_is_already_in_and_signs_thumbnails(monkeypatch, routes):
     async def search(source, q, page):
         assert (source, q, page) == ("openverse", "harbor", 2)
-        return [_result(), _result(source_id="def")]
+        return [_result(), _result(source_id="def")], True
 
-    monkeypatch.setattr(library.sources, "search", search)
+    monkeypatch.setattr(library.sources, "search_page", search)
     routes.conn = _site_conn(fetch={"FROM cappe_assets": [{"source": "openverse", "source_id": "def"}]})
     with _client() as client:
         res = client.get(f"/sites/{SITE_ID}/library/search", params={"source": "openverse", "q": "harbor", "page": 2})
@@ -337,11 +374,33 @@ def test_search_marks_what_is_already_in_and_signs_thumbnails(monkeypatch, route
     assert "image_url" not in body["results"][0]  # the archive's file address stays server-side
 
 
+def test_a_page_with_nothing_publishable_isnt_the_last(monkeypatch, routes):
+    async def search(source, q, page):
+        return [], True  # The Met: every hit on this page is copyrighted
+
+    monkeypatch.setattr(library.sources, "search_page", search)
+    routes.conn = _site_conn(fetch={"FROM cappe_assets": []})
+    with _client() as client:
+        body = client.get(f"/sites/{SITE_ID}/library/search", params={"source": "met", "q": "harbor"}).json()
+    assert body["results"] == [] and body["has_more"] is True
+
+
+def test_the_allowance_is_counted_under_a_per_account_lock(routes):
+    routes.conn = _import_conn(used=10, queued=[_import(source_id="a")])
+    with _client() as client:
+        res = client.post(f"/sites/{SITE_ID}/library/import", json={"items": [{"source": "openverse",
+                                                                               "source_id": "a"}]})
+    assert res.status_code == 202, res.text
+    tx = routes.conn.tx_writes
+    assert "pg_advisory_xact_lock" in tx[0] and routes.conn.args_for(tx[0]) == (f"cappe_stock_import:{ACCOUNT.id}",)
+    assert any("count(*)" in q for q in tx) and any("INSERT INTO cappe_asset_imports" in q for q in tx)
+
+
 def test_search_errors(monkeypatch, routes):
     async def down(source, q, page):
         raise sources.SourceError("HTTP 503")
 
-    monkeypatch.setattr(library.sources, "search", down)
+    monkeypatch.setattr(library.sources, "search_page", down)
     routes.conn = _site_conn()
     with _client() as client:
         assert client.get(f"/sites/{SITE_ID}/library/search",
@@ -479,6 +538,18 @@ def test_stocking_a_topic_when_every_archive_is_down(monkeypatch, routes):
     with _client() as client:
         res = client.post(f"/sites/{SITE_ID}/library/stock-topic", json={"topic": "science"})
     assert res.status_code == 502
+
+
+def test_stocking_a_topic_already_stocked_says_so_not_that_archives_are_down(monkeypatch, routes):
+    async def search(source, q, page):
+        return [_result(source=source, source_id="x")]
+
+    monkeypatch.setattr(library.sources, "search", search)
+    routes.conn = _site_conn(fetch={"FROM cappe_assets": [{"source": s, "source_id": "x"}
+                                                          for s in ("openverse", "smithsonian", "met", "nasa")]})
+    with _client() as client:
+        res = client.post(f"/sites/{SITE_ID}/library/stock-topic", json={"topic": "science"})
+    assert res.status_code == 409 and "already in your library" in res.json()["detail"]
 
 
 def test_every_topic_has_set_searches():

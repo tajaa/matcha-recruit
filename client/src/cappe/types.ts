@@ -1142,6 +1142,8 @@ export type CappeMagazine = {
   plan_includes_paid: boolean
   /** The account's Stripe can take charges. */
   stripe_ready: boolean
+  /** The site's currency: what readers are charged in. */
+  currency?: string
   /** Gummfit's share of each reader payment, in basis points. */
   fee_bps: number
 }
