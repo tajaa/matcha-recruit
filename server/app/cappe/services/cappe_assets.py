@@ -147,16 +147,19 @@ async def list_assets(
     conn, site_id: UUID, *, kind: Optional[str] = None, q: Optional[str] = None, limit: int = 200
 ) -> list[dict[str, Any]]:
     """A site's assets, newest first. `kind` filters to generated, upload or
-    stock; `q` matches the alt text, caption, title, creator or prompt."""
+    stock; `q` matches the alt text, caption, title, creator, credit or
+    prompt, literally (a `%` or `_` in it is just that character)."""
     clauses, args = ["site_id = $1"], [site_id]
     if kind:
         args.append(kind)
         clauses.append(f"kind = ${len(args)}")
     if q:
-        args.append(f"%{q.strip()}%")
+        literal = q.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        args.append(f"%{literal}%")
         n = len(args)
         clauses.append(
-            f"(alt ILIKE ${n} OR caption ILIKE ${n} OR title ILIKE ${n} OR creator ILIKE ${n} OR prompt ILIKE ${n})"
+            f"(alt ILIKE ${n} OR caption ILIKE ${n} OR title ILIKE ${n} OR creator ILIKE ${n} "
+            f"OR credit_line ILIKE ${n} OR prompt ILIKE ${n})"
         )
     args.append(limit)
     rows = await conn.fetch(
