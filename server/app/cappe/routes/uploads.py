@@ -11,6 +11,7 @@ import logging
 from typing import Optional
 from uuid import UUID
 
+from asyncpg.exceptions import ForeignKeyViolationError
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 
 from ...core.services.image_gen import ImageGenError, generate_image
@@ -31,6 +32,7 @@ from ..services.design_gate import is_premium_plan
 from ..services.image_prompting import build_image_prompt
 from ..services.magazine.stories import stories_using
 from ..services.merlin.catalog import AI_IMAGE_SIZES, DEFAULT_AI_IMAGE_SIZE
+from ..services.render_cache import invalidate_site_render_cache
 from ._shared import get_owned_site, read_capped
 
 logger = logging.getLogger(__name__)
@@ -320,6 +322,9 @@ async def update_site_asset(
         updated = await cappe_assets.update_asset(conn, site_id, asset_id, fields)
     if updated is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
+    if fields:
+        # Story pages, the front and the feed print its credit and alt text.
+        await invalidate_site_render_cache(site_id)
     return CappeAsset(**updated)
 
 
@@ -340,6 +345,13 @@ async def delete_site_asset(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=f"A story uses this picture ({used_by[0]}). Take it out of the story first.",
             )
-        deleted = await cappe_assets.delete_asset(conn, site_id, asset_id)
+        try:
+            deleted = await cappe_assets.delete_asset(conn, site_id, asset_id)
+        except ForeignKeyViolationError as exc:
+            # A story took the picture after the check above (a save in another tab).
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="A story uses this picture. Take it out of the story first.",
+            ) from exc
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Asset not found")
