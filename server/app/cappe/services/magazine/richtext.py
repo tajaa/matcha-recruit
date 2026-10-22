@@ -100,7 +100,10 @@ def render_md(source: str | None) -> str:
 
 
 _MD_MARKS = re.compile(r"(\*\*|__|\*|_|`|^#{1,6}\s*|^>\s*|^\s*[-*+]\s+|^\s*\d+\.\s+)", re.M)
-_MD_LINK = re.compile(r"!?\[([^\]]*)\]\([^)]*\)")
+# Neither part may hold its own opener: a scan from each `[` (or `(`) stops at
+# the next one (one level of parentheses in an address is allowed), so text
+# full of brackets is read in linear time, not quadratic.
+_MD_LINK = re.compile(r"!?\[([^\[\]]*)\]\((?:[^()]|\([^()]*\))*\)")
 
 
 def md_to_text(source: str | None) -> str:
