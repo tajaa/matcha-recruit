@@ -35,6 +35,9 @@ MAX_PIXELS = 50_000_000
 # The stored copy is capped here: a story column is at most ~2000 px wide on a
 # retina screen, and this keeps an 8K upload from becoming an 8K page image.
 MAX_SIDE = 3200
+# An animation is decoded frame by frame into memory (RGBA, 4 bytes a pixel),
+# so its frames together get a budget of their own.
+MAX_ANIMATED_PIXELS = 40_000_000
 VARIANT_WIDTHS = (480, 960, 1440, 2048)
 SHARE_WIDTH = 1200
 
@@ -91,22 +94,23 @@ def _open(data: bytes) -> Image.Image:
     return img
 
 
-def _to_srgb(img: Image.Image) -> Image.Image:
-    """Convert an image with an embedded colour profile (a phone's Display P3)
-    to sRGB, so dropping the profile doesn't shift its colours. Best effort:
-    an unreadable profile leaves the pixels as they are."""
+def _to_srgb(img: Image.Image, mode: str) -> Optional[Image.Image]:
+    """`img` in sRGB and `mode`, through its embedded colour profile (a phone's
+    Display P3, a press photo's CMYK), so dropping the profile doesn't shift
+    its colours. The profile describes the pixels as they came, so it is
+    applied before any other conversion. None when there is no profile or it
+    can't be read: the caller converts naively."""
     icc = img.info.get("icc_profile")
-    if not icc or img.mode not in ("RGB", "RGBA"):
-        return img
+    if not icc or img.mode not in ("RGB", "RGBA", "CMYK"):
+        return None
     try:
         from PIL import ImageCms
 
         src = ImageCms.ImageCmsProfile(io.BytesIO(icc))
         dst = ImageCms.createProfile("sRGB")
-        converted = ImageCms.profileToProfile(img, src, dst, outputMode=img.mode)
-        return converted or img
+        return ImageCms.profileToProfile(img, src, dst, outputMode=mode)
     except Exception:  # noqa: BLE001 — colour fidelity is not worth failing an upload
-        return img
+        return None
 
 
 def _clean(img: Image.Image) -> Image.Image:
@@ -114,8 +118,8 @@ def _clean(img: Image.Image) -> Image.Image:
     EXIF, XMP, comment or profile from the original can be written back."""
     img = ImageOps.exif_transpose(img)
     has_alpha = img.mode in ("RGBA", "LA", "PA") or (img.mode == "P" and "transparency" in img.info)
-    img = img.convert("RGBA" if has_alpha else "RGB")
-    img = _to_srgb(img)
+    mode = "RGBA" if has_alpha else "RGB"
+    img = _to_srgb(img, mode) or img.convert(mode)
     return Image.frombytes(img.mode, img.size, img.tobytes())
 
 
@@ -140,18 +144,67 @@ def _resized(img: Image.Image, width: int) -> Image.Image:
     return img.resize((width, height), Image.LANCZOS)
 
 
+# GIF extensions an animation needs: how a frame is shown and how it loops.
+_GIF_KEEP_APPS = (b"NETSCAPE2.0", b"ANIMEXTS1.0")
+
+
+def _gif_without_metadata(data: bytes) -> bytes:
+    """The GIF's own bytes, losslessly, minus everything that isn't picture:
+    comment and plain-text extensions, application extensions other than
+    looping (XMP rides in one, and can carry a GPS position), and anything
+    after the trailer. Re-encoding would re-quantize every frame."""
+    def sub_blocks(i: int) -> int:
+        while True:
+            size = data[i]
+            i += 1 + size
+            if size == 0:
+                return i
+
+    try:
+        if data[:6] not in (b"GIF87a", b"GIF89a"):
+            raise ValueError("not a GIF")
+        packed = data[10]
+        i = 13 + (3 * (2 << (packed & 7)) if packed & 0x80 else 0)
+        out = [data[:i]]
+        while True:
+            kind = data[i]
+            if kind == 0x3B:  # trailer
+                out.append(b"\x3b")
+                return b"".join(out)
+            if kind == 0x2C:  # an image: descriptor, local colour table, LZW data
+                packed = data[i + 9]
+                j = i + 10 + (3 * (2 << (packed & 7)) if packed & 0x80 else 0) + 1
+                end = sub_blocks(j)
+                out.append(data[i:end])
+            elif kind == 0x21:
+                label = data[i + 1]
+                end = sub_blocks(i + 2)
+                app = data[i + 3:i + 3 + data[i + 2]] if label == 0xFF else b""
+                if label == 0xF9 or app in _GIF_KEEP_APPS:
+                    out.append(data[i:end])
+            else:
+                raise ValueError(f"unknown GIF block {kind:#x}")
+            if end > len(data):
+                raise ValueError("truncated")
+            i = end
+    except (IndexError, ValueError) as exc:
+        raise ImageRejected("That file isn't an image we can read.") from exc
+
+
 def _animated(img: Image.Image, data: bytes, mime: str) -> ProcessedImage:
-    """GIF carries no EXIF and is stored as it came. An animated WebP can, so
-    its frames are written again without it."""
+    """A GIF keeps its frames as they came, with its metadata cut out. Any
+    other animation (WebP, APNG) has its frames written again as WebP."""
     if mime == "image/gif":
-        return ProcessedImage(data=data, mime=mime, width=img.width, height=img.height)
+        return ProcessedImage(data=_gif_without_metadata(data), mime=mime, width=img.width, height=img.height)
+    if img.width * img.height * getattr(img, "n_frames", 1) > MAX_ANIMATED_PIXELS:
+        raise ImageRejected("That animation is too large.")
     frames, durations = [], []
     for frame in ImageSequence.Iterator(img):
         frames.append(Image.frombytes("RGBA", frame.size, frame.convert("RGBA").tobytes()))
         durations.append(frame.info.get("duration", 100))
     out = _encode(frames[0], "WEBP", save_all=True, append_images=frames[1:], duration=durations,
                   loop=img.info.get("loop", 0), quality=_WEBP_QUALITY)
-    return ProcessedImage(data=out, mime=mime, width=img.width, height=img.height)
+    return ProcessedImage(data=out, mime="image/webp", width=img.width, height=img.height)
 
 
 def variant_widths(width: int) -> tuple[int, ...]:
