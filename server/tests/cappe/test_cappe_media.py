@@ -109,8 +109,58 @@ def test_an_animated_gif_is_stored_as_it_came():
     buf = io.BytesIO()
     frames[0].save(buf, "GIF", save_all=True, append_images=frames[1:], duration=50, loop=0)
     out = media.process_image(buf.getvalue(), "image/gif", derivatives=True)
-    assert out.data == buf.getvalue()
+    assert out.data == buf.getvalue()  # nothing to cut: the frames are the same bytes
     assert out.webp == () and out.share is None
+
+
+def _gif_with_metadata() -> tuple[bytes, bytes]:
+    """A two-frame GIF, and the same GIF carrying a comment, an XMP packet
+    with a GPS position, and bytes after its trailer."""
+    frames = [Image.new("RGB", (10, 10), c).convert("P") for c in ("red", "green")]
+    buf = io.BytesIO()
+    frames[0].save(buf, "GIF", save_all=True, append_images=frames[1:], duration=50, loop=0)
+    clean = buf.getvalue()
+    xmp = b'<x:xmpmeta><exif:GPSLatitude>37,46.5N</exif:GPSLatitude></x:xmpmeta>'
+    xmp_ext = b"\x21\xff\x0bXMP DataXMP" + b"".join(
+        bytes([len(xmp[i:i + 255])]) + xmp[i:i + 255] for i in range(0, len(xmp), 255)) + b"\x00"
+    comment = b"\x21\xfe\x0fshot at home 42\x00"
+    first_image = clean.index(b"\x21\xf9")  # the first frame's control block
+    dirty = clean[:first_image] + xmp_ext + comment + clean[first_image:] + b"GPS 37.77,-122.41"
+    return clean, dirty
+
+
+def test_an_animated_gif_loses_its_comment_xmp_and_trailing_bytes():
+    clean, dirty = _gif_with_metadata()
+    out = media.process_image(dirty, "image/gif")
+    assert b"GPSLatitude" not in out.data and b"shot at home" not in out.data and b"GPS 37" not in out.data
+    assert out.data == clean  # every frame and the loop count kept, byte for byte
+    with Image.open(io.BytesIO(out.data)) as img:
+        assert img.n_frames == 2 and img.info.get("loop") == 0
+
+
+def test_a_truncated_gif_is_refused_rather_than_stored_as_is():
+    clean, _ = _gif_with_metadata()
+    with pytest.raises(media.ImageRejected):
+        media._gif_without_metadata(clean[:-6])
+
+
+def test_an_animated_png_is_stored_as_the_webp_it_became():
+    frames = [Image.new("RGBA", (12, 12), c) for c in ("red", "blue")]
+    buf = io.BytesIO()
+    frames[0].save(buf, "PNG", save_all=True, append_images=frames[1:], duration=80)
+    out = media.process_image(buf.getvalue(), "image/png")
+    assert (out.mime, out.ext) == ("image/webp", ".webp")
+    with Image.open(io.BytesIO(out.data)) as img:
+        assert img.format == "WEBP" and img.n_frames == 2
+
+
+def test_an_animation_too_large_to_decode_is_refused(monkeypatch):
+    frames = [Image.new("RGB", (20, 20), c) for c in ("red", "green", "blue")]
+    buf = io.BytesIO()
+    frames[0].save(buf, "WEBP", save_all=True, append_images=frames[1:], duration=80)
+    monkeypatch.setattr(media, "MAX_ANIMATED_PIXELS", 20 * 20 * 3 - 1)
+    with pytest.raises(media.ImageRejected, match="animation is too large"):
+        media.process_image(buf.getvalue(), "image/webp")
 
 
 def test_an_animated_webp_is_written_again_without_its_exif():
@@ -171,7 +221,27 @@ def test_a_colour_profile_is_converted_to_srgb_and_not_kept():
 def test_an_unreadable_profile_leaves_the_pixels_alone():
     img = Image.new("RGB", (4, 4), "red")
     img.info["icc_profile"] = b"not a profile"
-    assert media._to_srgb(img) is img
+    assert media._to_srgb(img, "RGB") is None
+    out = media._clean(img)
+    assert out.getpixel((0, 0)) == (255, 0, 0) and "icc_profile" not in out.info
+
+
+def test_a_cmyk_picture_goes_through_its_own_profile_before_becoming_rgb(monkeypatch):
+    # The profile describes CMYK pixels: it has to see them as CMYK, not after
+    # a naive convert("RGB") (which it would refuse, keeping shifted colours).
+    seen = {}
+
+    def profile_to_profile(img, src, dst, outputMode):
+        seen.update(mode=img.mode, out=outputMode)
+        return Image.new(outputMode, img.size, (1, 2, 3))
+
+    monkeypatch.setattr(ImageCms, "ImageCmsProfile", lambda f: object())
+    monkeypatch.setattr(ImageCms, "profileToProfile", profile_to_profile)
+    img = Image.new("CMYK", (4, 4), (0, 255, 255, 0))
+    img.info["icc_profile"] = b"a CMYK press profile"
+    out = media._clean(img)
+    assert seen == {"mode": "CMYK", "out": "RGB"}
+    assert out.mode == "RGB" and out.getpixel((0, 0)) == (1, 2, 3)
 
 
 def test_bytes_that_are_not_an_image_are_refused():

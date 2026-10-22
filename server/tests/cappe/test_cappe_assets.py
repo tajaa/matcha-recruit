@@ -111,7 +111,16 @@ async def test_list_assets_searches_the_words_around_a_picture():
     await cappe_assets.list_assets(conn, site_id, kind="stock", q=" harbour ")
     sql = conn.statements[0]
     assert "alt ILIKE $3" in sql and "creator ILIKE $3" in sql and "prompt ILIKE $3" in sql
+    assert "credit_line ILIKE $3" in sql  # an upload's credit is all it has of its photographer
     assert conn.args[0] == (site_id, "stock", "%harbour%", 200)
+
+
+@pytest.mark.asyncio
+async def test_list_assets_searches_for_percent_and_underscore_literally():
+    conn = FakeConn()
+    site_id = uuid4()
+    await cappe_assets.list_assets(conn, site_id, q="100%_off\\")
+    assert conn.args[0][1] == "%100\\%\\_off\\\\%"
 
 
 def test_row_tolerates_missing_or_broken_variants():
