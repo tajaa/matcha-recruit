@@ -38,9 +38,11 @@ export type FrameMessage =
 
 /** The longest plain words the page may send (a field's own limit is applied
  *  where the edit lands: storyDoc), and the largest rich document, as JSON:
- *  a text block's 20,000 characters with room for its paragraphs and marks. */
+ *  more than a whole story the server keeps (600 KB), so a document too big
+ *  to save reaches the server and its message is what the owner sees; this
+ *  only turns away absurd messages. */
 export const MAX_VALUE = 20_000
-export const MAX_DOC_JSON = 200_000
+export const MAX_DOC_JSON = 2_000_000
 const MAX_BLOCK = 119
 const INSERTABLE = new Set<StoryBlock['type']>(['text', 'photo', 'photos', 'quote', 'sidebar', 'qa', 'divider'])
 const KEYS = new Set(['undo', 'redo', 'save', 'delete'])

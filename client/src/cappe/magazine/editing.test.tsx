@@ -192,6 +192,29 @@ describe('StoryEditor — editing', () => {
     expect(headline).toHaveValue('Dawn')
   })
 
+  it('undoes rich text with the story history only, and saves what is shown', async () => {
+    api.put.mockImplementation((_path: string, body: Partial<CappePost>) => Promise.resolve(post(body)))
+    mountEditor()
+    await screen.findByLabelText('Headline')
+    const field = screen.getByRole('textbox', { name: 'Text' }) as HTMLElement & { editor: import('@tiptap/core').Editor }
+    field.editor.chain().setTextSelection(field.editor.state.doc.content.size - 1).insertContent(' More.').run()
+    await waitFor(() => expect(field).toHaveTextContent('First words. More.'))
+    // A while later (past the history's merge window), ⌘Z in the field: one
+    // undo (the story's), not the field's and then the story's.
+    const now = Date.now.bind(Date)
+    vi.spyOn(Date, 'now').mockImplementation(() => now() + 5_000)
+    // (Ctrl: jsdom isn't a Mac, so that is the field editor's own undo key here.)
+    fireEvent.keyDown(field, { key: 'z', ctrlKey: true })
+    await waitFor(() => expect(field).toHaveTextContent(/^First words\.$/))
+    expect(screen.queryByText('Unsaved')).not.toBeInTheDocument()
+    fireEvent.keyDown(field, { key: 'z', ctrlKey: true, shiftKey: true })
+    await waitFor(() => expect(field).toHaveTextContent('First words. More.'))
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(api.put).toHaveBeenCalled())
+    const block = (api.put.mock.calls[0][1] as { content: { blocks: StoryBlock[] } }).content.blocks[1]
+    expect(block).toMatchObject({ md: 'First words. More.' })
+  })
+
   it('saves with ⌘S only when there is something to save', async () => {
     api.put.mockResolvedValue(post({ title: 'Dawn' }))
     mountEditor()

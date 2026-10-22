@@ -3,6 +3,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { generateJSON } from '@tiptap/core'
 import cases from '../../../../server/tests/cappe/fixtures/magazine_rt_cases.json'
+import cleanCases from '../../../../server/tests/cappe/fixtures/magazine_rt_clean_cases.json'
 import StoryEditor from './editor/StoryEditor'
 import IssueEditor from './issues/IssueEditor'
 import { newBlock } from './editor/blocks'
@@ -50,6 +51,22 @@ describe('rich text, as the server keeps it (the shared fixture)', () => {
     })
   }
 
+  for (const c of cleanCases) {
+    it(`keeps what the server keeps of ${c.name}`, () => expect(cleanRt(c.raw)).toEqual(c.rt))
+  }
+
+  it('keeps every word of a list pasted seven levels deep', () => {
+    let html = '<p>Keep these interview notes</p>'
+    for (let i = 6; i >= 1; i--) html = `<p>level ${i}</p><ul><li>${html}</li></ul>`
+    const kept = cleanRt(generateJSON(`<ul><li>${html}</li></ul>`, richExtensions()))!
+    expect(rtText(kept)).toContain('Keep these interview notes')
+    expect(rtToMd(kept)).toContain('Keep these interview notes')
+    // Nested past any sense, walked without running out of stack.
+    let deep: unknown = { type: 'paragraph', content: [{ type: 'text', text: 'bottom' }] }
+    for (let i = 0; i < 20_000; i++) deep = { type: 'tableCell', content: [deep] }
+    expect(cleanRt({ type: 'doc', content: [deep] })).toEqual(doc(t('bottom')))
+  })
+
   it('keeps only what the server keeps', () => {
     const raw = { type: 'doc', content: [
       { type: 'paragraph', content: [
@@ -83,7 +100,7 @@ describe('rich text, as the server keeps it (the shared fixture)', () => {
     expect(cleanRt(doc(t('a'.repeat(30)), t('b'.repeat(30))), 40)).toEqual(doc(t(`${'a'.repeat(30)}${'b'.repeat(10)}`)))
     let deep: unknown = { type: 'text', text: 'x' }
     for (let i = 0; i < 9; i++) deep = { type: 'span', content: [deep] }
-    expect(cleanRt({ type: 'doc', content: [{ type: 'paragraph', content: [deep] }] })).toEqual({ type: 'doc', content: [{ type: 'paragraph' }] })
+    expect(cleanRt({ type: 'doc', content: [{ type: 'paragraph', content: [deep] }] })).toEqual(doc(t('x')))
     for (const bad of ['javascript:x', 'data:text/html,x', '/here', 'https://a\nb', '', 3]) expect(cleanHref(bad)).toBeNull()
     expect(cleanHref('mailto:desk@example.com')).toBe('mailto:desk@example.com')
   })
@@ -131,6 +148,12 @@ describe('readMessage', () => {
       { type: 'text', text: 'Hi', marks: [{ type: 'bold' }, { type: 'link', attrs: { href: 'javascript:x' } }] }] }, { type: 'image' }] }
     expect(readMessage({ type: 'mz-edit', story: 'p-1', block: 1, field: 'md', value: sent, rich: true }, ctx))
       .toEqual({ type: 'mz-edit', story: 'p-1', block: 1, field: 'md', value: doc(t('Hi', 'bold')), rich: true })
+    // Anything the server could keep gets through (its own limit is the one an owner is told about):
+    // 2,800 bold runs between plain spaces, past the first bridge's 200 KB.
+    const runs = Array.from({ length: 2_800 }, () => [t('x', 'bold'), t(' ')]).flat()
+    const big = { type: 'doc', content: [{ type: 'paragraph', content: runs }] }
+    expect(JSON.stringify(big).length).toBeGreaterThan(200_000)
+    expect(readMessage({ type: 'mz-edit', story: 'p-1', block: 1, field: 'md', value: big, rich: true }, ctx)).not.toBeNull()
     expect(readMessage({ type: 'mz-key', key: 'undo' }, ctx)).toEqual({ type: 'mz-key', key: 'undo' })
   })
 
@@ -144,7 +167,7 @@ describe('readMessage', () => {
       { type: 'mz-edit', story: 'p-1', block: 1, field: 'items.0.__proto__.x', value: 'x', rich: false },
       { type: 'mz-edit', story: 'p-1', block: 1, field: 'constructor.prototype', value: 'x', rich: false },
       { type: 'mz-edit', story: 'p-1', block: 1, field: 'md', value: '<p>x</p>', rich: true },
-      { type: 'mz-edit', story: 'p-1', block: 1, field: 'md', value: doc(t('x'.repeat(200_001))), rich: true },
+      { type: 'mz-edit', story: 'p-1', block: 1, field: 'md', value: doc(t('x'.repeat(2_000_001))), rich: true },
       { type: 'mz-edit', story: 'p-1', block: 1, field: 'md', value: 42, rich: true },
       { type: 'mz-edit', story: 'p-1', block: 1, field: 'md', value: doc(t('x')), rich: 'yes' },
       { type: 'mz-edit', story: 'p-1', block: 1, field: 'caption', value: 'x'.repeat(20_001), rich: false },

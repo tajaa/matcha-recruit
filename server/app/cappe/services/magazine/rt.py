@@ -11,7 +11,8 @@ dashboard's text editor (ProseMirror, through Tiptap) works in:
 
 Everything is checked here before it is stored (`normalize_rt`): only the
 nodes and marks below survive, a link keeps an http(s)/mailto address only,
-unknown blocks keep their words as a paragraph, and the text is capped. The
+unknown blocks, and lists or quotes nested past `MAX_DEPTH`, keep their words
+as paragraphs (nothing typed is dropped silently), and the text is capped. The
 page renders it with `render_rt` (escaped text, no attributes but a link's).
 The Markdown a block also keeps (`md`, for emails, feeds, word counts and the
 iOS app's `body`) is derived from it (`rt_to_md`), and old Markdown-only text
@@ -28,14 +29,16 @@ from html import escape
 from html.parser import HTMLParser
 from typing import Any, Optional
 
-from .richtext import render_md
+from .richtext import md_to_text, render_md
 
 BLOCKS = ("paragraph", "heading", "blockquote", "bulletList", "orderedList")
 # In the editor's own order (its schema), so a document compares equal on both sides.
 MARKS = ("link", "bold", "italic", "strike", "underline")
 LINK_SCHEMES = ("http://", "https://", "mailto:")
 MAX_DEPTH = 6
-MAX_NODES = 6_000
+# Enough for any 20,000 characters (a list of one-letter items is the most
+# nodes per character); past it the owner is told, never cut short.
+MAX_NODES = 30_000
 MAX_HREF = 2_000
 LINK_REL = "nofollow ugc noopener"
 
@@ -89,9 +92,25 @@ def _marks(raw: Any) -> list[dict]:
     return sorted(out, key=lambda m: MARKS.index(m["type"]))
 
 
+def _texts(raw: Any) -> list[dict]:
+    """Every word and line break in `raw`, in order, however deeply it is
+    wrapped (walked without recursion)."""
+    out: list[dict] = []
+    stack = list(reversed(raw)) if isinstance(raw, list) else []
+    while stack:
+        n = stack.pop()
+        if not isinstance(n, dict):
+            continue
+        if n.get("type") in ("text", "hardBreak"):
+            out.append(n)
+        elif isinstance(n.get("content"), list):
+            stack.extend(reversed(n["content"]))
+    return out
+
+
 def _inline(raw: Any, budget: _Budget, depth: int = 0) -> list[dict]:
     if depth > MAX_DEPTH:
-        raise RtError("Lists and quotes can only go so deep.")
+        raw = _texts(raw)  # wrapped past any sense: the words, unwrapped
     out: list[dict] = []
     for n in raw if isinstance(raw, list) else []:
         if not isinstance(n, dict):
@@ -121,20 +140,49 @@ def _inline(raw: Any, budget: _Budget, depth: int = 0) -> list[dict]:
     return out
 
 
-def _flatten(n: dict, budget: _Budget) -> list[dict]:
+def _flatten(n: dict, budget: _Budget, depth: int) -> list[dict]:
     """The words of a block we don't keep, as paragraphs."""
     content = n.get("content") if isinstance(n.get("content"), list) else []
     if any(isinstance(c, dict) and c.get("type") in BLOCKS + ("listItem",) for c in content):
-        return _blocks(content, budget, 1)
+        return _blocks(content, budget, depth + 1)
     inline = _inline(content, budget)
     return [{"type": "paragraph", "content": inline}] if inline else []
+
+
+def _paragraphs(n: dict, budget: _Budget) -> list[dict]:
+    """Blocks nested past `MAX_DEPTH`: each paragraph or heading in them a
+    paragraph of its words (walked without recursion)."""
+    groups: list[list[dict]] = [[]]
+    stack: list[Any] = [n]
+    while stack:
+        node = stack.pop()
+        if node is None:  # the end of a paragraph or heading
+            groups.append([])
+            continue
+        if not isinstance(node, dict):
+            continue
+        if node.get("type") in ("text", "hardBreak"):
+            groups[-1].append(node)
+            continue
+        if node.get("type") in ("paragraph", "heading"):
+            groups.append([])
+            stack.append(None)
+        if isinstance(node.get("content"), list):
+            stack.extend(reversed(node["content"]))
+    out = []
+    for words in groups:
+        inline = _inline(words, budget)
+        if inline:
+            budget.node()
+            out.append({"type": "paragraph", "content": inline})
+    return out
 
 
 def _block(n: Any, budget: _Budget, depth: int) -> list[dict]:
     if not isinstance(n, dict):
         return []
     if depth > MAX_DEPTH:
-        raise RtError("Lists and quotes can only go so deep.")
+        return _paragraphs(n, budget)
     budget.node()
     kind = n.get("type")
     content = n.get("content")
@@ -166,7 +214,7 @@ def _block(n: Any, budget: _Budget, depth: int) -> list[dict]:
             start = attrs.get("start")
             node["attrs"] = {"start": start if isinstance(start, int) and 1 <= start <= 9999 else 1}
         return [node]
-    return _flatten(n, budget)
+    return _flatten(n, budget, depth)
 
 
 def _blocks(raw: Any, budget: _Budget, depth: int, *, quote: bool = False, in_item: bool = False) -> list[dict]:
@@ -376,18 +424,30 @@ class _ToRt(HTMLParser):
 
 def md_to_rt(md: Optional[str]) -> dict:
     """A document for text kept only as Markdown (stories written before the
-    rich editor, or Assist's suggestions)."""
+    rich editor, or Assist's suggestions). Never fails: Markdown the editor
+    couldn't hold in shape (more pieces than `MAX_NODES`) comes back as its
+    paragraphs of plain words, so an old story always opens."""
     parser = _ToRt()
     parser.feed(render_md(md or ""))
     parser.close()
-    # The newline between a line's words and a <br> in render_md's output.
-    def tidy(nodes: list) -> None:
-        for n in nodes:
-            n.pop("_loose", None)
-            content = n.get("content") or []
-            for i, c in enumerate(content):
-                if c.get("type") == "text" and i and content[i - 1].get("type") == "hardBreak":
-                    c["text"] = c["text"].lstrip()
-            tidy(content)
-    tidy(parser.root["content"])
-    return normalize_rt(parser.root) or empty_rt()
+    # The newline between a line's words and a <br> in render_md's output
+    # (walked without recursion: an old quote may be nested any depth).
+    stack = [parser.root]
+    while stack:
+        n = stack.pop()
+        n.pop("_loose", None)
+        content = n.get("content") or []
+        for i, c in enumerate(content):
+            if c.get("type") == "text" and i and content[i - 1].get("type") == "hardBreak":
+                c["text"] = c["text"].lstrip()
+        stack.extend(content)
+    try:
+        return normalize_rt(parser.root) or empty_rt()
+    except RtError:
+        words = [" ".join(p.split()) for p in re.split(r"\n\s*\n", md_to_text(md or ""))]
+        doc = {"type": "doc", "content": [{"type": "paragraph", "content": [{"type": "text", "text": w}]} for w in words if w]}
+        try:
+            return normalize_rt(doc) or empty_rt()
+        except RtError:
+            return normalize_rt({"type": "doc", "content": [{"type": "paragraph", "content": [
+                {"type": "text", "text": " ".join(words)}]}]}) or empty_rt()

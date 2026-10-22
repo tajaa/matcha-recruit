@@ -34,7 +34,8 @@ export default function RichField({ value, onChange, label, placeholder = '', ma
 }) {
   const [link, setLink] = useState<string | null>(null)
   const editor = useEditor({
-    extensions: richExtensions(placeholder),
+    // ⌘Z here is the story's own undo (StoryEditor), not a second one.
+    extensions: richExtensions(placeholder, { history: false }),
     content: value ?? emptyRt(),
     shouldRerenderOnTransaction: true,
     editorProps: {

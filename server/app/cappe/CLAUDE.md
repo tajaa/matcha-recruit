@@ -321,9 +321,11 @@ What is built so far:
   text block's and a sidebar's `rt`, an interview answer's `a_rt`, are ProseMirror JSON (what the
   dashboard's Tiptap editor types). `normalize_rt` keeps only paragraphs, headings 2–3, quotes, lists
   (ordered with `start`), line breaks and the marks link (http/https/mailto only)/bold/italic/strike/
-  underline, merges runs, flattens anything else into paragraphs, caps characters, nodes and depth.
+  underline, merges runs, turns anything else (and lists/quotes nested past six levels) into paragraphs
+  of its words without recursion, so nothing typed is dropped, and caps characters and nodes (30,000).
   `story_schema._rich`: a sent document wins and its `md` is derived (`rt_to_md`, for emails, feeds, word
-  counts and the iOS `body`); Markdown alone (an old story, Assist, iOS) becomes a document (`md_to_rt`).
+  counts and the iOS `body`); Markdown alone (an old story, Assist, iOS) becomes a document (`md_to_rt`, which never
+  fails: past the budget it gives plain paragraphs, so every old story opens).
   The page renders `render_rt` (else `render_md` for a block stored before documents). A single story
   for the owner (`blog._out`, through `stories.with_documents`) and the layout starters always carry
   documents; the list doesn't (converting Markdown costs about 1 ms a block). `tests/cappe/fixtures/

@@ -53,9 +53,24 @@ class Budget {
   constructor(chars: number) { this.chars = chars }
 }
 
+/** Every word and line break in `raw`, in order, however deeply wrapped
+ *  (walked without recursion). */
+function texts(raw: unknown): Raw[] {
+  const out: Raw[] = []
+  const stack = [...list(raw)].reverse()
+  while (stack.length) {
+    const node = obj(stack.pop())
+    if (!node) continue
+    if (node.type === 'text' || node.type === 'hardBreak') out.push(node)
+    else if (Array.isArray(node.content)) stack.push(...[...node.content].reverse())
+  }
+  return out
+}
+
 function inline(raw: unknown, budget: Budget, depth = 0): RtInline[] {
   const out: RtInline[] = []
-  if (depth > MAX_DEPTH) return out
+  // Wrapped past any sense: the words, unwrapped.
+  if (depth > MAX_DEPTH) raw = texts(raw)
   for (const n of list(raw)) {
     const node = obj(n)
     if (!node) continue
@@ -74,9 +89,31 @@ function inline(raw: unknown, budget: Budget, depth = 0): RtInline[] {
   return out
 }
 
+/** Blocks nested past MAX_DEPTH: each paragraph or heading in them a
+ *  paragraph of its words, so nothing typed is lost (walked without
+ *  recursion). */
+function paragraphs(n: Raw, budget: Budget): RtBlock[] {
+  const groups: Raw[][] = [[]]
+  const stack: (unknown | null)[] = [n]
+  while (stack.length) {
+    const item = stack.pop()
+    if (item === null) { groups.push([]); continue } // the end of a paragraph or heading
+    const node = obj(item)
+    if (!node) continue
+    if (node.type === 'text' || node.type === 'hardBreak') { groups[groups.length - 1].push(node); continue }
+    if (node.type === 'paragraph' || node.type === 'heading') { groups.push([]); stack.push(null) }
+    if (Array.isArray(node.content)) stack.push(...[...node.content].reverse())
+  }
+  return groups.flatMap((words) => {
+    const content = inline(words, budget)
+    return content.length ? [{ type: 'paragraph' as const, content }] : []
+  })
+}
+
 function block(n: unknown, budget: Budget, depth: number): RtBlock[] {
   const node = obj(n)
-  if (!node || depth > MAX_DEPTH) return []
+  if (!node) return []
+  if (depth > MAX_DEPTH) return paragraphs(node, budget)
   const content = node.content
   switch (node.type) {
     case 'paragraph': {
@@ -106,7 +143,7 @@ function block(n: unknown, budget: Budget, depth: number): RtBlock[] {
     }
     default: {
       // A block we don't keep keeps its words, as paragraphs.
-      if (list(content).some((c) => BLOCKS.includes(obj(c)?.type as string))) return blocks(content, budget, 1)
+      if (list(content).some((c) => BLOCKS.includes(obj(c)?.type as string))) return blocks(content, budget, depth + 1)
       const words = inline(content, budget)
       return words.length ? [{ type: 'paragraph', content: words }] : []
     }

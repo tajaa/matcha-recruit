@@ -8,9 +8,15 @@ import { cleanHref } from '../canvas/rt'
  *  line breaks; bold, italic, underline, strike-through and links (web and
  *  mail addresses only). The server keeps exactly this (services/magazine/
  *  rt.py); anything else pasted in becomes plain paragraphs. */
-export function richExtensions(placeholder = ''): AnyExtension[] {
+export function richExtensions(placeholder = '', { history = true }: {
+  /** The field keeps its own undo (on the page, where ⌘Z while typing is
+   *  the field's). The Outline turns it off: there ⌘Z is the story's one
+   *  history, as for every other field. */
+  history?: boolean
+} = {}): AnyExtension[] {
   return [
     StarterKit.configure({
+      undoRedo: history ? undefined : false,
       heading: { levels: [2, 3] },
       code: false,
       codeBlock: false,

@@ -31,7 +31,7 @@ from ..render.sanitize import _js_obj
 from .figures import figure_html, img_html, share_image
 from .magazines import masthead_fonts
 from .richtext import render_md
-from .rt import md_to_rt, normalize_rt
+from .rt import RtError, md_to_rt, normalize_rt
 from .story_render import cover_html, field, render_blocks, split_at_paywall
 from .story_schema import cover_block
 from .topics import topic_label
@@ -354,7 +354,11 @@ def rich_registry(blocks: list[dict]) -> str:
 
 
 def _doc(b: dict, md_key: str, rt_key: str) -> dict:
-    return normalize_rt(b.get(rt_key)) or md_to_rt(b.get(md_key))
+    try:
+        doc = normalize_rt(b.get(rt_key))
+    except RtError:
+        doc = None
+    return doc or md_to_rt(b.get(md_key))
 
 
 def render_story(site: dict, nav: list[dict], mag: dict, post: dict, assets: dict[str, dict], *,

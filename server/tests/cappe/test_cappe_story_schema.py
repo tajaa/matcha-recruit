@@ -76,11 +76,9 @@ def test_a_rich_fields_document_wins_and_its_markdown_follows():
     kept = story_schema.normalize_story({"blocks": [{"type": "text", "md": "Mine", "rt": "<p>x</p>"}]})["blocks"][0]
     assert (kept["md"], kept["rt"]) == ("Mine", _doc("Mine"))
     # A document the owner can't keep is a message, not a crash.
-    deep = {"type": "doc", "content": [{"type": "blockquote", "content": [{"type": "blockquote", "content": [
-        {"type": "blockquote", "content": [{"type": "blockquote", "content": [{"type": "blockquote", "content": [
-            {"type": "blockquote", "content": [{"type": "blockquote", "content": [_doc("x")["content"][0]]}]}]}]}]}]}]}]}
-    with pytest.raises(story_schema.StoryError, match="deep"):
-        story_schema.normalize_story({"blocks": [{"type": "text", "rt": deep}]})
+    huge = {"type": "doc", "content": [_doc("w")["content"][0]] * 15_001}
+    with pytest.raises(story_schema.StoryError, match="too long"):
+        story_schema.normalize_story({"blocks": [{"type": "text", "rt": huge}]})
 
 
 def test_an_empty_story_is_fine_and_other_shapes_are_not():

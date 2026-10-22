@@ -27,7 +27,7 @@ from typing import Optional
 
 from .figures import credit_html, figure_html, img_html
 from .richtext import render_md
-from .rt import normalize_rt, render_rt
+from .rt import RtError, normalize_rt, render_rt
 
 PAYWALL = "paywall"
 # Characters past which a pull quote is set smaller (mz-pull--long).
@@ -49,7 +49,12 @@ def _rich_html(b: dict, md_key: str, rt_key: str) -> str:
     """A rich field's words: from its document (what the editor saves), else
     its Markdown (a story stored before the editor had documents)."""
     doc = b.get(rt_key)
-    return render_rt(normalize_rt(doc)) if isinstance(doc, dict) else render_md(b.get(md_key))
+    if isinstance(doc, dict):
+        try:
+            return render_rt(normalize_rt(doc))
+        except RtError:
+            pass  # saved under other limits: its Markdown still reads
+    return render_md(b.get(md_key))
 
 
 def field(path: str, *, rich: bool = False, ph: str = "") -> str:

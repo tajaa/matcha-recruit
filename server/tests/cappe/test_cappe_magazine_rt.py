@@ -9,11 +9,16 @@ import pathlib
 
 import pytest
 
-from app.cappe.services.magazine import rt
+from app.cappe.services.magazine import pages, rt, story_schema
 from app.cappe.services.magazine.rt import RtError, md_to_rt, normalize_rt, render_rt, rt_has_words, rt_to_md
 from app.cappe.services.magazine.stories import with_documents
+from app.cappe.services.magazine.story_render import render_block
 
-CASES = json.loads((pathlib.Path(__file__).parent / "fixtures" / "magazine_rt_cases.json").read_text(encoding="utf-8"))
+FIXTURES = pathlib.Path(__file__).parent / "fixtures"
+CASES = json.loads((FIXTURES / "magazine_rt_cases.json").read_text(encoding="utf-8"))
+# Documents as an editor or a paste might send them, and what is kept of each;
+# the client's cleanRt is pinned to the same answers.
+CLEAN_CASES = json.loads((FIXTURES / "magazine_rt_clean_cases.json").read_text(encoding="utf-8"))
 
 
 def _t(text, *marks):
@@ -37,6 +42,30 @@ def test_the_shared_cases(case):
     assert render_rt(case["rt"]) == case["html"]
     assert rt_to_md(case["rt"]) == case["md"]
     assert (md_to_rt(case["md"]) == case["rt"]) is case["md_reads_back"]
+
+
+@pytest.mark.parametrize("case", CLEAN_CASES, ids=[c["name"] for c in CLEAN_CASES])
+def test_what_is_kept_of_what_is_sent(case):
+    assert normalize_rt(case["raw"]) == case["rt"]
+
+
+def _words(doc):
+    return " ".join(n["text"] for n in rt._texts(doc["content"]))
+
+
+def test_nothing_nested_too_deep_is_lost():
+    # Lists and quotes past six levels keep every word, as paragraphs at the sixth.
+    keep = next(c for c in CLEAN_CASES if c["name"].startswith("a list nested seven"))
+    assert "Keep these interview notes" in _words(keep["rt"]) and "Keep these interview notes" in rt_to_md(keep["rt"])
+    # Blocks we don't keep, nested past any sense, are walked without recursion.
+    deep = _p(_t("bottom"))
+    for _ in range(3_000):
+        deep = {"type": "tableCell", "content": [deep]}
+    assert normalize_rt(_doc(deep)) == _doc(_p(_t("bottom")))
+    wrapped = _t("bottom", "bold")
+    for _ in range(3_000):
+        wrapped = {"type": "span", "content": [wrapped]}
+    assert normalize_rt(_doc(_p(wrapped))) == _doc(_p(_t("bottom", "bold")))
 
 
 def test_links_keep_web_and_mail_addresses_only():
@@ -95,16 +124,6 @@ def test_what_isnt_a_document_and_the_limits():
     assert normalize_rt({"type": "doc", "content": "x"}) == rt.empty_rt()
     assert normalize_rt(_doc(_p(_t("a" * 30), _t("b" * 30))), max_chars=40) == _doc(_p(_t("a" * 30 + "b" * 10)))
     assert normalize_rt(_doc(_p(_t("x\r\ny")))) == _doc(_p(_t("x\ny")))
-    deep = _p(_t("x"))
-    for _ in range(8):
-        deep = {"type": "blockquote", "content": [deep]}
-    with pytest.raises(RtError, match="deep"):
-        normalize_rt(_doc(deep))
-    wrapped = _t("x")
-    for _ in range(8):
-        wrapped = {"type": "span", "content": [wrapped]}
-    with pytest.raises(RtError, match="deep"):
-        normalize_rt(_doc(_p(wrapped)))
     with pytest.raises(RtError, match="too long"):
         normalize_rt(_doc(*[_p(_t("w")) for _ in range(rt.MAX_NODES)]), max_chars=10**7)
 
@@ -113,6 +132,31 @@ def test_words_and_the_empty_story():
     assert render_rt(None) == "" and render_rt(_doc(_p(), _p(_t("  ")))) == ""
     assert not rt_has_words(None) and not rt_has_words(rt.empty_rt()) and rt_has_words(_doc(_p(_t("x"))))
     assert rt_to_md(None) == "" and md_to_rt(None) == md_to_rt("") == rt.empty_rt()
+
+
+def test_every_old_story_still_opens():
+    # Markdown the base accepted: quotes nested past six, and more list items
+    # than the first node budget allowed.
+    for md in ("> " * 8 + "hello", "- a\n" * 2_000):
+        doc = md_to_rt(md)
+        assert "hello" in _words(doc) or _words(doc).count("a") == 2_000
+        story = story_schema.normalize_story({"blocks": [{"type": "text", "md": md}]})
+        assert story["blocks"][0]["rt"] == doc
+        assert with_documents({"blocks": [{"type": "text", "md": md}]})["blocks"][0]["rt"] == doc
+
+
+def test_markdown_past_the_budget_comes_back_as_plain_paragraphs(monkeypatch):
+    monkeypatch.setattr(rt, "MAX_NODES", 8)
+    assert md_to_rt("**one** *two*\n\n- three\n- four\n\nfive") == _doc(_p(_t("one two three four")), _p(_t("five")))
+    monkeypatch.setattr(rt, "MAX_NODES", 3)
+    assert md_to_rt("one\n\ntwo\n\nthree") == _doc(_p(_t("one two three")))
+
+
+def test_a_document_saved_under_other_limits_still_shows(monkeypatch):
+    block = {"type": "text", "md": "From *Markdown*.", "rt": _doc(_p(_t("a")), _p(_t("b")), _p(_t("c")))}
+    monkeypatch.setattr(rt, "MAX_NODES", 4)
+    assert "From <em>Markdown</em>." in render_block(block, {})
+    assert pages._doc(block, "md", "rt") == _doc(_p(_t("From "), _t("Markdown", "italic"), _t(".")))
 
 
 def test_markdown_stories_become_documents():
