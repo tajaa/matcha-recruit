@@ -26,6 +26,13 @@ async def public_subscribe(slug: str, body: CappeSubscribeRequest, request: Requ
 
     async with get_connection() as conn:
         site = await _published_site(conn, slug)
+        # A writer's readers follow the magazine, double opt-in (`/follow`);
+        # this single opt-in form would mail them issues unconfirmed.
+        if await conn.fetchval(
+            "SELECT 1 FROM cappe_accounts a JOIN cappe_sites s ON s.account_id = a.id "
+            "WHERE s.id = $1 AND a.account_type = 'writer'", site["id"],
+        ):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Site not found")
         # Re-subscribe resurrects a previously-unsubscribed/bounced row.
         await conn.execute(
             """INSERT INTO cappe_subscribers (site_id, email, name, source, status)

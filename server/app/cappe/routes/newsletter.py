@@ -169,7 +169,7 @@ async def get_campaign(
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
         row = await conn.fetchrow(
-            f"SELECT {_CAMPAIGN_COLS} FROM cappe_campaigns WHERE id = $1 AND site_id = $2",
+            f"SELECT {_CAMPAIGN_COLS} FROM cappe_campaigns WHERE id = $1 AND site_id = $2 AND kind = 'campaign'",
             campaign_id,
             site_id,
         )
@@ -190,7 +190,7 @@ async def update_campaign(
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
         current = await conn.fetchrow(
-            "SELECT status FROM cappe_campaigns WHERE id = $1 AND site_id = $2",
+            "SELECT status FROM cappe_campaigns WHERE id = $1 AND site_id = $2 AND kind = 'campaign'",
             campaign_id,
             site_id,
         )
@@ -234,7 +234,7 @@ async def delete_campaign(
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
         result = await conn.execute(
-            "DELETE FROM cappe_campaigns WHERE id = $1 AND site_id = $2",
+            "DELETE FROM cappe_campaigns WHERE id = $1 AND site_id = $2 AND kind = 'campaign'",
             campaign_id,
             site_id,
         )
@@ -262,7 +262,7 @@ async def send_campaign(
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
         campaign = await conn.fetchrow(
-            "SELECT status FROM cappe_campaigns WHERE id = $1 AND site_id = $2",
+            "SELECT status FROM cappe_campaigns WHERE id = $1 AND site_id = $2 AND kind = 'campaign'",
             campaign_id,
             site_id,
         )
