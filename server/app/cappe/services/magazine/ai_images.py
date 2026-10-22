@@ -50,11 +50,12 @@ REAL_PERSON = ("AI illustrations can't show real people. For a real person, use 
 UNAVAILABLE = "Illustrations aren't available right now. Try again in a few minutes."
 FAILED = "The illustration didn't come out. Try again, or describe it another way."
 
-# Offices only a person holds; followed by a capitalised word they name one.
+# Offices only a person holds; followed directly by a capitalised word they
+# name one. No full stop between: "a mayor. Snow falls" is two sentences.
 _TITLES = ("president", "vice president", "senator", "congressman", "congresswoman", "governor", "mayor",
            "prime minister", "chancellor", "pope", "ayatollah", "ceo")
 _TITLE_NAME = re.compile(
-    r"\b(?i:" + "|".join(re.escape(t) for t in sorted(_TITLES, key=len, reverse=True)) + r")\.?\s+[A-Z][a-z'’-]+"
+    r"\b(?i:" + "|".join(re.escape(t) for t in sorted(_TITLES, key=len, reverse=True)) + r")\s+[A-Z][a-z'’-]+"
 )
 _HANDLE = re.compile(r"(?<![\w.])@[A-Za-z0-9_]{2,}")
 

@@ -220,7 +220,7 @@ export default function MagazineSettings() {
             </label>
             <div className="grid gap-4 sm:grid-cols-2">
               <label>
-                <span className={ui.label}>Price a month (USD)</span>
+                <span className={ui.label}>Price a month ({magazine?.currency || 'USD'})</span>
                 <input value={form.price} onChange={(e) => set('price', e.target.value)} inputMode="decimal" placeholder="5"
                   className={ui.input} aria-label="Price a month" />
                 <span className="mt-1 block text-xs text-zinc-500">A new price is for new subscribers; readers keep theirs.</span>

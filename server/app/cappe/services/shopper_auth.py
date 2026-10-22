@@ -45,6 +45,7 @@ async def published_shopper_site(conn, slug):
 # cancel it, nothing else: `require_shopper_session` serves those endpoints,
 # and every purchase still goes through `published_shopper_site`.
 BILLING_STATUSES = ("active", "trialing", "past_due", "unpaid", "paused")
+_LIVE_COMP = "revoked_at IS NULL AND (expires_at IS NULL OR expires_at > NOW())"
 
 
 async def _store(conn, slug):
@@ -70,10 +71,12 @@ async def session_site(conn, slug):
 async def sign_in_site(conn, slug):
     """(site, open) for signing in. A closed store still takes sign-ins while a
     subscription bills there (`subscribes_here` decides whose); otherwise it
-    refuses for the reason it's closed, as before."""
+    refuses for the reason it's closed, as before. A magazine's free
+    subscription (a live comp) counts like a billing one."""
     site, closed = await _store(conn, slug)
     if closed is not None and not await conn.fetchval(
-        "SELECT 1 FROM cappe_shopper_subscriptions WHERE site_id=$1 AND status = ANY($2::text[]) LIMIT 1",
+        "SELECT 1 FROM cappe_shopper_subscriptions WHERE site_id=$1 AND status = ANY($2::text[]) "
+        f"UNION ALL SELECT 1 FROM cappe_magazine_comps WHERE site_id=$1 AND {_LIVE_COMP} LIMIT 1",
         site["id"], list(BILLING_STATUSES),
     ):
         raise closed
@@ -81,10 +84,13 @@ async def sign_in_site(conn, slug):
 
 
 async def subscribes_here(conn, site_id, email) -> bool:
-    """Whether this email has a subscription still billing at this store."""
+    """Whether this email has a subscription still billing at this store, or
+    a live free one to its magazine."""
     return bool(await conn.fetchval(
         "SELECT 1 FROM cappe_shopper_subscriptions sub JOIN cappe_shoppers sh ON sh.id = sub.shopper_id "
-        "WHERE sub.site_id=$1 AND sh.site_id=$1 AND sh.email=$2 AND sub.status = ANY($3::text[]) LIMIT 1",
+        "WHERE sub.site_id=$1 AND sh.site_id=$1 AND sh.email=$2 AND sub.status = ANY($3::text[]) "
+        "UNION ALL SELECT 1 FROM cappe_magazine_comps c JOIN cappe_shoppers sh ON sh.id = c.shopper_id "
+        f"WHERE c.site_id=$1 AND sh.site_id=$1 AND sh.email=$2 AND {_LIVE_COMP} LIMIT 1",
         site_id, email.strip().lower(), list(BILLING_STATUSES),
     ))
 

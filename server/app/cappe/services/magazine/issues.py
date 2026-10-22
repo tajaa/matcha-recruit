@@ -247,11 +247,13 @@ async def save_issue(conn, site_id: UUID, issue_id: UUID, fields: dict[str, Any]
         await _set_assets(conn, issue_id, site_id, cover_asset_ids(cover))
     if "contents" in fields:
         put("contents", json.dumps(normalize_contents(fields["contents"])), "::jsonb")
-    if stories is not None:
-        await _set_stories(conn, issue_id, site_id, stories)
     sets.append("updated_at = NOW()")
     args += [issue_id, site_id]
     try:
+        # Inside the try: a story put in another issue since check_stories ran
+        # trips the unique index here, which is a message, not a 500.
+        if stories is not None:
+            await _set_stories(conn, issue_id, site_id, stories)
         row = await conn.fetchrow(
             f"UPDATE cappe_magazine_issues SET {', '.join(sets)} WHERE id = ${len(args) - 1} AND site_id = ${len(args)} "
             f"RETURNING {ISSUE_COLS}",
@@ -338,10 +340,12 @@ async def live_issue(conn, site_id: UUID, number: int) -> Optional[dict[str, Any
 
 
 async def current_issue(conn, site_id: UUID) -> Optional[dict[str, Any]]:
-    """The newest released issue, which leads the front page."""
+    """The newest released issue, by its number (as the archive lists them),
+    which leads the front page. Not by release date: an old issue withdrawn
+    to fix a typo and released again is not the current one."""
     row = await conn.fetchrow(
         f"SELECT {ISSUE_COLS} FROM cappe_magazine_issues WHERE site_id = $1 AND {LIVE_ISSUE} "
-        "ORDER BY released_at DESC, number DESC LIMIT 1",
+        "ORDER BY number DESC, released_at DESC LIMIT 1",
         site_id,
     )
     return issue_row(row) if row else None

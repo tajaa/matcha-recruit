@@ -48,8 +48,10 @@ def issue_book(mag: dict, issue: dict, stories: list[dict], assets: dict[str, di
                 "line": s.get("contents_line")} for s in stories]
     label = issue_line_text(issue.get("cover") or {}, issue["number"], _when(issue))
     articles = "".join(
+        # A plain Markdown post isn't edited on the page (the issue editor
+        # holds only stories' blocks): shown as is, nothing typed in it is lost.
         story_article_html(s, assets, mag=mag, currency=currency, site_slug=site_slug, preview_blocks=preview_blocks,
-                           single=False, edit=edit)
+                           single=False, edit=edit and s.get("format") == "blocks")
         for s in stories
     )
     inner = ('<div class="mz-issue" data-mz-flow>'

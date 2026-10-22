@@ -58,7 +58,9 @@ async def _view(conn, site, mag: dict | None, plan: str | None) -> dict[str, Any
             "live": bool(mag and mag["enabled"] and ent.has("magazine")),
             "plan_includes_paid": ent.has("magazine_paid"),
             "stripe_ready": await _stripe_ready(conn, site["account_id"]),
-            "fee_bps": await fee_bps(conn)}
+            "fee_bps": await fee_bps(conn),
+            # What readers are charged in (checkout uses the site's currency).
+            "currency": (site.get("currency") or "USD").upper()}
 
 
 async def _stripe_ready(conn, account_id) -> bool:

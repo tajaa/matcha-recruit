@@ -26,6 +26,7 @@ Which Claude runs is Admin → Settings → AI models, surface
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from dataclasses import dataclass, field
@@ -49,6 +50,10 @@ MAX_NOTES = 2000
 MAX_STORY_CHARS = 24_000
 VISION_WIDTH = 960
 MAX_IMAGE_BYTES = 3 * 1024 * 1024
+# The CDN gives the origin 60 s (deploy/cloudfront); the pictures (fetched at
+# once) and the model call, retries included, fit inside it with room to spare.
+FETCH_SECONDS = 10
+MODEL_SECONDS = 45.0
 FREE_PER_DAY = 5
 MAGAZINE_PER_DAY = 60
 UNAVAILABLE = "Writing help isn't available right now. Try again in a few minutes."
@@ -139,22 +144,24 @@ def _vision_url(asset: dict) -> Optional[str]:
     return (fitting[-1] if fitting else sizes[0])["url"]
 
 
+async def _attachment(asset: dict) -> dict | None:
+    url = _vision_url(asset)
+    if not url:
+        return None
+    try:
+        fetched = await fetch_public(url, max_bytes=MAX_IMAGE_BYTES, accept="image/webp",
+                                     total_timeout=FETCH_SECONDS)
+    except Exception as exc:  # noqa: BLE001 — a picture that won't load is described in words only
+        logger.info("assist picture %s not loaded: %s", asset.get("id"), type(exc).__name__)
+        return None
+    if fetched.status == 200 and not fetched.truncated:
+        return anthropic_messages.image_block(fetched.body, "image/webp")
+    return None
+
+
 async def _attachments(pictures: list[dict]) -> list[dict]:
-    blocks = []
-    for asset in pictures:
-        url = _vision_url(asset)
-        if not url:
-            continue
-        try:
-            fetched = await fetch_public(url, max_bytes=MAX_IMAGE_BYTES, accept="image/webp", total_timeout=15)
-        except Exception as exc:  # noqa: BLE001 — a picture that won't load is described in words only
-            logger.info("assist picture %s not loaded: %s", asset.get("id"), type(exc).__name__)
-            continue
-        if fetched.status == 200 and not fetched.truncated:
-            block = anthropic_messages.image_block(fetched.body, "image/webp")
-            if block:
-                blocks.append(block)
-    return blocks
+    """The pictures, fetched at once (not one after another), in order."""
+    return [b for b in await asyncio.gather(*(_attachment(a) for a in pictures)) if b]
 
 
 def _picture_notes(pictures: list[dict]) -> str:
@@ -283,7 +290,8 @@ def _shape(m: Material, data: dict) -> dict:
     elif m.action == "search_terms":
         terms = [{"source": t["source"], "query": _text(t.get("query"), 120)}
                  for t in data.get("terms") or []
-                 if isinstance(t, dict) and t.get("source") in SOURCES and _text(t.get("query"), 120)]
+                 if isinstance(t, dict) and isinstance(t.get("source"), str) and t["source"] in SOURCES
+                 and _text(t.get("query"), 120)]
         if terms:
             return {"terms": terms[:8]}
     elif m.action == "draft":
@@ -310,10 +318,10 @@ async def run(m: Material) -> dict:
             _prompt(m), model=model, system=_SYSTEM, attachments=attachments, json_output=True,
             effort="medium" if m.action == "draft" else "low",
             max_tokens=16_000 if m.action == "draft" else 4_096,
-            timeout_seconds=90.0 if m.action == "draft" else 45.0,
+            timeout_seconds=MODEL_SECONDS, deadline=MODEL_SECONDS,
         )
         data = anthropic_messages.parse_json_object(reply)
-    except (RuntimeError, ValueError, json.JSONDecodeError) as exc:
+    except (RuntimeError, ValueError, json.JSONDecodeError, TimeoutError) as exc:
         logger.info("story assist %s failed: %s", m.action, type(exc).__name__)
         raise AssistFailed(type(exc).__name__) from exc
     return {"action": m.action, **_shape(m, data)}

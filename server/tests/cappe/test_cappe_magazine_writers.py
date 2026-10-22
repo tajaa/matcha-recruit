@@ -46,7 +46,7 @@ from app.cappe.services import campaigns, readiness  # noqa: E402
 from app.cappe.services.catalog import plan_offered  # noqa: E402
 from app.cappe.services.magazine import issue_email, writers  # noqa: E402
 from app.workers.tasks import cappe_campaign_send as campaign_worker  # noqa: E402
-from tests._helpers.routes import QueryConn, route_client  # noqa: E402
+from tests._helpers.routes import QueryConn, Queue, route_client  # noqa: E402
 
 WRITER = SimpleNamespace(id=uuid4(), email="writer@example.com", name="Ana", plan="writer", account_type="writer",
                          status="active")
@@ -553,9 +553,10 @@ def issues(monkeypatch):
 def _issue_conn(*, followers=12, already=None):
     row = {"id": uuid4(), "story_id": POST_ID, "subject": "Before the town wakes", "status": "sending",
            "include_body": False, "recipient_count": 0, "failed_count": 0, "sent_at": None, "created_at": NOW}
-    return QueryConn(fetchrow={"FROM cappe_sites": _site_row(status="published"),
-                               "INSERT INTO cappe_campaigns": row},
-                     fetchval={"story_id = $1 AND kind = 'issue'": already, "COUNT(*) FROM cappe_subscribers": followers})
+    return TxQueryConn(fetchrow={"FROM cappe_sites": _site_row(status="published"),
+                                 "INSERT INTO cappe_campaigns": row},
+                       fetchval={"story_id = $1 AND kind = 'issue'": already,
+                                 "COUNT(*) FROM cappe_subscribers": followers})
 
 
 def _issue_client():
@@ -595,6 +596,63 @@ def test_a_story_goes_out_once_and_needs_followers(issues):
     issues.conn = _issue_conn(followers=0)
     with _issue_client() as client:
         assert "No one follows" in client.post(f"/sites/{SITE_ID}/posts/{POST_ID}/issue", json={}).json()["detail"]
+
+
+def test_two_sends_at_once_send_the_story_once(issues):
+    # The second Send passed the first check while the first was building;
+    # under the per-story lock it sees the first's row and stops.
+    issues.conn = _issue_conn(already=Queue([None, 1]))
+    with _issue_client() as client:
+        res = client.post(f"/sites/{SITE_ID}/posts/{POST_ID}/issue", json={})
+    assert res.status_code == 409 and "already gone" in res.json()["detail"]
+    assert issues.dispatched == [] and not issues.conn.sql_for("fetchrow")[-1].lstrip().startswith("INSERT")
+    lock = [q for q in issues.conn.sql_for("execute") if "pg_advisory_xact_lock" in q]
+    assert lock and issues.conn.args_for(lock[0]) == (f"cappe_issue:{POST_ID}",)
+
+
+def test_an_issue_needs_the_sites_own_address(issues, monkeypatch):
+    # Without one, its story and unsubscribe links would go nowhere.
+    monkeypatch.setattr(magazine_issues, "site_public_origin", lambda site: None)
+    issues.conn = _issue_conn()
+    with _issue_client() as client:
+        res = client.post(f"/sites/{SITE_ID}/posts/{POST_ID}/issue", json={})
+        assert res.status_code == 409 and "address" in res.json()["detail"]
+        assert client.post(f"/sites/{SITE_ID}/posts/{POST_ID}/issue/test", json={}).status_code == 409
+    assert issues.dispatched == []
+
+
+def test_the_newsletter_routes_leave_issues_alone(monkeypatch):
+    # Deleting a sent issue through the newsletter would let the story go out again.
+    from app.cappe.routes import newsletter
+
+    conn = QueryConn(fetchrow={"FROM cappe_sites": _site_row(), "FROM cappe_campaigns": None},
+                     execute={"DELETE FROM cappe_campaigns": "DELETE 0"})
+    monkeypatch.setattr(newsletter, "get_connection", lambda *a, **k: conn)
+    campaign = uuid4()
+    with route_client(newsletter.router, overrides={newsletter.require_cappe_account: WRITER}) as client:
+        assert client.get(f"/sites/{SITE_ID}/campaigns/{campaign}").status_code == 404
+        assert client.delete(f"/sites/{SITE_ID}/campaigns/{campaign}").status_code == 404
+        client.put(f"/sites/{SITE_ID}/campaigns/{campaign}", json={"subject": "x"})
+        client.post(f"/sites/{SITE_ID}/campaigns/{campaign}/send")
+    by_id = [q for q in conn.sql_for("fetchrow") + conn.sql_for("execute") if "cappe_campaigns WHERE id = $1" in q]
+    assert len(by_id) == 4 and all("kind = 'campaign'" in q for q in by_id)
+
+
+def test_a_writers_site_takes_no_single_opt_in_subscribers(monkeypatch):
+    from app.cappe.routes.public import newsletter as public_newsletter
+
+    async def no_limit(*a, **k):
+        return None
+
+    conn = QueryConn(fetchrow={"FROM cappe_sites": _site_row(status="published", home_country="US", currency="usd")},
+                     fetchval={"a.account_type = 'writer'": 1})
+    monkeypatch.setattr(public_newsletter, "check_rate_limit", no_limit)
+    monkeypatch.setattr(public_newsletter, "_reject_reserved", lambda email: None)
+    monkeypatch.setattr(public_newsletter, "get_connection", lambda *a, **k: conn)
+    with route_client(public_newsletter.router) as client:
+        res = client.post("/public/sites/harbour/subscribe", json={"email": "reader@example.com"})
+    assert res.status_code == 404
+    assert not any("INSERT INTO cappe_subscribers" in q for q in conn.sql_for("execute"))
 
 
 def test_a_dispatch_that_fails_takes_the_issue_back(issues):

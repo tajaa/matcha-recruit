@@ -88,6 +88,8 @@ def _asset(asset_id, **over):
     ("cliffs on Prince Edward Island", None),
     ("a can of Dr Pepper on a diner counter", None),
     ("a mayor cutting a ribbon", None),
+    ("A small-town mayor. Snow falls on the square", None),  # a sentence ends between them
+    ("an old senator. Rain on the window", None),
     ("mail me at someone@example.com", None),
 ])
 def test_the_unmistakable_cases_need_no_model(prompt, hit):
@@ -384,6 +386,33 @@ def test_captions_see_each_picture_as_webp_with_its_credit(claude):
     assert "Don't name or identify a person in a picture" in call["system"]
 
 
+def test_assist_fits_inside_the_cdns_minute(claude, monkeypatch):
+    # The CDN gives the origin 60 s: the pictures come at once, each capped,
+    # and the model call (retries included) has a deadline inside it.
+    import asyncio
+
+    gate = asyncio.Event()
+    started = []
+
+    async def fetch_public(url, **kw):
+        started.append(kw["total_timeout"])
+        if len(started) == 2:
+            gate.set()
+        await asyncio.wait_for(gate.wait(), 1)  # deadlocks if fetched one after another
+        return SimpleNamespace(status=200, truncated=False, body=b"RIFF....WEBPVP8 ", content_type="image/webp")
+
+    monkeypatch.setattr(assist, "fetch_public", fetch_public)
+    claude.reply = {"captions": [{"asset_id": A1, "caption": "Boats.", "alt": "Boats"}]}
+    run(assist.run(_material("captions", [_asset(A1), _asset(A2)])))
+    assert started == [assist.FETCH_SECONDS] * 2
+    call = claude.calls[0]
+    assert call["deadline"] == assist.MODEL_SECONDS
+    assert assist.FETCH_SECONDS + assist.MODEL_SECONDS < 60
+    claude.reply = TimeoutError()
+    with pytest.raises(assist.AssistFailed):
+        run(assist.run(_material("headlines")))
+
+
 def test_a_draft_never_uses_a_picture_it_wasnt_given(claude):
     invented = str(uuid4())
     claude.reply = {"title": "Four in the morning", "excerpt": "The harbour before dawn.", "kicker": "Dispatch",
@@ -411,7 +440,8 @@ def test_a_draft_never_uses_a_picture_it_wasnt_given(claude):
     ("headlines", {"headlines": [{"title": "Four a.m.", "dek": "Boats.", "kicker": "Dispatch"}, {"dek": "no title"}]},
      {"headlines": [{"title": "Four a.m.", "dek": "Boats.", "kicker": "Dispatch"}]}),
     ("search_terms", {"terms": [{"source": "openverse", "query": "fishing boats dawn"},
-                                {"source": "unsplash", "query": "boats"}, {"source": "nasa", "query": " "}]},
+                                {"source": "unsplash", "query": "boats"}, {"source": "nasa", "query": " "},
+                                {"source": ["openverse"], "query": "a list is not a source"}]},
      {"terms": [{"source": "openverse", "query": "fishing boats dawn"}]}),
     ("tighten", {"md": "Boats go out at **four**."},
      {"md": "Boats go out at **four**.", "block": 1, "rt": {"type": "doc", "content": [{"type": "paragraph", "content": [

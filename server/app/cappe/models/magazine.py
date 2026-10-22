@@ -3,7 +3,9 @@ from datetime import datetime
 from typing import Any, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field
+import re
+
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 MastheadStyle = Literal["classic", "literary", "modern", "elegant", "display"]
 
@@ -36,6 +38,7 @@ class CappeMagazine(BaseModel):
     # the money yet, and Gummfit's share of each payment.
     plan_includes_paid: bool = False
     stripe_ready: bool = False
+    currency: str = "USD"
     fee_bps: int = 3000
 
 
@@ -72,6 +75,15 @@ class CappeMagazineCompCreate(BaseModel):
     note: Optional[str] = Field(default=None, max_length=200)
 
 
+_HALVES = re.compile(r"[\ud800-\udfff]")
+
+
+def _whole_characters(value: Any) -> Any:
+    """Half an emoji (a lone surrogate) can't be printed on a page, and would
+    fail the response's UTF-8 encoding: dropped, as the story schema does."""
+    return _HALVES.sub("", value) if isinstance(value, str) else value
+
+
 class CappeStoryPreview(BaseModel):
     """An unsaved story to render as its page would look."""
     title: str = Field(default="", max_length=255)
@@ -86,6 +98,8 @@ class CappeStoryPreview(BaseModel):
     # The owner's editor on the page: the story whole, marked for editing,
     # with the editor's script (services/magazine/story_render.py).
     edit: bool = False
+
+    _whole = field_validator("title", "excerpt", "kicker", "byline", mode="before")(_whole_characters)
 
 
 class CappeStoryLayoutInfo(BaseModel):
@@ -279,6 +293,8 @@ class CappeIssueStoryDraft(BaseModel):
     byline: Optional[str] = Field(default=None, max_length=160)
     layout: Optional[str] = Field(default=None, max_length=20)
     content: dict[str, Any] = Field(default_factory=dict)
+
+    _whole = field_validator("title", "excerpt", "kicker", "byline", mode="before")(_whole_characters)
 
 
 class CappeMagazineIssuePreview(BaseModel):
