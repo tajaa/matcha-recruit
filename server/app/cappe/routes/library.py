@@ -73,14 +73,14 @@ async def search_stock(
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
     try:
-        results = await sources.search(source, q, page)
+        results, archive_had_more = await sources.search_page(source, q, page)
     except sources.SourceError as exc:
         logger.info("stock search %s failed: %s", source, exc)
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=SOURCE_DOWN) from exc
     async with get_connection() as conn:
         done = await _imported(conn, site_id, [(r.source, r.source_id) for r in results])
     return {
-        "source": source, "query": q, "page": page, "has_more": bool(results) and page < sources.MAX_PAGE,
+        "source": source, "query": q, "page": page, "has_more": archive_had_more and page < sources.MAX_PAGE,
         "results": [{**r.to_dict(), "thumb": thumb_path(r.thumb_url), "imported": (r.source, r.source_id) in done}
                     for r in results],
     }
@@ -97,17 +97,21 @@ async def _queue(account: CappeAccount, site_id: UUID, keys: list[tuple[str, str
         ent = await resolve_entitlements(account.plan, conn=conn)
         raw = ent.features.get("stock_imports_per_day")
         allowance = int(raw) if isinstance(raw, int) and not isinstance(raw, bool) else imports.DEFAULT_DAILY
-        used = await imports.daily_used(conn, account.id)
-        have = await imports.existing(conn, site_id, keys)
-        new = [k for k in keys if k not in have or imports.requeueable(have[k])]
-        if used + len(new) > allowance:
-            left = max(0, allowance - used)
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail=f"You can import {left} more picture{'s' if left != 1 else ''} today (your plan allows "
-                       f"{allowance} a day).",
-            )
-        rows = await imports.enqueue(conn, site_id=site_id, account_id=account.id, keys=keys, post_id=post_id)
+        async with conn.transaction():
+            # One request per account at a time between the count and the
+            # insert, so two at once can't both fit under the allowance.
+            await conn.execute("SELECT pg_advisory_xact_lock(hashtext($1))", f"cappe_stock_import:{account.id}")
+            used = await imports.daily_used(conn, account.id)
+            have = await imports.existing(conn, site_id, keys)
+            new = [k for k in keys if k not in have or imports.requeueable(have[k])]
+            if used + len(new) > allowance:
+                left = max(0, allowance - used)
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail=f"You can import {left} more picture{'s' if left != 1 else ''} today (your plan allows "
+                           f"{allowance} a day).",
+                )
+            rows = await imports.enqueue(conn, site_id=site_id, account_id=account.id, keys=keys, post_id=post_id)
     if any(r["status"] == "pending" for r in rows):
         _dispatch(site_id)
     return {"imports": [{**r, "asset": None} for r in rows], "remaining_today": max(0, allowance - used - len(new))}
@@ -164,6 +168,9 @@ async def stock_topic(site_id: UUID, body: CappeStockTopicRequest,
     async with get_connection() as conn:
         done = await _imported(conn, site_id, picked)
     keys = [k for k in dict.fromkeys(picked) if k not in done][:body.count]
-    if not keys:
+    if not picked:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=SOURCE_DOWN)
+    if not keys:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                            detail="Every picture we found for this topic is already in your library.")
     return await _queue(account, site_id, keys, body.post_id)

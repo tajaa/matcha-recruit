@@ -18,9 +18,12 @@ The route queues rows (`enqueue`) and dispatches the worker
   4. write the library row and mark the import ready together.
 
 No transaction is open, and no row lock held, during any network call. A
-download that fails goes back to pending until its third attempt; the owner's
-page polls `statuses`, which re-dispatches the worker for anything stuck, so
-no scheduled task is needed.
+download that fails goes back to pending until its third attempt, and is not
+claimed again for `RETRY_SECONDS` (a throttled archive isn't asked three times
+in a second); the owner's page polls `statuses`, which re-dispatches the
+worker for anything stuck, so no scheduled task is needed. A row whose last
+attempt died with its worker (the hourly restart) is failed when found, so a
+new request can queue it again; it never stays `working`.
 """
 from __future__ import annotations
 
@@ -42,6 +45,7 @@ IMPORT_COLS = "id, site_id, source, source_id, status, attempts, error, asset_id
 MAX_PER_REQUEST = 24
 MAX_ATTEMPTS = 3
 STUCK_MINUTES = 10
+RETRY_SECONDS = 60
 DEFAULT_DAILY = 25
 MAX_IMAGE_BYTES = 25 * 1024 * 1024
 DOWNLOAD_SECONDS = 45
@@ -52,6 +56,8 @@ UNREACHABLE = "The archive didn't send the picture. Try importing it again later
 
 
 async def daily_used(conn, account_id: UUID) -> int:
+    """Imports queued in the last day. A re-queued row counts again: `enqueue`
+    moves its `created_at` to the new request."""
     return int(await conn.fetchval(
         "SELECT count(*) FROM cappe_asset_imports WHERE account_id = $1 AND created_at > NOW() - INTERVAL '24 hours'",
         account_id,
@@ -86,7 +92,8 @@ async def enqueue(conn, *, site_id: UUID, account_id: UUID, keys: list[tuple[str
         INSERT INTO cappe_asset_imports (site_id, account_id, source, source_id, post_id)
         SELECT $1, $2, s, i, $5 FROM unnest($3::text[], $4::text[]) AS t(s, i)
         ON CONFLICT (site_id, source, source_id) DO UPDATE
-            SET status = 'pending', attempts = 0, error = NULL, claimed_at = NULL, updated_at = NOW()
+            SET status = 'pending', attempts = 0, error = NULL, claimed_at = NULL, updated_at = NOW(),
+                created_at = NOW()
             WHERE cappe_asset_imports.status = 'failed'
                OR (cappe_asset_imports.status = 'ready' AND cappe_asset_imports.asset_id IS NULL)
         RETURNING {IMPORT_COLS}
@@ -133,13 +140,22 @@ async def stuck(conn, site_id: UUID) -> bool:
 # ── the worker's side ────────────────────────────────────────────────────────
 
 async def claim_next(conn, site_id: UUID) -> Optional[dict]:
+    # A last attempt whose worker died can't be claimed again: fail it, so a
+    # new request for the picture queues it afresh.
+    await conn.execute(
+        "UPDATE cappe_asset_imports SET status = 'failed', error = $3, updated_at = NOW() "
+        f"WHERE site_id = $1 AND status = 'working' AND attempts >= $2 "
+        f"AND claimed_at < NOW() - INTERVAL '{STUCK_MINUTES} minutes'",
+        site_id, MAX_ATTEMPTS, UNREACHABLE,
+    )
     row = await conn.fetchrow(
         f"""
         UPDATE cappe_asset_imports SET status = 'working', attempts = attempts + 1,
                claimed_at = NOW(), updated_at = NOW()
          WHERE id = (SELECT id FROM cappe_asset_imports
                       WHERE site_id = $1 AND attempts < $2
-                        AND (status = 'pending'
+                        AND ((status = 'pending'
+                              AND (attempts = 0 OR updated_at < NOW() - INTERVAL '{RETRY_SECONDS} seconds'))
                              OR (status = 'working' AND claimed_at < NOW() - INTERVAL '{STUCK_MINUTES} minutes'))
                       ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED)
         RETURNING {IMPORT_COLS}, account_id
@@ -192,30 +208,33 @@ async def _store(conn, row: dict, result: sources.StockResult, stored: media.Sto
 
 async def import_one(conn, row: dict) -> str:
     """Work one claimed import; returns the status it ended in."""
+    if row["source"] not in sources.SOURCES:
+        await _finish(conn, row["id"], "refused", REFUSED)
+        return "refused"
     try:
         result = await sources.resolve(row["source"], row["source_id"], fresh=True)
     except sources.SourceError as exc:
         logger.info("stock import %s: resolve failed (%s)", row["id"], exc)
         return await _retry_or_fail(conn, row, UNREACHABLE)
-    except KeyError:
-        await _finish(conn, row["id"], "refused", REFUSED)
-        return "refused"
     if result is None:
         await _finish(conn, row["id"], "refused", REFUSED)
         return "refused"
     # The Met's "original" can be a scan of tens of megabytes; its web-large
     # copy (the search thumbnail) is the fallback when that is over the cap.
+    # A timeout on the original is a reason to try that copy too.
     urls = [result.image_url] + ([result.thumb_url] if result.source == "met" and result.thumb_url else [])
-    try:
-        for url in urls:
+    fetched = None
+    for url in urls:
+        try:
             fetched = await fetch_public(url, max_bytes=MAX_IMAGE_BYTES, accept=IMAGE_ACCEPT,
                                          total_timeout=DOWNLOAD_SECONDS)
-            if not fetched.truncated:
-                break
-    except Exception as exc:  # unsafe host, network error, timeout
-        logger.info("stock import %s: download failed (%s)", row["id"], type(exc).__name__)
-        return await _retry_or_fail(conn, row, UNREACHABLE)
-    if fetched.status != 200 or fetched.truncated or not fetched.content_type.startswith("image/"):
+        except Exception as exc:  # unsafe host, network error, timeout
+            logger.info("stock import %s: download failed (%s)", row["id"], type(exc).__name__)
+            fetched = None
+            continue
+        if not fetched.truncated:
+            break
+    if fetched is None or fetched.status != 200 or fetched.truncated or not fetched.content_type.startswith("image/"):
         return await _retry_or_fail(conn, row, UNREACHABLE)
     mime = fetched.content_type.split(";")[0].strip().lower()
     if mime == "image/jpg":
@@ -242,4 +261,8 @@ async def import_next(conn, site_id: UUID) -> Optional[str]:
     row = await claim_next(conn, site_id)
     if row is None:
         return None
-    return await import_one(conn, row)
+    try:
+        return await import_one(conn, row)
+    except Exception:  # an adapter's or the database's surprise: this row only, not the run
+        logger.exception("stock import %s failed unexpectedly", row["id"])
+        return await _retry_or_fail(conn, row, UNREACHABLE)

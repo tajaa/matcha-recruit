@@ -97,6 +97,32 @@ describe('StockSearch', () => {
     expect(await screen.findByText(/Nothing we can publish for “zzz”/)).toBeInTheDocument()
   })
 
+  it('offers more when a page had nothing publishable but the archive has more', async () => {
+    answer({ '/stories/options': OPTIONS,
+      '/library/search': { source: 'met', query: 'harbor', page: 0, has_more: true, results: [] } })
+    render(<StockSearch siteId="s-1" onImported={vi.fn()} />)
+    await searchFor('harbor')
+    expect(await screen.findByRole('button', { name: /More from/ })).toBeInTheDocument()
+  })
+
+  it('hands over a picture imported again on the same import', async () => {
+    // Deleted from the library and imported again: the server revives the
+    // same import row, with a new library picture.
+    let landed = asset('a-7')
+    answer({ '/stories/options': OPTIONS, '/library/imports': () => Promise.resolve({
+      imports: [job({ status: 'ready', asset: landed })] }) })
+    api.post.mockResolvedValue({ imports: [job()], remaining_today: 10 })
+    const onImported = vi.fn()
+    render(<StockSearch siteId="s-1" onImported={onImported} pollMs={5} />)
+    fireEvent.change(await screen.findByLabelText('Topic to stock'), { target: { value: 'science' } })
+    fireEvent.click(screen.getByRole('button', { name: /Add 12 pictures/ }))
+    await waitFor(() => expect(onImported).toHaveBeenCalledWith(asset('a-7')))
+    landed = asset('a-8')
+    await waitFor(() => expect(screen.getByRole('button', { name: /Add 12 pictures/ })).toBeEnabled())
+    fireEvent.click(screen.getByRole('button', { name: /Add 12 pictures/ }))
+    await waitFor(() => expect(onImported).toHaveBeenCalledWith(asset('a-8')))
+  })
+
   it('shows a search the archive refused', async () => {
     answer({ '/stories/options': OPTIONS, '/library/search': () => Promise.reject(new Error('That archive didn’t answer.')) })
     render(<StockSearch siteId="s-1" onImported={vi.fn()} />)
