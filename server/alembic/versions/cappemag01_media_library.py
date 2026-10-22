@@ -30,13 +30,13 @@ drops the named checks and the index, restores the old `kind` check and drops
 the columns.
 
 Revision ID: cappemag01
-Revises: zzzzcappe54
+Revises: cappesocial03
 Create Date: 2026-10-20
 """
 from alembic import op
 
 revision = "cappemag01"
-down_revision = "zzzzcappe54"
+down_revision = "cappesocial03"
 branch_labels = None
 depends_on = None
 

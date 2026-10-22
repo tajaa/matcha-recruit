@@ -47,6 +47,9 @@ from .policies import router as policies_router
 from .shop import router as shop_router
 from .shopper_subscriptions import router as shopper_subscriptions_router
 from .sites import router as sites_router
+from .social import router as social_router
+from .social_chat import router as social_chat_router
+from .social_exports import router as social_exports_router
 from .templates import router as templates_router
 from .uploads import router as uploads_router
 
@@ -117,5 +120,9 @@ cappe_router.include_router(magazine_ai_router)
 cappe_router.include_router(magazine_issues_router)
 cappe_router.include_router(magazine_paid_router)
 cappe_router.include_router(uploads_router)
+# Social growth: connected accounts, scheduled posts, the AI reply inbox.
+cappe_router.include_router(social_router)
+cappe_router.include_router(social_chat_router)
+cappe_router.include_router(social_exports_router)
 
 __all__ = ["cappe_router"]

@@ -463,6 +463,182 @@ What is built so far:
   month they paid for and emails them, retrying what Stripe refused on the next run. A lapsed magazine stays
   up for `magazines.GRACE_DAYS` (31) without the plan, so paid readers keep what they paid for.
 
+## Social growth (2026-10, `services/social/`, migrations `cappesocial01`–`03`)
+
+Owners connect the Instagram business account and Facebook Page they already run, drop photos
+into a composer (one carousel post, or one post per photo spread across days), schedule or post
+now, and answer comments/DMs from an inbox where Claude Haiku 5.5 drafts replies. Owner routes
+`routes/social.py` (`/sites/{id}/social/*`); Meta's OAuth callback + webhook are public in
+`routes/public/social_meta.py`; page `client/src/cappe/pages/site/Social/`.
+
+- **One Meta app, two networks.** Facebook Login yields a Page token per Page; the Page's
+  Instagram account is addressed with the same token. `providers/meta.py` is the only module that
+  speaks Graph; everything else uses `providers/base.py` shapes. A new network is a new provider
+  module plus one line in `providers/__init__.py:_PROVIDERS`.
+- **Tokens are Fernet-encrypted at rest** (`core.services.secret_crypto`) and decrypted only by
+  `connections.credentials()` for a call about to be made. `PUBLIC_COLUMNS` never includes
+  `access_token_enc`. A Graph token error (190/102) marks the connection `expired` ("reconnect").
+- **Connect is bound to the browser that started it.** The OAuth `state` is HMAC-signed (JWT
+  secret), expires in 15 min, and carries a nonce the start response sets as an HttpOnly,
+  `SameSite=Lax` cookie scoped to the callback path. Without the cookie match, an owner could send
+  someone the Facebook link and land that person's Pages on their own site. The cookie is set on
+  the host the dashboard calls and the redirect URI is built from `CAPPE_BASE_DOMAIN`, so Connect
+  works only from a dashboard served on that host (the same assumption `dashboard_url` makes).
+- **Publishing is per target.** A post is the composition; a target is that post on one
+  connection. `cappe_social_publisher` sweeps every minute (self-re-enqueue + `last_run_at` claim,
+  the `schedule_break_reminders` shape) and claims due targets `FOR UPDATE SKIP LOCKED`; "Post now"
+  dispatches `run_cappe_social_publish_post` for one post. Retryable failures back off
+  2/10/30 min, three attempts; the post's status rolls up from its targets
+  (`posts.rollup_status`).
+- **Replies: deterministic first, model second, owner's mode last** (`autoreply.py`). The
+  hard-stop list (refunds, disputes, legal, injury/allergy) and the owner's escalate words run
+  before any model call and can only ever escalate. The draft is grounded ONLY on the store's
+  active catalog, contact details and the owner's notes, and must set `needs_human` rather than
+  guess. `auto` sends by itself only for plain-question intents at confidence ≥ 0.75 under the
+  hourly cap; everything else is a draft to approve. Before an automatic send, `reply_guard`
+  (deterministic, after the model) holds any reply with a link off the store's own site, contact
+  details that aren't the store's, or a hard-stop subject — a commenter can't plant one through
+  the prompt. A partial post's "Post now" re-tries only its unpublished targets. The reply row is
+  written before the network call. The inbound worker re-checks the plan (`social_autoreply`) before running the model — a
+  downgrade keeps the stored mode, the plan decides.
+- **Models.** Admin → Settings → AI models row `gummfit.social`; default Claude Haiku 5.5 with an
+  Anthropic key, nothing without one (no Gemini fallback for words sent under the owner's name).
+  Every call counts in the `anthropic` bucket via `social/ai.py`; a full bucket means "not now".
+- **No pooled connection is held across a model or network call** in the routes (draft, reply).
+- **Video (`cappesocial02`, plan feature `social_video` on business / pro / creator).** The
+  browser posts the original straight to S3 with a presigned POST pinned to the declared size
+  (`assets.presign_upload`; nginx caps proxied bodies at 20 MB) into the public bucket under an
+  unguessable key — that bucket's CORS must list the dashboard origin (`https://gummfit.com`,
+  `https://www.gummfit.com`), or the browser's POST is blocked. `assets/{id}/complete` HEADs it and checks the container's first bytes, then queues
+  `render_cappe_social_video` (`workers/tasks/cappe_social_media.py`), which reads the original
+  through a presigned GET and cuts a 1080x1920 vertical render (plus 1920x1080 for a clearly
+  landscape clip) — fitted on a blurred copy of itself, never cropped, trimmed to 90 s, H.264 High
+  / AAC 48 kHz stereo, `+faststart`, a silent track added when there's none. Renders and three
+  poster frames go to the public bucket (Meta fetches by URL).
+  - **It runs on the shared default worker** (one slot, 768 MB) — Diego chose that over a media
+    host for now. So `render.py` bounds everything: `veryfast`, two threads, short lookahead, a
+    timeout per ffmpeg with the whole process group killed, one output on disk at a time; the
+    task is idempotent (stored frames/renders are skipped) and retried once. A long render delays
+    the minute publisher while it runs. If renders start to hurt, move the task to its own queue
+    on separate compute (the recaps worker pattern, `docs/ops/ESPRESSO_RECAPS.md`).
+  - **ffmpeg input is untrusted:** every `-i` carries `-protocol_whitelist https,tls,tcp` and
+    `-format_whitelist` (MP4/MOV + Matroska/WebM demuxers only), so a playlist posing as a video
+    can't make the worker read `file:` paths or fetch other URLs. Keep both on any new ffmpeg call.
+  - **A post names a video by `asset_id`**; `variants.media_for` swaps in the cut each network
+    takes at publish time (Instagram → Reel from the vertical cut; Facebook → Reel, or a Page
+    video from the landscape cut). A video always goes out alone (`validate_for_targets`). A
+    scheduled post whose video isn't ready is `rendering` and never claimed; the render flips it
+    to `scheduled` and publishes any that are already due.
+  - **Meta processes video for minutes, so publishing is resumable.** A provider returns
+    `Pending(phase, state, retry_after_s)`; the target goes back to `pending` with its `state`
+    (container / video id) and the claim's attempt handed back (`record_pending`), and the next
+    sweep checks once — no call waits. Instagram: `REELS` container → poll `status_code` (≤10
+    checks) → `media_publish`. Facebook Reel: `video_reels` start → `rupload` with `file_url`
+    (header auth `OAuth <token>`, not Bearer) → finish `PUBLISHED` → poll `status`.
+  - **`cappe_social_media_sweep`** (every 5 min, seeded on) re-queues renders stuck 30 min (fails
+    them after two attempts), deletes uploads never completed after a day, puts back targets a
+    killed worker left `publishing` for 20 min (`claimed_at`), and removes files 30 days on
+    (`expires_at`) once no live post needs them. Frames are kept for the queue.
+- **Chat composer** (`routes/social_chat.py`, `services/social/chat/`, the Create tab's default;
+  the form stays one click away). The owner drops photos/videos and says what to post, where and
+  when; one Claude call (`gummfit.social`, `ai.model_for("chat")`) per turn writes a reply and,
+  per post, the Instagram caption + hashtags, the Facebook text and alt text. **The model only
+  writes words and picks from lists; code decides the rest** (`chat/plan.py:resolve`): the time is
+  read from the owner's words first by `chat/when.py` (deterministic, the store's timezone —
+  "2pm tomorrow", weekdays, dates, "in 2 hours", "tonight"), the model's reading only when they
+  name none; accounts are the site's connected ones for the networks named (TikTok/YouTube get
+  files to download, below — a photos-only plan still gets a warning); the link is a real
+  `/shop/<slug>` page or the store; photos may share a carousel (≤10), a video goes alone, and
+  nothing dropped is left out of the plan.
+  - The conversation reuses Merlin's tables (`kind='social'`, no page; no migration) and the plan
+    is a staged action (`social_plan`: proposed → executed / dismissed / replaced). A new turn
+    replaces the open plan and bumps `revision`; confirm must name it and runs under
+    `lock_conversation_actions`, so a double click can't post twice.
+  - Confirm makes ordinary posts + targets (`chat/confirm.py`), with each network's copy and
+    UTM-tagged link on its target (`post_targets.content`); `outbound` prefers it over the post's
+    caption. Photos handed to the model must be our own `cappe/social/` uploads (Claude fetches
+    them by URL); a video is shown by its poster frame.
+  - The Create tab lists the owner's chats (`GET …/chat/conversations` with the last message and
+    whether a plan is waiting; `PATCH`/`DELETE …/chat/conversations/{id}` rename and delete,
+    scoped to `kind='social'` and the site).
+- **Exports (`cappesocial03`, `routes/social_exports.py`, `services/social/exports.py`; the Exports
+  tab).** TikTok and YouTube can't be posted to through their APIs until their app audits pass, so
+  a video is cut into files the owner downloads and uploads by hand, with the words to paste. The
+  chat makes them when the owner asks in their own words (`chat/intent.py`, deterministic, before
+  the model: "prepare this for all platforms", "cut it for TikTok", "export", "word-for-word
+  captions"), when they post "everywhere" or name TikTok/YouTube (posts go to Instagram/Facebook,
+  files for the other two), and for any video when no account is connected. `plan.exports`
+  carries `{platforms, captions, items, reason, files_only, note}`; the card's **Files only**
+  mode (`mode: "export"`) posts nothing; a plan with posts makes both. The model writes TikTok
+  (caption + hashtags) and YouTube (title, description, tags) words only when files are coming
+  (`plan.export_hint`); code fills them from the Instagram words when it doesn't and enforces the
+  limits. Links: YouTube's description gets the UTM link; Instagram/TikTok captions don't make
+  links clickable, so theirs is shown apart "for your bio" (`plan.texts_for`).
+  - **Cuts** (`presets.py`): one 1080x1920 file serves Instagram, TikTok and Shorts — a single
+    caption box (`VERTICAL_BOX`, bottom edge at y=1400, 140 px sides) clears all three apps'
+    buttons and text — plus 1920x1080 for YouTube when the clip is clearly landscape. Up to 180 s
+    (Shorts' limit); `-fs` 240 MB. A cut identical to the video's posting render (no captions,
+    clip ≤ 90 s) is reused (`shared`) rather than encoded again. A download is a 10-minute
+    presigned GET with `Content-Disposition: attachment; filename="<site>-<clip>-tiktok.mp4"`.
+  - **Captions**: the words come from **Gemini 3.5 Transcribe** (`transcribe.py`, the
+    `gemini-3.5-transcribe` model with `word_timestamp=True`; Claude doesn't take audio), fed 16 kHz
+    mono FLAC inline, counted in the `gemini` bucket; a full bucket, a 429/5xx or a dead
+    connection means "try again in 5 min" (6 runs, then the files go out without captions); no key
+    on the server skips captions at once (`transcribe.configured`). The timed words are kept on the
+    video (`cappe_social_assets.transcript`) so it is transcribed once — except a passing failure
+    (`reason` in `exports.TRANSIENT_NO_WORDS`), which only the export that hit it gives up on
+    (`exports.CAPTIONS_UNAVAILABLE` in its `warnings`); a later export listens again.
+    `subtitles.py` groups them (≤18
+    characters / 4 words a line, breaking on pauses and sentence ends) into an ASS file — white
+    DejaVu Sans Bold with a black outline, the spoken word lit in Gummfit lime — burned in by
+    ffmpeg's `ass` filter after the frame is fitted, and a phrase-level `.srt` for YouTube. The
+    image's ffmpeg must have libass; `server/Dockerfile` fails the build if it doesn't, and
+    `render.has_filter("ass")` makes a build without it ship plain files with a note. Homebrew's
+    ffmpeg has no libass, so the caption e2e test is skipped on a Mac. DejaVu covers Latin, Greek
+    and Cyrillic only.
+  - **Invariants from the 2026-10-21 review** (keep them):
+    - A post never waits in `rendering` on an event alone: `posts.settle_renders` re-derives every
+      held post from its videos' current state (ready → `scheduled`, failed/gone → `failed`); the
+      media sweep runs it, and `set_schedule`/`update_post` run it for the one post.
+    - `recover_stale_claims` resumes only targets with a `state` handle; one with none may already
+      be live, so it fails with `posts.INTERRUPTED` instead of posting twice. A Facebook Reel saves
+      its `video_id` (`facebook_uploading`) before uploading.
+    - Chat confirm reads what the chat already posted from `cappe_social_posts.ai_meta.chat`
+      (`confirm.posted_from_chat`), under the plan lock, and 409s a repeat; it re-checks every
+      video is still usable. Spread posts add days on the store's wall clock.
+    - A follow-up turn keeps the open plan's `exports` unless the message says something new about
+      files or posting (`plan.carried_exports`). Owner-edited TikTok/YouTube words carry
+      `by_owner` and are pasted as written.
+    - `exports.record_output`/`record_srt` write only to an open export and say so; a file cut for
+      an export deleted meanwhile is removed. Giving up a step never overwrites a file that landed.
+  - **One step per task run** (`prepare_cappe_social_export`: probe → transcribe → each cut → the
+    `.srt`), each recorded as it lands (`next_step` reads what's left), then the task queues the
+    next, so the minute publisher gets the worker between steps. `step` records what's running: a
+    soft time-limit or a second failure gives up that step only (that file shows its error; the
+    export ends `partial`). The media sweep re-queues exports idle 30 min and fails them after 12
+    runs; files expire after 30 days. A video an export uses can't be deleted and outlives its
+    own expiry until the export goes. A video made into files by a confirmed chat plan counts as
+    used, like a posted one.
+- **Plan features:** `social` (posting, scheduling, captions) on every plan; `social_video`
+  (dropped videos, and their export files) and `social_autoreply` (the AI inbox) on business / pro
+  / creator. All 402 at the route.
+- **Schedules are the store's wall clock.** A `scheduled_at` with no zone is read in
+  `cappe_sites.timezone` (`routes/social.py:check_schedule`), so "2pm" is the store's 2pm; the
+  chat's plan card edits times the same way. The form composer still sends an aware time from the
+  browser.
+- **Consumer data:** `scripts/sql/anonymize_dev.sql` turns every token into `dev_<id>` (connection
+  `revoked`) and strips inbox author ids/raw payloads; `refresh-dev-from-prod.sh` gates on both.
+
+**Meta setup (once, before "Connect" works):** create a Meta app (Business type) with Facebook
+Login for Business, Instagram Graph API and Messenger; add the redirect URI
+`https://<CAPPE_BASE_DOMAIN>/api/cappe/public/social/meta/callback`; subscribe the app's webhooks
+for `page` (feed, messages) and `instagram` (comments, messages) to
+`https://<CAPPE_BASE_DOMAIN>/api/cappe/public/social/meta/webhook` with the verify token; then
+set `CAPPE_META_APP_ID`, `CAPPE_META_APP_SECRET`, `CAPPE_META_VERIFY_TOKEN` (optional
+`CAPPE_META_GRAPH_VERSION`, default v21.0) in `~/matcha/.env.backend`. Outside development mode
+the permissions in `meta.SCOPES` need Meta App Review and business verification. Unset ⇒ Connect
+and Publish 503 with a setup message; the composer and queue still work.
+
 ## Site templates (`services/site_templates/`)
 
 - **The catalog is code, not the `cappe_templates` table.** One `SiteTemplate` per entry, one module

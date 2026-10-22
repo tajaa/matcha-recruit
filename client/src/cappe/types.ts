@@ -1787,3 +1787,322 @@ export type CappeStoryAssist = {
   terms?: { source: CappeStockSource; query: string }[]
   draft?: { title: string; excerpt: string; kicker: string; content: StoryContent }
 }
+
+// --- Social growth (server/app/cappe/models/social.py) ---------------------------
+
+export type CappeSocialPlatform = 'instagram' | 'facebook'
+
+export type CappeSocialConnection = {
+  id: string
+  platform: CappeSocialPlatform
+  external_id: string
+  handle: string | null
+  display_name: string | null
+  avatar_url: string | null
+  status: 'connected' | 'expired' | 'revoked' | 'error'
+  last_error: string | null
+  followers_count: number | null
+  metrics: Record<string, number>
+  metrics_at: string | null
+  token_expires_at: string | null
+  connected_at: string
+}
+
+export type CappeSocialConnections = { configured: boolean; connections: CappeSocialConnection[] }
+
+export type CappeSocialConnectStart = { authorize_url: string }
+
+/** A photo by its URL, or a dropped video by its asset (`poster` comes back
+ *  from the server once the video's frames exist). */
+export type CappeSocialMedia = {
+  url?: string | null
+  kind: 'image' | 'video'
+  alt?: string | null
+  asset_id?: string | null
+  poster?: string | null
+}
+
+export type CappeSocialAssetStatus = 'uploading' | 'rendering' | 'ready' | 'failed' | 'deleted'
+
+/** A dropped video: cut to size on the server, `ready` when every network's
+ *  version exists. */
+export type CappeSocialAsset = {
+  id: string
+  kind: 'video'
+  status: CappeSocialAssetStatus
+  filename: string | null
+  bytes: number
+  duration_ms: number | null
+  width: number | null
+  height: number | null
+  trimmed: boolean
+  frames: { url: string; t_ms: number }[]
+  renders: Record<string, { url: string; width: number | null; height: number | null; duration_ms: number | null }>
+  error: string | null
+  created_at: string
+}
+
+export type CappeSocialAssetUpload = {
+  asset_id: string
+  upload_url: string
+  fields: Record<string, string>
+  max_bytes: number
+}
+
+export type CappeSocialUpload = { url: string; width: number; height: number; padded: boolean }
+
+export type CappeSocialPostStatus =
+  'draft' | 'scheduled' | 'rendering' | 'publishing' | 'published' | 'partial' | 'failed' | 'cancelled'
+
+export type CappeSocialTarget = {
+  id: string
+  connection_id: string
+  platform: CappeSocialPlatform
+  handle: string | null
+  status: 'pending' | 'publishing' | 'published' | 'failed' | 'cancelled'
+  external_post_id: string | null
+  permalink: string | null
+  error: string | null
+  attempts: number
+  published_at: string | null
+  metrics: Record<string, number>
+  /** While the network is still processing a video. */
+  phase?: 'instagram_processing' | 'facebook_processing' | null
+}
+
+export type CappeSocialPost = {
+  id: string
+  site_id: string
+  caption: string
+  media: CappeSocialMedia[]
+  link_url: string | null
+  product_id: string | null
+  status: CappeSocialPostStatus
+  scheduled_at: string | null
+  published_at: string | null
+  ai_meta: { alt_text?: string }
+  targets: CappeSocialTarget[]
+  created_at: string
+  updated_at: string
+}
+
+export type CappeSocialPostInput = {
+  caption: string
+  media: CappeSocialMedia[]
+  link_url?: string | null
+  product_id?: string | null
+  connection_ids: string[]
+  scheduled_at?: string | null
+  alt_text?: string | null
+}
+
+// Chat composer (server/app/cappe/routes/social_chat.py, services/social/chat/)
+export type CappeSocialChatAttachment = {
+  kind: 'image' | 'video'
+  url?: string | null
+  asset_id?: string | null
+  name?: string | null
+}
+
+export type CappeSocialChatMessage = {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  attachments: CappeSocialChatAttachment[]
+  created_at: string
+}
+
+export type CappeSocialPlanMedia = CappeSocialChatAttachment & {
+  poster?: string | null
+  duration_ms?: number | null
+}
+
+export type CappeSocialTikTokWords = { caption: string; hashtags: string[] }
+export type CappeSocialYouTubeWords = { title: string; description: string; tags: string[] }
+
+export type CappeSocialPlanPost = {
+  items: number[]
+  media: CappeSocialPlanMedia[]
+  instagram: { caption: string; hashtags: string[] }
+  facebook: { text: string }
+  /** Only on posts with a video the plan makes files for. */
+  tiktok?: CappeSocialTikTokWords
+  youtube?: CappeSocialYouTubeWords
+  alt_text: string | null
+  offset_days: number
+}
+
+export type CappeSocialExportPlatform = 'instagram' | 'tiktok' | 'youtube'
+
+/** The files a plan makes for its videos, to download and upload by hand
+ *  (TikTok and YouTube can't be posted to yet). `files_only`: nothing is
+ *  posted — "prepare this for all platforms", or no account connected. */
+export type CappeSocialPlanExports = {
+  platforms: CappeSocialExportPlatform[]
+  captions: boolean
+  items: number[]
+  reason: 'asked' | 'no_accounts' | 'coming_soon'
+  files_only: boolean
+  note: string
+}
+
+export type CappeSocialPlan = {
+  when: {
+    mode: 'now' | 'at' | 'unset'
+    /** The store's wall clock, `YYYY-MM-DDTHH:MM`. */
+    local: string | null
+    scheduled_at: string | null
+    label: string | null
+    source: 'owner' | 'model' | null
+  }
+  accounts: { connection_id: string; platform: CappeSocialPlatform; handle: string | null }[]
+  link: { kind: 'store' | 'product' | 'none'; product_id: string | null; product_name: string | null; url: string | null }
+  posts: CappeSocialPlanPost[]
+  spread_days: number
+  exports?: CappeSocialPlanExports | null
+  warnings: string[]
+  needs: ('when' | 'what')[]
+}
+
+export type CappeSocialPlanCard = {
+  id: string
+  status: 'proposed' | 'executed' | 'dismissed' | 'replaced'
+  revision: number
+  plan: CappeSocialPlan
+  post_ids: string[]
+  export_ids?: string[]
+  model: string | null
+  created_at: string | null
+}
+
+/** A row in the chat list. `plan_status` 'proposed' means a plan is waiting. */
+export type CappeSocialChatSummary = {
+  id: string
+  title: string
+  created_at: string | null
+  updated_at: string
+  last: string | null
+  plan_status: CappeSocialPlanCard['status'] | null
+}
+
+export type CappeSocialChat = {
+  id: string
+  title: string
+  messages: CappeSocialChatMessage[]
+  plan: CappeSocialPlanCard | null
+}
+
+export type CappeSocialChatTurn = {
+  conversation_id: string
+  message: CappeSocialChatMessage
+  plan: CappeSocialPlanCard | null
+}
+
+export type CappeSocialPlanConfirmed = { plan: CappeSocialPlanCard; posts: CappeSocialPost[]; exports?: CappeSocialExport[] }
+
+// Exports (server/app/cappe/routes/social_exports.py): a video's files to
+// download for each platform, with the words to paste.
+export type CappeSocialExportStatus = 'queued' | 'working' | 'ready' | 'partial' | 'failed'
+
+export type CappeSocialExportFile = {
+  url: string | null
+  width: number | null
+  height: number | null
+  duration_ms: number | null
+  bytes: number | null
+  trimmed: boolean | null
+  error: string | null
+}
+
+export type CappeSocialExportTexts = {
+  instagram?: { text: string; link: string | null }
+  tiktok?: { text: string; link: string | null }
+  youtube?: { title: string; description: string; tags: string[] }
+}
+
+export type CappeSocialExport = {
+  id: string
+  asset_id: string
+  status: CappeSocialExportStatus
+  platforms: CappeSocialExportPlatform[]
+  captions: boolean
+  files: Partial<Record<CappeSocialExportPlatform, CappeSocialExportFile | null>>
+  progress: { done: number; total: number; step: string | null }
+  srt: boolean
+  texts: CappeSocialExportTexts
+  warnings: string[]
+  error: string | null
+  filename: string | null
+  poster: string | null
+  duration_ms: number | null
+  original: boolean
+  created_at: string
+  updated_at: string
+}
+
+export type CappeSocialExportTarget = CappeSocialExportPlatform | 'original' | 'captions'
+export type CappeSocialExportDownload = { url: string; filename: string; expires_in: number }
+
+export type CappeSocialCaptionOption = { text: string; hashtags: string[] }
+export type CappeSocialCaptions = { options: CappeSocialCaptionOption[]; alt_text: string | null; model: string }
+
+export type CappeSocialAutoreplyMode = 'off' | 'review' | 'auto'
+export type CappeSocialTone = 'friendly' | 'professional' | 'playful' | 'minimal'
+
+export type CappeSocialSettings = {
+  autoreply_mode: CappeSocialAutoreplyMode
+  reply_to_comments: boolean
+  reply_to_messages: boolean
+  tone: CappeSocialTone
+  business_facts: string
+  signature: string | null
+  default_hashtags: string[]
+  max_auto_per_hour: number
+  escalate_words: string[]
+  autoreply_available: boolean
+  video_available: boolean
+  ai_available: boolean
+}
+
+export type CappeSocialReply = {
+  id: string
+  body: string
+  mode: 'auto' | 'approved' | 'manual'
+  status: 'draft' | 'sending' | 'sent' | 'failed' | 'rejected'
+  model: string | null
+  grounding: { facts_used?: string[]; decision?: string }
+  external_reply_id: string | null
+  error: string | null
+  created_at: string
+  sent_at: string | null
+}
+
+export type CappeSocialInboxStatus = 'new' | 'drafted' | 'replied' | 'skipped' | 'escalated'
+
+export type CappeSocialInboxItem = {
+  id: string
+  connection_id: string
+  platform: CappeSocialPlatform
+  handle: string | null
+  kind: 'comment' | 'message'
+  external_id: string
+  external_parent_id: string | null
+  author_name: string | null
+  text: string
+  received_at: string
+  status: CappeSocialInboxStatus
+  classification: { intent?: string; sentiment?: string; confidence?: number; needs_human?: boolean; escalated_on?: string | null }
+  replies: CappeSocialReply[]
+}
+
+export type CappeSocialOverview = {
+  connections: number
+  scheduled: number
+  published_30d: number
+  inbox_new: number
+  drafts_waiting: number
+  followers: { platform: CappeSocialPlatform; handle: string | null; followers_count: number | null }[]
+  autoreply_mode: CappeSocialAutoreplyMode
+  meta_configured: boolean
+  ai_available: boolean
+}
