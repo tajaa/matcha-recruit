@@ -1,0 +1,872 @@
+[
+ {
+  "name": "a list nested seven deep keeps its innermost words",
+  "raw": {
+   "type": "doc",
+   "content": [
+    {
+     "type": "bulletList",
+     "content": [
+      {
+       "type": "listItem",
+       "content": [
+        {
+         "type": "paragraph",
+         "content": [
+          {
+           "type": "text",
+           "text": "level 1"
+          }
+         ]
+        },
+        {
+         "type": "bulletList",
+         "content": [
+          {
+           "type": "listItem",
+           "content": [
+            {
+             "type": "paragraph",
+             "content": [
+              {
+               "type": "text",
+               "text": "level 2"
+              }
+             ]
+            },
+            {
+             "type": "bulletList",
+             "content": [
+              {
+               "type": "listItem",
+               "content": [
+                {
+                 "type": "paragraph",
+                 "content": [
+                  {
+                   "type": "text",
+                   "text": "level 3"
+                  }
+                 ]
+                },
+                {
+                 "type": "bulletList",
+                 "content": [
+                  {
+                   "type": "listItem",
+                   "content": [
+                    {
+                     "type": "paragraph",
+                     "content": [
+                      {
+                       "type": "text",
+                       "text": "level 4"
+                      }
+                     ]
+                    },
+                    {
+                     "type": "bulletList",
+                     "content": [
+                      {
+                       "type": "listItem",
+                       "content": [
+                        {
+                         "type": "paragraph",
+                         "content": [
+                          {
+                           "type": "text",
+                           "text": "level 5"
+                          }
+                         ]
+                        },
+                        {
+                         "type": "bulletList",
+                         "content": [
+                          {
+                           "type": "listItem",
+                           "content": [
+                            {
+                             "type": "paragraph",
+                             "content": [
+                              {
+                               "type": "text",
+                               "text": "level 6"
+                              }
+                             ]
+                            },
+                            {
+                             "type": "bulletList",
+                             "content": [
+                              {
+                               "type": "listItem",
+                               "content": [
+                                {
+                                 "type": "paragraph",
+                                 "content": [
+                                  {
+                                   "type": "text",
+                                   "text": "Keep these interview notes"
+                                  }
+                                 ]
+                                }
+                               ]
+                              }
+                             ]
+                            }
+                           ]
+                          }
+                         ]
+                        }
+                       ]
+                      }
+                     ]
+                    }
+                   ]
+                  }
+                 ]
+                }
+               ]
+              }
+             ]
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  "rt": {
+   "type": "doc",
+   "content": [
+    {
+     "type": "bulletList",
+     "content": [
+      {
+       "type": "listItem",
+       "content": [
+        {
+         "type": "paragraph",
+         "content": [
+          {
+           "type": "text",
+           "text": "level 1"
+          }
+         ]
+        },
+        {
+         "type": "bulletList",
+         "content": [
+          {
+           "type": "listItem",
+           "content": [
+            {
+             "type": "paragraph",
+             "content": [
+              {
+               "type": "text",
+               "text": "level 2"
+              }
+             ]
+            },
+            {
+             "type": "bulletList",
+             "content": [
+              {
+               "type": "listItem",
+               "content": [
+                {
+                 "type": "paragraph",
+                 "content": [
+                  {
+                   "type": "text",
+                   "text": "level 3"
+                  }
+                 ]
+                },
+                {
+                 "type": "bulletList",
+                 "content": [
+                  {
+                   "type": "listItem",
+                   "content": [
+                    {
+                     "type": "paragraph",
+                     "content": [
+                      {
+                       "type": "text",
+                       "text": "level 4"
+                      }
+                     ]
+                    },
+                    {
+                     "type": "bulletList",
+                     "content": [
+                      {
+                       "type": "listItem",
+                       "content": [
+                        {
+                         "type": "paragraph",
+                         "content": [
+                          {
+                           "type": "text",
+                           "text": "level 5"
+                          }
+                         ]
+                        },
+                        {
+                         "type": "bulletList",
+                         "content": [
+                          {
+                           "type": "listItem",
+                           "content": [
+                            {
+                             "type": "paragraph",
+                             "content": [
+                              {
+                               "type": "text",
+                               "text": "level 6"
+                              }
+                             ]
+                            },
+                            {
+                             "type": "bulletList",
+                             "content": [
+                              {
+                               "type": "listItem",
+                               "content": [
+                                {
+                                 "type": "paragraph",
+                                 "content": [
+                                  {
+                                   "type": "text",
+                                   "text": "Keep these interview notes"
+                                  }
+                                 ]
+                                }
+                               ]
+                              }
+                             ]
+                            }
+                           ]
+                          }
+                         ]
+                        }
+                       ]
+                      }
+                     ]
+                    }
+                   ]
+                  }
+                 ]
+                }
+               ]
+              }
+             ]
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "name": "a quote nested eight deep keeps its words",
+  "raw": {
+   "type": "doc",
+   "content": [
+    {
+     "type": "blockquote",
+     "content": [
+      {
+       "type": "blockquote",
+       "content": [
+        {
+         "type": "blockquote",
+         "content": [
+          {
+           "type": "blockquote",
+           "content": [
+            {
+             "type": "blockquote",
+             "content": [
+              {
+               "type": "blockquote",
+               "content": [
+                {
+                 "type": "blockquote",
+                 "content": [
+                  {
+                   "type": "blockquote",
+                   "content": [
+                    {
+                     "type": "paragraph",
+                     "content": [
+                      {
+                       "type": "text",
+                       "text": "hello"
+                      }
+                     ]
+                    }
+                   ]
+                  }
+                 ]
+                }
+               ]
+              }
+             ]
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  "rt": {
+   "type": "doc",
+   "content": [
+    {
+     "type": "blockquote",
+     "content": [
+      {
+       "type": "blockquote",
+       "content": [
+        {
+         "type": "blockquote",
+         "content": [
+          {
+           "type": "blockquote",
+           "content": [
+            {
+             "type": "blockquote",
+             "content": [
+              {
+               "type": "blockquote",
+               "content": [
+                {
+                 "type": "blockquote",
+                 "content": [
+                  {
+                   "type": "paragraph",
+                   "content": [
+                    {
+                     "type": "text",
+                     "text": "hello"
+                    }
+                   ]
+                  }
+                 ]
+                }
+               ]
+              }
+             ]
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "name": "words wrapped in unknown marks past any depth keep their marks",
+  "raw": {
+   "type": "doc",
+   "content": [
+    {
+     "type": "paragraph",
+     "content": [
+      {
+       "type": "span",
+       "content": [
+        {
+         "type": "span",
+         "content": [
+          {
+           "type": "span",
+           "content": [
+            {
+             "type": "span",
+             "content": [
+              {
+               "type": "span",
+               "content": [
+                {
+                 "type": "span",
+                 "content": [
+                  {
+                   "type": "span",
+                   "content": [
+                    {
+                     "type": "span",
+                     "content": [
+                      {
+                       "type": "span",
+                       "content": [
+                        {
+                         "type": "text",
+                         "text": "deep",
+                         "marks": [
+                          {
+                           "type": "bold"
+                          }
+                         ]
+                        }
+                       ]
+                      }
+                     ]
+                    }
+                   ]
+                  }
+                 ]
+                }
+               ]
+              }
+             ]
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  "rt": {
+   "type": "doc",
+   "content": [
+    {
+     "type": "paragraph",
+     "content": [
+      {
+       "type": "text",
+       "text": "deep",
+       "marks": [
+        {
+         "type": "bold"
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "name": "unknown blocks nested deep keep their words",
+  "raw": {
+   "type": "doc",
+   "content": [
+    {
+     "type": "tableCell",
+     "content": [
+      {
+       "type": "tableCell",
+       "content": [
+        {
+         "type": "tableCell",
+         "content": [
+          {
+           "type": "tableCell",
+           "content": [
+            {
+             "type": "tableCell",
+             "content": [
+              {
+               "type": "tableCell",
+               "content": [
+                {
+                 "type": "tableCell",
+                 "content": [
+                  {
+                   "type": "tableCell",
+                   "content": [
+                    {
+                     "type": "tableCell",
+                     "content": [
+                      {
+                       "type": "tableCell",
+                       "content": [
+                        {
+                         "type": "tableCell",
+                         "content": [
+                          {
+                           "type": "tableCell",
+                           "content": [
+                            {
+                             "type": "paragraph",
+                             "content": [
+                              {
+                               "type": "text",
+                               "text": "cell"
+                              }
+                             ]
+                            }
+                           ]
+                          }
+                         ]
+                        }
+                       ]
+                      }
+                     ]
+                    }
+                   ]
+                  }
+                 ]
+                }
+               ]
+              }
+             ]
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  "rt": {
+   "type": "doc",
+   "content": [
+    {
+     "type": "paragraph",
+     "content": [
+      {
+       "type": "text",
+       "text": "cell"
+      }
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "name": "headings past depth become paragraphs",
+  "raw": {
+   "type": "doc",
+   "content": [
+    {
+     "type": "blockquote",
+     "content": [
+      {
+       "type": "blockquote",
+       "content": [
+        {
+         "type": "blockquote",
+         "content": [
+          {
+           "type": "blockquote",
+           "content": [
+            {
+             "type": "blockquote",
+             "content": [
+              {
+               "type": "blockquote",
+               "content": [
+                {
+                 "type": "blockquote",
+                 "content": [
+                  {
+                   "type": "heading",
+                   "attrs": {
+                    "level": 2
+                   },
+                   "content": [
+                    {
+                     "type": "text",
+                     "text": "Title"
+                    }
+                   ]
+                  }
+                 ]
+                }
+               ]
+              }
+             ]
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  "rt": {
+   "type": "doc",
+   "content": [
+    {
+     "type": "blockquote",
+     "content": [
+      {
+       "type": "blockquote",
+       "content": [
+        {
+         "type": "blockquote",
+         "content": [
+          {
+           "type": "blockquote",
+           "content": [
+            {
+             "type": "blockquote",
+             "content": [
+              {
+               "type": "blockquote",
+               "content": [
+                {
+                 "type": "blockquote",
+                 "content": [
+                  {
+                   "type": "paragraph",
+                   "content": [
+                    {
+                     "type": "text",
+                     "text": "Title"
+                    }
+                   ]
+                  }
+                 ]
+                }
+               ]
+              }
+             ]
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "name": "marks are merged, ordered and allowlisted",
+  "raw": {
+   "type": "doc",
+   "content": [
+    {
+     "type": "paragraph",
+     "content": [
+      {
+       "type": "text",
+       "text": "a",
+       "marks": [
+        {
+         "type": "italic"
+        },
+        {
+         "type": "bold"
+        },
+        {
+         "type": "code"
+        }
+       ]
+      },
+      {
+       "type": "text",
+       "text": "b",
+       "marks": [
+        {
+         "type": "bold"
+        },
+        {
+         "type": "italic"
+        }
+       ]
+      },
+      {
+       "type": "text",
+       "text": "c",
+       "marks": [
+        {
+         "type": "link",
+         "attrs": {
+          "href": "javascript:alert(1)"
+         }
+        }
+       ]
+      },
+      {
+       "type": "text",
+       "text": "d",
+       "marks": [
+        {
+         "type": "link",
+         "attrs": {
+          "href": " https://example.com/x ",
+          "target": "_blank"
+         }
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  "rt": {
+   "type": "doc",
+   "content": [
+    {
+     "type": "paragraph",
+     "content": [
+      {
+       "type": "text",
+       "text": "ab",
+       "marks": [
+        {
+         "type": "bold"
+        },
+        {
+         "type": "italic"
+        }
+       ]
+      },
+      {
+       "type": "text",
+       "text": "c"
+      },
+      {
+       "type": "text",
+       "text": "d",
+       "marks": [
+        {
+         "type": "link",
+         "attrs": {
+          "href": "https://example.com/x"
+         }
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "name": "heading levels fold to two and three",
+  "raw": {
+   "type": "doc",
+   "content": [
+    {
+     "type": "heading",
+     "attrs": {
+      "level": 1
+     },
+     "content": [
+      {
+       "type": "text",
+       "text": "Big"
+      }
+     ]
+    },
+    {
+     "type": "heading",
+     "attrs": {
+      "level": 6
+     },
+     "content": [
+      {
+       "type": "text",
+       "text": "Small"
+      }
+     ]
+    }
+   ]
+  },
+  "rt": {
+   "type": "doc",
+   "content": [
+    {
+     "type": "heading",
+     "attrs": {
+      "level": 2
+     },
+     "content": [
+      {
+       "type": "text",
+       "text": "Big"
+      }
+     ]
+    },
+    {
+     "type": "heading",
+     "attrs": {
+      "level": 3
+     },
+     "content": [
+      {
+       "type": "text",
+       "text": "Small"
+      }
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "name": "pictures and rules are dropped, code keeps its words",
+  "raw": {
+   "type": "doc",
+   "content": [
+    {
+     "type": "image",
+     "attrs": {
+      "src": "https://evil.test/x.png"
+     }
+    },
+    {
+     "type": "horizontalRule"
+    },
+    {
+     "type": "codeBlock",
+     "content": [
+      {
+       "type": "text",
+       "text": "x = 1"
+      }
+     ]
+    }
+   ]
+  },
+  "rt": {
+   "type": "doc",
+   "content": [
+    {
+     "type": "paragraph",
+     "content": [
+      {
+       "type": "text",
+       "text": "x = 1"
+      }
+     ]
+    }
+   ]
+  }
+ }
+]

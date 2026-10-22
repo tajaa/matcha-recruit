@@ -29,7 +29,7 @@ _VOID = frozenset({"br", "hr", "img", "input", "area", "base", "col", "embed", "
                    "source", "track", "wbr"})
 _RENAME = {"h1": "h2", "h4": "h3", "h5": "h3", "h6": "h3"}
 _LINK_SCHEMES = ("http://", "https://", "mailto:")
-MAX_MD = 20_000
+MAX_MD = 100_000  # a 20,000-character document, every character escaped and marked
 
 
 class _Allowlist(HTMLParser):

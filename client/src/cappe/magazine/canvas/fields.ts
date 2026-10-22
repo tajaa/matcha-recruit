@@ -20,8 +20,9 @@ export const BLOCK_FIELDS: Record<StoryBlock['type'], readonly string[]> = {
 export const STORY_FIELDS = ['@title', '@kicker', '@excerpt', '@byline'] as const
 export type StoryField = (typeof STORY_FIELDS)[number]
 
-/** Written with the toolbar (bold, links, headings, lists): Markdown when
- *  stored. Every other field is plain words. */
+/** Rich text (bold, links, headings, lists): typed in an editor, sent as a
+ *  document and kept with its Markdown (`md` → `rt`, `a_md` → `a_rt`).
+ *  Every other field is plain words. */
 export const RICH_FIELDS: readonly string[] = ['md', 'items.#.a_md']
 
 /** The longest each field may be, as the server keeps it (story_schema.py,

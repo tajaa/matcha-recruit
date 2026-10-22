@@ -1,0 +1,823 @@
+[
+ {
+  "name": "a plain paragraph",
+  "rt": {
+   "type": "doc",
+   "content": [
+    {
+     "type": "paragraph",
+     "content": [
+      {
+       "type": "text",
+       "text": "The harbour wakes before the town does."
+      }
+     ]
+    }
+   ]
+  },
+  "html": "<p>The harbour wakes before the town does.</p>",
+  "md": "The harbour wakes before the town does.",
+  "md_reads_back": true
+ },
+ {
+  "name": "two paragraphs",
+  "rt": {
+   "type": "doc",
+   "content": [
+    {
+     "type": "paragraph",
+     "content": [
+      {
+       "type": "text",
+       "text": "First."
+      }
+     ]
+    },
+    {
+     "type": "paragraph",
+     "content": [
+      {
+       "type": "text",
+       "text": "Second."
+      }
+     ]
+    }
+   ]
+  },
+  "html": "<p>First.</p><p>Second.</p>",
+  "md": "First.\n\nSecond.",
+  "md_reads_back": true
+ },
+ {
+  "name": "bold, italic and both",
+  "rt": {
+   "type": "doc",
+   "content": [
+    {
+     "type": "paragraph",
+     "content": [
+      {
+       "type": "text",
+       "text": "Out "
+      },
+      {
+       "type": "text",
+       "text": "early",
+       "marks": [
+        {
+         "type": "bold"
+        }
+       ]
+      },
+      {
+       "type": "text",
+       "text": " and "
+      },
+      {
+       "type": "text",
+       "text": "late",
+       "marks": [
+        {
+         "type": "italic"
+        }
+       ]
+      },
+      {
+       "type": "text",
+       "text": ", "
+      },
+      {
+       "type": "text",
+       "text": "always",
+       "marks": [
+        {
+         "type": "bold"
+        },
+        {
+         "type": "italic"
+        }
+       ]
+      },
+      {
+       "type": "text",
+       "text": "."
+      }
+     ]
+    }
+   ]
+  },
+  "html": "<p>Out <strong>early</strong> and <em>late</em>, <strong><em>always</em></strong>.</p>",
+  "md": "Out **early** and *late*, ***always***.",
+  "md_reads_back": true
+ },
+ {
+  "name": "a link with marks inside",
+  "rt": {
+   "type": "doc",
+   "content": [
+    {
+     "type": "paragraph",
+     "content": [
+      {
+       "type": "text",
+       "text": "Read "
+      },
+      {
+       "type": "text",
+       "text": "the report",
+       "marks": [
+        {
+         "type": "link",
+         "attrs": {
+          "href": "https://example.com/a?b=1&c=2"
+         }
+        }
+       ]
+      },
+      {
+       "type": "text",
+       "text": " or "
+      },
+      {
+       "type": "text",
+       "text": "this one",
+       "marks": [
+        {
+         "type": "link",
+         "attrs": {
+          "href": "https://example.com/x"
+         }
+        },
+        {
+         "type": "bold"
+        }
+       ]
+      },
+      {
+       "type": "text",
+       "text": "."
+      }
+     ]
+    }
+   ]
+  },
+  "html": "<p>Read <a rel=\"nofollow ugc noopener\" href=\"https://example.com/a?b=1&amp;c=2\">the report</a> or <a rel=\"nofollow ugc noopener\" href=\"https://example.com/x\"><strong>this one</strong></a>.</p>",
+  "md": "Read [the report](https://example.com/a?b=1&c=2) or [**this one**](https://example.com/x).",
+  "md_reads_back": true
+ },
+ {
+  "name": "a link with brackets in its address",
+  "rt": {
+   "type": "doc",
+   "content": [
+    {
+     "type": "paragraph",
+     "content": [
+      {
+       "type": "text",
+       "text": "Wiki",
+       "marks": [
+        {
+         "type": "link",
+         "attrs": {
+          "href": "https://example.com/Pier_(Brighton)"
+         }
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  "html": "<p><a rel=\"nofollow ugc noopener\" href=\"https://example.com/Pier_(Brighton)\">Wiki</a></p>",
+  "md": "[Wiki](https://example.com/Pier_%28Brighton%29)",
+  "md_reads_back": false
+ },
+ {
+  "name": "a mail link",
+  "rt": {
+   "type": "doc",
+   "content": [
+    {
+     "type": "paragraph",
+     "content": [
+      {
+       "type": "text",
+       "text": "Write to us",
+       "marks": [
+        {
+         "type": "link",
+         "attrs": {
+          "href": "mailto:desk@example.com"
+         }
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  "html": "<p><a rel=\"nofollow ugc noopener\" href=\"mailto:desk@example.com\">Write to us</a></p>",
+  "md": "[Write to us](mailto:desk@example.com)",
+  "md_reads_back": true
+ },
+ {
+  "name": "headings",
+  "rt": {
+   "type": "doc",
+   "content": [
+    {
+     "type": "heading",
+     "attrs": {
+      "level": 2
+     },
+     "content": [
+      {
+       "type": "text",
+       "text": "At sea"
+      }
+     ]
+    },
+    {
+     "type": "paragraph",
+     "content": [
+      {
+       "type": "text",
+       "text": "Words."
+      }
+     ]
+    },
+    {
+     "type": "heading",
+     "attrs": {
+      "level": 3
+     },
+     "content": [
+      {
+       "type": "text",
+       "text": "The catch",
+       "marks": [
+        {
+         "type": "italic"
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  "html": "<h2>At sea</h2><p>Words.</p><h3><em>The catch</em></h3>",
+  "md": "## At sea\n\nWords.\n\n### *The catch*",
+  "md_reads_back": true
+ },
+ {
+  "name": "a quote of two paragraphs",
+  "rt": {
+   "type": "doc",
+   "content": [
+    {
+     "type": "blockquote",
+     "content": [
+      {
+       "type": "paragraph",
+       "content": [
+        {
+         "type": "text",
+         "text": "We go out at four."
+        }
+       ]
+      },
+      {
+       "type": "paragraph",
+       "content": [
+        {
+         "type": "text",
+         "text": "Always four."
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  "html": "<blockquote><p>We go out at four.</p><p>Always four.</p></blockquote>",
+  "md": "> We go out at four.\n>\n> Always four.",
+  "md_reads_back": true
+ },
+ {
+  "name": "a bulleted list",
+  "rt": {
+   "type": "doc",
+   "content": [
+    {
+     "type": "bulletList",
+     "content": [
+      {
+       "type": "listItem",
+       "content": [
+        {
+         "type": "paragraph",
+         "content": [
+          {
+           "type": "text",
+           "text": "Nets"
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "type": "listItem",
+       "content": [
+        {
+         "type": "paragraph",
+         "content": [
+          {
+           "type": "text",
+           "text": "Rope",
+           "marks": [
+            {
+             "type": "bold"
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  "html": "<ul><li><p>Nets</p></li><li><p><strong>Rope</strong></p></li></ul>",
+  "md": "- Nets\n- **Rope**",
+  "md_reads_back": true
+ },
+ {
+  "name": "a numbered list from 3",
+  "rt": {
+   "type": "doc",
+   "content": [
+    {
+     "type": "orderedList",
+     "attrs": {
+      "start": 3
+     },
+     "content": [
+      {
+       "type": "listItem",
+       "content": [
+        {
+         "type": "paragraph",
+         "content": [
+          {
+           "type": "text",
+           "text": "Third"
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "type": "listItem",
+       "content": [
+        {
+         "type": "paragraph",
+         "content": [
+          {
+           "type": "text",
+           "text": "Fourth"
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  "html": "<ol start=\"3\"><li><p>Third</p></li><li><p>Fourth</p></li></ol>",
+  "md": "3. Third\n4. Fourth",
+  "md_reads_back": false
+ },
+ {
+  "name": "a numbered list from 1",
+  "rt": {
+   "type": "doc",
+   "content": [
+    {
+     "type": "orderedList",
+     "attrs": {
+      "start": 1
+     },
+     "content": [
+      {
+       "type": "listItem",
+       "content": [
+        {
+         "type": "paragraph",
+         "content": [
+          {
+           "type": "text",
+           "text": "One"
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  "html": "<ol><li><p>One</p></li></ol>",
+  "md": "1. One",
+  "md_reads_back": true
+ },
+ {
+  "name": "a line break",
+  "rt": {
+   "type": "doc",
+   "content": [
+    {
+     "type": "paragraph",
+     "content": [
+      {
+       "type": "text",
+       "text": "Line one"
+      },
+      {
+       "type": "hardBreak"
+      },
+      {
+       "type": "text",
+       "text": "line two"
+      }
+     ]
+    }
+   ]
+  },
+  "html": "<p>Line one<br>line two</p>",
+  "md": "Line one  \nline two",
+  "md_reads_back": true
+ },
+ {
+  "name": "underline and strike-through",
+  "rt": {
+   "type": "doc",
+   "content": [
+    {
+     "type": "paragraph",
+     "content": [
+      {
+       "type": "text",
+       "text": "under",
+       "marks": [
+        {
+         "type": "underline"
+        }
+       ]
+      },
+      {
+       "type": "text",
+       "text": " and "
+      },
+      {
+       "type": "text",
+       "text": "struck",
+       "marks": [
+        {
+         "type": "strike"
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  "html": "<p><u>under</u> and <s>struck</s></p>",
+  "md": "under and struck",
+  "md_reads_back": false
+ },
+ {
+  "name": "Markdown's own characters",
+  "rt": {
+   "type": "doc",
+   "content": [
+    {
+     "type": "paragraph",
+     "content": [
+      {
+       "type": "text",
+       "text": "2*3 = 6, snake_case, [brackets] and a back\\slash `tick`"
+      }
+     ]
+    }
+   ]
+  },
+  "html": "<p>2*3 = 6, snake_case, [brackets] and a back\\slash `tick`</p>",
+  "md": "2\\*3 = 6, snake\\_case, \\[brackets\\] and a back\\\\slash \\`tick\\`",
+  "md_reads_back": true
+ },
+ {
+  "name": "words that look like Markdown at a line's start",
+  "rt": {
+   "type": "doc",
+   "content": [
+    {
+     "type": "paragraph",
+     "content": [
+      {
+       "type": "text",
+       "text": "# not a heading"
+      }
+     ]
+    },
+    {
+     "type": "paragraph",
+     "content": [
+      {
+       "type": "text",
+       "text": "1. not a list"
+      }
+     ]
+    },
+    {
+     "type": "paragraph",
+     "content": [
+      {
+       "type": "text",
+       "text": "- not a bullet"
+      }
+     ]
+    },
+    {
+     "type": "paragraph",
+     "content": [
+      {
+       "type": "text",
+       "text": "> not a quote"
+      }
+     ]
+    }
+   ]
+  },
+  "html": "<p># not a heading</p><p>1. not a list</p><p>- not a bullet</p><p>&gt; not a quote</p>",
+  "md": "\\# not a heading\n\n1\\. not a list\n\n\\- not a bullet\n\n\\> not a quote",
+  "md_reads_back": true
+ },
+ {
+  "name": "markup typed as words",
+  "rt": {
+   "type": "doc",
+   "content": [
+    {
+     "type": "paragraph",
+     "content": [
+      {
+       "type": "text",
+       "text": "<script>alert(1)</script> & <b>"
+      }
+     ]
+    }
+   ]
+  },
+  "html": "<p>&lt;script&gt;alert(1)&lt;/script&gt; &amp; &lt;b&gt;</p>",
+  "md": "<script>alert(1)</script> & <b>",
+  "md_reads_back": true
+ },
+ {
+  "name": "an empty story",
+  "rt": {
+   "type": "doc",
+   "content": [
+    {
+     "type": "paragraph"
+    }
+   ]
+  },
+  "html": "",
+  "md": "",
+  "md_reads_back": true
+ },
+ {
+  "name": "numbers in a bulleted list",
+  "rt": {
+   "type": "doc",
+   "content": [
+    {
+     "type": "bulletList",
+     "content": [
+      {
+       "type": "listItem",
+       "content": [
+        {
+         "type": "paragraph",
+         "content": [
+          {
+           "type": "text",
+           "text": "Outer"
+          }
+         ]
+        },
+        {
+         "type": "orderedList",
+         "attrs": {
+          "start": 1
+         },
+         "content": [
+          {
+           "type": "listItem",
+           "content": [
+            {
+             "type": "paragraph",
+             "content": [
+              {
+               "type": "text",
+               "text": "One"
+              }
+             ]
+            }
+           ]
+          },
+          {
+           "type": "listItem",
+           "content": [
+            {
+             "type": "paragraph",
+             "content": [
+              {
+               "type": "text",
+               "text": "Two"
+              }
+             ]
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "type": "listItem",
+       "content": [
+        {
+         "type": "paragraph",
+         "content": [
+          {
+           "type": "text",
+           "text": "Next"
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  "html": "<ul><li><p>Outer</p><ol><li><p>One</p></li><li><p>Two</p></li></ol></li><li><p>Next</p></li></ul>",
+  "md": "- Outer\n    1. One\n    2. Two\n- Next",
+  "md_reads_back": true
+ },
+ {
+  "name": "a list item of two paragraphs",
+  "rt": {
+   "type": "doc",
+   "content": [
+    {
+     "type": "bulletList",
+     "content": [
+      {
+       "type": "listItem",
+       "content": [
+        {
+         "type": "paragraph",
+         "content": [
+          {
+           "type": "text",
+           "text": "First"
+          }
+         ]
+        },
+        {
+         "type": "paragraph",
+         "content": [
+          {
+           "type": "text",
+           "text": "Second"
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "type": "listItem",
+       "content": [
+        {
+         "type": "paragraph",
+         "content": [
+          {
+           "type": "text",
+           "text": "Third"
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  "html": "<ul><li><p>First</p><p>Second</p></li><li><p>Third</p></li></ul>",
+  "md": "- First\n\n    Second\n\n- Third",
+  "md_reads_back": true
+ },
+ {
+  "name": "a tight list item keeps the spaces around its marks",
+  "rt": {
+   "type": "doc",
+   "content": [
+    {
+     "type": "bulletList",
+     "content": [
+      {
+       "type": "listItem",
+       "content": [
+        {
+         "type": "paragraph",
+         "content": [
+          {
+           "type": "text",
+           "text": "foo "
+          },
+          {
+           "type": "text",
+           "text": "bar",
+           "marks": [
+            {
+             "type": "bold"
+            }
+           ]
+          },
+          {
+           "type": "text",
+           "text": " baz"
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  "html": "<ul><li><p>foo <strong>bar</strong> baz</p></li></ul>",
+  "md": "- foo **bar** baz",
+  "md_reads_back": true
+ },
+ {
+  "name": "words that start a line like a heading, a rule or an underline stay words",
+  "rt": {
+   "type": "doc",
+   "content": [
+    {
+     "type": "paragraph",
+     "content": [
+      {
+       "type": "text",
+       "text": "#hashtag is cool"
+      }
+     ]
+    },
+    {
+     "type": "paragraph",
+     "content": [
+      {
+       "type": "text",
+       "text": "---"
+      }
+     ]
+    },
+    {
+     "type": "paragraph",
+     "content": [
+      {
+       "type": "text",
+       "text": "Title"
+      },
+      {
+       "type": "hardBreak"
+      },
+      {
+       "type": "text",
+       "text": "==="
+      }
+     ]
+    }
+   ]
+  },
+  "html": "<p>#hashtag is cool</p><p>---</p><p>Title<br>===</p>",
+  "md": "\\#hashtag is cool\n\n\\---\n\nTitle  \n ===",
+  "md_reads_back": true
+ }
+]

@@ -1,6 +1,6 @@
-/* The owner's editor on the page (editor.js): only in edit renders. The page
-   is the reader's own; this adds what editing needs and nothing a reader
-   sees. */
+/* The owner's editor on the page (frame/index.ts), written into edit renders
+   by EditFrame. The page is the reader's own; this adds what editing needs
+   and nothing a reader sees. */
 
 /* The book stays hidden until the editor has turned it back to the place
    being edited (mz-goto), so a fresh render never flashes page one; it shows
@@ -21,9 +21,13 @@
    for the small lines around it. */
 .mz-kicker[data-mz-f],.mz-dek[data-mz-f],.mz-by [data-mz-f]{position:relative;z-index:1}
 .mz-text[data-mz-f]:empty,.mz-sidebar [data-mz-f]:empty,.mz-qa__a[data-mz-f]:empty{min-height:1.6em}
+/* Rich text is an editor on the field itself (rich.ts): its empty first
+   paragraph says what the field is for. */
+[data-mz-f] .is-editor-empty:first-child::before{content:attr(data-placeholder);float:left;height:0;opacity:.38;font-style:italic;
+  pointer-events:none}
 
 /* What the pointer is over, and what is selected: boxes drawn over the page
-   (editor.js), one for each piece of a block split across columns. */
+   (selection.ts), one for each piece of a block split across columns. */
 .mze-box{position:fixed;z-index:50;display:none;box-sizing:border-box;border-radius:3px;pointer-events:none}
 .mze-box--hov{border:1px dashed rgba(16,185,129,.75)}
 .mze-box--sel{border:2px solid #10b981}
@@ -49,6 +53,8 @@
 .mze-bar button:hover{background:#27272a}
 .mze-bar button[aria-pressed="true"]{background:#10b981;color:#052e16}
 .mze-bar button[data-cmd="italic"]{font-style:italic;font-family:Georgia,serif}
+.mze-bar button[data-cmd="underline"]{text-decoration:underline}
+.mze-bar button[data-cmd="strike"]{text-decoration:line-through}
 .mze-bar .mze-link{width:16rem;height:30px;margin-left:4px;padding:0 8px;border:1px solid #3f3f46;border-radius:6px;background:#09090b;color:#f4f4f5}
 .mze-plus{position:fixed;z-index:55;display:none;width:22px;height:22px;padding:0;border:0;border-radius:50%;background:#10b981;color:#052e16;
   font:700 16px/22px system-ui,sans-serif;text-align:center;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.3)}

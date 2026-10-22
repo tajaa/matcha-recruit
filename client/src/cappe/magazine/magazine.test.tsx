@@ -34,7 +34,8 @@ const post = (over: Partial<CappePost> = {}): CappePost => ({
   cover_image_url: 'https://cdn.example.test/a.jpg', status: 'draft', published_at: null, created_at: '2026-10-20T09:00:00Z',
   updated_at: '2026-10-20T09:00:00Z', format: 'blocks',
   content: { blocks: [{ type: 'cover', asset_id: 'a-1', style: 'stacked', tone: 'light', focal: { x: 50, y: 50 } },
-                      { type: 'text', md: 'The **boats**.', dropcap: true, columns: 1 }] },
+                      { type: 'text', md: 'The **boats**.', dropcap: true, columns: 1,
+                        rt: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'The ' }, { type: 'text', text: 'boats', marks: [{ type: 'bold' }] }, { type: 'text', text: '.' }] }] } }] },
   kicker: 'Dispatch', topic: 'city', layout: 'standard', access: 'free', cover_asset_id: 'a-1', byline: 'Ana Ruiz',
   word_count: 2, reading_minutes: 1, hidden: false, ...over,
 })
@@ -143,7 +144,9 @@ describe('StoryEditor', () => {
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
 
     fireEvent.change(screen.getByLabelText('Headline'), { target: { value: 'Dawn' } })
-    fireEvent.change(screen.getByDisplayValue('The **boats**.'), { target: { value: 'New words.' } })
+    const words = screen.getByRole('textbox', { name: 'Text' }) as HTMLElement & { editor: import('@tiptap/core').Editor }
+    expect(words).toHaveTextContent('The boats.')
+    words.editor.chain().selectAll().insertContent('New words.').run()
     fireEvent.click(screen.getByRole('button', { name: /Add a block/ }))
     fireEvent.click(screen.getByRole('menuitem', { name: 'Pull quote' }))
     expect(screen.getByLabelText('Pull quote block')).toBeInTheDocument()
@@ -160,7 +163,7 @@ describe('StoryEditor', () => {
     expect(sent.status).toBe('published')
     expect(sent.cover_asset_id).toBe('a-1')
     const blocks = (sent.content as { blocks: StoryBlock[] }).blocks
-    expect(blocks[1]).toEqual({ type: 'text', md: 'New words.', dropcap: true, columns: 1 })
+    expect(blocks[1]).toEqual({ type: 'text', md: 'New words.', rt: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'New words.' }] }] }, dropcap: true, columns: 1 })
     expect(blocks[2].type).toBe('quote')
     expect(await screen.findByText('published')).toBeInTheDocument()
   })
@@ -219,13 +222,17 @@ describe('StoryEditor', () => {
 
   it('offers to turn a plain post into a story', async () => {
     answer({ '/posts/p-1': post({ format: 'markdown', content: null, body: 'Old *words*.' }), '/stories/options': OPTIONS, '/assets': { assets: [] } })
-    api.put.mockResolvedValue(post({ content: { blocks: [{ type: 'text', md: 'Old *words*.', dropcap: true, columns: 1 }] } }))
+    api.put.mockResolvedValue(post({ content: { blocks: [{ type: 'text', md: 'Old *words*.', dropcap: true, columns: 1, rt: { type: 'doc', content: [
+      { type: 'paragraph', content: [{ type: 'text', text: 'Old ' }, { type: 'text', text: 'words', marks: [{ type: 'italic' }] }, { type: 'text', text: '.' }] }] } }] } }))
     mount('/cappe/sites/s-1/stories/p-1?view=outline', <StoryEditor />, '/cappe/sites/:siteId/stories/:postId')
     expect(await screen.findByText(/plain post written as Markdown/)).toBeInTheDocument()
     expect(api.postHtml).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: 'Turn into a story' }))
     await waitFor(() => expect(api.put).toHaveBeenCalledWith('/sites/s-1/posts/p-1', { format: 'blocks' }))
-    expect(await screen.findByDisplayValue('Old *words*.')).toBeInTheDocument()
+    // The server keeps its words as a document; the editor opens it.
+    const words = await screen.findByRole('textbox', { name: 'Text' })
+    expect(words).toHaveTextContent('Old words.')
+    expect(words.querySelector('em')).toHaveTextContent('words')
   })
 
   it('shows a save failure and deletes after confirming', async () => {

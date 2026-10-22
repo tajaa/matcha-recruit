@@ -1,7 +1,9 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import cases from '../../../../server/tests/cappe/fixtures/magazine_md_cases.json'
+import { generateJSON } from '@tiptap/core'
+import cases from '../../../../server/tests/cappe/fixtures/magazine_rt_cases.json'
+import cleanCases from '../../../../server/tests/cappe/fixtures/magazine_rt_clean_cases.json'
 import StoryEditor from './editor/StoryEditor'
 import IssueEditor from './issues/IssueEditor'
 import { newBlock } from './editor/blocks'
@@ -10,7 +12,8 @@ import EditFrame from './canvas/EditFrame'
 import { PHONE, SPREAD_MIN, fitFrame } from './canvas/fit'
 import { readMessage, type FrameMessage } from './canvas/bridge'
 import { BLOCK_FIELDS, blockHasField, clip, fieldShape, isRichField } from './canvas/fields'
-import { escapeMd, htmlToMd } from './canvas/htmlToMd'
+import { cleanHref, cleanRt, emptyRt, richPatch, rtText, rtToMd, type RtDoc } from './canvas/rt'
+import { richExtensions } from './frame/extensions'
 import { applyIssueEdit, coverFocal, moveCoverEl } from './canvas/issueEdits'
 import { applyEdit, storyFromMessage, withPicture, type StoryDoc } from './canvas/storyDoc'
 import type {
@@ -21,7 +24,11 @@ const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delet
 vi.mock('../api', () => ({ cappeApi: api, cappeApiBase: '/api/cappe' }))
 
 const ctx = { stories: new Set(['preview', 'p-1']) }
-const text = (md: string): StoryBlock => ({ ...(newBlock('text') as Extract<StoryBlock, { type: 'text' }>), md })
+type Mark = 'bold' | 'italic' | 'underline' | 'strike' | { type: 'link'; attrs: { href: string } }
+const t = (text: string, ...marks: Mark[]) =>
+  (marks.length ? { type: 'text' as const, text, marks: marks.map((m) => (typeof m === 'string' ? { type: m } : m)) } : { type: 'text' as const, text })
+const doc = (...inline: ReturnType<typeof t>[]): RtDoc => ({ type: 'doc', content: [{ type: 'paragraph', content: inline }] }) as RtDoc
+const text = (md: string): StoryBlock => ({ ...(newBlock('text') as Extract<StoryBlock, { type: 'text' }>), md, rt: doc(t(md)) })
 const photo = (over: Partial<Extract<StoryBlock, { type: 'photo' }>> = {}): StoryBlock =>
   ({ ...(newBlock('photo') as Extract<StoryBlock, { type: 'photo' }>), ...over })
 
@@ -33,12 +40,87 @@ const story = (): StoryDoc => ({
     { type: 'qa', items: [{ q: 'Why?', a_md: 'Because.' }] }],
 })
 
-describe('htmlToMd', () => {
+describe('rich text, as the server keeps it (the shared fixture)', () => {
   for (const c of cases) {
-    it(`converts ${c.name}`, () => expect(htmlToMd(c.html)).toBe(c.md))
+    it(`keeps ${c.name}`, () => {
+      const rt = c.rt as unknown as RtDoc
+      expect(cleanRt(rt)).toEqual(rt)
+      expect(rtToMd(rt)).toBe(c.md)
+      // The editor reads the page's HTML back into the same document.
+      expect(cleanRt(generateJSON(c.html, richExtensions()))).toEqual(rt)
+    })
   }
-  it('escapes what Markdown would read as formatting', () => {
-    expect(escapeMd('a*b_c[d]`e\\')).toBe('a\\*b\\_c\\[d\\]\\`e\\\\')
+
+  for (const c of cleanCases) {
+    it(`keeps what the server keeps of ${c.name}`, () => expect(cleanRt(c.raw)).toEqual(c.rt))
+  }
+
+  it('keeps every word of a list pasted seven levels deep', () => {
+    let html = '<p>Keep these interview notes</p>'
+    for (let i = 6; i >= 1; i--) html = `<p>level ${i}</p><ul><li>${html}</li></ul>`
+    const kept = cleanRt(generateJSON(`<ul><li>${html}</li></ul>`, richExtensions()))!
+    expect(rtText(kept)).toContain('Keep these interview notes')
+    expect(rtToMd(kept)).toContain('Keep these interview notes')
+    // Nested past any sense, walked without running out of stack.
+    let deep: unknown = { type: 'paragraph', content: [{ type: 'text', text: 'bottom' }] }
+    for (let i = 0; i < 20_000; i++) deep = { type: 'tableCell', content: [deep] }
+    expect(cleanRt({ type: 'doc', content: [deep] })).toEqual(doc(t('bottom')))
+  })
+
+  it('keeps only what the server keeps', () => {
+    const raw = { type: 'doc', content: [
+      { type: 'paragraph', content: [
+        { type: 'text', text: 'a', marks: [{ type: 'italic' }, { type: 'bold' }, { type: 'bold' }, { type: 'code' }] },
+        { type: 'text', text: 'b', marks: [{ type: 'bold' }, { type: 'italic' }] },
+        { type: 'text', text: 'c', marks: [{ type: 'link', attrs: { href: 'javascript:alert(1)', target: '_blank' } }] },
+        { type: 'text', text: 'd', marks: [{ type: 'link', attrs: { href: ' https://example.com ', class: 'x' } }] },
+        { type: 'image', attrs: { src: 'https://evil.test/x.png' } }, 7, null],
+      },
+      { type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: 'Big' }] },
+      { type: 'heading', attrs: { level: 5 } },
+      { type: 'codeBlock', content: [{ type: 'text', text: 'x()' }] },
+      { type: 'blockquote', content: [{ type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: 'Said' }] }] },
+      { type: 'blockquote', content: [] },
+      { type: 'orderedList', attrs: { start: 0 }, content: [{ type: 'listItem', content: [{ type: 'bulletList', content: [
+        { type: 'listItem', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'in' }] }] }] }] }, { type: 'listItem', content: [] }] },
+      { type: 'bulletList', content: [] },
+    ] }
+    expect(cleanRt(raw)).toEqual({ type: 'doc', content: [
+      { type: 'paragraph', content: [t('ab', 'bold', 'italic'), t('c'), t('d', { type: 'link', attrs: { href: 'https://example.com' } })] },
+      { type: 'heading', attrs: { level: 2 }, content: [t('Big')] },
+      { type: 'heading', attrs: { level: 3 } },
+      { type: 'paragraph', content: [t('x()')] },
+      { type: 'blockquote', content: [{ type: 'paragraph', content: [t('Said')] }] },
+      { type: 'orderedList', attrs: { start: 1 }, content: [{ type: 'listItem', content: [
+        { type: 'paragraph' }, { type: 'bulletList', content: [{ type: 'listItem', content: [{ type: 'paragraph', content: [t('in')] }] }] }] }] },
+    ] })
+    expect(cleanRt(null)).toBeNull()
+    expect(cleanRt({ type: 'p' })).toBeNull()
+    expect(cleanRt({ type: 'doc', content: 'x' })).toEqual(emptyRt())
+    expect(cleanRt(doc(t('a'.repeat(30)), t('b'.repeat(30))), 40)).toEqual(doc(t(`${'a'.repeat(30)}${'b'.repeat(10)}`)))
+    let deep: unknown = { type: 'text', text: 'x' }
+    for (let i = 0; i < 9; i++) deep = { type: 'span', content: [deep] }
+    expect(cleanRt({ type: 'doc', content: [{ type: 'paragraph', content: [deep] }] })).toEqual(doc(t('x')))
+    for (const bad of ['javascript:x', 'data:text/html,x', '/here', 'https://a\nb', '', 3]) expect(cleanHref(bad)).toBeNull()
+    expect(cleanHref('mailto:desk@example.com')).toBe('mailto:desk@example.com')
+  })
+
+  it('counts and cuts characters whole, as the server does', () => {
+    // An emoji is one character: 3 characters of "ab😀c" keep it whole.
+    expect(cleanRt(doc(t('ab😀c')), 3)).toEqual(doc(t('ab😀')))
+    expect(cleanRt(doc(t('😀😀'), t('x', 'bold')), 2)).toEqual(doc(t('😀😀')))
+    expect(richPatch(doc(t(`${'x'.repeat(19)}😀😀`)), 20)).toEqual({ rt: doc(t(`${'x'.repeat(19)}😀`)), md: `${'x'.repeat(19)}😀` })
+  })
+
+  it('reads its words and keeps a field within its length', () => {
+    expect(rtText({ type: 'doc', content: [{ type: 'heading', attrs: { level: 2 }, content: [t('At sea')] },
+      { type: 'paragraph', content: [t('Line'), { type: 'hardBreak' }, t('two')] }] })).toBe('At sea Line two')
+    expect(rtText(null)).toBe('')
+    // The words are cut to the field; their Markdown keeps its marks whole.
+    expect(richPatch(doc(t('x'.repeat(50), 'bold')), 20)).toEqual({ rt: doc(t('x'.repeat(20), 'bold')), md: `**${'x'.repeat(20)}**` })
+    expect(richPatch('nope', 20)).toEqual({ rt: emptyRt(), md: '' })
+    // Half an emoji is dropped as the server drops it; a whole one stays.
+    expect(cleanRt(doc(t('Dawn \ud83d and 😀')))).toEqual(doc(t('Dawn  and 😀')))
   })
 })
 
@@ -71,6 +153,17 @@ describe('readMessage', () => {
     expect(readMessage({ type: 'mz-move', target: { kind: 'overlay', story: 'p-1', block: 2, overlay: 'overlays.1' }, x: 5, y: 6 }, ctx))
       .toEqual({ type: 'mz-move', target: { kind: 'overlay', story: 'p-1', block: 2, overlay: 1 }, x: 5, y: 6, w: null })
     expect(readMessage({ type: 'mz-pick', story: 'p-1', block: 3, item: null }, ctx)).toMatchObject({ item: null })
+    // A rich field's document arrives cleaned to what the server keeps.
+    const sent = { type: 'doc', content: [{ type: 'paragraph', content: [
+      { type: 'text', text: 'Hi', marks: [{ type: 'bold' }, { type: 'link', attrs: { href: 'javascript:x' } }] }] }, { type: 'image' }] }
+    expect(readMessage({ type: 'mz-edit', story: 'p-1', block: 1, field: 'md', value: sent, rich: true }, ctx))
+      .toEqual({ type: 'mz-edit', story: 'p-1', block: 1, field: 'md', value: doc(t('Hi', 'bold')), rich: true })
+    // Anything the server could keep gets through (its own limit is the one an owner is told about):
+    // 2,800 bold runs between plain spaces, past the first bridge's 200 KB.
+    const runs = Array.from({ length: 2_800 }, () => [t('x', 'bold'), t(' ')]).flat()
+    const big = { type: 'doc', content: [{ type: 'paragraph', content: runs }] }
+    expect(JSON.stringify(big).length).toBeGreaterThan(200_000)
+    expect(readMessage({ type: 'mz-edit', story: 'p-1', block: 1, field: 'md', value: big, rich: true }, ctx)).not.toBeNull()
     expect(readMessage({ type: 'mz-key', key: 'undo' }, ctx)).toEqual({ type: 'mz-key', key: 'undo' })
   })
 
@@ -83,8 +176,12 @@ describe('readMessage', () => {
       { type: 'mz-select', target: { kind: 'cover', el: 'script' } },
       { type: 'mz-edit', story: 'p-1', block: 1, field: 'items.0.__proto__.x', value: 'x', rich: false },
       { type: 'mz-edit', story: 'p-1', block: 1, field: 'constructor.prototype', value: 'x', rich: false },
-      { type: 'mz-edit', story: 'p-1', block: 1, field: 'md', value: 'x'.repeat(80_001), rich: true },
+      { type: 'mz-edit', story: 'p-1', block: 1, field: 'md', value: '<p>x</p>', rich: true },
+      { type: 'mz-edit', story: 'p-1', block: 1, field: 'md', value: doc(t('x'.repeat(2_000_001))), rich: true },
       { type: 'mz-edit', story: 'p-1', block: 1, field: 'md', value: 42, rich: true },
+      { type: 'mz-edit', story: 'p-1', block: 1, field: 'md', value: doc(t('x')), rich: 'yes' },
+      { type: 'mz-edit', story: 'p-1', block: 1, field: 'caption', value: 'x'.repeat(20_001), rich: false },
+      { type: 'mz-edit', story: 'p-1', block: -1, field: 'issue:lines.0.text', value: doc(t('x')), rich: true },
       { type: 'mz-edit', story: 'p-1', block: 1, field: 'issue:line:not-a-uuid', value: 'x', rich: false },
       { type: 'mz-insert', story: 'p-1', at: 2, kind: 'cover' },
       { type: 'mz-insert', story: 'p-1', at: -1, kind: 'text' },
@@ -101,20 +198,28 @@ describe('readMessage', () => {
 describe('a story edited on its page', () => {
   it('takes words into the header and the blocks', () => {
     const d = story()
-    expect(applyEdit(d, -1, '@title', 'High\ntide', false)!.fields.title).toBe('High tide')
-    expect(applyEdit(d, 1, 'md', '<p>New <b>words</b></p>', true)!.blocks[1]).toMatchObject({ md: 'New **words**' })
-    expect(applyEdit(d, 2, 'caption', 'Morning', false)!.blocks[2]).toMatchObject({ caption: 'Morning' })
-    expect(applyEdit(d, 2, 'overlays.0.text', 'Two\nlines', false)!.blocks[2]).toMatchObject({ overlays: [{ text: 'Two\nlines' }] })
-    expect(applyEdit(d, 3, 'items.1.caption', 'Second', false)!.blocks[3]).toMatchObject({ items: [{ caption: '' }, { caption: 'Second' }] })
-    expect(applyEdit(d, 4, 'items.0.a_md', '<p>Yes</p>', true)!.blocks[4]).toMatchObject({ items: [{ q: 'Why?', a_md: 'Yes' }] })
-    expect(applyEdit(d, -1, '@kicker', 'x'.repeat(90), false)!.fields.kicker).toHaveLength(60)
-    expect(applyEdit(d, 1, 'md', '<p>First words.</p>', true)).toBe(d)  // unchanged: the same document
+    expect(applyEdit(d, -1, '@title', 'High\ntide')!.fields.title).toBe('High tide')
+    const words = doc(t('New '), t('words', 'bold'))
+    expect(applyEdit(d, 1, 'md', words)!.blocks[1]).toMatchObject({ md: 'New **words**', rt: words })
+    expect(applyEdit(d, 2, 'caption', 'Morning')!.blocks[2]).toMatchObject({ caption: 'Morning' })
+    expect(applyEdit(d, 2, 'overlays.0.text', 'Two\nlines')!.blocks[2]).toMatchObject({ overlays: [{ text: 'Two\nlines' }] })
+    expect(applyEdit(d, 3, 'items.1.caption', 'Second')!.blocks[3]).toMatchObject({ items: [{ caption: '' }, { caption: 'Second' }] })
+    expect(applyEdit(d, 4, 'items.0.a_md', doc(t('Yes')))!.blocks[4]).toMatchObject({ items: [{ q: 'Why?', a_md: 'Yes', a_rt: doc(t('Yes')) }] })
+    expect(applyEdit(d, -1, '@kicker', 'x'.repeat(90))!.fields.kicker).toHaveLength(60)
+    expect(applyEdit(d, 1, 'md', doc(t('First words.')))).toBe(d)  // unchanged: the same document
+    // A sidebar's words are shorter than a text block's.
+    const side = { ...d, blocks: [...d.blocks, { type: 'sidebar' as const, title: '', md: '' }] }
+    expect(applyEdit(side, 5, 'md', doc(t('x'.repeat(5_000))))!.blocks[5]).toMatchObject({ md: 'x'.repeat(4_000) })
+    // The document is cut to the limit; its Markdown (longer by the escapes) is not.
+    const marked = richPatch(doc(t('2*3 '.repeat(1_000).trim())), 4_000)
+    expect(marked.md.endsWith('2\\*3')).toBe(true)
+    expect(marked.md.length).toBeGreaterThan(4_000)
   })
 
   it('cuts words to their length by whole characters, never half an emoji', () => {
     const d = story()
-    expect(applyEdit(d, 2, 'caption', `${'x'.repeat(499)}😀`, false)!.blocks[2]).toMatchObject({ caption: `${'x'.repeat(499)}😀` })
-    const cut = (applyEdit(d, 2, 'caption', `${'x'.repeat(500)}😀`, false)!.blocks[2] as { caption: string }).caption
+    expect(applyEdit(d, 2, 'caption', `${'x'.repeat(499)}😀`)!.blocks[2]).toMatchObject({ caption: `${'x'.repeat(499)}😀` })
+    const cut = (applyEdit(d, 2, 'caption', `${'x'.repeat(500)}😀`)!.blocks[2] as { caption: string }).caption
     expect(cut).toBe('x'.repeat(500))
     expect(clip('ab😀c', 3)).toBe('ab😀')
     expect(clip('abc', 3)).toBe('abc')
@@ -123,12 +228,13 @@ describe('a story edited on its page', () => {
 
   it('drops an edit naming what the story does not have', () => {
     const d = story()
-    expect(applyEdit(d, 1, 'caption', 'x', false)).toBeNull()  // a text block has no caption
-    expect(applyEdit(d, 1, 'md', 'x', false)).toBeNull()  // text is written with the toolbar
-    expect(applyEdit(d, 2, 'caption', 'x', true)).toBeNull()
-    expect(applyEdit(d, 9, 'md', 'x', true)).toBeNull()
-    expect(applyEdit(d, 3, 'items.5.caption', 'x', false)).toBeNull()
-    expect(applyEdit(d, -1, '@title', '<b>x</b>', true)).toBeNull()
+    expect(applyEdit(d, 1, 'caption', 'x')).toBeNull()  // a text block has no caption
+    expect(applyEdit(d, 1, 'md', 'x')).toBeNull()  // text arrives as a document
+    expect(applyEdit(d, 2, 'caption', doc(t('x')))).toBeNull()
+    expect(applyEdit(d, 9, 'md', doc(t('x')))).toBeNull()
+    expect(applyEdit(d, 3, 'items.5.caption', 'x')).toBeNull()
+    expect(applyEdit(d, 4, 'items.3.a_md', doc(t('x')))).toBeNull()
+    expect(applyEdit(d, -1, '@title', doc(t('x')))).toBeNull()
   })
 
   it('adds blocks after the cover, moves words on a photo, focuses the cover', () => {
@@ -142,7 +248,7 @@ describe('a story edited on its page', () => {
     const focused = storyFromMessage(d, { type: 'mz-focal', target: { kind: 'block', story: 'p-1', block: 0 }, x: 20, y: 70 })!
     expect(focused.doc.blocks[0]).toMatchObject({ focal: { x: 20, y: 70 } })
     expect(storyFromMessage(d, { type: 'mz-focal', target: { kind: 'block', story: 'p-1', block: 1 }, x: 2, y: 2 })).toBeNull()
-    const typed = storyFromMessage(d, { type: 'mz-edit', story: 'p-1', block: 1, field: 'md', value: '<p>Hey</p>', rich: true })!
+    const typed = storyFromMessage(d, { type: 'mz-edit', story: 'p-1', block: 1, field: 'md', value: doc(t('Hey')), rich: true })!
     expect(typed.step).toBe(false)
     expect(storyFromMessage(d, { type: 'mz-ready' })).toBeNull()
   })
@@ -375,7 +481,8 @@ describe('StoryEditor, on the page', () => {
     // A block clicked: its settings, not its words.
     page.say({ type: 'mz-select', target: { kind: 'block', story: 'preview', block: 1 } })
     expect(await screen.findByRole('heading', { name: 'Text' })).toBeInTheDocument()
-    expect(screen.getByText('Columns')).toBeInTheDocument()
+    expect(screen.getByText('Align')).toBeInTheDocument()
+    expect(screen.queryByText('Columns')).toBeNull()  // a book page is already a column
     expect(screen.queryByLabelText('Text')).toBeNull()
 
     // Words typed: kept, and the page isn't set again while they're typed.
@@ -383,7 +490,7 @@ describe('StoryEditor, on the page', () => {
     page.say({ type: 'mz-editing', on: true })
     page.say({ type: 'mz-edit', story: 'preview', block: 1, field: 'caption', value: 'nope', rich: false })
     expect(screen.queryByText('Unsaved')).toBeNull()
-    page.say({ type: 'mz-edit', story: 'preview', block: 1, field: 'md', value: '<p>New <b>words</b></p>', rich: true })
+    page.say({ type: 'mz-edit', story: 'preview', block: 1, field: 'md', value: doc(t('New '), t('words', 'bold')), rich: true })
     page.say({ type: 'mz-edit', story: 'preview', block: -1, field: '@title', value: 'High tide', rich: false })
     expect(await screen.findByText('Unsaved')).toBeInTheDocument()
     await new Promise((r) => setTimeout(r, 400))
@@ -403,7 +510,7 @@ describe('StoryEditor, on the page', () => {
     const body = api.put.mock.calls[0][1]
     expect(body.title).toBe('High tide')
     expect(body.content.blocks).toHaveLength(2)
-    expect(body.content.blocks[1]).toMatchObject({ type: 'text', md: 'New **words**' })
+    expect(body.content.blocks[1]).toMatchObject({ type: 'text', md: 'New **words**', rt: doc(t('New '), t('words', 'bold')) })
   })
 
   it('saves the words typed just before ⌘S on the page', async () => {
@@ -480,7 +587,7 @@ describe('IssueEditor, on its pages', () => {
     page.say({ type: 'mz-select', target: { kind: 'contents' } })
     expect(await screen.findByRole('heading', { name: 'Contents' })).toBeInTheDocument()
     page.say({ type: 'mz-edit', story: '', block: -1, field: `issue:line:${P1}`, value: 'Out with the boats', rich: false })
-    page.say({ type: 'mz-edit', story: P1, block: 1, field: 'md', value: '<p>Fresh <i>words</i></p>', rich: true })
+    page.say({ type: 'mz-edit', story: P1, block: 1, field: 'md', value: doc(t('Fresh '), t('words', 'italic')), rich: true })
     page.say({ type: 'mz-select', target: { kind: 'block', story: P1, block: 1 } })
     expect(await screen.findByText('In “Low tide”')).toBeInTheDocument()
     expect(await screen.findByText('Unsaved (and a story)')).toBeInTheDocument()

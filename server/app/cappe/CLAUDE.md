@@ -317,8 +317,23 @@ What is built so far:
 - **A paid story's words are never in the server-rendered page, the cache, the feed or the public
   JSON** (`story_render.split_at_paywall`; `routes/public/blog.py` nulls `body`/`content`). Writing
   `access='paid'` is refused until reader subscriptions ship (PR 6).
+- **Rich text is a document, with its Markdown beside it** (`services/magazine/rt.py`, 2026-10-21): a
+  text block's and a sidebar's `rt`, an interview answer's `a_rt`, are ProseMirror JSON (what the
+  dashboard's Tiptap editor types). `normalize_rt` keeps only paragraphs, headings 2–3, quotes, lists
+  (ordered with `start`), line breaks and the marks link (http/https/mailto only)/bold/italic/strike/
+  underline, merges runs, turns anything else (and lists/quotes nested past six levels) into paragraphs
+  of its words without recursion, so nothing typed is dropped, and caps characters (counted whole: a half-character is dropped, never kept or cut into) and nodes (30,000).
+  `story_schema._rich`: a sent document wins and its `md` is derived (`rt_to_md`: nested lists indented four spaces as `render_md` reads them; for emails, feeds, word
+  counts and the iOS `body`); Markdown alone (an old story, Assist, iOS) becomes a document (`md_to_rt`, which never
+  fails: past the budget it gives plain paragraphs, so every old story opens).
+  The page renders `render_rt` (else `render_md` for a block stored before documents). A single story
+  for the owner (`blog._out`, through `stories.with_documents`) and the layout starters always carry
+  documents; the list doesn't (converting Markdown costs about 1 ms a block). `tests/cappe/fixtures/
+  magazine_rt_cases.json` pins `rt` → HTML and Markdown here and the client's `canvas/rt.ts` (whose editor
+  reads that HTML back into the same document). `MAX_CONTENT_BYTES` is 600 KB (words are kept twice).
 - **Text and photos carry their design in the block** (`story_schema`): text has `variant`
-  (body/lede/small/statement), `align`, `columns` 1–3; a photo has `border`, `shape`
+  (body/lede/small/statement), `align`, `columns` 1–3 (read for old stories but offered nowhere: a book
+  page is already a column, `.mz-book .mz-text--cols` is one column); a photo has `border`, `shape`
   (rect/rounded/circle/arch), `filter` (none/bw/sepia), `crop` ({x,y,w,h} percent, at least 5%, a whole
   picture is `null`) and up to 8 `overlays` (words centred on an x/y point, size, tone, box, align).
   `story_render.photo_html` draws a crop by scaling the picture inside a frame of the crop's aspect, and a
@@ -346,9 +361,9 @@ What is built so far:
   so following it fires the frame's `load`, which the parent reads (`followedLink`) and puts the page back.
 - **The story editor keeps one undoable document** (`editor/history.ts`: headline fields + blocks; edits
   within 1 s fold into one step, structural edits are their own), ⌘Z/⇧⌘Z/⌘S, insert-anywhere, duplicate,
-  drag to reorder, a Markdown toolbar (`editor/MarkdownField.tsx`, `editor/markdown.ts`) and the shared
+  drag to reorder, rich text with a formatting bar (`editor/RichField.tsx`, Tiptap) and the shared
   `useUnsavedGuard`.
-- **Rich text is constrained Markdown** (`richtext.render_md`: `<` escaped before Markdown, then our
+- **Markdown (stories stored before documents, emails, feeds) is constrained** (`richtext.render_md`: `<` escaped before Markdown, then our
   own `html.parser` allowlist of p/em/strong/a/h2/h3/lists/blockquote — not bleach, which several
   test modules stub; h1→h2; links http(s)/mailto with `rel="nofollow ugc noopener"`). Credits come
   from the library row, never the block.
@@ -507,7 +522,10 @@ What is built so far:
   them. Cached as `__mag__:issue:{n}` and `__mag__:issues:{page}`; every owner write invalidates.
 - **The owner edits on the page itself** (2026-10-21): an *edit render* of a story or an issue
   (`POST /sites/{id}/stories/preview` or `…/magazine/issues/preview` with `edit: true`) is the reader's page
-  with markers and `render/assets/editor.js` + `editor.css` inlined (`pages._EDITOR`, after `book.js`). The
+  with markers, and each story's rich fields' documents in a `<script type="application/json"
+  data-mz-rt>` (`pages.rich_registry`, `"<block>|<field>"` → document, `<` escaped) so the editor opens
+  them exactly. The editor itself is the dashboard's (`client/src/cappe/magazine/frame/`, bundled by
+  `client/vite-mz-frame.ts` and written into the page by `EditFrame`); the server serves none. The
   dashboard shows it in a `sandbox="allow-scripts"` frame **without** allow-same-origin (the dashboard's
   tokens live in sessionStorage) and listens only to its own frame (`client/src/cappe/magazine/canvas/`).
   The same renderers take `edit` (`story_render`, `pages.story_article_html`/`render_story`/`book_html`,
@@ -526,10 +544,10 @@ What is built so far:
   (each story's unsaved words, through `normalize_story` + `check_assets` like a save; a story not in the
   issue is ignored; its cover picture is what saving them would leave, the cover block's or none, never the
   saved one) and has its own rate bucket (`cappe_issue_edit_preview`, `EDIT_PREVIEWS_PER_HOUR`).
-  Rich fields come back as HTML and the dashboard stores them as the constrained Markdown `render_md`
-  reads (`canvas/htmlToMd.ts`); `tests/cappe/fixtures/magazine_md_cases.json` pins HTML → Markdown on the
-  client and Markdown → HTML here. In the frame, Home/End/Page keys are swallowed while typing (on a Mac
-  they scroll the whole page out from under the book) and Backspace never navigates back.
+  Rich fields come back as documents and are kept as above. In the frame, Home/End/Page keys are
+  swallowed while typing (on a Mac they scroll the whole page out from under the book), Backspace never
+  navigates back, and the book is re-measured and turned to the caret when typing runs onto a new spread
+  (`book.js` counts spreads only on resize and load).
 
 ## Social growth (2026-10, `services/social/`, migrations `cappesocial01`–`03`)
 

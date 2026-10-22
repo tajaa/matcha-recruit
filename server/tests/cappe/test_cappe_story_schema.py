@@ -41,13 +41,44 @@ def test_blocks_are_reshaped_and_unknown_keys_dropped():
     ]})
     blocks = out["blocks"]
     assert blocks[0] == {"type": "cover", "asset_id": A, "style": "overlay", "tone": "dark", "focal": {"x": 100, "y": 0}}
-    assert blocks[1] == {"type": "text", "md": "Hello", "dropcap": True, "columns": 1, "variant": "body", "align": "left"}
+    assert blocks[1] == {"type": "text", "md": "Hello", "rt": DOC_HELLO, "dropcap": True, "columns": 1,
+                         "variant": "body", "align": "left"}
     assert blocks[2]["asset_id"] is None and len(blocks[2]["caption"]) == 500 and blocks[2]["size"] == "column"
     assert blocks[3]["items"] == [{"asset_id": B, "caption": "c"}]
     assert blocks[4]["style"] == "big"
+    assert blocks[5] == {"type": "sidebar", "title": "T", "md": "m", "rt": _doc("m")}
+    assert blocks[6]["items"] == [{"q": "Why?", "a_md": "Because.", "a_rt": _doc("Because.")}]
     assert blocks[7] == {"type": "divider"} and blocks[8] == {"type": "paywall"}
 
 
+def _doc(text):
+    return {"type": "doc", "content": [{"type": "paragraph", "content": [{"type": "text", "text": text}]}]}
+
+
+DOC_HELLO = _doc("Hello")
+
+
+def test_a_rich_fields_document_wins_and_its_markdown_follows():
+    bold = {"type": "doc", "content": [{"type": "paragraph", "content": [
+        {"type": "text", "text": "Low ", "marks": [{"type": "bold"}, {"type": "junk"}]},
+        {"type": "text", "text": "tide", "marks": [{"type": "bold"}]},
+        {"type": "image", "attrs": {"src": "https://evil.test/x.png"}}]}]}
+    out = story_schema.normalize_story({"blocks": [
+        {"type": "text", "md": "stale words", "rt": bold},
+        {"type": "sidebar", "md": "stale", "rt": _doc("Fresh")},
+        {"type": "qa", "items": [{"q": "Q", "a_md": "stale", "a_rt": _doc("Fresh answer")}]},
+    ]})["blocks"]
+    assert out[0]["rt"] == {"type": "doc", "content": [{"type": "paragraph", "content": [
+        {"type": "text", "text": "Low tide", "marks": [{"type": "bold"}]}]}]}
+    assert out[0]["md"] == "**Low tide**"
+    assert (out[1]["md"], out[2]["items"][0]["a_md"]) == ("Fresh", "Fresh answer")
+    # Something that isn't a document is ignored; the Markdown stands.
+    kept = story_schema.normalize_story({"blocks": [{"type": "text", "md": "Mine", "rt": "<p>x</p>"}]})["blocks"][0]
+    assert (kept["md"], kept["rt"]) == ("Mine", _doc("Mine"))
+    # A document the owner can't keep is a message, not a crash.
+    huge = {"type": "doc", "content": [_doc("w")["content"][0]] * 15_001}
+    with pytest.raises(story_schema.StoryError, match="too long"):
+        story_schema.normalize_story({"blocks": [{"type": "text", "rt": huge}]})
 def test_half_a_character_is_never_kept():
     # An emoji cut in two by a UTF-16 slice (a lone surrogate) can't be printed on a page.
     out = story_schema.normalize_story({"blocks": [{"type": "photo", "caption": "Dawn \ud83d", "asset_id": None},
@@ -91,7 +122,7 @@ def test_the_limits_an_owner_is_told_about():
     with pytest.raises(story_schema.StoryError, match="at most 40"):
         story_schema.normalize_story({"blocks": [{"type": "qa", "items": [{}] * 41}]})
     with pytest.raises(story_schema.StoryError, match="too long"):
-        story_schema.normalize_story({"blocks": [{"type": "text", "md": "x" * 20_000}] * 12})
+        story_schema.normalize_story({"blocks": [{"type": "text", "md": "x" * 20_000}] * 16})
 
 
 @pytest.mark.parametrize("layout", list(story_schema.LAYOUTS))

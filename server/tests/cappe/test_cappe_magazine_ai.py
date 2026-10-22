@@ -313,7 +313,9 @@ def test_gather_reads_the_story_and_its_pictures():
     assert m.pictures == []  # headlines don't need the pictures
     unsaved = {"blocks": [{"type": "text", "md": "A new first line."}]}
     m = run(assist.gather(QueryConn(), SITE_ID, POST, action="tighten", block=0, content=unsaved, title="New"))
-    assert m.content == {"blocks": [{"type": "text", "md": "A new first line.", "dropcap": False, "columns": 1, "variant": "body", "align": "left"}]}
+    assert m.content == {"blocks": [{"type": "text", "md": "A new first line.", "dropcap": False, "columns": 1, "variant": "body", "align": "left",
+                                     "rt": {"type": "doc", "content": [{"type": "paragraph", "content": [
+                                         {"type": "text", "text": "A new first line."}]}]}}]}
     assert m.title == "New"
 
 
@@ -441,7 +443,10 @@ def test_a_draft_never_uses_a_picture_it_wasnt_given(claude):
                                 {"source": "unsplash", "query": "boats"}, {"source": "nasa", "query": " "},
                                 {"source": ["openverse"], "query": "a list is not a source"}]},
      {"terms": [{"source": "openverse", "query": "fishing boats dawn"}]}),
-    ("tighten", {"md": "Boats go out at four."}, {"md": "Boats go out at four.", "block": 1}),
+    ("tighten", {"md": "Boats go out at **four**."},
+     {"md": "Boats go out at **four**.", "block": 1, "rt": {"type": "doc", "content": [{"type": "paragraph", "content": [
+         {"type": "text", "text": "Boats go out at "}, {"type": "text", "text": "four", "marks": [{"type": "bold"}]},
+         {"type": "text", "text": "."}]}]}}),
 ])
 def test_each_proposal_keeps_only_what_the_editor_can_use(claude, action, reply, expected):
     claude.reply = reply

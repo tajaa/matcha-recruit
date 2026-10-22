@@ -2,16 +2,19 @@ import { createEvent, fireEvent, render, screen, waitFor } from '@testing-librar
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import StoryEditor from './editor/StoryEditor'
-import MarkdownField from './editor/MarkdownField'
+import RichField from './editor/RichField'
 import { duplicateBlock, insertBlock, newBlock } from './editor/blocks'
 import { HISTORY_LIMIT, MERGE_MS, historyReducer, type History } from './editor/history'
-import { formatMarkdown, shortcutFormat } from './editor/markdown'
+import { withText } from './editor/blocks'
+import type { RtDoc } from './canvas/rt'
 import type { CappePost, CappeStoryOptions, StoryBlock } from '../types'
 
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn(), postHtml: vi.fn(), upload: vi.fn(), patch: vi.fn() }))
 vi.mock('../api', () => ({ cappeApi: api, cappeApiBase: '/api/cappe' }))
 
-const text = (md: string): StoryBlock => ({ ...(newBlock('text') as Extract<StoryBlock, { type: 'text' }>), md })
+const para = (text: string, marks: string[] = []): RtDoc => ({ type: 'doc', content: [{ type: 'paragraph', content: [
+  marks.length ? { type: 'text', text, marks: marks.map((type) => ({ type })) } as never : { type: 'text', text }] }] })
+const text = (md: string): StoryBlock => ({ ...(newBlock('text') as Extract<StoryBlock, { type: 'text' }>), md, rt: para(md) })
 
 const post = (over: Partial<CappePost> = {}): CappePost => ({
   id: 'p-1', site_id: 's-1', title: 'The harbour at dawn', slug: 'harbour', excerpt: 'Forty boats.', body: 'The boats.',
@@ -95,42 +98,6 @@ describe('historyReducer', () => {
   })
 })
 
-describe('formatMarkdown', () => {
-  it('wraps the selection in bold or italic, and unwraps it again', () => {
-    expect(formatMarkdown('a cat sat', 2, 5, 'bold')).toEqual({ value: 'a **cat** sat', start: 4, end: 7 })
-    expect(formatMarkdown('a **cat** sat', 4, 7, 'bold')).toEqual({ value: 'a cat sat', start: 2, end: 5 })
-    expect(formatMarkdown('a cat', 2, 5, 'italic').value).toBe('a *cat*')
-    // Italic inside bold adds marks rather than eating the bold's.
-    expect(formatMarkdown('**cat**', 2, 5, 'italic').value).toBe('***cat***')
-  })
-
-  it('puts in words to type over when nothing is selected', () => {
-    expect(formatMarkdown('Hi ', 3, 3, 'bold')).toEqual({ value: 'Hi **bold words**', start: 5, end: 15 })
-  })
-
-  it('makes a link with the address selected', () => {
-    const e = formatMarkdown('see this', 4, 8, 'link')
-    expect(e.value).toBe('see [this](https://)')
-    expect(e.value.slice(e.start, e.end)).toBe('https://')
-  })
-
-  it('marks every line the selection touches, and toggles it off', () => {
-    const v = 'intro\none\ntwo\nend'
-    const on = formatMarkdown(v, 7, 11, 'bullets')
-    expect(on.value).toBe('intro\n- one\n- two\nend')
-    expect(formatMarkdown(on.value, on.start, on.end, 'bullets').value).toBe(v)
-    expect(formatMarkdown(v, 7, 11, 'numbers').value).toBe('intro\n1. one\n2. two\nend')
-    expect(formatMarkdown('> old', 0, 0, 'h2').value).toBe('## old')
-    expect(formatMarkdown('Title', 0, 0, 'h3').value).toBe('### Title')
-    expect(formatMarkdown('said', 1, 1, 'quote').value).toBe('> said')
-  })
-
-  it('knows the shortcuts', () => {
-    const k = (key: string, over = {}) => shortcutFormat({ key, metaKey: true, ctrlKey: false, shiftKey: false, altKey: false, ...over })
-    expect([k('b'), k('I'), k('k'), k('x'), k('b', { shiftKey: true }), k('b', { metaKey: false })]).toEqual(['bold', 'italic', 'link', null, null, null])
-  })
-})
-
 describe('insertBlock and duplicateBlock', () => {
   const cover = newBlock('cover')
   it('inserts anywhere after the cover; a cover only goes first, once', () => {
@@ -153,19 +120,54 @@ describe('insertBlock and duplicateBlock', () => {
   })
 })
 
-describe('MarkdownField', () => {
-  it('formats the selected words from the bar and from ⌘B', () => {
+/** The field's editor, as Tiptap hangs it on its element. */
+const editorIn = (label: string) => (screen.getByRole('textbox', { name: label }) as HTMLElement & { editor: import('@tiptap/core').Editor }).editor
+
+describe('RichField', () => {
+  it('formats the selected words from the bar, reporting the document and its Markdown', () => {
     const onChange = vi.fn()
-    render(<MarkdownField value="a cat sat" onChange={onChange} label="Text" />)
-    const area = screen.getByLabelText('Text') as HTMLTextAreaElement
-    area.setSelectionRange(2, 5)
+    render(<RichField value={para('a cat sat')} onChange={onChange} label="Text" max={20_000} />)
+    expect(screen.getByRole('textbox', { name: 'Text' })).toHaveTextContent('a cat sat')
+    editorIn('Text').commands.setTextSelection({ from: 3, to: 6 })
     fireEvent.click(screen.getByRole('button', { name: 'Bold (⌘B)' }))
-    expect(onChange).toHaveBeenLastCalledWith('a **cat** sat')
-    area.setSelectionRange(2, 5)
-    fireEvent.keyDown(area, { key: 'i', metaKey: true })
-    expect(onChange).toHaveBeenLastCalledWith('a *cat* sat')
+    expect(onChange).toHaveBeenLastCalledWith({
+      md: 'a **cat** sat',
+      rt: { type: 'doc', content: [{ type: 'paragraph', content: [
+        { type: 'text', text: 'a ' }, { type: 'text', text: 'cat', marks: [{ type: 'bold' }] }, { type: 'text', text: ' sat' }] }] },
+    })
+    expect(screen.getByRole('button', { name: 'Bold (⌘B)' })).toHaveAttribute('aria-pressed', 'true')
     fireEvent.click(screen.getByRole('button', { name: 'Numbered list' }))
-    expect(onChange).toHaveBeenLastCalledWith('1. a cat sat')
+    expect(onChange.mock.lastCall![0].md).toBe('1. a **cat** sat')
+  })
+
+  it('links the selected words from the bar', () => {
+    const onChange = vi.fn()
+    render(<RichField value={para('see this')} onChange={onChange} label="Text" max={20_000} />)
+    editorIn('Text').commands.setTextSelection({ from: 5, to: 9 })
+    fireEvent.click(screen.getByRole('button', { name: 'Link' }))
+    const address = screen.getByLabelText('Link address')
+    fireEvent.change(address, { target: { value: 'example.com/a' } })
+    fireEvent.keyDown(address, { key: 'Enter' })
+    expect(onChange.mock.lastCall![0].md).toBe('see [this](https://example.com/a)')
+    expect(screen.queryByLabelText('Link address')).not.toBeInTheDocument()
+  })
+
+  it('shows a change made elsewhere (undo, Assist) without reporting it back', () => {
+    const onChange = vi.fn()
+    const { rerender } = render(<RichField value={para('one')} onChange={onChange} label="Text" max={20_000} />)
+    rerender(<RichField value={para('two', ['italic'])} onChange={onChange} label="Text" max={20_000} />)
+    expect(screen.getByRole('textbox', { name: 'Text' })).toHaveTextContent('two')
+    expect(screen.getByRole('textbox', { name: 'Text' }).querySelector('em')).not.toBeNull()
+    expect(onChange).not.toHaveBeenCalled()
+  })
+})
+
+describe('withText', () => {
+  it("takes tighten's passage with its document, or lets the server make one", () => {
+    const bs = [newBlock('cover'), text('old')]
+    expect(withText(bs, 1, 'new', para('new'))[1]).toMatchObject({ md: 'new', rt: para('new') })
+    expect(withText(bs, 1, 'new')[1]).not.toHaveProperty('rt')
+    expect(withText(bs, 0, 'x')).toEqual(bs)
   })
 })
 
@@ -188,6 +190,29 @@ describe('StoryEditor — editing', () => {
     fireEvent.keyDown(window, { key: 'z', ctrlKey: true })
     fireEvent.keyDown(window, { key: 'y', ctrlKey: true })
     expect(headline).toHaveValue('Dawn')
+  })
+
+  it('undoes rich text with the story history only, and saves what is shown', async () => {
+    api.put.mockImplementation((_path: string, body: Partial<CappePost>) => Promise.resolve(post(body)))
+    mountEditor()
+    await screen.findByLabelText('Headline')
+    const field = screen.getByRole('textbox', { name: 'Text' }) as HTMLElement & { editor: import('@tiptap/core').Editor }
+    field.editor.chain().setTextSelection(field.editor.state.doc.content.size - 1).insertContent(' More.').run()
+    await waitFor(() => expect(field).toHaveTextContent('First words. More.'))
+    // A while later (past the history's merge window), ⌘Z in the field: one
+    // undo (the story's), not the field's and then the story's.
+    const now = Date.now.bind(Date)
+    vi.spyOn(Date, 'now').mockImplementation(() => now() + 5_000)
+    // (Ctrl: jsdom isn't a Mac, so that is the field editor's own undo key here.)
+    fireEvent.keyDown(field, { key: 'z', ctrlKey: true })
+    await waitFor(() => expect(field).toHaveTextContent(/^First words\.$/))
+    expect(screen.queryByText('Unsaved')).not.toBeInTheDocument()
+    fireEvent.keyDown(field, { key: 'z', ctrlKey: true, shiftKey: true })
+    await waitFor(() => expect(field).toHaveTextContent('First words. More.'))
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(api.put).toHaveBeenCalled())
+    const block = (api.put.mock.calls[0][1] as { content: { blocks: StoryBlock[] } }).content.blocks[1]
+    expect(block).toMatchObject({ md: 'First words. More.' })
   })
 
   it('leaves ⌘Z to Assist’s own fields', async () => {
@@ -232,7 +257,7 @@ describe('StoryEditor — editing', () => {
     expect(screen.getAllByRole('button', { name: 'Duplicate block' })).toHaveLength(2)  // never the cover
     fireEvent.click(screen.getAllByRole('button', { name: 'Duplicate block' })[1])
     expect(kinds()).toEqual(['Cover block', 'Divider block', 'Text block', 'Text block'])
-    expect(screen.getAllByDisplayValue('First words.')).toHaveLength(2)
+    expect(screen.getAllByRole('textbox', { name: 'Text' }).filter((f) => f.textContent === 'First words.')).toHaveLength(2)
 
     fireEvent.click(screen.getByRole('button', { name: 'Undo' }))
     expect(kinds()).toEqual(['Cover block', 'Divider block', 'Text block'])

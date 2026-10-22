@@ -1,16 +1,32 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { frameScript, frameStyle } from 'virtual:mz-frame'
 import { readMessage, sameTarget, type Device, type FrameMessage, type Place } from './bridge'
 import { fitFrame } from './fit'
 
 export type { Device } from './bridge'
 
-type Buffer = { html: string; gen: number }
+/** A render as the frame shows it: `doc` is the page with the editor
+ *  written into it. */
+type Buffer = { html: string; doc: string; gen: number }
 type Buffers = [Buffer | null, Buffer | null]
 
 const other = (i: 0 | 1): 0 | 1 => (i === 0 ? 1 : 0)
 
+/** The page with the editor's stylesheet at the end of its head and its
+ *  script at the end of its body, after the book's own. Spliced, not
+ *  `replace`d: the script is full of `$`. */
+function withEditor(html: string): string {
+  if (!frameScript) return html
+  const head = html.indexOf('</head>')
+  const withStyle = head === -1 ? `<style>${frameStyle}</style>${html}`
+    : `${html.slice(0, head)}<style>${frameStyle}</style>${html.slice(head)}`
+  const body = withStyle.lastIndexOf('</body>')
+  const script = `<script>${frameScript}</script>`
+  return body === -1 ? withStyle + script : `${withStyle.slice(0, body)}${script}${withStyle.slice(body)}`
+}
+
 /** The page being edited, in a frame that runs its own scripts (the
- *  magazine's book and the editor's, render/assets/editor.js) but not as our
+ *  magazine's book and the editor's, magazine/frame/) but not as our
  *  origin (`sandbox="allow-scripts"`, no same-origin), so nothing on it can
  *  reach the dashboard's session. It speaks only by messages: what it sends
  *  is checked (bridge.ts) and only the shown frame is listened to.
@@ -50,7 +66,7 @@ export default function EditFrame({ html, place, stories, device, title, onMessa
     setLoaded(html)
     if (front === null || buffers[front]?.html !== html) {
       const back: 0 | 1 = front === null ? 0 : other(front)
-      const buf = { html, gen: gens + 1 }
+      const buf = { html, doc: withEditor(html), gen: gens + 1 }
       setGens(gens + 1)
       setBuffers(back === 0 ? [buf, buffers[1]] : [buffers[0], buf])
     }
@@ -151,7 +167,7 @@ export default function EditFrame({ html, place, stories, device, title, onMessa
         } : undefined}>
         {buffers.map((b, i) => (
           <iframe key={b ? b.gen : `empty-${i}`} ref={i === 0 ? frame0 : frame1} title={i === front ? title : `${title} (loading)`}
-            srcDoc={b?.html || ''} sandbox="allow-scripts" aria-hidden={i !== front} tabIndex={i === front ? 0 : -1}
+            srcDoc={b?.doc || ''} sandbox="allow-scripts" aria-hidden={i !== front} tabIndex={i === front ? 0 : -1}
             className={`absolute inset-0 h-full w-full border-0 bg-white ${i === front ? '' : 'pointer-events-none invisible'}`} />
         ))}
       </div>

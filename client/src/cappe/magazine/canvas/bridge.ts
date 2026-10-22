@@ -1,6 +1,7 @@
 import type { StoryBlock } from '../../types'
+import { cleanRt, type RtDoc } from './rt'
 
-/** What the page in the editor's frame talks about (render/assets/editor.js).
+/** What the page in the editor's frame talks about (magazine/frame/).
  *  The frame runs scripts without our origin, so everything it sends is
  *  checked here before an editor acts on it: its source (the caller), each
  *  message's shape, every index, name and length. Whether a story has that
@@ -27,16 +28,21 @@ export type FrameMessage =
   | { type: 'mz-place'; spread: number }
   | { type: 'mz-select'; target: FrameTarget }
   | { type: 'mz-editing'; on: boolean }
-  | { type: 'mz-edit'; story: string; block: number; field: string; value: string; rich: boolean }
+  | { type: 'mz-edit'; story: string; block: number; field: string; value: string; rich: false }
+  | { type: 'mz-edit'; story: string; block: number; field: string; value: RtDoc; rich: true }
   | { type: 'mz-insert'; story: string; at: number; kind: StoryBlock['type'] }
   | { type: 'mz-pick'; story: string; block: number; item: number | null }
   | { type: 'mz-move'; target: MoveTarget; x: number; y: number; w: number | null }
   | { type: 'mz-focal'; target: FrameTarget; x: number; y: number }
   | { type: 'mz-key'; key: 'undo' | 'redo' | 'save' | 'delete' }
 
-/** The longest value the page may send: a text block's 20,000 characters as
- *  HTML, with room for its tags. */
-export const MAX_VALUE = 80_000
+/** The longest plain words the page may send (a field's own limit is applied
+ *  where the edit lands: storyDoc), and the largest rich document, as JSON:
+ *  more than a whole story the server keeps (600 KB), so a document too big
+ *  to save reaches the server and its message is what the owner sees; this
+ *  only turns away absurd messages. */
+export const MAX_VALUE = 20_000
+export const MAX_DOC_JSON = 2_000_000
 const MAX_BLOCK = 119
 const INSERTABLE = new Set<StoryBlock['type']>(['text', 'photo', 'photos', 'quote', 'sidebar', 'qa', 'divider'])
 const KEYS = new Set(['undo', 'redo', 'save', 'delete'])
@@ -74,6 +80,15 @@ export function readTarget(v: unknown, ctx: BridgeContext): FrameTarget | null {
   }
 }
 
+/** A rich field's document, cleaned to what the server keeps; null when it
+ *  isn't one or is too large. */
+function richValue(v: unknown): RtDoc | null {
+  if (!obj(v)) return null
+  let size = 0
+  try { size = JSON.stringify(v).length } catch { return null }
+  return size <= MAX_DOC_JSON ? cleanRt(v) : null
+}
+
 /** A message from the frame, checked; null for anything else. */
 export function readMessage(data: unknown, ctx: BridgeContext): FrameMessage | null {
   const d = obj(data)
@@ -85,11 +100,14 @@ export function readMessage(data: unknown, ctx: BridgeContext): FrameMessage | n
     case 'mz-editing': return typeof d.on === 'boolean' ? { type: 'mz-editing', on: d.on } : null
     case 'mz-edit': {
       const field = typeof d.field === 'string' && FIELD.test(d.field) ? d.field : null
-      const value = typeof d.value === 'string' && d.value.length <= MAX_VALUE ? d.value : null
-      if (!field || value === null || typeof d.rich !== 'boolean') return null
-      if (field.startsWith('issue:')) return { type: 'mz-edit', story: '', block: -1, field, value, rich: d.rich }
+      const value = d.rich === true ? richValue(d.value) : d.rich === false && typeof d.value === 'string' && d.value.length <= MAX_VALUE ? d.value : null
+      if (!field || value === null) return null
+      const edit = (story: string, block: number): FrameMessage => (typeof value === 'string'
+        ? { type: 'mz-edit', story, block, field, value, rich: false }
+        : { type: 'mz-edit', story, block, field, value, rich: true })
+      if (field.startsWith('issue:')) return typeof value === 'string' ? edit('', -1) : null
       const s = story(d.story, ctx), b = int(d.block, -1, MAX_BLOCK)
-      return s && b !== null ? { type: 'mz-edit', story: s, block: b, field, value, rich: d.rich } : null
+      return s && b !== null ? edit(s, b) : null
     }
     case 'mz-insert': {
       const s = story(d.story, ctx), at = int(d.at, 0, MAX_BLOCK + 1)

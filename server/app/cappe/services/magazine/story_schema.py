@@ -19,8 +19,10 @@ import re
 from typing import Any, Optional
 from uuid import UUID
 
+from .rt import RtError, md_to_rt, normalize_rt, rt_to_md
+
 MAX_BLOCKS = 120
-MAX_CONTENT_BYTES = 200_000
+MAX_CONTENT_BYTES = 600_000  # a story's words are kept twice: the document and its Markdown
 MAX_PHOTOS = 12
 MAX_QA = 40
 
@@ -100,10 +102,29 @@ def _cover(b: dict) -> dict:
     }
 
 
+def _rich(b: dict, md_key: str, rt_key: str, limit: int) -> tuple[str, dict]:
+    """A rich field's document and its Markdown. The document wins when it is
+    sent (the editor's); Markdown alone (an old story, Assist, the iOS app)
+    becomes a document."""
+    try:
+        doc = normalize_rt(b.get(rt_key), max_chars=limit)
+    except RtError as exc:
+        raise StoryError(str(exc)) from exc
+    if doc is not None:
+        # Not cut again: the document is within `limit`, and its Markdown runs
+        # longer by the escapes and marks it adds. A cut here would drop the
+        # end of the story from emails and feeds, or split an escape.
+        return rt_to_md(doc), doc
+    md = _str(b.get(md_key), limit)
+    return md, md_to_rt(md)
+
+
 def _text(b: dict) -> dict:
+    md, doc = _rich(b, "md", "rt", 20_000)
     return {
         "type": "text",
-        "md": _str(b.get("md"), 20_000),
+        "md": md,
+        "rt": doc,
         "dropcap": bool(b.get("dropcap")),
         "columns": b.get("columns") if b.get("columns") in (2, 3) else 1,
         "variant": _choice(b.get("variant"), TEXT_VARIANTS),
@@ -174,7 +195,13 @@ def _quote(b: dict) -> dict:
 
 
 def _sidebar(b: dict) -> dict:
-    return {"type": "sidebar", "title": _str(b.get("title"), 120), "md": _str(b.get("md"), 4_000)}
+    md, doc = _rich(b, "md", "rt", 4_000)
+    return {"type": "sidebar", "title": _str(b.get("title"), 120), "md": md, "rt": doc}
+
+
+def _qa_item(i: dict) -> dict:
+    md, doc = _rich(i, "a_md", "a_rt", 5_000)
+    return {"q": _str(i.get("q"), 500), "a_md": md, "a_rt": doc}
 
 
 def _qa(b: dict) -> dict:
@@ -183,8 +210,7 @@ def _qa(b: dict) -> dict:
         raise StoryError(f"An interview block holds at most {MAX_QA} questions.")
     return {
         "type": "qa",
-        "items": [{"q": _str(i.get("q"), 500), "a_md": _str(i.get("a_md"), 5_000)}
-                  for i in items if isinstance(i, dict)],
+        "items": [_qa_item(i) for i in items if isinstance(i, dict)],
     }
 
 

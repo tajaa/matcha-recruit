@@ -97,14 +97,13 @@ describe('PhotoDesigner', () => {
 })
 
 describe('BlockEditor — text design', () => {
-  it('chooses the style, columns and alignment', () => {
+  it('chooses the style and alignment (a book page is already a column)', () => {
     const onChange = vi.fn()
     render(<BlockEditor block={newBlock('text')} index={1} count={2} assets={new Map()} onChange={onChange}
       onMove={vi.fn()} onRemove={vi.fn()} onPickAsset={vi.fn()} />)
     fireEvent.change(screen.getByLabelText('Style'), { target: { value: 'statement' } })
     expect(onChange.mock.lastCall![0]).toMatchObject({ variant: 'statement' })
-    fireEvent.change(screen.getByLabelText('Columns'), { target: { value: '3' } })
-    expect(onChange.mock.lastCall![0]).toMatchObject({ columns: 3 })
+    expect(screen.queryByLabelText('Columns')).toBeNull()
     fireEvent.change(screen.getByLabelText('Align'), { target: { value: 'justify' } })
     expect(onChange.mock.lastCall![0]).toMatchObject({ align: 'justify' })
   })

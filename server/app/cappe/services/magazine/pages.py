@@ -15,6 +15,8 @@ the empty `.mz-paid` box under the paywall.
 """
 from __future__ import annotations
 
+import json
+
 from datetime import datetime
 from email.utils import format_datetime
 from html import escape
@@ -29,6 +31,7 @@ from ..render.sanitize import _js_obj
 from .figures import figure_html, img_html, share_image
 from .magazines import masthead_fonts
 from .richtext import render_md
+from .rt import RtError, md_to_rt, normalize_rt
 from .story_render import cover_html, field, render_blocks, split_at_paywall
 from .story_schema import cover_block
 from .topics import topic_label
@@ -39,10 +42,6 @@ _ISSUE_CSS = (_ASSETS / "issue.css").read_text(encoding="utf-8")
 _FOLLOW_JS = (_ASSETS / "follow.js").read_text(encoding="utf-8")
 _PAYWALL_JS = (_ASSETS / "paywall.js").read_text(encoding="utf-8")
 _BOOK_JS = (_ASSETS / "book.js").read_text(encoding="utf-8")
-# The owner's editor on the page: only in edit renders (`edit=True`), never on
-# a reader's page or in the cache.
-_EDITOR = (f'<style>{(_ASSETS / "editor.css").read_text(encoding="utf-8")}</style>'
-           f'<script>{(_ASSETS / "editor.js").read_text(encoding="utf-8")}</script>')
 _SYMBOLS = {"USD": "$", "CAD": "CA$", "AUD": "A$", "NZD": "NZ$", "EUR": "€", "GBP": "£"}
 
 PAGE_SIZE = 12
@@ -334,8 +333,33 @@ def story_article_html(post: dict, assets: dict[str, dict], *, mag: dict, curren
         f'<article class="{cls}"{attrs}>'
         + cover_html(post, cover, cover_asset, byline_html=_meta(post, edit=edit), edit=edit)
         + f'<div class="mz-story__body">{render_blocks(free, assets, edit=edit)}</div>{paywall}{from_issue}{topic_link}'
-        "</article>"
+        + (rich_registry(blocks) if edit else "")
+        + "</article>"
     )
+
+
+def rich_registry(blocks: list[dict]) -> str:
+    """The documents behind a story's rich fields, for the editor on the page
+    to open them exactly (`"<block>|<field>"` → document), not by reading the
+    page's HTML back. Only in edit renders."""
+    docs: dict[str, dict] = {}
+    for i, b in enumerate(blocks):
+        kind = b.get("type")
+        if kind in ("text", "sidebar"):
+            docs[f"{i}|md"] = _doc(b, "md", "rt")
+        elif kind == "qa":
+            for j, item in enumerate(b.get("items") or []):
+                docs[f"{i}|items.{j}.a_md"] = _doc(item, "a_md", "a_rt")
+    data = json.dumps(docs, ensure_ascii=False, separators=(",", ":")).replace("<", "\\u003c")
+    return f'<script type="application/json" data-mz-rt>{data}</script>'
+
+
+def _doc(b: dict, md_key: str, rt_key: str) -> dict:
+    try:
+        doc = normalize_rt(b.get(rt_key))
+    except RtError:
+        doc = None
+    return doc or md_to_rt(b.get(md_key))
 
 
 def render_story(site: dict, nav: list[dict], mag: dict, post: dict, assets: dict[str, dict], *,
@@ -385,8 +409,8 @@ def book_html(inner: str, *, issue: bool = False, face: str = "", edit: bool = F
     is its cover, drawn over the first page from outside the flowing columns,
     and `inner` holds the rest (`data-mz-flow`, which the script measures).
 
-    `edit`: the owner's editor on the page (`data-mz-edit`, and
-    `render/assets/editor.js` after the book's own script)."""
+    `edit`: the owner's editor on the page (`data-mz-edit`; the dashboard
+    adds its own script and styles, client `magazine/frame/`)."""
     what = "The issue" if issue else "The story"
     return (
         f'<div class="mz-reader" data-mz-book{" data-mz-issue" if issue else ""}{" data-mz-edit" if edit else ""}>'
@@ -397,7 +421,7 @@ def book_html(inner: str, *, issue: bool = False, face: str = "", edit: bool = F
         '<div class="mz-gloss" aria-hidden="true"></div></div>'
         '<button type="button" class="mz-turn mz-turn--next" data-mz-next aria-label="Next page" hidden>&#8250;</button>'
         '<p class="mz-folio" data-mz-folio aria-live="polite"></p>'
-        f"</div><script>{_BOOK_JS}</script>{_EDITOR if edit else ''}"
+        f"</div><script>{_BOOK_JS}</script>"
     )
 
 

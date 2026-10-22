@@ -16,7 +16,7 @@
 // and a contents entry (or a link in, /issues/3#mz-s-<story>) turns to it.
 // Keep in step with client/src/cappe/magazine/reader/book.ts, which does the
 // same from outside the script-less preview frames.
-// window.mzBook is for the owner's editor on the page (editor.js): turn to a
+// window.mzBook is for the owner's editor on the page (client magazine/frame/): turn to a
 // spread (at once with `now`), which spread an element is on, measure again.
 var box=document.querySelector('[data-mz-book]');if(!box)return;
 var book=box.querySelector('.mz-book'),pages=box.querySelector('.mz-pages'),story=pages.querySelector('[data-mz-flow]')||pages.firstElementChild,end=box.querySelector('.mz-end'),prev=box.querySelector('[data-mz-prev]'),next=box.querySelector('[data-mz-next]'),folio=box.querySelector('[data-mz-folio]');

@@ -2,7 +2,7 @@ import type { CappePost, StoryBlock, StoryContent } from '../../types'
 import { insertBlock, newBlock } from '../editor/blocks'
 import type { FrameMessage } from './bridge'
 import { FIELD_MAX, SIDEBAR_MD_MAX, blockHasField, clip, fieldShape, isRichField, isStoryField, type StoryField } from './fields'
-import { htmlToMd } from './htmlToMd'
+import { richPatch, type RtDoc } from './rt'
 
 /** A story's header and settings. */
 export type StoryFields = {
@@ -58,20 +58,28 @@ export const storyWordsBody = (d: StoryDoc) => ({
 
 export const sameStory = (a: StoryDoc, b: StoryDoc) => JSON.stringify(a) === JSON.stringify(b)
 
-function setIn(block: StoryBlock, path: string, value: string): StoryBlock | null {
+/** `block` with `path` (a field, or an item's) changed: `patch` holds the
+ *  field's new value and, for rich text, its document beside it. */
+function setIn(block: StoryBlock, path: string, patch: (key: string) => Record<string, unknown>): StoryBlock | null {
   const { shape, index } = fieldShape(path)
   const [list, , key] = shape.split('.')
-  if (index === null) return { ...block, [shape]: value } as StoryBlock
+  if (index === null) return { ...block, ...patch(shape) } as StoryBlock
   const items = (block as Record<string, unknown>)[list]
   if (!Array.isArray(items) || index >= items.length) return null
-  return { ...block, [list]: items.map((it, i) => (i === index ? { ...it, [key]: value } : it)) } as StoryBlock
+  return { ...block, [list]: items.map((it, i) => (i === index ? { ...it, ...patch(key) } : it)) } as StoryBlock
 }
 
+/** A rich field's document is kept beside its Markdown: `md` → `rt`,
+ *  `a_md` → `a_rt`. */
+const docKey = (key: string) => key.replace(/md$/, 'rt')
+
 /** The story with words typed on its page. `block` is the block's index
- *  (the header's fields ignore it); a rich field's value is its HTML. Null
- *  when the page named something this story doesn't have: the edit is
- *  dropped, never written somewhere else. */
-export function applyEdit(doc: StoryDoc, block: number, field: string, value: string, rich: boolean): StoryDoc | null {
+ *  (the header's fields ignore it); a rich field's value is its document,
+ *  kept with the Markdown the server will keep beside it. Null when the page
+ *  named something this story doesn't have: the edit is dropped, never
+ *  written somewhere else. */
+export function applyEdit(doc: StoryDoc, block: number, field: string, value: string | RtDoc): StoryDoc | null {
+  const rich = typeof value !== 'string'
   if (isStoryField(field)) {
     if (rich) return null
     const key = HEADER[field]
@@ -82,9 +90,15 @@ export function applyEdit(doc: StoryDoc, block: number, field: string, value: st
   if (!b || !blockHasField(b.type, field) || rich !== isRichField(field)) return null
   const shape = fieldShape(field).shape
   const max = b.type === 'sidebar' && shape === 'md' ? SIDEBAR_MD_MAX : FIELD_MAX[shape]
-  // Only words on a photo keep their line breaks; a caption or a quote is one run.
-  const words = clip(rich ? htmlToMd(value) : shape === 'overlays.#.text' ? value : value.replace(/\s*\n\s*/g, ' '), max)
-  const next = setIn(b, field, words)
+  let next: StoryBlock | null
+  if (rich) {
+    const { rt, md } = richPatch(value, max)
+    next = setIn(b, field, (key) => ({ [key]: md, [docKey(key)]: rt }))
+  } else {
+    // Only words on a photo keep their line breaks; a caption or a quote is one run.
+    const words = clip(shape === 'overlays.#.text' ? value : value.replace(/\s*\n\s*/g, ' '), max)
+    next = setIn(b, field, (key) => ({ [key]: words }))
+  }
   if (!next) return null
   if (JSON.stringify(next) === JSON.stringify(b)) return doc
   return { ...doc, blocks: doc.blocks.map((x, i) => (i === block ? next : x)) }
@@ -131,7 +145,7 @@ export const insertIndex = (blocks: StoryBlock[], at: number) =>
 export function storyFromMessage(doc: StoryDoc, msg: FrameMessage): { doc: StoryDoc; step: boolean; select?: number } | null {
   switch (msg.type) {
     case 'mz-edit': {
-      const next = applyEdit(doc, msg.block, msg.field, msg.value, msg.rich)
+      const next = applyEdit(doc, msg.block, msg.field, msg.value)
       return next ? { doc: next, step: false } : null
     }
     case 'mz-insert': {

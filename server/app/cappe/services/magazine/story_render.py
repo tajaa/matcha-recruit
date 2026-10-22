@@ -3,14 +3,15 @@
 Separate from the page-block registry (`services/render/blocks.py`): stories
 have their own small vocabulary (`story_schema.STORY_BLOCKS`) and their own
 CSS (`render/assets/magazine.css`, every class `mz-`). Everything the owner
-typed is escaped or goes through `richtext.render_md`; pictures come from the
+typed is escaped or goes through `rt.render_rt` (`richtext.render_md` for text
+stored before documents); pictures come from the
 library rows passed in `assets`, credits included.
 
 Photo groups keep each picture's own shape: a row's pictures are given flex
 weights from their width/height, so they line up at one height without
 cropping (`pair`, `trio`); `grid` and `mosaic` are CSS columns.
 
-`edit=True` is the owner's editor on the page (`render/assets/editor.js`),
+`edit=True` is the owner's editor on the page (the dashboard's `magazine/frame/`),
 never a reader's page: each block's first tag carries its place in
 `content.blocks` (`data-mz-b`), each piece of words the editor may type into
 carries its path (`data-mz-f`, `data-mz-k` plain or rich), and what a reader
@@ -26,6 +27,7 @@ from typing import Optional
 
 from .figures import credit_html, figure_html, img_html
 from .richtext import render_md
+from .rt import RtError, normalize_rt, render_rt
 
 PAYWALL = "paywall"
 # Characters past which a pull quote is set smaller (mz-pull--long).
@@ -49,6 +51,18 @@ def split_at_paywall(blocks: list[dict], *, preview_blocks: int = 3) -> tuple[li
             return blocks[:i], blocks[i:]
         body += 1
     return blocks, []
+
+
+def _rich_html(b: dict, md_key: str, rt_key: str) -> str:
+    """A rich field's words: from its document (what the editor saves), else
+    its Markdown (a story stored before the editor had documents)."""
+    doc = b.get(rt_key)
+    if isinstance(doc, dict):
+        try:
+            return render_rt(normalize_rt(doc))
+        except RtError:
+            pass  # saved under other limits: its Markdown still reads
+    return render_md(b.get(md_key))
 
 
 def field(path: str, *, rich: bool = False, ph: str = "") -> str:
@@ -107,7 +121,7 @@ def _qa(b: dict, *, edit: bool = False) -> str:
         f'<div class="mz-qa__item"><p class="mz-qa__q"{field(f"items.{i}.q", ph="Question") if edit else ""}>'
         f'{escape(it.get("q") or "")}</p>'
         f'<div class="mz-qa__a"{field(f"items.{i}.a_md", rich=True, ph="Answer") if edit else ""}>'
-        f'{render_md(it.get("a_md"))}</div></div>'
+        f'{_rich_html(it, "a_md", "a_rt")}</div></div>'
         for i, it in enumerate(b.get("items") or []) if edit or (it.get("q") or it.get("a_md"))
     )
     if not rows and edit:
@@ -176,7 +190,7 @@ def photo_html(b: dict, asset: Optional[dict], *, edit: bool = False) -> str:
 def render_block(b: dict, assets: dict[str, dict], *, first_text: bool = False, edit: bool = False) -> str:
     kind = b.get("type")
     if kind == "text":
-        html = render_md(b.get("md"))
+        html = _rich_html(b, "md", "rt")
         if not html and not edit:
             return ""
         cls = ["mz-text", "mz-measure", f"mz-text--{b.get('variant') or 'body'}", f"mz-align--{b.get('align') or 'left'}"]
@@ -201,7 +215,7 @@ def render_block(b: dict, assets: dict[str, dict], *, first_text: bool = False, 
                 f'<p{field("text", ph="The words to pull out") if edit else ""}>{escape(b.get("text") or "")}</p>'
                 f"{cite}</blockquote>")
     if kind == "sidebar":
-        body = render_md(b.get("md"))
+        body = _rich_html(b, "md", "rt")
         if not (body or b.get("title")) and not edit:
             return ""
         if edit:

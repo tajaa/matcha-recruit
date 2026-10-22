@@ -1,7 +1,7 @@
 import { ImagePlus, Trash2 } from 'lucide-react'
 import { ui } from '../../components/ui'
 import type { CappeAsset, StoryBlock } from '../../types'
-import MarkdownField from './MarkdownField'
+import RichField from './RichField'
 import PictureSlot from './PictureSlot'
 import PhotoDesigner from './PhotoDesigner'
 
@@ -57,8 +57,8 @@ export default function BlockOptions({ block, assets, onChange, onPickAsset, wor
       return (
         <div className="space-y-2">
           {words && (
-            <MarkdownField value={block.md} onChange={(md) => onChange({ ...block, md })} label="Text"
-              placeholder="Write here. Select words and use the bar above, or type Markdown: **bold**, *italic*, ## heading, > quote, - list" />
+            <RichField value={block.rt} onChange={(patch) => onChange({ ...block, ...patch })} label="Text" max={20_000}
+              placeholder="Write here. Select words and use the bar above." />
           )}
           <div className={`flex flex-wrap gap-3 text-sm text-zinc-300 ${words ? '' : 'flex-col'}`}>
             <label className="flex items-center gap-2">Style
@@ -67,11 +67,6 @@ export default function BlockOptions({ block, assets, onChange, onPickAsset, wor
                 <option value="lede">Lede (larger opening)</option>
                 <option value="statement">Statement (big, in the headline type)</option>
                 <option value="small">Small print</option>
-              </select>
-            </label>
-            <label className="flex items-center gap-2">Columns
-              <select value={block.columns} onChange={(e) => onChange({ ...block, columns: Number(e.target.value) as typeof block.columns })} className={small}>
-                <option value={1}>One</option><option value={2}>Two</option><option value={3}>Three</option>
               </select>
             </label>
             <label className="flex items-center gap-2">Align
@@ -169,7 +164,8 @@ export default function BlockOptions({ block, assets, onChange, onPickAsset, wor
       return words ? (
         <div className="space-y-2">
           <input value={block.title} onChange={(e) => onChange({ ...block, title: e.target.value })} maxLength={120} placeholder="Sidebar title" className={ui.input} />
-          <MarkdownField value={block.md} onChange={(md) => onChange({ ...block, md })} rows={4} label="Sidebar" placeholder="Facts, a timeline, where to go" />
+          <RichField value={block.rt} onChange={(patch) => onChange({ ...block, ...patch })} max={4_000} minHeight="5rem" label="Sidebar"
+            placeholder="Facts, a timeline, where to go" />
         </div>
       ) : <p className="text-xs text-zinc-500">A box beside the story. Type its title and words on the page.</p>
     case 'qa':
@@ -185,8 +181,8 @@ export default function BlockOptions({ block, assets, onChange, onPickAsset, wor
                     <button type="button" aria-label={`Remove question ${i + 1}`} onClick={() => onChange({ ...block, items: block.items.filter((_, j) => j !== i) })}
                       className="text-zinc-500 hover:text-red-400"><Trash2 className="h-4 w-4" /></button>
                   </div>
-                  <MarkdownField value={item.a_md} onChange={(a_md) => onChange({ ...block, items: block.items.map((x, j) => (j === i ? { ...x, a_md } : x)) })}
-                    rows={3} label={`Answer ${i + 1}`} placeholder="Answer" />
+                  <RichField value={item.a_rt} max={5_000} minHeight="4rem" label={`Answer ${i + 1}`} placeholder="Answer"
+                    onChange={({ rt, md }) => onChange({ ...block, items: block.items.map((x, j) => (j === i ? { ...x, a_md: md, a_rt: rt } : x)) })} />
                 </>
               ) : (
                 <>

@@ -359,8 +359,10 @@ export default function IssueEditor() {
       }
       case 'mz-edit':
         if (msg.field.startsWith('issue:')) {
-          if (applyIssueEdit(current, msg.field, msg.value, excerpts)) {
-            setDoc((d) => (d ? applyIssueEdit(d, msg.field, msg.value, excerpts) ?? d : d))
+          // The issue's own words are plain (the bridge sends no document for them).
+          const words = msg.rich ? null : msg.value
+          if (words !== null && applyIssueEdit(current, msg.field, words, excerpts)) {
+            setDoc((d) => (d ? applyIssueEdit(d, msg.field, words, excerpts) ?? d : d))
           }
           return
         }

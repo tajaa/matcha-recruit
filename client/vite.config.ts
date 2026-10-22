@@ -1,5 +1,6 @@
 import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
+import { mzFrame } from './vite-mz-frame'
 
 // https://vite.dev/config/
 const backendTarget = process.env.VITE_PROXY_TARGET || 'http://127.0.0.1:8001'
@@ -55,7 +56,7 @@ function landingPreload(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [react(), landingPreload()],
+  plugins: [react(), landingPreload(), mzFrame()],
   build: {
     // Emit source maps alongside JS bundles and include a
     // //# sourceMappingURL= comment so browsers resolve stack traces to
