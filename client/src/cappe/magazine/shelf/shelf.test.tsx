@@ -79,6 +79,11 @@ describe('reader paths', () => {
     expect(magazineSlugFrom('https://gummfit.com/cappe/reader/m/salt')).toBe('salt')
     expect(magazineSlugFrom('')).toBeNull()
     expect(magazineSlugFrom('not a magazine!')).toBeNull()
+    // Not under Gummfit's address: its first label isn't a handle.
+    expect(magazineSlugFrom('mag.example.com')).toBeNull()
+    expect(magazineSlugFrom('www.saltmagazine.com')).toBeNull()
+    expect(magazineSlugFrom('gummfit.com')).toBeNull()
+    expect(magazineSlugFrom('www.gummfit.com')).toBeNull()
     expect(readerStoryPath('salt', 'low tide')).toBe('/cappe/reader/m/salt/low%20tide')
   })
 
@@ -113,6 +118,20 @@ describe('the shelf', () => {
     expect(screen.getByRole('link', { name: /Low tide/ })).toHaveAttribute('href', '/cappe/reader/m/salt/low-tide')
     expect(screen.getByText('Free, from the writer')).toBeInTheDocument()
     expect(screen.getByText(/isn’t up right now/)).toBeInTheDocument()
+  })
+
+  it('cancels a subscription to a magazine that is down from the shelf itself', async () => {
+    // Its page 404s while it is down; the reader can still stop paying.
+    api.get.mockResolvedValue({ magazines: [held({ live: false, latest: null })] })
+    api.post.mockResolvedValue({ status: 'active', cancel_at_period_end: true })
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    mount('/cappe/reader', '/cappe/reader', <Shelf />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Cancel subscription' }))
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith('/reader/subscriptions/sub-1/cancel'))
+    expect(await screen.findByText(/^Ends/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Cancel subscription' })).not.toBeInTheDocument()
+    expect(screen.queryByText(/All stories and your subscription/)).not.toBeInTheDocument()
+    confirm.mockRestore()
   })
 
   it('opens another magazine by its address', async () => {

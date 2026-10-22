@@ -6,13 +6,30 @@ import { ui } from '../../components/ui'
 import type { CappeShelfMagazine } from '../../types'
 import { magazineSlugFrom, readerMagazinePath } from './readerPaths'
 import StoryCard from './StoryCard'
-import { compState, subscriptionState } from './subscription'
+import { changeSubscription, compState, subscriptionState } from './subscription'
 
 /** `/cappe/reader` — every magazine the reader subscribes to or was given,
  *  with its latest story, and a way to open another by its address. */
 export default function Shelf() {
   const [mags, setMags] = useState<CappeShelfMagazine[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  // A magazine that is down has no page to open (it 404s), so its
+  // subscription is stopped from here.
+  const cancel = async (m: CappeShelfMagazine) => {
+    if (!m.subscription || !window.confirm('Cancel? You keep reading until the month you paid for ends.')) return
+    setBusy(true)
+    try {
+      const res = await changeSubscription(m.subscription.id, true)
+      setMags((ms) => ms && ms.map((x) => (x.site_id === m.site_id && x.subscription
+        ? { ...x, subscription: { ...x.subscription, cancel_at_period_end: res.cancel_at_period_end } } : x)))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not cancel. Try again.')
+    } finally {
+      setBusy(false)
+    }
+  }
 
   useEffect(() => {
     let live = true
@@ -48,7 +65,16 @@ export default function Shelf() {
                 </span>
               </div>
               <div className="p-5">
-                {!m.live && <p className="text-sm text-zinc-500">This magazine isn’t up right now. You can still manage your subscription from its page.</p>}
+                {!m.live && (
+                  <div className="flex flex-wrap items-center gap-3">
+                    <p className="text-sm text-zinc-500">This magazine isn’t up right now.</p>
+                    {m.subscription && !m.subscription.cancel_at_period_end && (
+                      <button type="button" disabled={busy} className={`${ui.btnGhost} ml-auto`} onClick={() => void cancel(m)}>
+                        Cancel subscription
+                      </button>
+                    )}
+                  </div>
+                )}
                 {m.live && m.latest && (
                   <div className="max-w-sm">
                     <p className="mb-2 text-xs font-medium uppercase tracking-wide text-zinc-500">Latest</p>
@@ -56,7 +82,9 @@ export default function Shelf() {
                   </div>
                 )}
                 {m.live && !m.latest && <p className="text-sm text-zinc-500">No stories yet.</p>}
-                <Link to={readerMagazinePath(m.slug)} className={`mt-4 inline-block text-sm ${ui.accentText}`}>All stories and your subscription →</Link>
+                {m.live && (
+                  <Link to={readerMagazinePath(m.slug)} className={`mt-4 inline-block text-sm ${ui.accentText}`}>All stories and your subscription →</Link>
+                )}
               </div>
             </li>
           ))}
