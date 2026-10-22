@@ -25,7 +25,7 @@
   var overlay = null;  // the words on a photo last clicked, which the grip moves
 
   // ── what a click is on ────────────────────────────────────────────────
-  var esc = function (s) { return window.CSS && CSS.escape ? CSS.escape(s) : String(s).replace(/"/g, '\\"'); };
+  var esc = function (s) { return window.CSS && CSS.escape ? CSS.escape(s) : String(s).replace(/["\\]/g, '\\$&'); };
   function storyOf(el) { var s = el.closest('[data-mz-s]'); return s ? s.getAttribute('data-mz-s') : ''; }
   function blockOf(el) { var b = el.closest('[data-mz-b]'); return b ? +b.getAttribute('data-mz-b') : -1; }
   function targetOf(el) {
