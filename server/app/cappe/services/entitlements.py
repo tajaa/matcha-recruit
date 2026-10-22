@@ -120,6 +120,9 @@ def _legacy_fallback(plan_code: str) -> Entitlements:
             # Zones are applied at checkout, so an unreadable catalog must not
             # quietly stop a paying store's buyers abroad from checking out.
             "shipping_zones": str(plan_code or "").lower() in {"business", "pro", "hosting"},
+            # A magazine's pages are checked against the plan as they render:
+            # an unreadable catalog must not take a paying writer's stories down.
+            "magazine": str(plan_code or "").lower() in {"business", "pro", "creator", "writer"},
         },
     )
 

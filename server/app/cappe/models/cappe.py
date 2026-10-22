@@ -15,4 +15,5 @@ from .domains import *  # noqa: F401,F403
 from .presets import *  # noqa: F401,F403
 from .uploads import *  # noqa: F401,F403
 from .public import *  # noqa: F401,F403
+from .magazine import *  # noqa: F401,F403
 from .social import *  # noqa: F401,F403

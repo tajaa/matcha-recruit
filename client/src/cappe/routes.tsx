@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react'
-import { Routes, Route } from 'react-router-dom'
+import { Routes, Route, Navigate, useParams } from 'react-router-dom'
 import Subscriptions from './pages/site/Subscriptions'
 import Finances from './pages/site/Finances'
 import CappeLayout from './layout/CappeLayout'
@@ -41,12 +41,21 @@ const Campaigns = lazy(() => import('./pages/site/Campaigns'))
 const Forms = lazy(() => import('./pages/site/Forms'))
 const Bookings = lazy(() => import('./pages/site/Bookings'))
 const Locations = lazy(() => import('./pages/site/Locations'))
-const Blog = lazy(() => import('./pages/site/Blog'))
 const Messages = lazy(() => import('./pages/site/Messages'))
 const Clients = lazy(() => import('./pages/site/Clients'))
 const Reviews = lazy(() => import('./pages/site/Reviews'))
 const Library = lazy(() => import('./magazine/library/LibraryPage'))
 const Social = lazy(() => import('./pages/site/Social'))
+const Stories = lazy(() => import('./magazine/stories/Stories'))
+const StoryEditor = lazy(() => import('./magazine/editor/StoryEditor'))
+const MagazineSettings = lazy(() => import('./magazine/settings/MagazineSettings'))
+const ReaderView = lazy(() => import('./magazine/reader/ReaderView'))
+
+// The Blog page became the magazine's Stories (cappemag02); old links land there.
+function BlogRedirect() {
+  const { siteId } = useParams<{ siteId: string }>()
+  return <Navigate to={`/cappe/sites/${siteId}/stories`} replace />
+}
 
 // Cappe — website-builder product, served at /cappe. Self-contained route tree
 // with its own auth (cappe_* tokens, useCappeMe). Public signup/login live
@@ -107,7 +116,11 @@ export default function CappeRoutes() {
           <Route path="sites/:siteId/messages" element={<Messages />} />
           <Route path="sites/:siteId/clients" element={<Clients />} />
           <Route path="sites/:siteId/reviews" element={<Reviews />} />
-          <Route path="sites/:siteId/blog" element={<Blog />} />
+          <Route path="sites/:siteId/blog" element={<BlogRedirect />} />
+          <Route path="sites/:siteId/stories" element={<Stories />} />
+          <Route path="sites/:siteId/stories/:postId" element={<StoryEditor />} />
+          <Route path="sites/:siteId/magazine" element={<MagazineSettings />} />
+          <Route path="sites/:siteId/magazine/view" element={<ReaderView />} />
           <Route path="sites/:siteId/library" element={<Library />} />
           {/* Creator marketplace: creator self-service + brand-side collabs.
               Each group is wrapped in RequireAccountType — CappeLayout above

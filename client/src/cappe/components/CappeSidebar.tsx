@@ -56,7 +56,7 @@ const SITE_NAV: { to: string; label: string; icon: typeof Globe; end?: boolean }
   { to: 'social', label: 'Social', icon: Megaphone },
   { to: 'forms', label: 'Forms', icon: Inbox },
   { to: 'reviews', label: 'Reviews', icon: Star },
-  { to: 'blog', label: 'Blog', icon: Newspaper },
+  { to: 'stories', label: 'Magazine', icon: Newspaper },
   { to: 'library', label: 'Library', icon: Images },
 ]
 

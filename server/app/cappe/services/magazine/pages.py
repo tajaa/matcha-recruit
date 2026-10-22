@@ -1,0 +1,266 @@
+"""The magazine's server-rendered pages: its front, a story, a topic, and the
+RSS feed.
+
+Each page goes through `render_site_html(body_override=...)` like the product
+page does, so it wears the site's header, footer and theme; the magazine adds
+its own masthead fonts and `magazine.css`. Server-rendered so a story shared on
+Instagram or found on Google shows its picture, headline and words before any
+script runs: Open Graph `article` tags and Article structured data.
+
+A paid story's page holds only its free part (`story_render.split_at_paywall`);
+the paid part is never in this HTML, in the cache, or in the feed.
+"""
+from __future__ import annotations
+
+from datetime import datetime
+from email.utils import format_datetime
+from html import escape
+from pathlib import Path
+from typing import Optional
+from xml.sax.saxutils import escape as xml_escape
+
+from ..render.design import _font_stack, _gfonts_link
+from ..render.page import render_site_html
+from ..render.sanitize import _js_obj
+from .figures import figure_html, img_html, share_image
+from .magazines import masthead_fonts
+from .richtext import render_md
+from .story_render import cover_html, render_blocks, split_at_paywall
+from .story_schema import cover_block
+from .topics import topic_label
+
+_CSS = (Path(__file__).resolve().parent.parent / "render" / "assets" / "magazine.css").read_text(encoding="utf-8")
+
+PAGE_SIZE = 12
+MAX_PAGE = 50
+
+
+def story_path(slug: str) -> str:
+    return f"/stories/{slug}"
+
+
+def topic_path(key: str) -> str:
+    return f"/topics/{key}"
+
+
+def front_path(mag: dict) -> str:
+    return "/" if mag.get("front_at_root") else "/magazine"
+
+
+def _date(ts: Optional[datetime]) -> str:
+    return f"{ts.strftime('%B')} {ts.day}, {ts.year}" if ts else ""
+
+
+def _head(mag: dict, origin: str) -> str:
+    heading, body = masthead_fonts(mag)
+    accent = mag.get("accent") or ""
+    vars_ = f"--mz-h:{_font_stack(heading)};--mz-b:{_font_stack(body)};"
+    if accent:
+        vars_ += f"--mz-accent:{accent};"
+    feed = escape(f"{origin}/feed.xml", quote=True)
+    title = escape(mag.get("name") or "", quote=True)
+    return (_gfonts_link(heading, body) + f"<style>.mz{{{vars_}}}{_CSS}</style>"
+            f'<link rel="alternate" type="application/rss+xml" title="{title}" href="{feed}" />')
+
+
+def _masthead(mag: dict, *, small: bool = False) -> str:
+    tagline = f'<p class="mz-masthead__tagline">{escape(mag["tagline"])}</p>' if mag.get("tagline") and not small else ""
+    tag = "p" if small else "h1"
+    cls = "mz-masthead mz-masthead--small" if small else "mz-masthead"
+    return (f'<header class="{cls}"><{tag} class="mz-masthead__name">'
+            f'<a href="{front_path(mag)}">{escape(mag.get("name") or "")}</a></{tag}>{tagline}</header>')
+
+
+def _topics_nav(keys: list[str], current: Optional[str] = None) -> str:
+    links = []
+    for k in keys:
+        if not topic_label(k):
+            continue
+        here = ' aria-current="page"' if k == current else ""
+        links.append(f'<a href="{topic_path(k)}"{here}>{escape(topic_label(k))}</a>')
+    return f'<nav class="mz-topics" aria-label="Topics">{"".join(links)}</nav>' if links else ""
+
+
+def _meta(post: dict) -> str:
+    bits = []
+    if post.get("byline"):
+        bits.append(f'<span class="mz-by">By {escape(post["byline"])}</span>')
+    if post.get("published_at"):
+        ts = post["published_at"]
+        bits.append(f'<time datetime="{escape(ts.isoformat(), quote=True)}">{escape(_date(ts))}</time>')
+    if post.get("reading_minutes"):
+        bits.append(f"<span>{int(post['reading_minutes'])} min read</span>")
+    return f'<p class="mz-meta">{" · ".join(bits)}</p>' if bits else ""
+
+
+def card_html(post: dict, asset: Optional[dict], *, big: bool = False) -> str:
+    """A story on the front or a topic page: picture, kicker, headline, dek."""
+    img = img_html(asset, size="wide" if big else "card", eager=big, cls="mz-card__img") if asset else ""
+    media = f'<div class="mz-card__media">{img}</div>' if img else ""
+    kicker = post.get("kicker") or topic_label(post.get("topic"))
+    kicker_html = f'<p class="mz-kicker">{escape(kicker)}</p>' if kicker else ""
+    dek = f'<p class="mz-dek">{escape(post["excerpt"])}</p>' if post.get("excerpt") else ""
+    title = f'<h2 class="mz-card__title">{escape(post.get("title") or "")}</h2>'
+    cls = "mz-card mz-card--lead" if big else "mz-card"
+    href = escape(story_path(post["slug"]), quote=True)
+    return (f'<article class="{cls}"><a href="{href}">{media}<div class="mz-card__words">'
+            f"{kicker_html}{title}{dek}{_meta({**post, 'byline': None})}</div></a></article>")
+
+
+def _key(post: dict) -> str:
+    return str(post["id"])
+
+
+def _grid(posts: list[dict], covers: dict[str, dict]) -> str:
+    cards = "".join(card_html(p, covers.get(_key(p))) for p in posts)
+    return f'<div class="mz-grid">{cards}</div>' if cards else ""
+
+
+def _pager(base: str, page: int, has_more: bool) -> str:
+    links = []
+    if page > 1:
+        prev = base if page == 2 else f"{base}?page={page - 1}"
+        links.append(f'<a rel="prev" href="{escape(prev, quote=True)}">Newer stories</a>')
+    if has_more and page < MAX_PAGE:
+        links.append(f'<a rel="next" href="{escape(base, quote=True)}?page={page + 1}">Older stories</a>')
+    return f'<nav class="mz-pager">{"".join(links)}</nav>' if links else ""
+
+
+def _page(site: dict, nav: list[dict], mag: dict, body: str, *, origin: str, seo: dict, extra_head: str = "") -> str:
+    return render_site_html(
+        site, {"title": seo.get("title") or mag.get("name"), "slug": "__magazine", "content": {}}, nav,
+        body_override=f'<div class="mz">{body}</div>', extra_head=_head(mag, origin) + extra_head, seo=seo,
+    )
+
+
+def render_front(site: dict, nav: list[dict], mag: dict, *, lead: Optional[dict], posts: list[dict],
+                 covers: dict[str, dict], topics: list[str], page: int, has_more: bool, origin: str) -> str:
+    """The magazine's front: masthead, the cover story, then the latest."""
+    lead_html = ""
+    if lead and page == 1:
+        lead_html = f'<section class="mz-lead">{card_html(lead, covers.get(_key(lead)), big=True)}</section>'
+    about = ""
+    if page == 1 and mag.get("about"):
+        about = f'<section class="mz-about mz-measure">{render_md(mag["about"])}</section>'
+    empty = '<p class="mz-empty">The first stories are on their way.</p>' if not (lead_html or posts) else ""
+    body = (_masthead(mag) + _topics_nav(topics) + lead_html + _grid(posts, covers) + empty
+            + _pager(front_path(mag), page, has_more) + about)
+    url = f"{origin}{front_path(mag)}" + (f"?page={page}" if page > 1 else "")
+    lead_img = share_image(covers.get(_key(lead))) if lead else None
+    return _page(site, nav, mag, body, origin=origin, seo={
+        "title": mag.get("name") + (f" — page {page}" if page > 1 else ""),
+        "description": mag.get("tagline") or "", "image": lead_img, "type": "website", "url": url,
+    })
+
+
+def render_topic(site: dict, nav: list[dict], mag: dict, topic: str, *, posts: list[dict],
+                 covers: dict[str, dict], topics: list[str], page: int, has_more: bool, origin: str) -> str:
+    label = topic_label(topic)
+    body = (_masthead(mag, small=True) + _topics_nav(topics, current=topic)
+            + f'<h1 class="mz-topic-title">{escape(label)}</h1>' + _grid(posts, covers)
+            + _pager(topic_path(topic), page, has_more))
+    return _page(site, nav, mag, body, origin=origin, seo={
+        "title": f"{label} — {mag.get('name')}", "description": mag.get("tagline") or "",
+        "type": "website", "url": f"{origin}{topic_path(topic)}",
+    })
+
+
+def article_ld(post: dict, mag: dict, *, url: str, image: Optional[str]) -> str:
+    published = post["published_at"].isoformat() if post.get("published_at") else None
+    data = {
+        "@context": "https://schema.org",
+        "@type": "NewsArticle" if post.get("layout") == "dispatch" else "Article",
+        "headline": (post.get("title") or "")[:110],
+        "description": post.get("excerpt") or "",
+        "mainEntityOfPage": url,
+        "datePublished": published,
+        "dateModified": post["updated_at"].isoformat() if post.get("updated_at") else published,
+        "author": ({"@type": "Person", "name": post["byline"]} if post.get("byline")
+                   else {"@type": "Organization", "name": mag.get("name")}),
+        "publisher": {"@type": "Organization", "name": mag.get("name")},
+    }
+    if image:
+        data["image"] = [image]
+    if post.get("topic"):
+        data["articleSection"] = topic_label(post["topic"])
+    return f'<script type="application/ld+json">{_js_obj({k: v for k, v in data.items() if v})}</script>'
+
+
+def story_blocks(post: dict) -> list[dict]:
+    """A story's blocks; a legacy Markdown post is one text block."""
+    if post.get("format") == "blocks":
+        return list((post.get("content") or {}).get("blocks") or [])
+    return [{"type": "text", "md": post.get("body") or "", "dropcap": False, "columns": 1}]
+
+
+def render_story(site: dict, nav: list[dict], mag: dict, post: dict, assets: dict[str, dict], *,
+                 more: list[dict], more_covers: dict[str, dict], origin: str, preview_blocks: int = 3) -> str:
+    blocks = story_blocks(post)
+    cover = cover_block({"blocks": blocks})
+    cover_asset = assets.get((cover or {}).get("asset_id") or "") or assets.get(str(post.get("cover_asset_id") or ""))
+    free = blocks
+    paywall = ""
+    if post.get("access") == "paid":
+        free, _paid = split_at_paywall(blocks, preview_blocks=preview_blocks)
+        paywall = ('<section class="mz-paywall mz-measure" data-mz-paid>'
+                   "<p>The rest of this story is for subscribers.</p></section>")
+    topic = post.get("topic")
+    topic_link = (f'<p class="mz-story__topic"><a href="{topic_path(topic)}">{escape(topic_label(topic))}</a></p>'
+                  if topic_label(topic) else "")
+    more_html = ""
+    if more:
+        cards = "".join(card_html(p, more_covers.get(_key(p))) for p in more)
+        more_html = (f'<section class="mz-more"><h2 class="mz-more__title">More from {escape(mag.get("name") or "")}'
+                     f'</h2><div class="mz-grid">{cards}</div></section>')
+    body = (
+        _masthead(mag, small=True)
+        + f'<article class="mz-story mz-layout-{escape(post.get("layout") or "standard")}">'
+        + cover_html(post, cover, cover_asset, byline_html=_meta(post))
+        + f'<div class="mz-story__body">{render_blocks(free, assets)}</div>{paywall}{topic_link}</article>'
+        + more_html
+    )
+    url = f"{origin}{story_path(post['slug'])}"
+    image = share_image(cover_asset)
+    extra = article_ld(post, mag, url=url, image=image)
+    if post.get("published_at"):
+        extra += f'<meta property="article:published_time" content="{escape(post["published_at"].isoformat(), quote=True)}" />'
+    if topic_label(topic):
+        extra += f'<meta property="article:section" content="{escape(topic_label(topic), quote=True)}" />'
+    extra += '<meta name="twitter:card" content="summary_large_image" />'
+    return _page(site, nav, mag, body, origin=origin, extra_head=extra, seo={
+        "title": f"{post.get('title')} — {mag.get('name')}", "description": post.get("excerpt") or "",
+        "image": image, "type": "article", "url": url,
+    })
+
+
+def _cdata(html: str) -> str:
+    return "<![CDATA[" + html.replace("]]>", "]]]]><![CDATA[>") + "]]>"
+
+
+def render_feed(mag: dict, posts: list[dict], assets: dict[str, dict], *, origin: str) -> str:
+    """RSS 2.0: the latest stories, in full when free, the dek when paid."""
+    items = []
+    for p in posts:
+        link = f"{origin}{story_path(p['slug'])}"
+        if p.get("access") == "paid":
+            content = f"<p>{escape(p.get('excerpt') or '')}</p>"
+        else:
+            cover = assets.get(str(p.get("cover_asset_id") or ""))
+            content = (figure_html(cover) if cover else "") + render_blocks(story_blocks(p), assets)
+        pub = f"<pubDate>{format_datetime(p['published_at'])}</pubDate>" if p.get("published_at") else ""
+        items.append(
+            "<item>"
+            f"<title>{xml_escape(p.get('title') or '')}</title><link>{xml_escape(link)}</link>"
+            f'<guid isPermaLink="true">{xml_escape(link)}</guid>{pub}'
+            f"<description>{xml_escape(p.get('excerpt') or '')}</description>"
+            f"<content:encoded>{_cdata(content)}</content:encoded>"
+            "</item>"
+        )
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/">'
+        f"<channel><title>{xml_escape(mag.get('name') or '')}</title>"
+        f"<link>{xml_escape(origin + front_path(mag))}</link>"
+        f"<description>{xml_escape(mag.get('tagline') or mag.get('name') or '')}</description>"
+        + "".join(items) + "</channel></rss>\n"
+    )
