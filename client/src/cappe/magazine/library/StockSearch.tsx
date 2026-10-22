@@ -22,15 +22,17 @@ const message = (e: unknown, fallback: string) => (e instanceof Error && e.messa
  * for a topic. Imports run on the server; this polls them and hands each
  * picture to `onImported` as it lands.
  */
-export default function StockSearch({ siteId, postId, onImported, pollMs = POLL_MS }: {
+export default function StockSearch({ siteId, postId, onImported, initial, pollMs = POLL_MS }: {
   siteId: string
   /** The story being edited, when opened from the editor's picker. */
   postId?: string
   onImported: (asset: CappeAsset) => void
+  /** A search to run as soon as it opens (the editor's suggested searches). */
+  initial?: { source: CappeStockSource; query: string }
   pollMs?: number
 }) {
-  const [source, setSource] = useState<CappeStockSource>('openverse')
-  const [query, setQuery] = useState('')
+  const [source, setSource] = useState<CappeStockSource>(initial?.source || 'openverse')
+  const [query, setQuery] = useState(initial?.query || '')
   const [last, setLast] = useState<CappeStockSearch | null>(null)
   const [results, setResults] = useState<CappeStockResult[]>([])
   const [searching, setSearching] = useState(false)
@@ -53,7 +55,7 @@ export default function StockSearch({ siteId, postId, onImported, pollMs = POLL_
       .catch(() => setTopics([]))
   }, [siteId])
 
-  const search = async (src: CappeStockSource, q: string, page: number) => {
+  const search = useCallback(async (src: CappeStockSource, q: string, page: number) => {
     if (!q) return
     const gen = ++generation.current
     setSearching(true)
@@ -70,7 +72,14 @@ export default function StockSearch({ siteId, postId, onImported, pollMs = POLL_
     } finally {
       if (gen === generation.current) setSearching(false)
     }
-  }
+  }, [siteId])
+
+  const started = useRef(false)
+  useEffect(() => {
+    if (started.current || !initial?.query) return
+    started.current = true
+    void search(initial.source, initial.query, 0)
+  }, [initial, search])
 
   const submit = (e: FormEvent) => {
     e.preventDefault()

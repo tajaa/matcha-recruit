@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, BookOpen, Eye, Loader2, Plus, Trash2, X } from 'lucide-react'
+import { ArrowLeft, BookOpen, Eye, Loader2, Plus, Trash2, Wand2, X } from 'lucide-react'
 import { cappeApi } from '../../api'
 import { ui } from '../../components/ui'
-import type { CappeAsset, CappePost, CappeStoryOptions, StoryBlock, StoryContent, StoryLayout } from '../../types'
+import type {
+  CappeAsset, CappePost, CappeStockSource, CappeStoryOptions, StoryBlock, StoryContent, StoryLayout,
+} from '../../types'
 import LibraryPanel from '../library/LibraryPanel'
+import AssistPanel from './AssistPanel'
 import BlockEditor from './BlockEditor'
-import { BLOCK_LABELS, moveBlock, newBlock } from './blocks'
+import { BLOCK_LABELS, moveBlock, newBlock, withCaption, withText } from './blocks'
 
 type Fields = { title: string; kicker: string; excerpt: string; byline: string; topic: string; layout: StoryLayout; status: CappePost['status'] }
 
@@ -32,6 +35,8 @@ export default function StoryEditor() {
   const [savedAt, setSavedAt] = useState<number | null>(null)
   const [picking, setPicking] = useState<((a: CappeAsset) => void) | null>(null)
   const [adding, setAdding] = useState(false)
+  const [assisting, setAssisting] = useState(false)
+  const [finding, setFinding] = useState<{ source: CappeStockSource; query: string } | null>(null)
   const [preview, setPreview] = useState<string>('')
   const [previewOpen, setPreviewOpen] = useState(true)
   const previewGen = useRef(0)
@@ -83,6 +88,13 @@ export default function StoryEditor() {
       setPicking(null)
     })
   }, [])
+
+  // From "Find pictures": the chosen picture joins the story as a photo block.
+  const addPhoto = (a: CappeAsset) => {
+    setAssets((m) => new Map(m).set(a.id, a))
+    setBlocks((bs) => [...bs, { type: 'photo', asset_id: a.id, caption: '', size: 'column' }])
+    setFinding(null)
+  }
 
   const save = async (status?: CappePost['status']) => {
     if (!fields || !post) return
@@ -160,6 +172,7 @@ export default function StoryEditor() {
             </Link>
           )}
           {savedAt && !dirty && <span className="text-xs text-emerald-400">Saved</span>}
+          {isStory && <button type="button" className={ui.btnGhost} onClick={() => setAssisting((v) => !v)} aria-pressed={assisting}><Wand2 className="h-4 w-4" /> Assist</button>}
           {isStory && <button type="button" className={ui.btnGhost} onClick={() => setPreviewOpen((v) => !v)} aria-pressed={previewOpen}><Eye className="h-4 w-4" /> Preview</button>}
           <button type="button" className={ui.btnGhost} disabled={saving || !dirty} onClick={() => save()}>Save</button>
           {post.status !== 'published'
@@ -171,6 +184,19 @@ export default function StoryEditor() {
 
       <div className={`grid flex-1 ${previewOpen && isStory ? 'lg:grid-cols-2' : ''}`}>
         <div className="space-y-4 overflow-y-auto p-5">
+          {assisting && isStory && (
+            <AssistPanel siteId={siteId!} postId={postId!} title={fields.title} excerpt={fields.excerpt} blocks={blocks}
+              assets={assets} onClose={() => setAssisting(false)}
+              onHeadline={(h) => setFields((f) => (f ? { ...f, title: h.title, excerpt: h.dek || f.excerpt, kicker: h.kicker || f.kicker } : f))}
+              onCaption={(id, caption) => setBlocks((bs) => withCaption(bs, id, caption))}
+              onAlt={(a) => setAssets((m) => new Map(m).set(a.id, a))}
+              onTighten={(i, md) => setBlocks((bs) => withText(bs, i, md))}
+              onDraft={(d) => {
+                setFields((f) => (f ? { ...f, title: d.title || f.title, excerpt: d.excerpt || f.excerpt, kicker: d.kicker || f.kicker } : f))
+                setBlocks(d.content.blocks)
+              }}
+              onFind={setFinding} />
+          )}
           <section className={`${ui.card} space-y-3 p-4`}>
             <input value={fields.title} onChange={(e) => setField('title', e.target.value)} maxLength={255} placeholder="Headline"
               className="w-full bg-transparent text-2xl font-semibold text-zinc-50 outline-none placeholder:text-zinc-600" aria-label="Headline" />
@@ -245,14 +271,17 @@ export default function StoryEditor() {
         )}
       </div>
 
-      {picking && (
-        <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/60 p-4 sm:items-center" role="dialog" aria-label="Choose a picture">
+      {(picking || finding) && (
+        <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/60 p-4 sm:items-center" role="dialog"
+          aria-label={picking ? 'Choose a picture' : 'Find pictures'}>
           <div className={`${ui.card} max-h-[90vh] w-full max-w-5xl overflow-y-auto p-5`}>
             <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-sm font-medium text-zinc-100">Choose a picture</h2>
-              <button type="button" onClick={() => setPicking(null)} className="text-zinc-500 hover:text-zinc-300" aria-label="Close picker"><X className="h-4 w-4" /></button>
+              <h2 className="text-sm font-medium text-zinc-100">{picking ? 'Choose a picture' : 'Find pictures for this story'}</h2>
+              <button type="button" onClick={() => { setPicking(null); setFinding(null) }} className="text-zinc-500 hover:text-zinc-300" aria-label="Close picker"><X className="h-4 w-4" /></button>
             </div>
-            <LibraryPanel siteId={siteId!} onPick={picking} postId={postId} />
+            {finding && <p className="mb-3 text-xs text-zinc-500">Import pictures, then click one and “Use this picture” to add it to the story as a photo.</p>}
+            <LibraryPanel siteId={siteId!} onPick={picking || (finding ? addPhoto : undefined)} postId={postId}
+              stockQuery={picking ? undefined : finding || undefined} />
           </div>
         </div>
       )}

@@ -256,19 +256,28 @@ def filename_for(original: Optional[str], ext: str) -> str:
     return f"{stem}{ext}"
 
 
-async def store_processed(image: ProcessedImage, *, prefix: str, filename: Optional[str] = None) -> StoredImage:
+async def store_processed(image: ProcessedImage, *, prefix: str, filename: Optional[str] = None,
+                          main_url: Optional[str] = None) -> StoredImage:
     """Upload the image and its sizes. The sizes go up in parallel; any upload
-    failure raises (the caller decides whether that fails the request)."""
+    failure raises (the caller decides whether that fails the request).
+
+    `main_url`: the original is already stored there (an AI illustration keeps
+    the file the generator made, with its own provenance data), so only the
+    sizes are uploaded."""
     storage = get_storage()
-    main_name = filename_for(filename, image.ext)
-    jobs = [storage.upload_file(file_bytes=image.data, filename=main_name, prefix=prefix,
-                                content_type=image.mime)]
-    jobs += [storage.upload_file(file_bytes=v.data, filename=f"w{v.width}.webp", prefix=prefix,
+    sizes = [storage.upload_file(file_bytes=v.data, filename=f"w{v.width}.webp", prefix=prefix,
                                  content_type=v.mime) for v in image.webp]
     if image.share:
-        jobs.append(storage.upload_file(file_bytes=image.share.data, filename="share.jpg", prefix=prefix,
-                                        content_type=image.share.mime))
-    urls = await asyncio.gather(*jobs)
+        sizes.append(storage.upload_file(file_bytes=image.share.data, filename="share.jpg", prefix=prefix,
+                                         content_type=image.share.mime))
+    if main_url:
+        urls = [main_url, *await asyncio.gather(*sizes)]
+    else:
+        urls = await asyncio.gather(
+            storage.upload_file(file_bytes=image.data, filename=filename_for(filename, image.ext), prefix=prefix,
+                                content_type=image.mime),
+            *sizes,
+        )
     variants: dict[str, Any] = {}
     if image.webp:
         variants["webp"] = [{"w": v.width, "url": url} for v, url in zip(image.webp, urls[1:])]

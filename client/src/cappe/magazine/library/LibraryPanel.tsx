@@ -2,8 +2,9 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { ExternalLink, Globe, ImagePlus, Loader2, Search, Sparkles, Trash2, X } from 'lucide-react'
 import { cappeApi } from '../../api'
 import { ui } from '../../components/ui'
-import type { CappeAsset, CappeAssetKind } from '../../types'
+import type { CappeAsset, CappeAssetKind, CappeStockSource } from '../../types'
 import { creditEditable, thumbUrl } from './assets'
+import IllustrateForm from './IllustrateForm'
 import StockSearch from './StockSearch'
 
 const KINDS: { key: '' | CappeAssetKind; label: string }[] = [
@@ -19,12 +20,14 @@ const KINDS: { key: '' | CappeAssetKind; label: string }[] = [
  *
  * `onPick` turns it into a picker (the story editor uses it, passing its
  * `postId`); without it the panel is the Library page. "Find free photos"
- * imports archive pictures into the same list.
+ * imports archive pictures into the same list (`stockQuery` opens it on a
+ * search), and "Illustrate" adds a labeled AI illustration.
  */
-export default function LibraryPanel({ siteId, onPick, postId }: {
+export default function LibraryPanel({ siteId, onPick, postId, stockQuery }: {
   siteId: string
   onPick?: (asset: CappeAsset) => void
   postId?: string
+  stockQuery?: { source: CappeStockSource; query: string }
 }) {
   const [assets, setAssets] = useState<CappeAsset[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -32,8 +35,8 @@ export default function LibraryPanel({ siteId, onPick, postId }: {
   const [query, setQuery] = useState('')
   const [search, setSearch] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [adding, setAdding] = useState(false)
-  const [finding, setFinding] = useState(false)
+  const [open, setOpen] = useState<'' | 'upload' | 'find' | 'illustrate'>(stockQuery ? 'find' : '')
+  const toggle = (what: typeof open) => setOpen((now) => (now === what ? '' : what))
   const generation = useRef(0)
 
   // Typing settles for a moment before the list is asked again.
@@ -63,7 +66,7 @@ export default function LibraryPanel({ siteId, onPick, postId }: {
   const added = (asset: CappeAsset) => {
     setAssets((list) => [asset, ...(list || [])])
     setSelectedId(asset.id)
-    setAdding(false)
+    setOpen('')
   }
 
   // An archive import lands at the top without taking over the details pane.
@@ -103,17 +106,20 @@ export default function LibraryPanel({ siteId, onPick, postId }: {
             className={`${ui.input} pl-9`}
           />
         </label>
-        <button type="button" className={ui.btnGhost} aria-expanded={finding}
-          onClick={() => { setFinding((v) => !v); setAdding(false) }}>
+        <button type="button" className={ui.btnGhost} aria-expanded={open === 'find'} onClick={() => toggle('find')}>
           <Globe className="h-4 w-4" /> Find free photos
         </button>
-        <button type="button" className={ui.btnPrimary} onClick={() => { setAdding((v) => !v); setFinding(false) }}>
-          <ImagePlus className="h-4 w-4" /> Add a picture
+        <button type="button" className={ui.btnGhost} aria-expanded={open === 'illustrate'} onClick={() => toggle('illustrate')}>
+          <Sparkles className="h-4 w-4" /> Illustrate
+        </button>
+        <button type="button" className={ui.btnPrimary} onClick={() => toggle('upload')}>
+          <ImagePlus className="h-4 w-4" /> Upload a picture
         </button>
       </div>
 
-      {adding && <UploadForm siteId={siteId} onDone={added} onCancel={() => setAdding(false)} />}
-      {finding && <StockSearch siteId={siteId} postId={postId} onImported={imported} />}
+      {open === 'upload' && <UploadForm siteId={siteId} onDone={added} onCancel={() => setOpen('')} />}
+      {open === 'find' && <StockSearch siteId={siteId} postId={postId} onImported={imported} initial={stockQuery} />}
+      {open === 'illustrate' && <IllustrateForm siteId={siteId} onDone={added} onCancel={() => setOpen('')} />}
 
       {loadError && <p role="alert" className="text-sm text-red-400">{loadError}</p>}
 
@@ -206,7 +212,7 @@ function UploadForm({ siteId, onDone, onCancel }: {
   }
 
   return (
-    <form onSubmit={submit} className={`${ui.card} grid gap-3 p-4 sm:grid-cols-2`} aria-label="Add a picture">
+    <form onSubmit={submit} className={`${ui.card} grid gap-3 p-4 sm:grid-cols-2`} aria-label="Upload a picture">
       <label className="sm:col-span-2">
         <span className={ui.label}>Picture</span>
         <input

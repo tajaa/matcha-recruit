@@ -29,6 +29,9 @@ _STYLE_CLAUSES = {
     "minimalist": "minimalist composition, generous negative space, restrained color palette",
     "cinematic": "cinematic photography, dramatic lighting, shallow depth of field, film-like color grade",
     "watercolor": "watercolor painting, soft edges, gentle color bleed, textured paper",
+    # Magazines: plainly an illustration, never mistakable for a photograph.
+    "editorial illustration": "editorial magazine illustration, painterly or graphic, visible artistic "
+                              "technique, clearly an illustration and not a photograph",
 }
 _MOOD_CLAUSES = {
     "bright & airy": "bright and airy, soft natural light, light and open feel",
@@ -56,7 +59,8 @@ def _clause(raw: str | None, table: dict[str, str], default: str) -> str:
     return table.get(text.lower(), text)
 
 
-def build_image_prompt(prompt: str, *, style: str | None = None, mood: str | None = None) -> str:
+def build_image_prompt(prompt: str, *, style: str | None = None, mood: str | None = None,
+                       baseline: str | None = None) -> str:
     """Compose the final Gemini prompt from a user description plus optional
     style/mood direction (chip label, free text, or omitted/"you decide").
 
@@ -65,11 +69,12 @@ def build_image_prompt(prompt: str, *, style: str | None = None, mood: str | Non
     model enforces on the raw prompt; the cap is spent on the DESCRIPTION, not
     the clauses — a maxed-out user prompt has its tail trimmed to leave room for
     the style/mood/baseline direction, rather than the direction (the point of
-    this function) being sliced off the end."""
+    this function) being sliced off the end. `baseline` replaces the business
+    website clause (magazines pass their own)."""
     suffix = " ".join([
         f"Style: {_clause(style, _STYLE_CLAUSES, _STYLE_DEFAULT)}.",
         f"Mood and lighting: {_clause(mood, _MOOD_CLAUSES, _MOOD_DEFAULT)}.",
-        _BASELINE + ".",
+        (baseline or _BASELINE) + ".",
     ])
     # Reserve the suffix's room (+1 for the join space) before truncating the
     # description. The suffix is bounded (style/mood capped at 120 each by the

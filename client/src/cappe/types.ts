@@ -1679,6 +1679,21 @@ export type CappeStockImports = {
   remaining_today?: number | null
 }
 
+export type IllustrationAspect = '16:9' | '3:2' | '4:3' | '1:1' | '3:4' | '2:3' | '9:16'
+
+export type StoryAssistAction = 'draft' | 'headlines' | 'captions' | 'tighten' | 'search_terms'
+
+/** One Assist proposal for a story; nothing is saved until the writer applies it. */
+export type CappeStoryAssist = {
+  action: StoryAssistAction
+  headlines?: { title: string; dek: string; kicker: string }[]
+  captions?: { asset_id: string; caption: string; alt: string }[]
+  md?: string
+  block?: number
+  terms?: { source: CappeStockSource; query: string }[]
+  draft?: { title: string; excerpt: string; kicker: string; content: StoryContent }
+}
+
 // --- Social growth (server/app/cappe/models/social.py) ---------------------------
 
 export type CappeSocialPlatform = 'instagram' | 'facebook'

@@ -112,6 +112,37 @@ async def insert_upload(
     return row(created)
 
 
+async def insert_generated(
+    conn,
+    *,
+    account_id: UUID,
+    site_id: UUID,
+    url: str,
+    prompt: str,
+    aspect: str,
+    image_size: str,
+    width: int,
+    height: int,
+    size_bytes: int,
+    mime: str,
+    variants: dict[str, Any],
+) -> dict[str, Any]:
+    """A magazine illustration: a generated picture with its sizes, always
+    credited "AI illustration" (the same labels `record` gives every
+    generation)."""
+    created = await conn.fetchrow(
+        f"""
+        INSERT INTO cappe_assets (account_id, site_id, kind, url, prompt, aspect, image_size, source,
+                                  ai_generated, license, credit_line, width, height, bytes, mime, variants)
+        VALUES ($1, $2, 'generated', $3, $4, $5, $6, 'generated', TRUE, 'ai', $7, $8, $9, $10, $11, $12::jsonb)
+        RETURNING {COLUMNS}
+        """,
+        account_id, site_id, url, prompt, aspect, image_size, AI_CREDIT, width, height, size_bytes, mime,
+        json.dumps(variants),
+    )
+    return row(created)
+
+
 async def list_assets(
     conn, site_id: UUID, *, kind: Optional[str] = None, q: Optional[str] = None, limit: int = 200
 ) -> list[dict[str, Any]]:
