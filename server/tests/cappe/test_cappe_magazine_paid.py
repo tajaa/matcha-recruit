@@ -203,6 +203,23 @@ def test_checkout_opens_a_monthly_magazine_subscription_at_thirty_percent(monkey
     assert closed == [stale[0]["id"]] and attached == ["cs_1"]
 
 
+def test_a_checkout_that_wont_close_opens_no_second_one(monkeypatch):
+    # Paid, its webhook still on the way: Stripe won't close it, and a new
+    # checkout would charge the reader twice.
+    stale = [{"id": uuid4(), "status": "incomplete"}]
+    conn, stripe, closed, attached = _checkout(monkeypatch, stale=stale)
+
+    async def settling(row, cancel, **kw):
+        raise HTTPException(409, "Payment is settling")
+
+    monkeypatch.setattr(recurring, "change_subscription", settling)
+    with pytest.raises(HTTPException) as err:
+        _run_checkout()
+    assert err.value.status_code == 409 and "still being confirmed" in err.value.detail
+    assert stripe.calls == [] and attached == []
+    assert conn.args_for("DELETE FROM cappe_shopper_subscriptions") == (SUB,)
+
+
 @pytest.mark.parametrize("kw,code", [
     ({"mag": None}, 409),
     ({"mag": {**MAG, "paid_enabled": False}}, 409),
@@ -520,8 +537,11 @@ def test_the_grace_keeps_a_lapsed_magazine_up_for_a_month():
 def test_live_magazine_without_the_plan_only_in_grace(monkeypatch):
     monkeypatch.setattr(mags, "resolve_entitlements", resolver())
     lapsed = {**MAG, "paid_enabled": False, "lapsed_at": datetime.now(timezone.utc) - timedelta(days=2)}
-    for mag, live in ((lapsed, True), ({**lapsed, "lapsed_at": None}, False)):
-        conn = Conn(fetchrow={"FROM cappe_magazines": mag}, fetchval={"SELECT plan FROM cappe_accounts": "free"})
+    for mag, readers, live in ((lapsed, 1, True), ({**lapsed, "lapsed_at": None}, 1, False),
+                               # No one paying or comped: nobody for the grace month to protect.
+                               (lapsed, None, False), ({**lapsed, "paid_enabled": True, "lapsed_at": None}, None, False)):
+        conn = Conn(fetchrow={"FROM cappe_magazines": mag},
+                    fetchval={"SELECT plan FROM cappe_accounts": "free", "cappe_magazine_comps": readers})
         assert (asyncio.run(mags.live_magazine(conn, SITE_ROW)) is not None) is live
 
 
@@ -536,10 +556,17 @@ def test_mark_lapsed_stops_paid_where_the_owner_cant_have_it(monkeypatch):
     async def resolve(plan, conn=None):
         return ent("magazine_paid") if plan == "writer" else ent()
 
+    cleared = []
+
+    async def invalidate(site_id):
+        cleared.append(site_id)
+
     monkeypatch.setattr(lapse, "resolve_entitlements", resolve)
+    monkeypatch.setattr(lapse, "invalidate_site_render_cache", invalidate)
     assert asyncio.run(lapse.mark_lapsed(conn)) == 2
     marked = [args[0] for kind, sql, args in conn.calls if "UPDATE cappe_magazines" in sql]
     assert marked == [free_site, gone_site]
+    assert cleared == [free_site, gone_site]  # cached pages stop offering the subscription
 
 
 class LapseStripe:
@@ -579,6 +606,10 @@ def test_wind_down_ends_renewals_and_tells_each_reader_once(monkeypatch):
     assert sent[0][1] == {"reply_to": "ana@example.com"}
     query = next(sql for kind, sql, _ in conn.calls if kind == "fetch")
     assert "NOT sub.cancel_at_period_end" in query and "NOT m.paid_enabled" in query
+    # The one Stripe refused goes to the back, so it can't starve the rest run after run.
+    assert "ORDER BY sub.updated_at" in query
+    touched = [args for kind, sql, args in conn.calls if "SET updated_at = NOW() WHERE id" in sql]
+    assert touched == [(subs[1]["id"],)]
 
 
 def test_the_comp_sweep_runs_the_lapse_and_survives_its_failure(monkeypatch):
@@ -762,3 +793,40 @@ def test_admins_set_the_magazine_share(monkeypatch):
     assert audits[0]["new"] == {"magazine_fee_bps": 2000}
     with pytest.raises(ValueError):
         admin._MarketplaceSettingsPatch(magazine_fee_bps=6000)
+
+
+def test_a_comped_reader_can_still_sign_in_where_the_store_is_closed(monkeypatch):
+    # The owner's plan lost magazine_paid; the magazine is in its grace month
+    # and a comp is still live: its reader must be able to sign in to read.
+    from app.cappe.services import shopper_auth
+
+    closed = HTTPException(402, "closed")
+
+    async def store(conn, slug):
+        return {"id": SITE}, closed
+
+    monkeypatch.setattr(shopper_auth, "_store", store)
+    conn = Conn(fetchval={"cappe_magazine_comps": 1})
+    assert asyncio.run(shopper_auth.sign_in_site(conn, "salt")) == ({"id": SITE}, False)
+    assert asyncio.run(shopper_auth.subscribes_here(conn, SITE, " Reader@Example.com"))
+    for sql in conn.sql_for("fetchval"):
+        assert "cappe_magazine_comps" in sql and "revoked_at IS NULL" in sql and "expires_at > NOW()" in sql
+    assert conn.args_for(conn.sql_for("fetchval")[1])[1] == "reader@example.com"
+
+
+def test_the_settings_say_what_currency_readers_pay_in(monkeypatch):
+    # Checkout charges in the site's currency, not always dollars.
+    client, _saved = _settings(monkeypatch, current=MAG)
+    monkeypatch.setattr(magazine_mod, "get_owned_site", lambda *a: _value({**SITE_ROW, "currency": "eur"}))
+    with client as c:
+        assert c.get(f"/sites/{SITE}/magazine").json()["currency"] == "EUR"
+
+
+def test_a_paid_story_no_longer_than_its_preview_has_no_paywall():
+    short = {**PAID_POST, "content": {"blocks": [{"type": "cover", "asset_id": None},
+                                                 {"type": "text", "md": "One.", "dropcap": True},
+                                                 {"type": "text", "md": "Two.", "dropcap": False}]}}
+    page = pages.render_story({"name": "Salt", "slug": "salt", "theme_config": {}, "meta_config": {}}, [], MAG,
+                              short, {}, more=[], more_covers={}, origin="https://salt.gummfit.com",
+                              currency="USD", preview_blocks=3)
+    assert "One." in page and "Two." in page and "a month. Cancel any time." not in page

@@ -111,8 +111,10 @@ export default function StockSearch({ siteId, postId, onImported, initial, pollM
       return [...byId.values()]
     })
     for (const j of res.imports) {
-      if (j.status === 'ready' && j.asset && !delivered.current.has(j.id)) {
-        delivered.current.add(j.id)
+      // By import and picture: a picture deleted and imported again comes
+      // back on the same import row with a new library picture.
+      if (j.status === 'ready' && j.asset && !delivered.current.has(`${j.id}:${j.asset.id}`)) {
+        delivered.current.add(`${j.id}:${j.asset.id}`)
         onImportedRef.current(j.asset)
       }
     }
@@ -244,7 +246,7 @@ export default function StockSearch({ siteId, postId, onImported, initial, pollM
         </ul>
       )}
 
-      {last?.has_more && results.length > 0 && (
+      {last?.has_more && (
         <button type="button" className={`${ui.btnGhost} self-center`} disabled={searching}
           onClick={() => void search(last.source, last.query, last.page + 1)}>
           More from {STOCK_SOURCES.find((s) => s.key === last.source)?.label}

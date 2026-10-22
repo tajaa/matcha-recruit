@@ -119,8 +119,17 @@ async def checkout(site: dict, shopper: dict, body, *, return_origins: Optional[
     for old in stale:
         try:
             await recurring.change_subscription(old, True)
-        except HTTPException as exc:  # it stays claimed; Stripe expires it within a day
+        except HTTPException as exc:
+            # It may be paid with its webhook still on the way (Stripe won't
+            # close a completed checkout): a new one could charge the reader
+            # twice, so none opens until that one settles or expires.
             logger.info("magazine checkout %s not closed yet: %s", old["id"], exc.detail)
+            async with get_connection() as conn:
+                await conn.execute(
+                    "DELETE FROM cappe_shopper_subscriptions WHERE id = $1 AND status = 'preparing'", row["id"],
+                )
+            raise HTTPException(409, "Your last checkout is still being confirmed. Give it a minute, "
+                                     "then check your subscription.") from exc
     line = {"price_data": {"currency": currency.lower(), "unit_amount": price, "recurring": {"interval": "month"},
                            "product_data": {"name": title}}, "quantity": 1}
     try:

@@ -36,6 +36,7 @@ class CappeMagazine(BaseModel):
     # the money yet, and Gummfit's share of each payment.
     plan_includes_paid: bool = False
     stripe_ready: bool = False
+    currency: str = "USD"
     fee_bps: int = 3000
 
 

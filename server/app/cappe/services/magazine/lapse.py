@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 
 from ..entitlements import resolve_entitlements
+from ..render_cache import invalidate_site_render_cache
 from ..shopper_auth import BILLING_STATUSES
 
 logger = logging.getLogger(__name__)
@@ -42,11 +43,14 @@ async def mark_lapsed(conn) -> int:
     for r in rows:
         if r["status"] == "active" and await _plan_takes_paid(conn, r["plan"], seen):
             continue
-        marked += bool(await conn.fetchval(
+        if await conn.fetchval(
             "UPDATE cappe_magazines SET paid_enabled = false, lapsed_at = NOW(), updated_at = NOW() "
             "WHERE site_id = $1 AND paid_enabled RETURNING site_id",
             r["site_id"],
-        ))
+        ):
+            marked += 1
+            # Cached story pages still offer the subscription (its price, Subscribe).
+            await invalidate_site_render_cache(r["site_id"])
     return marked
 
 
@@ -68,7 +72,7 @@ async def wind_down(conn, *, limit: int = BATCH) -> dict:
              LEFT JOIN cappe_shoppers sh ON sh.id = sub.shopper_id
             WHERE sub.kind = 'magazine' AND sub.stripe_subscription_id IS NOT NULL
               AND NOT sub.cancel_at_period_end AND sub.status = ANY($1::text[])
-            ORDER BY sub.created_at LIMIT $2""",
+            ORDER BY sub.updated_at, sub.created_at LIMIT $2""",
         list(BILLING_STATUSES), limit,
     )
     stopped = failed = 0
@@ -80,6 +84,9 @@ async def wind_down(conn, *, limit: int = BATCH) -> dict:
             )
         except CappeStripeError:
             failed += 1
+            # To the back of the queue: one Stripe keeps refusing can't hold
+            # every reader after it out of the batch, run after run.
+            await conn.execute("UPDATE cappe_shopper_subscriptions SET updated_at = NOW() WHERE id = $1", sub["id"])
             continue
         async with conn.transaction():
             await conn.fetchval("SELECT id FROM cappe_shopper_subscriptions WHERE id = $1 FOR UPDATE", sub["id"])

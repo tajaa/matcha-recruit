@@ -166,11 +166,17 @@ def test_refresh_rotates_the_cookie_and_hands_back_an_access_token(monkeypatch):
     assert resolve.await_args.args[2:] == ("ref-1", "refresh")
 
 
-def test_refresh_without_a_cookie_is_401(monkeypatch):
+def test_refresh_without_a_cookie_is_401_and_spends_no_one_elses_limit(monkeypatch):
+    # A paid story asks on every view; anonymous readers on a shared address
+    # mustn't use up the refresh budget a subscriber there needs.
     _wire(monkeypatch)
     with pytest.raises(HTTPException) as exc:
         asyncio.run(web.web_refresh("lumiere", _request(WEB), Response()))
     assert exc.value.status_code == 401
+    web.check_rate_limit.assert_not_awaited()
+    monkeypatch.setattr(web.auth, "resolve_shopper", AsyncMock(side_effect=HTTPException(401, "gone")))
+    asyncio.run(web.web_refresh("lumiere", _request(WEB, {web.COOKIE: "ref-1"}), Response()))
+    web.check_rate_limit.assert_awaited_once()  # a real session's refresh is counted
 
 
 def test_a_dead_session_is_401_and_clears_the_cookie(monkeypatch):
