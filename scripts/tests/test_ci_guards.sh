@@ -465,6 +465,48 @@ else
 fi
 rm -rf "$stub_dir"
 
+################################################################################
+# Case 12 — scripts/ci/select_scope.sh picks what a PR's CI runs. It may scope
+# a change down only when it stays inside one isolated app (cappe/, tellus/,
+# oceanlab/); anything shared, or a change to CI itself, runs everything.
+################################################################################
+SELECT="$REPO_ROOT/scripts/ci/select_scope.sh"
+scope_of() { printf '%s\n' "$@" | "$SELECT"; }
+out="$(scope_of server/app/cappe/services/social/posts.py server/tests/cappe/test_x.py \
+    server/app/workers/tasks/cappe_social_media.py server/alembic/versions/cappesocial03_x.py client/src/cappe/a.tsx)"
+grep -qx 'server_scope=cappe' <<< "$out" && grep -q '^server_tests=tests/cappe ' <<< "$out" \
+    && grep -qx 'oceanlab_tests=false' <<< "$out" && grep -qx 'client=true' <<< "$out"
+check "select_scope: a Cappe-only change runs the Cappe tests" $?
+out="$(scope_of server/app/cappe/a.py server/app/core/services/b.py)"
+grep -qx 'server_scope=all' <<< "$out" && grep -qx 'server_tests=tests' <<< "$out"
+check "select_scope: touching app/core runs the whole suite" $?
+out="$(scope_of server/app/cappe/a.py server/app/tellus/b.py)"
+grep -qx 'server_scope=all' <<< "$out"
+check "select_scope: a change across two apps runs the whole suite" $?
+out="$(scope_of .github/workflows/ci.yml)"
+grep -qx 'full=true' <<< "$out" && grep -qx 'server_tests=tests' <<< "$out" && grep -qx 'client=true' <<< "$out"
+check "select_scope: a CI change runs everything" $?
+out="$(scope_of scripts/ci/select_scope.sh)"
+grep -qx 'full=true' <<< "$out"
+check "select_scope: a selector change runs everything" $?
+out="$(scope_of client/src/pages/a.tsx)"
+grep -qx 'server=false' <<< "$out" && grep -qx 'client=true' <<< "$out" && grep -qx 'ops=false' <<< "$out"
+check "select_scope: a client-only change skips the server suite" $?
+out="$(scope_of server/app/cappe/CLAUDE.md docs/notes.md)"
+grep -qx 'server=false' <<< "$out" && grep -qx 'ops=false' <<< "$out"
+check "select_scope: Markdown alone runs no server tests" $?
+out="$(scope_of server/app/cappe/a.py server/Dockerfile server/.env.example)"
+grep -qx 'server_scope=cappe' <<< "$out"
+check "select_scope: the Dockerfile and .env.example don't widen the scope" $?
+out="$(CI_FULL=1 "$SELECT" </dev/null)"
+grep -qx 'full=true' <<< "$out" && grep -qx 'server_tests=tests' <<< "$out" && grep -qx 'oceanlab_tests=true' <<< "$out"
+check "select_scope: CI_FULL (push to main, ci:full) runs everything" $?
+# The workflow must actually feed the selector and gate on it.
+grep -qF 'scripts/ci/select_scope.sh < "$changed"' "$CI_WORKFLOW" \
+    && grep -qF "if: needs.changes.outputs.server == 'true'" "$CI_WORKFLOW" \
+    && grep -qF "github.event_name != 'pull_request'" "$CI_WORKFLOW"
+check "ci.yml runs the selector and runs everything off PRs" $?
+
 echo
 echo "----------------------------------------"
 echo "PASS: $PASS  FAIL: $FAIL"

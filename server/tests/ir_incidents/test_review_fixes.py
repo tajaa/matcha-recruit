@@ -31,6 +31,27 @@ def test_analytics_module_names_resolve():
     assert callable(getattr(analytics, "get_settings", None))
 
 
+def test_trends_period_is_validated_and_documented():
+    """FastAPI 0.156 removed `Query(enum=...)`, which only ever documented the
+    choices. The period is a Literal now: an unknown one is a 422 (it used to
+    reach `trunc_map[period]` and 500), and the schema still lists the three."""
+    from types import SimpleNamespace
+
+    from app.matcha.dependencies import require_admin_or_client
+    from app.matcha.routes.ir_incidents import analytics
+    from tests._helpers.routes import route_client
+
+    user = SimpleNamespace(id="u-1", role="client")
+    with route_client(analytics.router, overrides={require_admin_or_client: user}) as client:
+        res = client.get("/analytics/trends", params={"period": "hourly"})
+        schema = client.get("/openapi.json").json()
+    assert res.status_code == 422
+    params = schema["paths"]["/analytics/trends"]["get"]["parameters"]
+    period = next(p for p in params if p["name"] == "period")
+    assert period["schema"]["enum"] == ["daily", "weekly", "monthly"]
+    assert period["schema"]["default"] == "daily"
+
+
 def _ir_route_submodules() -> list[str]:
     """Every module under routes/ir_incidents/, recursively, incl. subpackages."""
     import importlib
