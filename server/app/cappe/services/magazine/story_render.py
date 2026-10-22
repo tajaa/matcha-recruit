@@ -25,11 +25,19 @@ LONG_QUOTE = 110
 
 def split_at_paywall(blocks: list[dict], *, preview_blocks: int = 3) -> tuple[list[dict], list[dict]]:
     """(free part, paid part). The owner's paywall marker decides; without one
-    the first `preview_blocks` blocks are free."""
+    the first `preview_blocks` blocks of the body are free (the cover is the
+    story's header, not one of them)."""
     for i, b in enumerate(blocks):
         if b.get("type") == PAYWALL:
             return blocks[:i], blocks[i + 1:]
-    return blocks[:preview_blocks], blocks[preview_blocks:]
+    body = 0
+    for i, b in enumerate(blocks):
+        if b.get("type") == "cover":
+            continue
+        if body == preview_blocks:
+            return blocks[:i], blocks[i:]
+        body += 1
+    return blocks, []
 
 
 def _aspect(asset: Optional[dict]) -> float:
