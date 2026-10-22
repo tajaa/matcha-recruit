@@ -828,6 +828,101 @@ async def send_cappe_subscription_cancelled_email(
                 from_name=store_from_name(site_name), reply_to=reply_to)
 
 
+# ── transactional: magazine readers (cappemag05) ─────────────────────────────
+
+def _long_date(ts: datetime | None) -> str:
+    return f"{ts.strftime('%B')} {ts.day}, {ts.year}" if ts else ""
+
+
+async def send_cappe_magazine_new_reader_email(
+    to_email: str, to_name: str | None, site_name: str, reader_email: str | None,
+    total_cents: int, currency: str, readers_url: str,
+) -> None:
+    """A reader started paying for the magazine. Once per subscription, not
+    per renewal. Best-effort."""
+    who = reader_email or "A reader"
+    amount = fmt_money(total_cents, currency)
+    body = (
+        f'<p style="margin:0 0 12px;font-size:15px;line-height:1.6;color:#d4d4d8;">'
+        f"<b style=\"color:#fafafa;\">{escape(who)}</b> now subscribes to {escape(site_name or '')} "
+        f"at {escape(amount)} a month.</p>"
+    )
+    html = _email_shell("A new paid reader", body, cta_label="See your readers", cta_url=readers_url)
+    text = f"{who} now subscribes to {site_name} at {amount} a month.\n\nSee your readers: {readers_url}"
+    await _send(to_email, to_name, f"New paid reader — {site_name}", html, text, label="magazine new reader",
+                log_recipient=False)
+
+
+async def send_cappe_magazine_welcome_email(
+    to_email: str, to_name: str | None, site_name: str, title: str, total_cents: int, currency: str,
+    magazine_url: str | None, account_url: str | None, *, reply_to: str | None = None,
+) -> None:
+    """A reader's subscription started: what they pay, where to read, how to
+    stop. Best-effort."""
+    e_site = escape(site_name or "")
+    amount = fmt_money(total_cents, currency)
+    body = (
+        f'<p style="margin:0 0 12px;font-size:15px;line-height:1.6;color:#d4d4d8;">'
+        f"Welcome to {e_site}. Every story is open to you now.</p>"
+        f'<div style="border-left:3px solid #c6f16b;padding:8px 0 8px 14px;color:#fafafa;font-size:15px;">'
+        f"<b>{escape(title)}</b><br><span style=\"color:#a1a1aa;\">{escape(amount)} every month</span></div>"
+        f'<p style="margin:14px 0 0;font-size:13px;color:#a1a1aa;">Sign in on the magazine with this email to read. '
+        f"You can cancel any time from your account; it stops before the next charge.</p>"
+        + _account_link(magazine_url, "Start reading") + _account_link(account_url, "Manage your subscription")
+    )
+    html = _email_shell(f"Welcome to {e_site}", body)
+    text = (
+        f"Welcome to {site_name}: {title}, {amount} every month. Sign in on the magazine with this email to read."
+        + (f"\nRead: {magazine_url}" if magazine_url else "")
+        + (f"\nManage your subscription: {account_url}" if account_url else "")
+    )
+    await _send(to_email, to_name, f"Welcome to {site_name}", html, text, label="magazine welcome",
+                from_name=store_from_name(site_name), reply_to=reply_to)
+
+
+async def send_cappe_magazine_ending_email(
+    to_email: str, to_name: str | None, site_name: str, period_end: datetime | None,
+    magazine_url: str | None, *, reply_to: str | None = None,
+) -> None:
+    """The magazine stopped taking paid subscriptions, so the reader's won't
+    renew. They keep what they paid for. Best-effort."""
+    e_site = escape(site_name or "")
+    until = _long_date(period_end)
+    keep = f"You can keep reading until {until}, the end of the month you paid for." if until else (
+        "You keep reading until the end of the month you paid for.")
+    body = (
+        f'<p style="margin:0 0 12px;font-size:15px;line-height:1.6;color:#d4d4d8;">'
+        f"{e_site} has stopped paid subscriptions, so yours won't renew and you won't be charged again.</p>"
+        f'<p style="margin:0;font-size:13px;color:#a1a1aa;">{escape(keep)}</p>'
+        + _account_link(magazine_url, "Go to the magazine")
+    )
+    html = _email_shell(f"Your subscription to {e_site} is ending", body, accent="#71717a")
+    text = f"{site_name} has stopped paid subscriptions, so yours won't renew and you won't be charged again. {keep}"
+    await _send(to_email, to_name, f"Your subscription to {site_name} is ending", html, text,
+                label="magazine ending", from_name=store_from_name(site_name), reply_to=reply_to)
+
+
+async def send_cappe_magazine_comp_email(
+    to_email: str, site_name: str, expires_at: datetime | None, magazine_url: str | None,
+    *, reply_to: str | None = None,
+) -> None:
+    """The writer gave this reader a free subscription. Best-effort."""
+    e_site = escape(site_name or "")
+    until = _long_date(expires_at)
+    term = f"until {until}" if until else "for as long as they keep it on"
+    body = (
+        f'<p style="margin:0 0 12px;font-size:15px;line-height:1.6;color:#d4d4d8;">'
+        f"{e_site} has given you a free subscription, {escape(term)}. Every story is open to you.</p>"
+        f'<p style="margin:0;font-size:13px;color:#a1a1aa;">Sign in on the magazine with this email to read. '
+        f"Nothing is charged.</p>" + _account_link(magazine_url, "Start reading")
+    )
+    html = _email_shell(f"A subscription to {e_site}, on the house", body)
+    text = (f"{site_name} has given you a free subscription, {term}. Sign in on the magazine with this email "
+            "to read. Nothing is charged." + (f"\nRead: {magazine_url}" if magazine_url else ""))
+    await _send(to_email, None, f"A free subscription to {site_name}", html, text, label="magazine comp",
+                from_name=store_from_name(site_name), reply_to=reply_to)
+
+
 # ── transactional: creator marketplace collabs ───────────────────────────────
 
 async def send_cappe_offer_received_email(

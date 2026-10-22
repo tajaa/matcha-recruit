@@ -67,6 +67,8 @@ const WRITER_SITE_NAV: typeof SITE_NAV = [
   { to: 'library', label: 'Library', icon: Images },
   { to: 'subscribers', label: 'Followers', icon: Users },
   { to: 'issues', label: 'Issues', icon: Send },
+  { to: 'readers', label: 'Readers', icon: UserCircle },
+  { to: 'earnings', label: 'Earnings', icon: Landmark },
   { to: 'magazine', label: 'Magazine settings', icon: Settings2 },
   { to: '', label: 'Site & domain', icon: Globe, end: true },
 ]

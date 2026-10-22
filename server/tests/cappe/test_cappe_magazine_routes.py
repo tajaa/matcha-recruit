@@ -10,7 +10,8 @@ What each block pins:
   * the story API: a story is saved with its derived body, reading time and
     cover URL; pictures from another site are refused; the iOS app's plain
     posts keep working and an app edit of a story's body is a 409; every
-    write drops the render cache; paid stories are refused for now;
+    write drops the render cache; a story can't be paid while the magazine
+    takes no subscribers;
   * the magazine settings: topics from the list, the cover story must be
     the site's, the view says whether the plan includes a magazine;
   * the public JSON never returns a hidden story or a paid story's words;
@@ -280,12 +281,14 @@ def test_a_cached_magazine_goes_down_with_the_plan(monkeypatch, path):
 # ── the story API ────────────────────────────────────────────────────────────
 
 def _owner_conn(**tables):
-    fetchrow = {"FROM cappe_sites": SITE_ROW, "FROM cappe_magazines": MAG_ROW}
+    fetchrow = {"FROM cappe_sites": SITE_ROW, "FROM cappe_magazines": MAG_ROW,
+                "stripe_charges_enabled FROM cappe_accounts": {"stripe_account_id": None, "stripe_charges_enabled": False}}
     fetchrow.update(tables.pop("fetchrow", {}))
     fetch = {"FROM cappe_assets WHERE site_id = $1 AND id = ANY": [ASSET_ROW], "FROM cappe_pages": []}
     fetch.update(tables.pop("fetch", {}))
     fetchval = {"SELECT 1 FROM cappe_posts WHERE id": None, "SELECT 1 FROM cappe_posts WHERE site_id": None,
-                "SELECT plan FROM cappe_accounts": "business"}
+                "SELECT plan FROM cappe_accounts": "business", "SELECT paid_enabled FROM cappe_magazines": False,
+                "FROM cappe_marketplace_settings": None}
     fetchval.update(tables.pop("fetchval", {}))
     return Conn(fetchrow=fetchrow, fetch=fetch, fetchval=fetchval, **tables)
 
@@ -523,7 +526,7 @@ def test_saving_the_magazine(monkeypatch, invalidated):
                                                            "tagline": "  ", "masthead_style": "display"})
     assert res.status_code == 200, res.text
     assert res.json()["live"] is True
-    sql = conn.sql_for("fetchrow")[-1]
+    sql = next(q for q in conn.sql_for("fetchrow") if "INSERT INTO cappe_magazines" in q)
     assert "ON CONFLICT (site_id) DO UPDATE SET enabled = EXCLUDED.enabled" in sql and "name" in sql
     args = conn.args_for("INSERT INTO cappe_magazines")
     assert ["food", "city"] in args and None in args and "Bloom" in args  # tagline cleared; default name on first save

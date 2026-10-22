@@ -5,6 +5,7 @@ import { cappeApi } from '../../api'
 import SurfaceShell from '../../components/SurfaceShell'
 import { ui } from '../../components/ui'
 import type { CappeMagazine, CappeStoryOptions } from '../../types'
+import { priceCents } from './price'
 
 const MASTHEADS: { key: CappeMagazine['masthead_style']; label: string; note: string }[] = [
   { key: 'classic', label: 'Classic', note: 'Bodoni Moda with Spectral — the fashion-magazine look.' },
@@ -14,12 +15,19 @@ const MASTHEADS: { key: CappeMagazine['masthead_style']; label: string; note: st
   { key: 'display', label: 'Display', note: 'Playfair Display with Lora — the Sunday supplement.' },
 ]
 
-type Form = Pick<CappeMagazine, 'enabled' | 'name' | 'tagline' | 'about' | 'masthead_style' | 'accent' | 'topics' | 'front_at_root' | 'nav_label' | 'follow_enabled'>
+type Form = Pick<CappeMagazine, 'enabled' | 'name' | 'tagline' | 'about' | 'masthead_style' | 'accent' | 'topics' | 'front_at_root' | 'nav_label' | 'follow_enabled' | 'paid_enabled' | 'paid_pitch' | 'preview_blocks'> & {
+  /** The monthly price as typed, in dollars. */
+  price: string
+}
 
 const pick = (m: CappeMagazine): Form => ({
   enabled: m.enabled, name: m.name, tagline: m.tagline, about: m.about, masthead_style: m.masthead_style,
   accent: m.accent, topics: m.topics, front_at_root: m.front_at_root, nav_label: m.nav_label, follow_enabled: m.follow_enabled,
+  paid_enabled: m.paid_enabled, paid_pitch: m.paid_pitch, preview_blocks: m.preview_blocks,
+  price: m.price_cents ? (m.price_cents / 100).toFixed(m.price_cents % 100 ? 2 : 0) : '',
 })
+
+const longDate = (iso: string) => new Date(iso).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })
 
 /** `sites/:siteId/magazine` — the magazine's name and masthead, its topics,
  *  whether it is on, and whether it is the site's front page. */
@@ -61,12 +69,19 @@ export default function MagazineSettings() {
   const save = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!form) return
+    const { price, ...rest } = form
+    const cents = priceCents(price)
+    if (Number.isNaN(cents)) {
+      setError('The monthly price is between $1 and $1,000.')
+      return
+    }
     setSaving(true)
     setError(null)
     try {
       const next = await cappeApi.put<CappeMagazine>(`/sites/${siteId}/magazine`, {
-        ...form, name: form.name.trim(), nav_label: form.nav_label.trim() || 'Magazine',
+        ...rest, name: form.name.trim(), nav_label: form.nav_label.trim() || 'Magazine',
         tagline: form.tagline?.trim() || null, about: form.about?.trim() || null, accent: form.accent || null,
+        price_cents: cents, paid_pitch: form.paid_pitch?.trim() || null,
       })
       setMagazine(next)
       setForm(pick(next))
@@ -169,7 +184,59 @@ export default function MagazineSettings() {
             <label className="flex items-start gap-3 text-sm text-zinc-200">
               <input type="checkbox" checked={form.follow_enabled} onChange={(e) => set('follow_enabled', e.target.checked)} className="mt-0.5" />
               <span><span className="font-medium">Readers can follow</span>
-                <span className="block text-xs text-zinc-500">A follow form on the magazine pages (email issues arrive in a later release).</span></span>
+                <span className="block text-xs text-zinc-500">A follow form on the magazine pages. Followers get the stories you send as issues.</span></span>
+            </label>
+          </section>
+
+          <section className={`${ui.card} space-y-4 p-5`} aria-label="Paid subscriptions">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <h2 className="text-sm font-medium text-zinc-100">Paid subscriptions</h2>
+              <span className="flex gap-3 text-xs">
+                <Link to={`/cappe/sites/${siteId}/readers`} className="text-emerald-400 hover:text-emerald-300">Readers</Link>
+                <Link to={`/cappe/sites/${siteId}/earnings`} className="text-emerald-400 hover:text-emerald-300">Earnings</Link>
+              </span>
+            </div>
+            {!magazine.plan_includes_paid && (
+              <p className="text-xs text-amber-200">Readers can pay on the Writer, Creator, Business or Pro plan.</p>
+            )}
+            {magazine.plan_includes_paid && !magazine.stripe_ready && (
+              <p className="text-xs text-amber-200">
+                Readers pay into your Stripe account. <Link to={`/cappe/sites/${siteId}/earnings`} className="underline">Connect Stripe</Link> before turning this on.
+              </p>
+            )}
+            {magazine.lapsed_at && !magazine.paid_enabled && (
+              <p className="text-xs text-zinc-400">
+                Paid subscriptions stopped on {longDate(magazine.lapsed_at)}. Readers who paid keep reading until their month ends; none renew.
+              </p>
+            )}
+            <label className="flex items-start gap-3 text-sm text-zinc-200">
+              <input type="checkbox" checked={form.paid_enabled} disabled={!magazine.plan_includes_paid && !form.paid_enabled}
+                onChange={(e) => set('paid_enabled', e.target.checked)} className="mt-0.5" />
+              <span><span className="font-medium">Readers pay to read paid stories</span>
+                <span className="block text-xs text-zinc-500">
+                  Gummfit keeps {magazine.fee_bps / 100}% of each payment; Stripe’s processing fee comes out of your Stripe balance.
+                  Turning this off ends every reader’s subscription when the month they paid for is over.
+                </span></span>
+            </label>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label>
+                <span className={ui.label}>Price a month ({magazine?.currency || 'USD'})</span>
+                <input value={form.price} onChange={(e) => set('price', e.target.value)} inputMode="decimal" placeholder="5"
+                  className={ui.input} aria-label="Price a month" />
+                <span className="mt-1 block text-xs text-zinc-500">A new price is for new subscribers; readers keep theirs.</span>
+              </label>
+              <label>
+                <span className={ui.label}>Free blocks before the paywall</span>
+                <input type="number" min={1} max={20} value={form.preview_blocks}
+                  onChange={(e) => set('preview_blocks', Math.max(1, Math.min(20, Number(e.target.value) || 1)))}
+                  className={ui.input} aria-label="Free blocks before the paywall" />
+                <span className="mt-1 block text-xs text-zinc-500">For a paid story without a paywall block of its own.</span>
+              </label>
+            </div>
+            <label className="block">
+              <span className={ui.label}>Why subscribe (shown at the paywall)</span>
+              <textarea value={form.paid_pitch || ''} onChange={(e) => set('paid_pitch', e.target.value)} maxLength={600} rows={2}
+                className={ui.input} placeholder="Every story, every week — and the archive." />
             </label>
           </section>
 

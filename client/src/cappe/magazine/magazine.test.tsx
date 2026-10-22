@@ -42,7 +42,9 @@ const post = (over: Partial<CappePost> = {}): CappePost => ({
 const magazine = (over: Partial<CappeMagazine> = {}): CappeMagazine => ({
   site_id: 's-1', enabled: true, name: 'Salt & Light', tagline: 'Harbour stories', about: null, masthead_style: 'classic',
   accent: null, topics: ['city'], front_at_root: false, nav_label: 'Magazine', cover_post_id: null, follow_enabled: true,
-  created_at: null, updated_at: null, live: true, plan_includes_magazine: true, ...over,
+  paid_enabled: false, price_cents: null, paid_pitch: null, preview_blocks: 3, lapsed_at: null,
+  created_at: null, updated_at: null, live: true, plan_includes_magazine: true, plan_includes_paid: true,
+  stripe_ready: false, fee_bps: 3000, ...over,
 })
 
 const OPTIONS: CappeStoryOptions = {

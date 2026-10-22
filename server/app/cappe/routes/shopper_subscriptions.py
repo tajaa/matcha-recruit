@@ -1,4 +1,10 @@
-"""Recurring checkout and management for shoppers and store owners."""
+"""Recurring checkout and management for shoppers and store owners.
+
+Both lists carry each row's `kind` — `goods` (a store's recurring order) or
+`magazine` (a reader's subscription, services/magazine/billing.py) — and take
+`?kind=` to keep one.
+"""
+from typing import Literal, Optional
 from uuid import UUID
 
 from fastapi import Depends, HTTPException, Query, Request
@@ -15,7 +21,20 @@ from .public._body_limit import limited_public_router
 
 router = limited_public_router(65536)
 PREFIX = "/public/sites/{slug}/shopper/me/subscriptions"
-COLS = "id,site_id,shopper_id,status,interval,items,subtotal_cents,tax_cents,tax_included,shipping_cents,total_cents,currency,current_period_end,cancel_at_period_end,created_at"
+COLS = "id,site_id,shopper_id,status,interval,items,subtotal_cents,tax_cents,tax_included,shipping_cents,total_cents,currency,current_period_end,cancel_at_period_end,created_at,kind"
+Kind = Optional[Literal["goods", "magazine"]]
+
+
+def _filters(include_abandoned: bool, kind: Kind, first: int, prefix: str = "") -> tuple[str, list]:
+    """The optional status and kind filters, numbered from `$first`."""
+    sql, args = "", []
+    if not include_abandoned:
+        args.append(list(_ABANDONED))
+        sql += f" AND {prefix}status <> ALL(${first + len(args) - 1}::text[])"
+    if kind in ("goods", "magazine"):
+        args.append(kind)
+        sql += f" AND {prefix}kind = ${first + len(args) - 1}"
+    return sql, args
 # Checkouts that were opened and never finished. Hidden from the owner's list
 # by default — they are not subscriptions, and they used to fill the page.
 _ABANDONED = ("preparing", "incomplete", "cancel_requested", "incomplete_expired")
@@ -31,7 +50,7 @@ async def checkout(body: SubscriptionCheckout, request: Request, context=Depends
 @router.get(PREFIX)
 async def list_mine(
     limit: int = Query(default=100, ge=1, le=100), offset: int = Query(default=0, ge=0, le=10000),
-    include_abandoned: bool = Query(default=True),
+    include_abandoned: bool = Query(default=True), kind: Kind = Query(default=None),
     context=Depends(require_shopper_session),
 ):
     """The shopper's subscriptions, newest first. `include_abandoned=false`
@@ -39,12 +58,12 @@ async def list_mine(
     applies — filtered after it, a hundred abandoned checkouts could hide an
     older subscription that still bills. The default keeps them (the app's
     contract)."""
-    status_filter = "" if include_abandoned else "AND status <> ALL($5::text[])"
+    extra, args = _filters(include_abandoned, kind, 5)
     async with get_connection() as conn:
         rows = await conn.fetch(
-            f"SELECT {COLS} FROM cappe_shopper_subscriptions WHERE shopper_id=$1 AND site_id=$2 {status_filter} "
+            f"SELECT {COLS} FROM cappe_shopper_subscriptions WHERE shopper_id=$1 AND site_id=$2{extra} "
             "ORDER BY created_at DESC,id DESC LIMIT $3 OFFSET $4",
-            context[1]["id"], context[0]["id"], limit, offset, *([] if include_abandoned else [list(_ABANDONED)]),
+            context[1]["id"], context[0]["id"], limit, offset, *args,
         )
     return [{**dict(r), "items": loads_list(r["items"])} for r in rows]
 
@@ -71,14 +90,14 @@ async def resume_mine(subscription_id: UUID, context=Depends(require_shopper)):
 @router.get("/sites/{site_id}/subscriptions")
 async def list_owned(
     site_id: UUID, limit: int = Query(default=100, ge=1, le=100), offset: int = Query(default=0, ge=0, le=10000),
-    include_abandoned: bool = Query(default=False),
+    include_abandoned: bool = Query(default=False), kind: Kind = Query(default=None),
     account: CappeAccount = Depends(require_cappe_account),
 ):
     """The site's subscriptions with WHO subscribes (the list used to show
     items and a price, but no customer), how many renewal orders each has
     produced, and the latest one's date."""
     cols = ",".join(f"sub.{c}" for c in COLS.split(","))
-    status_filter = "" if include_abandoned else "AND sub.status <> ALL($4::text[])"
+    extra, args = _filters(include_abandoned, kind, 4, prefix="sub.")
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
         rows = await conn.fetch(
@@ -87,9 +106,9 @@ async def list_owned(
                        (SELECT max(o.created_at) FROM cappe_orders o WHERE o.subscription_id = sub.id) AS last_order_at
                   FROM cappe_shopper_subscriptions sub
                   LEFT JOIN cappe_shoppers sh ON sh.id = sub.shopper_id
-                 WHERE sub.site_id=$1 {status_filter}
+                 WHERE sub.site_id=$1{extra}
                  ORDER BY sub.created_at DESC, sub.id DESC LIMIT $2 OFFSET $3""",
-            site_id, limit, offset, *([] if include_abandoned else [list(_ABANDONED)]),
+            site_id, limit, offset, *args,
         )
     return [{**dict(r), "items": loads_list(r["items"])} for r in rows]
 

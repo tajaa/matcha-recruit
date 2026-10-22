@@ -9,8 +9,15 @@ a magazine" instead of showing a switch that does nothing.
 A writer account gets its magazine from `POST /magazine/sites`: a
 magazine-only site at exactly the handle they chose (`services/magazine/
 writers.py`), created under the same account lock and site limit as any site.
+
+Paid subscriptions (cappemag05) are turned on here too: that needs a plan
+with `magazine_paid`, a Stripe account that can take charges, and a price.
+Turning them off stamps `lapsed_at`; the hourly lapse sweep
+(`services/magazine/lapse.py`) then ends each reader's subscription with the
+month they paid for. A new price is for new subscribers; readers keep theirs.
 """
 import json
+from datetime import datetime, timezone
 from typing import Any, Optional
 from uuid import UUID
 
@@ -33,7 +40,8 @@ from ..models.cappe import (
 from ..services.entitlements import resolve_entitlements
 from ..services.magazine import pages as mag_pages, reader as mag_reader
 from ..services.magazine import writers
-from ..services.magazine.magazines import MASTHEADS, get_magazine, save_magazine
+from ..services.magazine.billing import fee_bps
+from ..services.magazine.magazines import MASTHEADS, get_magazine, preview_blocks, save_magazine
 from ..services.magazine.stories import POST_COLS, post_row
 from ..services.magazine.topics import TOPICS, normalize_topic
 from ._shared import get_owned_site, site_row_to_dict
@@ -47,7 +55,44 @@ async def _view(conn, site, mag: dict | None, plan: str | None) -> dict[str, Any
     ent = await resolve_entitlements(plan, conn=conn)
     base = mag or {"site_id": site["id"], "name": site["name"]}
     return {**base, "plan_includes_magazine": ent.has("magazine"),
-            "live": bool(mag and mag["enabled"] and ent.has("magazine"))}
+            "live": bool(mag and mag["enabled"] and ent.has("magazine")),
+            "plan_includes_paid": ent.has("magazine_paid"),
+            "stripe_ready": await _stripe_ready(conn, site["account_id"]),
+            "fee_bps": await fee_bps(conn),
+            # What readers are charged in (checkout uses the site's currency).
+            "currency": (site.get("currency") or "USD").upper()}
+
+
+async def _stripe_ready(conn, account_id) -> bool:
+    row = await conn.fetchrow(
+        "SELECT stripe_account_id, stripe_charges_enabled FROM cappe_accounts WHERE id = $1", account_id,
+    )
+    return bool(row and row["stripe_account_id"] and row["stripe_charges_enabled"])
+
+
+async def _paid_fields(conn, site, fields: dict[str, Any], plan: str | None) -> None:
+    """Check and complete the paid-subscription part of an update, in place."""
+    current = await get_magazine(conn, site["id"]) or {}
+    if isinstance(fields.get("paid_pitch"), str):
+        fields["paid_pitch"] = fields["paid_pitch"].strip() or None
+    turning_on = fields.get("paid_enabled") is True and not current.get("paid_enabled")
+    turning_off = fields.get("paid_enabled") is False and current.get("paid_enabled")
+    paid_after = fields.get("paid_enabled", current.get("paid_enabled"))
+    if paid_after and not fields.get("price_cents", current.get("price_cents")):
+        raise HTTPException(status_code=422, detail="Set a monthly price for paid subscriptions.")
+    if turning_on:
+        ent = await resolve_entitlements(plan, conn=conn)
+        if not ent.has("magazine_paid"):
+            raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail={
+                "code": "plan_required", "plan": "writer",
+                "message": "Paid subscriptions need the Writer plan (or Creator, Business or Pro)."})
+        if not await _stripe_ready(conn, site["account_id"]):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={
+                "code": "stripe_required",
+                "message": "Connect Stripe and finish its setup first: readers pay into your Stripe account."})
+        fields["lapsed_at"] = None
+    elif turning_off:
+        fields["lapsed_at"] = datetime.now(timezone.utc)
 
 
 @router.get("/sites/{site_id}/magazine", response_model=CappeMagazine)
@@ -62,7 +107,8 @@ async def get_site_magazine(site_id: UUID, account: CappeAccount = Depends(requi
 async def update_site_magazine(site_id: UUID, body: CappeMagazineUpdate,
                                account: CappeAccount = Depends(require_cappe_account)):
     fields = body.model_dump(exclude_unset=True)
-    for key in ("enabled", "name", "masthead_style", "topics", "front_at_root", "nav_label", "follow_enabled"):
+    for key in ("enabled", "name", "masthead_style", "topics", "front_at_root", "nav_label", "follow_enabled",
+                "paid_enabled", "preview_blocks"):
         if key in fields and fields[key] is None:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"{key} can't be empty")
     if "topics" in fields:
@@ -85,6 +131,8 @@ async def update_site_magazine(site_id: UUID, body: CappeMagazineUpdate,
             if not owned:
                 raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                                     detail="The cover story has to be one of this site's stories.")
+        if fields.keys() & {"paid_enabled", "price_cents", "paid_pitch", "preview_blocks"}:
+            await _paid_fields(conn, site, fields, account.plan)
         mag = await save_magazine(conn, site_id, fields, default_name=site["name"])
         view = await _view(conn, site, mag, account.plan)
     await invalidate_render_cache(site_id)
@@ -127,7 +175,7 @@ async def reader_view(site_id: UUID, body: CappeReaderView, account: CappeAccoun
             nav = await _nav(conn, site_id)
             html = mag_pages.render_story(_site_dict(site, magazine=mag), nav, mag, post, assets, more=more,
                                           more_covers=more_covers, origin="",
-                                          preview_blocks=int(mag.get("preview_blocks") or 3))
+                                          preview_blocks=preview_blocks(mag), currency=site.get("currency"))
     return HTMLResponse(html, headers={**tenant_security_headers(), "Cache-Control": "no-store"})
 
 

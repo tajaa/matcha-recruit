@@ -4,7 +4,7 @@ import { ArrowLeft, BookOpen, Eye, Loader2, Plus, Redo2, Trash2, Undo2, Wand2, X
 import { cappeApi } from '../../api'
 import { ui } from '../../components/ui'
 import type {
-  CappeAsset, CappePost, CappeStockSource, CappeStoryOptions, StoryBlock, StoryContent, StoryLayout,
+  CappeAsset, CappeMagazine, CappePost, CappeStockSource, CappeStoryOptions, StoryBlock, StoryContent, StoryLayout,
 } from '../../types'
 import LibraryPanel from '../library/LibraryPanel'
 import AssistPanel from './AssistPanel'
@@ -15,11 +15,11 @@ import { BLOCK_LABELS, duplicateBlock, insertBlock, moveBlock, newBlock, withCap
 import { useHistory } from './history'
 import BookFrame from '../reader/BookFrame'
 
-type Fields = { title: string; kicker: string; excerpt: string; byline: string; topic: string; layout: StoryLayout; status: CappePost['status'] }
+type Fields = { title: string; kicker: string; excerpt: string; byline: string; topic: string; layout: StoryLayout; status: CappePost['status']; access: CappePost['access'] }
 
 const fieldsOf = (p: CappePost): Fields => ({
   title: p.title, kicker: p.kicker || '', excerpt: p.excerpt || '', byline: p.byline || '', topic: p.topic || '',
-  layout: p.layout, status: p.status,
+  layout: p.layout, status: p.status, access: p.access || 'free',
 })
 
 type Doc = { fields: Fields; blocks: StoryBlock[] }
@@ -30,11 +30,13 @@ const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigat
 const MOD = isMac ? '⌘' : 'Ctrl+'
 
 /** A thin "+" between blocks that opens the kinds of block to put there. */
-function InsertMenu({ open, onToggle, onPick, withCover, last }: {
+function InsertMenu({ open, onToggle, onPick, withCover, withPaywall, last }: {
   open: boolean
   onToggle: () => void
   onPick: (type: StoryBlock['type']) => void
   withCover: boolean
+  /** A paid story without its paywall yet: the line can go here. */
+  withPaywall: boolean
   last?: boolean
 }) {
   return (
@@ -50,7 +52,7 @@ function InsertMenu({ open, onToggle, onPick, withCover, last }: {
       {open && (
         <div className={`flex flex-wrap gap-2 ${last ? 'mt-2' : 'my-2 justify-center'}`} role="menu">
           {withCover && <button type="button" role="menuitem" className={ui.btnGhost} onClick={() => onPick('cover')}>Cover</button>}
-          {ADDABLE.map((t) => (
+          {[...ADDABLE, ...(withPaywall ? ['paywall' as const] : [])].map((t) => (
             <button key={t} type="button" role="menuitem" className={ui.btnGhost} onClick={() => onPick(t)}>{BLOCK_LABELS[t]}</button>
           ))}
         </div>
@@ -82,6 +84,8 @@ export default function StoryEditor() {
   const [finding, setFinding] = useState<{ source: CappeStockSource; query: string } | null>(null)
   const [preview, setPreview] = useState<string>('')
   const [previewOpen, setPreviewOpen] = useState(true)
+  // Whether the magazine takes paid subscribers: a story can only become paid then.
+  const [paidOn, setPaidOn] = useState(false)
   const previewGen = useRef(0)
   const { set: setDoc, reset: resetDoc, replace: replaceDoc } = doc
 
@@ -92,6 +96,14 @@ export default function StoryEditor() {
   const setFields = useCallback((next: (f: Fields) => Fields) =>
     setDoc((d) => (d ? { ...d, fields: next(d.fields) } : d)), [setDoc])
   const docOf = (p: CappePost): Doc => ({ fields: fieldsOf(p), blocks: p.content?.blocks || [] })
+
+  useEffect(() => {
+    let cancelled = false
+    cappeApi.get<CappeMagazine>(`/sites/${siteId}/magazine`)
+      .then((m) => { if (!cancelled) setPaidOn(!!m.paid_enabled) })
+      .catch(() => { /* treated as off; the server decides anyway */ })
+    return () => { cancelled = true }
+  }, [siteId])
 
   useEffect(() => {
     let cancelled = false
@@ -122,7 +134,7 @@ export default function StoryEditor() {
     const gen = ++previewGen.current
     const t = setTimeout(() => {
       const body = { title: fields.title, excerpt: fields.excerpt || null, kicker: fields.kicker || null, topic: fields.topic || null,
-        layout: fields.layout, byline: fields.byline || null, content: { blocks } satisfies StoryContent }
+        layout: fields.layout, byline: fields.byline || null, access: fields.access, content: { blocks } satisfies StoryContent }
       cappeApi.postHtml(`/sites/${siteId}/stories/preview`, body)
         .then((html) => { if (gen === previewGen.current) setPreview(html) })
         .catch(() => { /* the last good preview stays up */ })
@@ -157,6 +169,7 @@ export default function StoryEditor() {
         title: next.title.trim() || 'Untitled story', kicker: next.kicker.trim() || null, excerpt: next.excerpt.trim() || null,
         byline: next.byline.trim() || null, topic: next.topic || null, layout: next.layout, status: next.status,
       }
+      if (next.access !== post.access) body.access = next.access
       if (isStory) {
         body.content = { blocks }
         const cover = blocks[0]?.type === 'cover' ? blocks[0].asset_id : null
@@ -215,6 +228,7 @@ export default function StoryEditor() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
+  const offerPaywall = fields?.access === 'paid' && !blocks.some((b) => b.type === 'paywall')
   const insert = (type: StoryBlock['type'], at: number) => {
     setBlocks((bs) => insertBlock(bs, at, newBlock(type)), true)
     setInsertAt(null)
@@ -331,6 +345,20 @@ export default function StoryEditor() {
                 </select>
               </label>
             </div>
+            {isStory && (
+              <label className="block text-sm text-zinc-300">Who can read it
+                <select value={fields.access} onChange={(e) => setField('access', e.target.value as CappePost['access'])}
+                  className={`${ui.input} mt-1 sm:max-w-xs`} aria-label="Who can read it">
+                  <option value="free">Everyone</option>
+                  <option value="paid" disabled={!paidOn && fields.access !== 'paid'}>Subscribers (after the paywall)</option>
+                </select>
+                <span className="mt-1 block text-xs text-zinc-500">
+                  {paidOn
+                    ? 'Readers see everything above the paywall block (or the first few blocks), then are asked to subscribe.'
+                    : <>To charge readers, turn on paid subscriptions in <Link to={`/cappe/sites/${siteId}/magazine`} className="underline">Magazine settings</Link>.</>}
+                </span>
+              </label>
+            )}
           </section>
 
           {!isStory ? (
@@ -345,7 +373,7 @@ export default function StoryEditor() {
                 <div key={i} className="space-y-4">
                   {b.type !== 'cover' && (
                     <InsertMenu open={insertAt === i} onToggle={() => setInsertAt((v) => (v === i ? null : i))}
-                      onPick={(t) => insert(t, i)} withCover={i === 0} />
+                      onPick={(t) => insert(t, i)} withCover={i === 0} withPaywall={offerPaywall} />
                   )}
                   <div data-block={i} onDragOver={dragOver(i)} onDrop={drop(i)} onDragEnd={dragEnd}
                     onDragLeave={() => setDropAt((v) => (v === i ? null : v))}
@@ -362,7 +390,7 @@ export default function StoryEditor() {
               ))}
               <div>
                 <InsertMenu last open={insertAt === blocks.length} onToggle={() => setInsertAt((v) => (v === blocks.length ? null : blocks.length))}
-                  onPick={(t) => insert(t, blocks.length)} withCover={blocks[0]?.type !== 'cover'} />
+                  onPick={(t) => insert(t, blocks.length)} withCover={blocks[0]?.type !== 'cover'} withPaywall={offerPaywall} />
               </div>
             </>
           )}

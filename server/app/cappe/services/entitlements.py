@@ -123,6 +123,7 @@ def _legacy_fallback(plan_code: str) -> Entitlements:
             # A magazine's pages are checked against the plan as they render:
             # an unreadable catalog must not take a paying writer's stories down.
             "magazine": str(plan_code or "").lower() in {"business", "pro", "creator", "writer"},
+            "magazine_paid": str(plan_code or "").lower() in {"business", "pro", "creator", "writer"},
         },
     )
 

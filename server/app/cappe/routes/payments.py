@@ -768,6 +768,9 @@ async def _sync_charge_refunded(obj, event) -> dict:
     recorded as made in Stripe. A FULL refund closes the order (restocking
     unless it shipped); a PARTIAL one leaves it paid. Idempotent — our own
     refund route's echo finds the ledger already up to date.
+
+    A magazine reader's payment (`cappe_magazine_payments`) has no order: its
+    `refunded_cents` takes Stripe's total refunded instead.
     """
     account_id = event.get("account")
     if not account_id:
@@ -793,6 +796,13 @@ async def _sync_charge_refunded(obj, event) -> dict:
                 )
                 logger.info("cappe order %s: Stripe refund synced (%s)", order["id"], outcome)
                 return {"received": True, "status": outcome}
+
+            from ..services.magazine.billing import sync_refund
+
+            if await sync_refund(conn, account_id=account_id, payment_intent=intent if isinstance(intent, str) else None,
+                                 invoice_id=obj.get("invoice") if isinstance(obj.get("invoice"), str) else None,
+                                 refunded_cents=refunded if refunded else (amount if full else 0)):
+                return {"received": True, "status": "magazine_refund_synced"}
 
             if isinstance(intent, str) and intent and full:
                 collab = await conn.fetchrow(

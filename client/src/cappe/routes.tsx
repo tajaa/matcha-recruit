@@ -50,6 +50,8 @@ const Stories = lazy(() => import('./magazine/stories/Stories'))
 const StoryEditor = lazy(() => import('./magazine/editor/StoryEditor'))
 const MagazineSettings = lazy(() => import('./magazine/settings/MagazineSettings'))
 const Issues = lazy(() => import('./magazine/issues/Issues'))
+const Readers = lazy(() => import('./magazine/readers/Readers'))
+const Earnings = lazy(() => import('./magazine/earnings/Earnings'))
 const WritersLanding = lazy(() => import('./magazine/writers/WritersLanding'))
 const WriterHome = lazy(() => import('./magazine/writers/WriterHome'))
 const MagazineOnboarding = lazy(() => import('./magazine/onboarding/MagazineOnboarding'))
@@ -131,6 +133,8 @@ export default function CappeRoutes() {
           <Route path="sites/:siteId/magazine/view" element={<ReaderView />} />
           <Route path="sites/:siteId/library" element={<Library />} />
           <Route path="sites/:siteId/issues" element={<Issues />} />
+          <Route path="sites/:siteId/readers" element={<Readers />} />
+          <Route path="sites/:siteId/earnings" element={<Earnings />} />
           <Route path="writer" element={<RequireAccountType type="writer"><WriterHome /></RequireAccountType>} />
           <Route path="writer/new" element={<RequireAccountType type="writer"><MagazineOnboarding /></RequireAccountType>} />
           {/* Creator marketplace: creator self-service + brand-side collabs.

@@ -13,17 +13,35 @@ confirmation emails a day per magazine.
 List-Unsubscribe-Post target an issue email carries, so a mail client's
 "Unsubscribe" button works without opening a page. It works whatever the
 site's status: leaving must never depend on the magazine still being up.
+
+Paid readers (cappemag05), all for a signed-in reader (a shopper session,
+`render/assets/paywall.js`):
+
+  * `GET /public/sites/{slug}/stories/{story}/paid` — the part of a paid
+    story after its paywall, as HTML, for a reader with paid access; 403
+    `{code: 'subscribe'}` otherwise. `no-store`: it is never in a cache, the
+    page's HTML, the feed or an issue email.
+  * `POST /public/sites/{slug}/magazine/checkout` — start a subscription
+    (`services/magazine/billing.py`).
+  * `GET /public/sites/{slug}/magazine/me` — what the reader holds here.
 """
 import hashlib
 import logging
 
-from fastapi import HTTPException, Request, status
-from fastapi.responses import Response
+from fastapi import Depends, HTTPException, Request, status
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse, Response
 
 from ....core.services.redis_cache import check_rate_limit, client_ip
 from ....database import get_connection
-from ...models.cappe import CappeFollowRequest
-from ...services.magazine.magazines import live_magazine
+from ...dependencies import require_shopper, require_shopper_session
+from ...models.cappe import CappeFollowRequest, CappeMagazineCheckout
+from ...services.magazine import billing as mag_billing
+from ...services.magazine import reader as mag_reader
+from ...services.magazine.access import has_paid_access, reader_status
+from ...services.magazine.magazines import live_magazine, preview_blocks
+from ...services.magazine.pages import story_blocks
+from ...services.magazine.story_render import render_blocks, split_at_paywall
 from ._body_limit import limited_public_router
 from ._common import _read_rate_limit, _reject_reserved
 
@@ -93,3 +111,39 @@ async def one_click_unsubscribe(slug: str, token: str, request: Request):
         )
     # The same answer whether or not the token was known.
     return Response(status_code=status.HTTP_200_OK)
+
+
+_PRIVATE = {"Cache-Control": "no-store, private"}
+
+
+@router.get("/public/sites/{slug}/stories/{story_slug}/paid")
+async def paid_part(slug: str, story_slug: str, context=Depends(require_shopper_session)):
+    """The rest of a paid story, for a reader who has paid access."""
+    site, shopper = context
+    await check_rate_limit(str(shopper["id"]), "cappe_mag_paid", 300, 3600)
+    async with get_connection() as conn:
+        mag = await live_magazine(conn, site) if site["status"] == "published" else None
+        post = await mag_reader.live_story(conn, site["id"], slug=story_slug) if mag else None
+        if not post or post.get("access") != "paid":
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Story not found")
+        if not await has_paid_access(conn, site["id"], shopper["id"]):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail={
+                "code": "subscribe", "message": "This story is for subscribers."})
+        assets = await mag_reader.story_assets(conn, site["id"], post)
+    _free, rest = split_at_paywall(story_blocks(post), preview_blocks=preview_blocks(mag))
+    return JSONResponse({"html": render_blocks(rest, assets, dropcap=False)}, headers=_PRIVATE)
+
+
+@router.post("/public/sites/{slug}/magazine/checkout", status_code=status.HTTP_201_CREATED)
+async def magazine_checkout(slug: str, body: CappeMagazineCheckout, context=Depends(require_shopper)):
+    site, shopper = context
+    await check_rate_limit(str(shopper["id"]), "cappe_mag_checkout", 10, 3600)
+    return await mag_billing.checkout(site, shopper, body)
+
+
+@router.get("/public/sites/{slug}/magazine/me")
+async def magazine_me(slug: str, context=Depends(require_shopper_session)):
+    site, shopper = context
+    async with get_connection() as conn:
+        status_ = await reader_status(conn, site["id"], shopper["id"])
+    return JSONResponse(content=jsonable_encoder(status_), headers=_PRIVATE)

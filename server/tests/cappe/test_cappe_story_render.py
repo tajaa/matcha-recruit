@@ -134,6 +134,11 @@ def test_the_paywall_splits_the_story():
     assert story_render.split_at_paywall(blocks) == ([blocks[0]], [blocks[2]])
     four = [{"type": "text", "md": str(i)} for i in range(4)]
     assert story_render.split_at_paywall(four, preview_blocks=3) == (four[:3], four[3:])
+    # The cover is the header, not one of the free blocks; nothing past the
+    # preview means nothing paid.
+    covered = [{"type": "cover", "asset_id": None}] + four
+    assert story_render.split_at_paywall(covered, preview_blocks=3) == (covered[:4], covered[4:])
+    assert story_render.split_at_paywall(covered[:3], preview_blocks=3) == (covered[:3], [])
 
 
 def test_the_cover_spread_styles():
@@ -226,7 +231,7 @@ def test_a_dispatch_is_a_news_article_and_a_paid_story_hides_its_paid_part():
     html = pages.render_story(SITE, NAV, MAG, p, {}, more=[], more_covers={}, origin="https://b.test")
     assert '"@type": "NewsArticle"' in html
     assert "Free words." in html and SENTINEL not in html
-    assert 'class="mz-paywall mz-measure" data-mz-paid' in html
+    assert 'class="mz-paywall mz-measure" id="mz-paywall"' in html and '<div class="mz-story__body mz-paid" data-mz-paid hidden></div>' in html
 
 
 def test_a_legacy_markdown_post_renders_as_one_text_block():

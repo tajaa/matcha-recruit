@@ -142,6 +142,18 @@
 .mz-divider{width:4rem;margin:3rem auto;border:0;border-top:2px solid var(--mz-accent)}
 .mz-story__topic{max-width:var(--mz-measure);margin:3rem auto 0;padding:1.5rem 1.25rem 0;border-top:1px solid var(--line);font-size:.75rem;letter-spacing:.16em;text-transform:uppercase}
 .mz-paywall{margin-top:2rem;padding:2rem 1.25rem;text-align:center;border-top:1px solid var(--line);color:var(--muted)}
+.mz-paywall__lede{margin:0;font-family:var(--mz-h);font-size:1.35rem;color:inherit}
+.mz-paywall__pitch{margin:.75rem auto 0;max-width:32rem}
+.mz-paywall__price{margin:.75rem 0 0;font-weight:600}
+.mz-paywall__actions{margin-top:1.25rem}
+.mz-paywall__btn{padding:.7rem 1.4rem;border:1px solid var(--mz-accent);border-radius:.4rem;background:transparent;color:inherit;font:600 1rem var(--mz-b);cursor:pointer}
+.mz-paywall__btn--solid{background:var(--mz-accent);color:#fff}
+.mz-paywall__form{display:flex;flex-wrap:wrap;gap:.5rem;justify-content:center}
+.mz-paywall__form input{flex:1 1 14rem;max-width:20rem;padding:.65rem .8rem;border:1px solid var(--line);border-radius:.4rem;background:transparent;color:inherit;font:inherit}
+.mz-paywall__note{margin:.85rem 0 0;font-size:.9rem}
+.mz-paywall__note a{color:var(--mz-accent)}
+.mz-paywall__msg{min-height:1.25rem;margin:.75rem 0 0;font-size:.9rem}
+.mz-paywall__msg.err{color:#b91c1c}
 .mz-more{margin-top:4rem;padding-top:1rem;border-top:1px solid var(--line)}
 .mz-more__title{text-align:center;font-family:var(--mz-h);font-size:1.5rem}
 .mz-follow{max-width:var(--mz-measure);margin:3.5rem auto 0;padding:2rem 1.25rem;text-align:center;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}

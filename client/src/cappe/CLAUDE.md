@@ -36,6 +36,10 @@ Website-builder frontend for the consumer brand **Gummfit**, host-routed on gumm
   at `/cappe/writer/new`), `issues/Issues.tsx` (`sites/:siteId/issues`). `CappeSidebar` gives a
   writer the magazine's nav (Stories, Library, Followers = the Subscribers page, Issues, settings).
   Where an account lands after auth is one function: `utils/postAuthHome.ts`.
+  Paid readers (cappemag05): the paid section of `settings/MagazineSettings.tsx` (price typed in dollars,
+  `settings/price.ts`), "Who can read it" in the story editor (a Paywall block is offered once a story is
+  for subscribers), `readers/Readers.tsx` (subscriptions and free comps) and `earnings/Earnings.tsx`
+  (the ledger and `StripeConnectCard magazineFeeBps`, which names the magazine share, not the plan fee).
   `stories/Stories.tsx` (the wall of covers at `sites/:siteId/stories`; `/blog` redirects here),
   `editor/StoryEditor.tsx` + `editor/BlockEditor.tsx` (blocks, a library picker, a live preview
   iframe fed by `POST /stories/preview`), `settings/MagazineSettings.tsx`. `storyBlocks.ts` mirrors

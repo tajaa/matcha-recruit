@@ -1126,11 +1126,69 @@ export type CappeMagazine = {
   nav_label: string
   cover_post_id: string | null
   follow_enabled: boolean
+  /** Paid subscriptions (cappemag05). */
+  paid_enabled: boolean
+  price_cents: number | null
+  paid_pitch: string | null
+  /** Blocks a paid story without a paywall marker shows free. */
+  preview_blocks: number
+  /** When paid subscriptions stopped; readers keep the month they paid for. */
+  lapsed_at: string | null
   created_at: string | null
   updated_at: string | null
   /** Pages render now: turned on AND the plan includes a magazine. */
   live: boolean
   plan_includes_magazine: boolean
+  plan_includes_paid: boolean
+  /** The account's Stripe can take charges. */
+  stripe_ready: boolean
+  /** The site's currency: what readers are charged in. */
+  currency?: string
+  /** Gummfit's share of each reader payment, in basis points. */
+  fee_bps: number
+}
+
+/** A reader's subscription to a magazine, as the writer sees it. */
+export type CappeMagazineReader = {
+  id: string
+  status: string
+  total_cents: number
+  currency: string
+  current_period_end: string | null
+  cancel_at_period_end: boolean
+  created_at: string
+  email: string | null
+  name: string | null
+}
+
+export type CappeMagazineComp = {
+  id: string
+  note: string | null
+  expires_at: string | null
+  created_at: string
+  email: string | null
+  name?: string | null
+}
+
+export type CappeMagazineReaders = { subscriptions: CappeMagazineReader[]; comps: CappeMagazineComp[] }
+
+export type CappeMagazineTotals = {
+  currency: string
+  payments: number
+  gross_cents: number
+  fee_cents: number
+  refunded_cents: number
+  net_cents: number
+}
+
+export type CappeMagazineEarnings = {
+  fee_bps: number
+  paying_readers: number
+  all_time: CappeMagazineTotals[]
+  last_30_days: CappeMagazineTotals[]
+  payments: { id: string; amount_cents: number; fee_cents: number | null; refunded_cents: number; currency: string;
+    billing_reason: string | null; paid_at: string; email: string | null }[]
+  balance: { available: { amount_cents: number; currency: string }[]; pending: { amount_cents: number; currency: string }[] } | null
 }
 
 // A saved reusable look: kind='theme' → a theme_config style subset;

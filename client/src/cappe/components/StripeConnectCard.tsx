@@ -16,7 +16,9 @@ function feeText(bps: number | null | undefined): string {
   return `Gummfit takes ${bps / 100}%`
 }
 
-export default function StripeConnectCard() {
+/** `magazineFeeBps`: the card on a magazine's earnings, where readers pay and
+ *  Gummfit keeps its magazine share — not the plan's store fee. */
+export default function StripeConnectCard({ magazineFeeBps }: { magazineFeeBps?: number } = {}) {
   const [status, setStatus] = useState<Status | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -38,11 +40,13 @@ export default function StripeConnectCard() {
   }
 
   if (status === null) return null
+  const magazine = magazineFeeBps != null
+  const fee = magazine ? `Gummfit keeps ${magazineFeeBps / 100}%` : feeText(status.platform_fee_bps)
 
   if (status.charges_enabled) {
     return (
       <div className="mb-5 flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/[0.06] px-4 py-2.5 text-sm text-emerald-300">
-        <CheckCircle2 className="h-4 w-4 shrink-0" /> Card payments active — customer purchases pay out to your Stripe account ({feeText(status.platform_fee_bps)}).
+        <CheckCircle2 className="h-4 w-4 shrink-0" /> Card payments active — {magazine ? 'readers’ subscriptions' : 'customer purchases'} pay out to your Stripe account ({fee}).
       </div>
     )
   }
@@ -54,10 +58,12 @@ export default function StripeConnectCard() {
           <CreditCard className="mt-0.5 h-5 w-5 shrink-0 text-amber-300" />
           <div>
             <p className="text-sm font-medium text-amber-100">
-              {status.connected ? 'Finish connecting Stripe to accept payments' : 'Connect Stripe to sell on your storefront'}
+              {status.connected ? 'Finish connecting Stripe to accept payments' : magazine ? 'Connect Stripe to charge readers' : 'Connect Stripe to sell on your storefront'}
             </p>
             <p className="mt-0.5 text-xs text-amber-200/70">
-              Customers pay by card; the money goes straight to your Stripe account. {feeText(status.platform_fee_bps)}. Until then, orders stay pending for you to handle manually.
+              {magazine
+                ? `Readers pay by card; the money goes straight to your Stripe account. ${fee}. Paid subscriptions can't be turned on until then.`
+                : `Customers pay by card; the money goes straight to your Stripe account. ${fee}. Until then, orders stay pending for you to handle manually.`}
             </p>
           </div>
         </div>
