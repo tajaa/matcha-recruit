@@ -72,6 +72,10 @@ celery_app = Celery(
         "app.workers.tasks.cappe_comp_expiry",
         "app.workers.tasks.cappe_order_reaper",
         "app.workers.tasks.cappe_edge_sync",
+        "app.workers.tasks.cappe_social_publisher",
+        "app.workers.tasks.cappe_social_inbound",
+        "app.workers.tasks.cappe_social_metrics",
+        "app.workers.tasks.cappe_social_media",
         "app.workers.tasks.compliance_evals",
         "app.workers.tasks.property_cat_refresh",
         "app.workers.tasks.cba_clause_extraction",
@@ -248,6 +252,11 @@ _SCHEDULED_TASKS = [
     ("cappe_domain_finalize", "app.workers.tasks.cappe_domain_finalize", "run_cappe_domain_finalize"),
     ("cappe_order_reaper", "app.workers.tasks.cappe_order_reaper", "run_cappe_order_reaper"),
     ("cappe_edge_sync", "app.workers.tasks.cappe_edge_sync", "run_cappe_edge_sync"),
+    # Self-rescheduling every minute (same chain guard as schedule_break_reminders);
+    # this dispatch only (re)starts the chain.
+    ("cappe_social_publisher", "app.workers.tasks.cappe_social_publisher", "run_cappe_social_publisher"),
+    ("cappe_social_metrics", "app.workers.tasks.cappe_social_metrics", "run_cappe_social_metrics"),
+    ("cappe_social_media_sweep", "app.workers.tasks.cappe_social_media", "run_cappe_social_media_sweep"),
 ]
 
 

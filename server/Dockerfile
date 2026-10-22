@@ -79,6 +79,14 @@ RUN set -eu; \
         }; \
     done
 
+# Cappe social exports burn word-for-word captions into videos with ffmpeg's
+# `ass` filter (libass) in DejaVu Sans Bold (services/social/subtitles.py).
+# Debian's ffmpeg has libass today; if a base-image change ever drops it or
+# moves the font, fail the build here instead of shipping caption-less files.
+RUN ffmpeg -hide_banner -filters 2>/dev/null | grep -qE '^ *[A-Z.]+ +ass +' \
+    && test -f /usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf \
+    || { echo "ffmpeg without libass, or DejaVu Sans Bold missing: captions would be skipped."; exit 1; }
+
 # Create uploads directory
 RUN mkdir -p /app/uploads && chown -R matcha:matcha /app/uploads
 
