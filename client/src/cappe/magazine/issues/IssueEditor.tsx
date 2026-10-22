@@ -305,6 +305,10 @@ export default function IssueEditor() {
   useEffect(() => {
     keys.current = { save: () => { if (dirty && !busy) save() }, undo: doc.undo, redo: doc.redo, blocked: !!picking }
   })
+  // ⌘S on the page arrives right after the words typed there: the save runs
+  // once a render has those words in the document, not from this render's.
+  const [saveAsked, setSaveAsked] = useState(0)
+  useEffect(() => { if (saveAsked) keys.current.save() }, [saveAsked])
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey) || e.altKey || keys.current.blocked) return
@@ -334,10 +338,12 @@ export default function IssueEditor() {
       case 'mz-key': {
         if (keys.current.blocked) return
         const t = place.target
-        if (msg.key === 'save') keys.current.save()
+        if (msg.key === 'save') setSaveAsked((n) => n + 1)
         else if (msg.key === 'undo') doc.undo()
         else if (msg.key === 'redo') doc.redo()
-        else if (t?.kind === 'block' && storyOf(current, t.story)?.blocks[t.block]) removeBlock(t.story, t.block)
+        // Not a story's cover: it is its header (see StoryEditor).
+        else if (t?.kind === 'block' && storyOf(current, t.story)?.blocks[t.block]
+          && storyOf(current, t.story)?.blocks[t.block].type !== 'cover') removeBlock(t.story, t.block)
         return
       }
       case 'mz-pick': {

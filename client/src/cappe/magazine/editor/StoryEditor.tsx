@@ -262,6 +262,10 @@ export default function StoryEditor() {
   useEffect(() => {
     keys.current = { save: () => { if (dirty && !saving) save() }, undo: doc.undo, redo: doc.redo, blocked: !!(picking || finding) }
   })
+  // ⌘S on the page arrives right after the words typed there: the save runs
+  // once a render has those words in the document, not from this render's.
+  const [saveAsked, setSaveAsked] = useState(0)
+  useEffect(() => { if (saveAsked) keys.current.save() }, [saveAsked])
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey) || e.altKey || keys.current.blocked) return
@@ -286,10 +290,12 @@ export default function StoryEditor() {
       case 'mz-editing': setTyping(msg.on); return
       case 'mz-key':
         if (keys.current.blocked) return
-        if (msg.key === 'save') keys.current.save()
+        if (msg.key === 'save') setSaveAsked((n) => n + 1)
         else if (msg.key === 'undo') doc.undo()
         else if (msg.key === 'redo') doc.redo()
-        else if (selected !== null) removeBlock(selected)
+        // Not the cover: it is the story's header, and a stray Backspace after
+        // leaving the headline would take it and its picture.
+        else if (selected !== null && blocks[selected]?.type !== 'cover') removeBlock(selected)
         return
       case 'mz-pick': {
         const { block, item } = msg
