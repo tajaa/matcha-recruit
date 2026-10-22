@@ -36,6 +36,9 @@ from .richtext import render_md
 from .rt import RtError, md_to_rt, normalize_rt
 from .story_render import cover_html, field, render_blocks, split_at_paywall
 from .story_schema import cover_block, with_designs
+from .studio import render as studio_render
+from .studio.schema import paywall_from
+from .studio.text_view import text_blocks
 from .topics import topic_label
 
 _ASSETS = Path(__file__).resolve().parent.parent / "render" / "assets"
@@ -45,6 +48,9 @@ _DESIGN_CSS = (_ASSETS / "design.css").read_text(encoding="utf-8")
 _FOLLOW_JS = (_ASSETS / "follow.js").read_text(encoding="utf-8")
 _PAYWALL_JS = (_ASSETS / "paywall.js").read_text(encoding="utf-8")
 _BOOK_JS = (_ASSETS / "book.js").read_text(encoding="utf-8")
+_STUDIO = Path(__file__).resolve().parent / "studio"
+_PAGES_JS = (_STUDIO / "pages.js").read_text(encoding="utf-8")
+_READER_CSS = (_STUDIO / "reader.css").read_text(encoding="utf-8")
 _SYMBOLS = {"USD": "$", "CAD": "CA$", "AUD": "A$", "NZD": "NZ$", "EUR": "€", "GBP": "£"}
 
 PAGE_SIZE = 12
@@ -184,7 +190,7 @@ def price_label(cents: int, currency: Optional[str]) -> str:
 
 
 def paywall_section(mag: dict, post: dict, *, currency: Optional[str], site_slug: Optional[str] = None,
-                    single: bool = True) -> str:
+                    single: bool = True, pages: bool = False) -> str:
     """Under a paid story's free part: the pitch and price (the same for every
     reader, so the page caches) and an empty `.mz-paid` box for the paid part.
     A magazine that has stopped taking subscribers still lets the ones it has
@@ -202,6 +208,8 @@ def paywall_section(mag: dict, post: dict, *, currency: Optional[str], site_slug
            if site_slug else "")
     slug = escape(post["slug"], quote=True)
     ident = ' id="mz-paywall"' if single else ""
+    if pages:
+        ident += " data-mz-pages"
     return (
         f'<section class="mz-paywall mz-measure"{ident} data-mz-paywall data-mz-story="{slug}" '
         f'data-mz-open="{1 if open_ else 0}" data-mz-price="{escape(price, quote=True)}">'
@@ -269,7 +277,8 @@ def render_topic(site: dict, nav: list[dict], mag: dict, topic: str, *, posts: l
     })
 
 
-def article_ld(post: dict, mag: dict, *, url: str, image: Optional[str], paid: bool = False) -> str:
+def article_ld(post: dict, mag: dict, *, url: str, image: Optional[str], paid: bool = False,
+               paid_selector: str = ".mz-paid") -> str:
     published = post["published_at"].isoformat() if post.get("published_at") else None
     data = {
         "@context": "https://schema.org",
@@ -292,12 +301,15 @@ def article_ld(post: dict, mag: dict, *, url: str, image: Optional[str], paid: b
         # Google's paywalled-content markup: the part behind the paywall is
         # the `.mz-paid` box, which a subscriber's browser fills.
         clean["isAccessibleForFree"] = False
-        clean["hasPart"] = {"@type": "WebPageElement", "isAccessibleForFree": False, "cssSelector": ".mz-paid"}
+        clean["hasPart"] = {"@type": "WebPageElement", "isAccessibleForFree": False, "cssSelector": paid_selector}
     return f'<script type="application/ld+json">{_js_obj(clean)}</script>'
 
 
 def story_blocks(post: dict) -> list[dict]:
-    """A story's blocks; a legacy Markdown post is one text block."""
+    """A story's blocks; a legacy Markdown post is one text block, a paged
+    story its Text view (`studio/text_view.py`)."""
+    if post.get("format") == "pages":
+        return text_blocks((post.get("content") or {}).get("doc") or {}, paywall_from(post))
     if post.get("format") == "blocks":
         return with_designs(list((post.get("content") or {}).get("blocks") or []))
     return [{"type": "text", "md": post.get("body") or "", "dropcap": False, "columns": 1}]
@@ -402,31 +414,98 @@ def _doc(b: dict, md_key: str, rt_key: str) -> dict:
 
 def render_story(site: dict, nav: list[dict], mag: dict, post: dict, assets: dict[str, dict], *,
                  more: list[dict], more_covers: dict[str, dict], origin: str, preview_blocks: int = 3,
-                 currency: Optional[str] = None, issue: Optional[dict] = None, edit: bool = False) -> str:
+                 currency: Optional[str] = None, issue: Optional[dict] = None, edit: bool = False,
+                 text_view: bool = False) -> str:
     """A story's page. `edit`: the owner's editor on the page (whole, marked,
-    with the editor's script; never cached or shown to a reader)."""
+    with the editor's script; never cached or shown to a reader). A paged
+    story is its pages (`render_paged_story`), or with `text_view` its words
+    and pictures as running text in the book."""
+    if post.get("format") == "pages" and not text_view and not edit:
+        return render_paged_story(site, nav, mag, post, assets, more=more, more_covers=more_covers, origin=origin,
+                                  currency=currency, issue=issue)
     paid = post.get("access") == "paid" and not edit
     article = story_article_html(post, assets, mag=mag, currency=currency, site_slug=site.get("slug"),
                                  preview_blocks=preview_blocks, issue=issue, edit=edit)
-    more_html = ""
-    if more:
-        cards = "".join(card_html(p, more_covers.get(_key(p))) for p in more)
-        more_html = (f'<section class="mz-more"><h2 class="mz-more__title">More from {escape(mag.get("name") or "")}'
-                     f'</h2><div class="mz-grid">{cards}</div></section>')
-    body = (_masthead(mag, small=True) + book_html(article, edit=edit) + (paywall_script() if paid else "")
+    more_html = _more(mag, more, more_covers)
+    views = ""
+    if text_view:
+        views = (f'<p class="mz-views mz-measure"><a href="{escape(story_path(post["slug"]), quote=True)}">'
+                 "See it as designed, page by page</a></p>")
+    body = (_masthead(mag, small=True) + views + book_html(article, edit=edit) + (paywall_script() if paid else "")
             + follow_html(mag, site.get("slug")) + more_html)
     _cover, cover_asset = story_cover(post, assets)
-    topic = post.get("topic")
     url = f"{origin}{story_path(post['slug'])}"
     image = share_image(cover_asset)
     extra = fonts_links(story_fonts(story_blocks(post))) + article_ld(post, mag, url=url, image=image, paid=paid)
-    if post.get("published_at"):
-        extra += f'<meta property="article:published_time" content="{escape(post["published_at"].isoformat(), quote=True)}" />'
-    if topic_label(topic):
-        extra += f'<meta property="article:section" content="{escape(topic_label(topic), quote=True)}" />'
-    extra += '<meta name="twitter:card" content="summary_large_image" />'
+    extra += _article_meta(post)
     return _page(site, nav, mag, body, origin=origin, extra_head=extra, preview=edit, seo={
         "title": f"{post.get('title')} — {mag.get('name')}", "description": post.get("excerpt") or "",
+        "image": image, "type": "article", "url": url,
+    })
+
+
+def _more(mag: dict, more: list[dict], more_covers: dict[str, dict]) -> str:
+    if not more:
+        return ""
+    cards = "".join(card_html(p, more_covers.get(_key(p))) for p in more)
+    return (f'<section class="mz-more"><h2 class="mz-more__title">More from {escape(mag.get("name") or "")}'
+            f'</h2><div class="mz-grid">{cards}</div></section>')
+
+
+def _article_meta(post: dict) -> str:
+    extra = ""
+    if post.get("published_at"):
+        extra += f'<meta property="article:published_time" content="{escape(post["published_at"].isoformat(), quote=True)}" />'
+    if topic_label(post.get("topic")):
+        extra += f'<meta property="article:section" content="{escape(topic_label(post["topic"]), quote=True)}" />'
+    return extra + '<meta name="twitter:card" content="summary_large_image" />'
+
+
+def render_paged_story(site: dict, nav: list[dict], mag: dict, post: dict, assets: dict[str, dict], *,
+                       more: list[dict], more_covers: dict[str, dict], origin: str,
+                       currency: Optional[str] = None, issue: Optional[dict] = None) -> str:
+    """A paged story's page: its pages exactly as designed, a spread at a
+    time (a page at a time on a phone, pinch to zoom), turned with the
+    arrows, the keys or a swipe (`studio/pages.js`), and a link to its Text
+    view. A paid story's locked pages are empty here; a subscriber's browser
+    fills them (`paywall.js`)."""
+    doc = post["content"]["doc"]
+    locked = paywall_from(post)
+    title = post.get("title") or ""
+    strip, used = studio_render.pages_html(doc, assets, locked_from=locked,
+                                           label=f"{title}. Use the left and right arrow keys to turn the pages.")
+    slug = escape(story_path(post["slug"]), quote=True)
+    kicker = post.get("kicker") or topic_label(post.get("topic"))
+    kicker_html = f'<p class="mz-kicker">{escape(kicker)}</p>' if kicker else ""
+    head = (f'<header class="lyt-head">{kicker_html}'
+            f'<h1 class="lyt-title">{escape(title)}</h1>{_meta(post)}'
+            f'<p class="lyt-views"><a href="{slug}/text">Text view</a></p></header>')
+    turn = ('<div class="lyt-nav"><button type="button" class="lyt-turn" data-lyt-prev aria-label="Previous page" '
+            'hidden>&#8249;</button><p class="lyt-folio" data-lyt-folio aria-live="polite"></p>'
+            '<button type="button" class="lyt-turn" data-lyt-next aria-label="Next page" hidden>&#8250;</button></div>')
+    paywall = (paywall_section(mag, post, currency=currency, site_slug=site.get("slug"), pages=True)
+               if locked else "")
+    from_issue = ""
+    if issue:
+        href = escape(f"/issues/{int(issue['number'])}#mz-s-{post['slug']}", quote=True)
+        from_issue = (f'<p class="mz-story__issue">From No. {int(issue["number"])} — '
+                      f'<a href="{href}">read it in the issue</a></p>')
+    topic = post.get("topic")
+    topic_link = (f'<p class="mz-story__topic"><a href="{topic_path(topic)}">{escape(topic_label(topic))}</a></p>'
+                  if topic_label(topic) else "")
+    body = (_masthead(mag, small=True)
+            + f'<article class="mz-paged">{head}{strip}{turn}</article>{paywall}{from_issue}{topic_link}'
+            + (paywall_script() if locked else "") + f"<script>{_PAGES_JS}</script>"
+            + follow_html(mag, site.get("slug")) + _more(mag, more, more_covers))
+    _cover, cover_asset = story_cover(post, assets)
+    url = f"{origin}{story_path(post['slug'])}"
+    image = share_image(cover_asset)
+    extra = (f"<style>{studio_render.faces_css(doc)}{studio_render.CSS}{_READER_CSS}</style>" + fonts_links(used)
+             + article_ld(post, mag, url=url, image=image, paid=bool(locked), paid_selector=".lyt-page--locked")
+             + f'<link rel="alternate" type="text/html" title="Text view" href="{slug}/text" />'
+             + _article_meta(post))
+    return _page(site, nav, mag, body, origin=origin, extra_head=extra, seo={
+        "title": f"{title} — {mag.get('name')}", "description": post.get("excerpt") or "",
         "image": image, "type": "article", "url": url,
     })
 

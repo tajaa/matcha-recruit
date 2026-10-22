@@ -734,6 +734,32 @@ async def story_page(story_slug: str, request: Request):
     return await _cached_magazine_page(request, f"story:{story_slug}", build)
 
 
+@router.get("/stories/{story_slug}/text", response_class=HTMLResponse)
+async def story_text_page(story_slug: str, request: Request):
+    """A paged story's Text view: its words and pictures as running text
+    (`studio/text_view.py`), for a phone, a screen reader or a quick read.
+    Any other story has no second view: its page."""
+    if len(story_slug) > 160 or not _STORY_SLUG.match(story_slug):
+        return _not_found_html("Story not found")
+
+    async def build(conn, site, magazine, host):
+        post = await mag_reader.live_story(conn, site["id"], slug=story_slug)
+        if post is None:
+            return None
+        if post.get("format") != "pages":
+            return RedirectResponse(f"/stories/{story_slug}", status_code=status.HTTP_308_PERMANENT_REDIRECT)
+        assets = await mag_reader.story_assets(conn, site["id"], post)
+        issue = await mag_issues.issue_for_story(conn, site["id"], post["id"])
+        nav = await _nav(conn, site["id"])
+        kinds = await policy_kinds(conn, site["id"])
+        return mag_pages.render_story(_site_dict(site, kinds, magazine), nav, magazine, post, assets, more=[],
+                                      more_covers={}, origin=_origin(site, host),
+                                      preview_blocks=preview_blocks(magazine), currency=site.get("currency"),
+                                      issue=issue, text_view=True)
+
+    return await _cached_magazine_page(request, f"story-text:{story_slug}", build)
+
+
 @router.get("/issues", response_class=HTMLResponse)
 async def issues_page(request: Request):
     """Every released issue, as its cover."""

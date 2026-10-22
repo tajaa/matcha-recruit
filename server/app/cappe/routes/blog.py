@@ -9,11 +9,16 @@ Two kinds of post share one table and one API:
   * a story (`format='blocks'`) keeps its words and pictures in `content`.
     Its `body` is derived from the blocks on every save so the app has
     something to show, and an app edit that changes `body` is refused (409):
-    writing plain text back would wipe the layout.
+    writing plain text back would wipe the layout;
+  * a paged story (`format='pages'`) is made here with its first pages and
+    designed in the Studio, which saves its document (`routes/studio.py`).
+    Here it changes only what isn't on its pages: title, status, topic,
+    access and the like.
 
 Every write drops the site's rendered pages from the cache.
 """
 import json
+import re
 from datetime import datetime, timezone
 from typing import Any, Optional
 from uuid import UUID
@@ -52,6 +57,7 @@ from ..services.magazine.story_schema import (
     referenced_asset_ids,
     starter_content,
 )
+from ..services.magazine.studio.schema import DocError, normalize_doc, starter_doc
 from ..services.magazine.topics import TOPICS, normalize_topic
 from ._shared import get_owned_site, slugify, unique_site_slug
 from .render import _nav, _site_dict, invalidate_render_cache, tenant_security_headers
@@ -59,6 +65,7 @@ from .render import _nav, _site_dict, invalidate_render_cache, tenant_security_h
 router = APIRouter()
 
 EDIT_ON_WEB = "This story has a magazine layout. Edit it on the web at gummfit.com."
+EDIT_IN_STUDIO = "This story is made of pages. Change them in the Studio."
 
 
 def _out(row, *, documents: bool = True) -> dict[str, Any]:
@@ -69,6 +76,8 @@ def _out(row, *, documents: bool = True) -> dict[str, Any]:
     d["hidden"] = d.pop("hidden_at", None) is not None
     if documents and d.get("format") == "blocks":
         d["content"] = with_documents(d["content"])
+    if not documents and d.get("format") == "pages":
+        d["content"] = None  # a document of pages is the Studio's to open, not the list's
     return d
 
 
@@ -120,6 +129,30 @@ async def _story_fields(conn, site_id: UUID, content: dict, cover_asset_id: Opti
     }
 
 
+async def pages_fields(conn, site_id: UUID, raw_doc: Any) -> dict[str, Any]:
+    """What a paged story's document decides: the stored document, the text
+    the app and the feed read (its Text view), the reading time and its cover
+    picture (the biggest on its first page)."""
+    try:
+        doc = normalize_doc(raw_doc)
+        content = {"doc": doc}
+        assets = await check_assets(conn, site_id, content, None)
+    except (DocError, StoryError) as exc:
+        raise _unprocessable(str(exc)) from exc
+    text = story_text(content)
+    words, minutes = reading_stats(text)
+    cover_id = cover_asset(content, None)
+    return {
+        "content": content,
+        "body": text,
+        "word_count": words,
+        "reading_minutes": minutes,
+        "cover_asset_id": cover_id,
+        "cover_image_url": assets[cover_id]["url"] if cover_id else None,
+        "_asset_ids": referenced_asset_ids(content),
+    }
+
+
 def _markdown_stats(body: Optional[str]) -> dict[str, Any]:
     words, minutes = reading_stats(md_to_text(body))
     return {"word_count": words, "reading_minutes": minutes}
@@ -142,12 +175,15 @@ async def create_post(
 ):
     topic = _topic(body.topic)
     layout = normalize_layout(body.layout)
-    is_story = body.format == "blocks" or body.content is not None
+    paged = body.format == "pages"
+    is_story = paged or body.format == "blocks" or body.content is not None
     published_clause = "NOW()" if body.status == "published" else "NULL"
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
         await _check_paid(conn, site_id, body.access)
-        if is_story:
+        if paged:
+            derived = await pages_fields(conn, site_id, (body.content or {}).get("doc") or starter_doc())
+        elif is_story:
             derived = await _story_fields(conn, site_id, body.content or starter_content(layout),
                                           body.cover_asset_id)
         else:
@@ -166,9 +202,9 @@ async def create_post(
                             $8, $9::jsonb, $10, $11, $12, $17, $13, $14, $15, $16)
                     RETURNING {POST_COLS}""",
                 site_id, body.title, slug, body.excerpt, derived["body"], derived["cover_image_url"], body.status,
-                "blocks" if is_story else "markdown", json.dumps(derived["content"]), body.kicker, topic, layout,
-                body.cover_asset_id, body.byline, derived["word_count"], derived["reading_minutes"],
-                body.access or "free",
+                "pages" if paged else "blocks" if is_story else "markdown", json.dumps(derived["content"]),
+                body.kicker, topic, layout, derived.get("cover_asset_id", body.cover_asset_id), body.byline,
+                derived["word_count"], derived["reading_minutes"], body.access or "free",
             )
             if is_story:
                 await sync_post_assets(conn, row["id"], site_id, derived["_asset_ids"])
@@ -189,6 +225,8 @@ async def get_post(site_id: UUID, post_id: UUID, account: CappeAccount = Depends
 
 
 _SIMPLE = ("title", "excerpt", "status", "kicker", "byline")
+# The address a story is made with ("Untitled story" → untitled-story-3).
+_PLACEHOLDER_SLUG = re.compile(r"untitled(-story)?(-\d+)?")
 _NULLABLE = {"excerpt", "kicker", "byline", "topic", "cover_asset_id", "cover_image_url", "body"}
 
 
@@ -210,10 +248,17 @@ async def update_post(
             if current is None:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
             current = post_row(current)
-            is_story = current["format"] == "blocks" or body.format == "blocks" or "content" in sent
+            paged = current["format"] == "pages"
+            if paged and (sent & {"content", "cover_asset_id", "cover_image_url"}
+                          or ("format" in sent and body.format != "pages")):
+                raise _unprocessable(EDIT_IN_STUDIO)
+            if not paged and body.format == "pages":
+                raise _unprocessable("A story can't become pages here. Make a new story in the Studio.")
+            is_story = not paged and (current["format"] == "blocks" or body.format == "blocks" or "content" in sent)
             if current["format"] == "blocks" and body.format == "markdown":
                 raise _unprocessable("A story can't go back to plain text.")
-            if current["format"] == "blocks" and "body" in sent and (body.body or "") != (current["body"] or ""):
+            if current["format"] in ("blocks", "pages") and "body" in sent \
+                    and (body.body or "") != (current["body"] or ""):
                 raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=EDIT_ON_WEB)
 
             values: dict[str, Any] = {col: getattr(body, col) for col in _SIMPLE if col in sent}
@@ -244,7 +289,7 @@ async def update_post(
                                   word_count=derived["word_count"], reading_minutes=derived["reading_minutes"],
                                   cover_image_url=derived["cover_image_url"])
                     await sync_post_assets(conn, post_id, site_id, derived["_asset_ids"])
-            else:
+            elif not paged:
                 if "cover_asset_id" in sent and body.cover_asset_id:
                     raise _unprocessable("Only a story has a cover from the library.")
                 if "body" in sent:
@@ -254,6 +299,14 @@ async def update_post(
                     values["cover_image_url"] = body.cover_image_url
             if body.slug is not None:
                 values["slug"] = slugify(body.slug)
+            elif body.status == "published" and current["published_at"] is None \
+                    and _PLACEHOLDER_SLUG.fullmatch(current["slug"] or ""):
+                # Going out for the first time still at its placeholder address:
+                # take one from the headline (never changed once published).
+                title = values.get("title", current["title"]) or ""
+                base = slugify(title)
+                if re.search(r"[a-z0-9]", title.lower()) and not _PLACEHOLDER_SLUG.fullmatch(base):
+                    values["slug"] = await unique_site_slug(conn, "cappe_posts", site_id, base)
 
             if not values:
                 return _out(current)
@@ -312,13 +365,14 @@ async def preview_story(site_id: UUID, body: CappeStoryPreview,
     the story editor's preview frame, or with `edit` its page to edit on (the
     whole story, marked, with the editor's script). No persistence, never
     cached."""
+    paged = body.format == "pages"
     async with get_connection() as conn:
         site = await get_owned_site(conn, site_id, account.id)
         try:
-            content = normalize_story(body.content)
+            content = {"doc": normalize_doc(body.content.get("doc"))} if paged else normalize_story(body.content)
             assets = await check_assets(conn, site_id, content,
                                         str(body.cover_asset_id) if body.cover_asset_id else None)
-        except StoryError as exc:
+        except (StoryError, DocError) as exc:
             raise _unprocessable(str(exc)) from exc
         magazine = await get_magazine(conn, site_id) or {"name": site["name"], "masthead_style": "classic"}
         nav = await _nav(conn, site_id)
@@ -329,7 +383,7 @@ async def preview_story(site_id: UUID, body: CappeStoryPreview,
         "id": "preview", "slug": "preview", "title": body.title or ("" if body.edit else "Untitled story"),
         "excerpt": body.excerpt,
         "kicker": body.kicker, "topic": normalize_topic(body.topic), "layout": normalize_layout(body.layout),
-        "byline": body.byline, "access": body.access, "format": "blocks", "content": content,
+        "byline": body.byline, "access": body.access, "format": "pages" if paged else "blocks", "content": content,
         "cover_asset_id": body.cover_asset_id, "reading_minutes": minutes,
         "published_at": datetime.now(timezone.utc), "updated_at": None,
     }

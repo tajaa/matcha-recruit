@@ -1,12 +1,16 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { BookOpen, EyeOff, Loader2, Newspaper, Plus, Settings2 } from 'lucide-react'
+import { BookOpen, EyeOff, LayoutTemplate, Loader2, Newspaper, Plus, Settings2 } from 'lucide-react'
 import { cappeApi } from '../../api'
 import SurfaceShell from '../../components/SurfaceShell'
 import { statusBadge, ui } from '../../components/ui'
 import type { CappeMagazine, CappePost, CappeStoryOptions } from '../../types'
 
 type Status = 'all' | 'draft' | 'published' | 'archived'
+
+/** Where a story is edited: a paged one in the Studio, the rest in the story editor. */
+const storyPath = (siteId: string, p: Pick<CappePost, 'id' | 'format'>) =>
+  p.format === 'pages' ? `/cappe/studio/${siteId}/story/${p.id}` : `/cappe/sites/${siteId}/stories/${p.id}`
 
 /** `sites/:siteId/stories` — the magazine's stories as a wall of covers,
  *  with the magazine's own switch and a link to its settings. */
@@ -19,7 +23,7 @@ export default function Stories() {
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<Status>('all')
   const [topic, setTopic] = useState('')
-  const [creating, setCreating] = useState(false)
+  const [creating, setCreating] = useState<'pages' | 'blocks' | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -39,17 +43,18 @@ export default function Stories() {
   const shown = (posts || []).filter((p) => (status === 'all' || p.status === status) && (!topic || p.topic === topic))
   const usedTopics = Array.from(new Set((posts || []).map((p) => p.topic).filter((t): t is string => !!t)))
 
-  const startStory = async () => {
-    setCreating(true)
+  /** A story designed as pages in the Studio, or one that flows (the classic editor). */
+  const startStory = async (format: 'pages' | 'blocks') => {
+    setCreating(format)
     setError(null)
     try {
-      const created = await cappeApi.post<CappePost>(`/sites/${siteId}/posts`, {
-        title: 'Untitled story', format: 'blocks', layout: 'standard',
-      })
-      navigate(`/cappe/sites/${siteId}/stories/${created.id}`)
+      const created = await cappeApi.post<CappePost>(`/sites/${siteId}/posts`, format === 'pages'
+        ? { title: 'Untitled story', format: 'pages' }
+        : { title: 'Untitled story', format: 'blocks', layout: 'standard' })
+      navigate(storyPath(siteId!, created))
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not start a story')
-      setCreating(false)
+      setCreating(null)
     }
   }
 
@@ -61,8 +66,13 @@ export default function Stories() {
         <div className="flex gap-2">
           <Link to={`/cappe/sites/${siteId}/magazine/view`} className={ui.btnGhost}><BookOpen className="h-4 w-4" /> View as a reader</Link>
           <Link to={`/cappe/sites/${siteId}/magazine`} className={ui.btnGhost}><Settings2 className="h-4 w-4" /> Magazine settings</Link>
-          <button type="button" onClick={startStory} disabled={creating} className={ui.btnPrimary}>
-            {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} New story
+          <button type="button" onClick={() => startStory('blocks')} disabled={!!creating} className={ui.btnGhost}
+            title="A story that flows: blocks of words and pictures, laid out for you">
+            {creating === 'blocks' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Flowing story
+          </button>
+          <button type="button" onClick={() => startStory('pages')} disabled={!!creating} className={ui.btnPrimary}
+            title="Design every page in Gummfit Studio: frames, columns, type, pictures">
+            {creating === 'pages' ? <Loader2 className="h-4 w-4 animate-spin" /> : <LayoutTemplate className="h-4 w-4" />} New story in Studio
           </button>
         </div>
       }
@@ -100,7 +110,7 @@ export default function Stories() {
         <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
           {shown.map((p) => (
             <li key={p.id}>
-              <Link to={`/cappe/sites/${siteId}/stories/${p.id}`} className={`${ui.cardHover} block overflow-hidden`}>
+              <Link to={storyPath(siteId!, p)} className={`${ui.cardHover} block overflow-hidden`}>
                 <div className="relative aspect-[4/5] bg-zinc-950">
                   {p.cover_image_url
                     ? <img src={p.cover_image_url} alt="" loading="lazy" className="h-full w-full object-cover" />
@@ -118,7 +128,7 @@ export default function Stories() {
                   )}
                   <h2 className="mt-0.5 line-clamp-2 font-medium text-zinc-100">{p.title}</h2>
                   <p className="mt-1 text-xs text-zinc-500">
-                    {p.format === 'markdown' ? 'Plain post' : `${p.reading_minutes || 0} min read`}
+                    {p.format === 'markdown' ? 'Plain post' : `${p.format === 'pages' ? 'Pages · ' : ''}${p.reading_minutes || 0} min read`}
                   </p>
                 </div>
               </Link>

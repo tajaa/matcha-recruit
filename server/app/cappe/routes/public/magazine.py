@@ -42,6 +42,8 @@ from ...services.magazine.access import has_paid_access, reader_status
 from ...services.magazine.magazines import live_magazine, preview_blocks
 from ...services.magazine.pages import story_blocks
 from ...services.magazine.story_render import render_blocks, split_at_paywall
+from ...services.magazine.studio.render import locked_pages
+from ...services.magazine.studio.schema import paywall_from
 from ._body_limit import limited_public_router
 from ._common import _read_rate_limit, _reject_reserved
 
@@ -131,7 +133,13 @@ async def paid_part(slug: str, story_slug: str, context=Depends(require_shopper_
                 "code": "subscribe", "message": "This story is for subscribers."})
         assets = await mag_reader.story_assets(conn, site["id"], post)
     _free, rest = split_at_paywall(story_blocks(post), preview_blocks=preview_blocks(mag))
-    return JSONResponse({"html": render_blocks(rest, assets, dropcap=False)}, headers=_PRIVATE)
+    out: dict = {"html": render_blocks(rest, assets, dropcap=False)}
+    start = paywall_from(post) if post.get("format") == "pages" else None
+    if start:
+        # A paged story's locked pages, each as its items (the page fills its
+        # empty pages), beside the rest of its Text view.
+        out["pages"] = locked_pages(post["content"]["doc"], assets, start)
+    return JSONResponse(out, headers=_PRIVATE)
 
 
 @router.post("/public/sites/{slug}/magazine/checkout", status_code=status.HTTP_201_CREATED)

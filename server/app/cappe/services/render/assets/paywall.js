@@ -6,7 +6,8 @@
 // only the short-lived access token is kept here, in memory, as on /account
 // (account.js) — then fills each wall's empty .mz-paid box with that story's
 // paid part for a subscriber (GET .../stories/<slug>/paid, never cached), or
-// starts their subscription (POST .../magazine/checkout → Stripe).
+// starts their subscription (POST .../magazine/checkout → Stripe). A paged
+// story's subscriber pages arrive the same way, each filling its empty page.
 var RT=window.__CAPPE_RT__,els=document.querySelectorAll('[data-mz-paywall]');
 if(!RT||!els.length||!RT.slug||RT.preview)return;
 var walls=[];
@@ -77,8 +78,11 @@ var here=location.origin+location.pathname,at=document.getElementById('mz-s-'+w.
 call('POST','/magazine/checkout',{success_url:here+'?subscribed=1'+at,cancel_url:here+at})
 .then(function(r){location.assign(r.checkout_url);})
 .catch(function(err){say(w,err.message,true);member();});}
+// A paged story's wall (data-mz-pages) fills its empty locked pages instead.
 function fill(w){return call('GET','/stories/'+encodeURIComponent(w.slug)+'/paid').then(function(d){
-if(w.paid){w.paid.innerHTML=d.html;w.paid.hidden=false;}w.el.hidden=true;return null;},function(err){return err;});}
+if(w.el.hasAttribute('data-mz-pages')&&d.pages){d.pages.forEach(function(p){var box=document.querySelector('[data-lyt-lock="'+(+p.n)+'"]');
+if(!box)return;box.innerHTML=p.html;box.className='lyt-page';box.removeAttribute('data-lyt-lock');box.setAttribute('data-lyt-page',+p.n);});}
+else if(w.paid){w.paid.innerHTML=d.html;w.paid.hidden=false;}w.el.hidden=true;return null;},function(err){return err;});}
 // Each paid part for a subscriber; otherwise what the reader can do. Back
 // from checkout, the subscription arrives by webhook a few seconds later.
 // `from`: the wall whose "Subscribe" signed the reader in.

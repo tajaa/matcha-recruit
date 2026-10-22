@@ -107,6 +107,22 @@ Website-builder frontend for the consumer brand **Gummfit**, host-routed on gumm
   back past a save. `EditFrame` drops a render that was loading when words were typed (it predates them)
   and numbers renders with a counter that never repeats. Field lengths are cut by whole characters
   (`fields.clip`), never half an emoji.
+- `studio/` — **Gummfit Studio** (2026-10-22), the design application for stories made of pages, full
+  screen at `/cappe/studio/:siteId/story/:postId` (outside `CappeLayout`; the classic `StoryEditor` hands a
+  paged story to it). Server spec: `server/app/cappe/CLAUDE.md` §Gummfit Studio. Its core is plain
+  TypeScript: `model/` (the document's types, `ops.ts` pure operations, `units.ts`, `limits.ts` mirroring the
+  server), `compose/` (HarfBuzz `shaper.ts` + the greedy `compose.ts`; every edit composes again in
+  `store/store.ts`, so a stored document is always set as shown), `render/layoutRender.ts` (byte-equal to the
+  server's renderer; `render/sink.ts` is the **only** place allowed `innerHTML` — eslint bars it everywhere
+  else in `studio/`), `text/` (a hidden ProseMirror owns typing; `caret.ts` draws the caret and selection
+  from the composed lines; arrows, Home/End and the ⌘-arrows move by the composed lines, and in the Story
+  Editor by the browser's), `canvas/` (pasteboard, rulers, guides, handles, `usePointer.ts` for every tool;
+  the board has half a view of slack around it so any page can be centred: convert with
+  `geometry.boardOffset`). React panels read the store with `useStudio` (useSyncExternalStore); a drag never
+  renders React. Panel fields must `preventDefault` Enter: applying type hands focus back to the text, and
+  an Enter let through would replace the selection. The Studio is always dark (`ui/studio.css` puts
+  Tailwind's own zinc ramp back inside `.studio-dark`, whatever the dashboard theme). Fonts: `fonts/faces.ts`
+  (the manifest), `fonts/loader.ts` (FontFace from the same bytes HarfBuzz measures).
 
 ## Backend pairing
 

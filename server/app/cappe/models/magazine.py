@@ -94,6 +94,8 @@ class CappeStoryPreview(BaseModel):
     byline: Optional[str] = Field(default=None, max_length=160)
     cover_asset_id: Optional[UUID] = None
     access: Literal["free", "paid"] = "free"
+    # `pages`: a paged story, `content = {"doc": ...}` (the Studio's "Preview").
+    format: Literal["blocks", "pages"] = "blocks"
     content: dict[str, Any] = Field(default_factory=dict)
     # The owner's editor on the page: the story whole, marked for editing,
     # with the editor's script (services/magazine/story_render.py).

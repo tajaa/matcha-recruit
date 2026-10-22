@@ -20,4 +20,19 @@ export default defineConfig([
       globals: globals.browser,
     },
   },
+  {
+    // Gummfit Studio draws pages into the dashboard itself (no frame): its one
+    // HTML write is render/sink.ts, fed only by the page renderer.
+    files: ['src/cappe/studio/**/*.{ts,tsx}'],
+    ignores: ['src/cappe/studio/render/sink.ts', 'src/cappe/studio/**/*.test.{ts,tsx}'],
+    rules: {
+      'no-restricted-properties': ['error',
+        { property: 'innerHTML', message: 'Write HTML only through studio/render/sink.ts.' },
+        { property: 'outerHTML', message: 'Write HTML only through studio/render/sink.ts.' },
+        { property: 'insertAdjacentHTML', message: 'Write HTML only through studio/render/sink.ts.' }],
+      'no-restricted-syntax': ['error',
+        { selector: "JSXAttribute[name.name='dangerouslySetInnerHTML']",
+          message: 'Write HTML only through studio/render/sink.ts.' }],
+    },
+  },
 ])

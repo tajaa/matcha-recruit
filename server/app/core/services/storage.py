@@ -210,6 +210,41 @@ class StorageService:
         with open(local_path, "rb") as f:
             return f.read()
 
+    def _fixed_local_path(self, key: str) -> str:
+        if not key or key.startswith("/") or ".." in key.split("/"):
+            raise RuntimeError("Unsupported storage key")
+        return self._resolve_local_upload_path(os.path.join(self.uploads_root, key))
+
+    async def put_key(self, key: str, data: bytes, content_type: str) -> None:
+        """Store bytes at a fixed key (not a generated one) in the public
+        bucket, or under app/uploads/<key> when S3 isn't set up. For content
+        addressed by its own hash, which never changes once written."""
+        if self.s3_client and self.bucket:
+            await asyncio.to_thread(
+                self.s3_client.put_object, Bucket=self.bucket, Key=key, Body=data,
+                ServerSideEncryption="AES256", ContentType=content_type,
+            )
+            return
+        path = self._fixed_local_path(key)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as f:
+            f.write(data)
+
+    async def get_key(self, key: str) -> Optional[bytes]:
+        """The bytes at a fixed key (`put_key`), or None when there are none."""
+        if self.s3_client and self.bucket:
+            def _read() -> Optional[bytes]:
+                try:
+                    return self.s3_client.get_object(Bucket=self.bucket, Key=key)["Body"].read()
+                except ClientError:
+                    return None
+            return await asyncio.to_thread(_read)
+        path = self._fixed_local_path(key)
+        if not os.path.isfile(path):
+            return None
+        with open(path, "rb") as f:
+            return f.read()
+
     async def inline_image_data_uri(self, src: Optional[str]) -> Optional[str]:
         """Return a base64 `data:` URI for a storage-owned image, else None.
 

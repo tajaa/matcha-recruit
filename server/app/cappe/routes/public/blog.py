@@ -2,7 +2,8 @@
 
 Only live posts (published and not hidden by an admin). A paid story's body
 and blocks are never returned here: its words are for subscribers, and this
-endpoint is anonymous.
+endpoint is anonymous. A paged story's document isn't either: its words are
+its `body` (its Text view, when free) and its pages are on the site.
 """
 from fastapi import HTTPException, Request, status
 
@@ -24,6 +25,8 @@ def _public(row) -> dict:
     if d.get("access") == "paid":
         d["body"] = None
         d["content"] = None
+    if d.get("format") == "pages":
+        d["content"] = None  # its pages are read on the site; its words are `body`
     return d
 
 

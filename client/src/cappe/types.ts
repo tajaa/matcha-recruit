@@ -1068,7 +1068,7 @@ export type CappePost = {
   updated_at: string
   // A post is also a magazine story (cappemag02): `blocks` keeps its words and
   // pictures in `content`; `markdown` is a plain post (the iOS app's).
-  format: 'markdown' | 'blocks'
+  format: 'markdown' | 'blocks' | 'pages'
   content: StoryContent | null
   kicker: string | null
   topic: string | null
