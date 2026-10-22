@@ -427,7 +427,8 @@ What is built so far:
   `pending_confirmation` row with `source='follow'`, confirmed by the existing confirmation worker and
   page (worded as the reader's own ask). It never touches a `subscribed` or `bounced` row, the answer is
   always the same 202, and an address gets at most three confirmation emails a day per magazine.
-- **An issue is a campaign** (`cappe_campaigns.kind='issue'`, `routes/magazine_issues.py`): a published
+- **An emailed "issue" is a campaign** (`cappe_campaigns.kind='issue'`, `routes/magazine_emails.py`, the
+  owner's "Emails" page; not an issue in print, below): a published
   story emailed to followers from our template (`services/magazine/issue_email.py`: tables and inline
   styles, the 1200 px JPEG for pictures, credits from the library row, "AI illustration" for AI). A paid
   story only ever sends its opening. A story goes out once. Newsletters and issues share one send budget
@@ -476,6 +477,34 @@ What is built so far:
   paywall marker prints nothing), cut at the paywall otherwise; `no-store, private`. The shelf keeps a
   magazine that is down so its reader can still cancel; resume needs one still taking subscribers. The
   paywall on the magazine's own page links to the dashboard (`pages.reader_path`, `data-mz-alt`).
+- **An issue in print is one numbered book** (`cappemag07`: `cappe_magazine_issues`,
+  `cappe_magazine_issue_stories`, `cappe_magazine_issue_assets`; `services/magazine/issues.py`,
+  owner API `routes/issues.py` at `/sites/{id}/magazine/issues…`). It holds stories in order, each with a
+  section and contents line, and **a story is in at most one issue** (`post_id` UNIQUE). Its `cover` and
+  `contents` are designs checked and reshaped by `issue_schema.normalize_cover`/`normalize_contents` (as
+  `normalize_story` treats a story): a 4:5 artboard, positions in percent and type sizes in `cqw`, ≤8 cover
+  lines, a picture only as a library `asset_id` (recorded in `cappe_magazine_issue_assets`, so the library
+  refuses to delete it), and a cover line may link only to a story in the issue. The client mirror of the
+  lists is `client/src/cappe/magazine/issues/coverVocab.ts` (a server test reads it).
+  **Releasing publishes the issue's draft stories in the same transaction**; a released issue stays
+  editable, every save goes live, and a draft added to it is published by the save (the editor's button
+  says so). Withdrawing takes it back to a draft and leaves its stories up. Release needs a live magazine
+  and at least one story. Readers reach a released issue without `hidden_at`, and in it only live stories.
+- **Its pages** (`services/magazine/issue_render.py` for the cover and contents, `issue_pages.py` for
+  the pages; `render/assets/issue.css`): `/issues/{n}` is the whole issue as one book: the cover alone on
+  the right of the first spread (a closed magazine; the spread is clipped to its right half until the first
+  turn), the contents, then every story from a new page with its own opener and, when paid, its own
+  paywall. The cover's face is drawn over its page from outside the flowing columns (`.mz-issue__face`, a
+  child of `.mz-pages`, not of the measured `[data-mz-flow]`), so it bleeds to the paper's edges and is
+  never split across pages. `book.js` (and `reader/book.ts` for our frames) calls the first spread
+  "Cover", doesn't count the mat page (`data-mz-skip`), fills the contents' page numbers
+  (`[data-mz-pageno]`) from where each story starts, and turns to a story from its contents entry, a cover
+  line or a `#mz-s-<slug>` link in. **One paywall script serves every paid story on a page** (each wall
+  `[data-mz-paywall]` fills the `[data-mz-paid]` box after it from the per-story `/paid`; the single-story
+  page keeps `id="mz-paywall"`), so the paid part of every story stays out of the issue's HTML and cache.
+  `/issues` is the archive of covers; the front page leads with the newest released issue (its stories
+  stay in the list below), a story in one links "From No. 3 — read it in the issue", and the sitemap lists
+  them. Cached as `__mag__:issue:{n}` and `__mag__:issues:{page}`; every owner write invalidates.
 
 ## Social growth (2026-10, `services/social/`, migrations `cappesocial01`–`03`)
 

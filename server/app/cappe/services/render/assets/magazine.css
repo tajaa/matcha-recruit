@@ -141,6 +141,8 @@
 .mz-qa__q{margin:0 0 .45rem;font-weight:700;font-family:var(--mz-h);font-size:1.2rem}
 .mz-divider{width:4rem;margin:3rem auto;border:0;border-top:2px solid var(--mz-accent)}
 .mz-story__topic{max-width:var(--mz-measure);margin:3rem auto 0;padding:1.5rem 1.25rem 0;border-top:1px solid var(--line);font-size:.75rem;letter-spacing:.16em;text-transform:uppercase}
+.mz-story__issue{max-width:var(--mz-measure);margin:1.5rem auto 0;padding:0 1.25rem;font-size:.95rem;color:var(--muted)}
+.mz-story__issue a{color:var(--ink);font-weight:600}
 .mz-paywall{margin-top:2rem;padding:2rem 1.25rem;text-align:center;border-top:1px solid var(--line);color:var(--muted)}
 .mz-paywall__lede{margin:0;font-family:var(--mz-h);font-size:1.35rem;color:inherit}
 .mz-paywall__pitch{margin:.75rem auto 0;max-width:32rem}
@@ -224,7 +226,7 @@
 .mz-book .mz-story__body{font-size:1.05rem;line-height:1.62;hyphens:auto}
 /* On a page, everything takes the page's measure. */
 .mz-book .mz-measure,.mz-book .mz-fig--column,.mz-book .mz-fig--wide,.mz-book .mz-cover__words,.mz-book .mz-cover--stacked .mz-cover__media,
-.mz-book .mz-cover__credit,.mz-book .mz-story__topic,.mz-book .mz-paywall,.mz-book .mz-text--cols{max-width:none;padding-left:0;padding-right:0;margin-left:0;margin-right:0}
+.mz-book .mz-cover__credit,.mz-book .mz-story__topic,.mz-book .mz-story__issue,.mz-book .mz-paywall,.mz-book .mz-text--cols{max-width:none;padding-left:0;padding-right:0;margin-left:0;margin-right:0}
 .mz-book .mz-fig,.mz-book .mz-pull,.mz-book .mz-sidebar,.mz-book .mz-qa__item,.mz-book .mz-photos,.mz-book .mz-cover,.mz-book .mz-paywall{break-inside:avoid}
 /* Each page is already a column: text the writer set in columns runs in one
    here (columns nested in the pages break across a page in Safari). */

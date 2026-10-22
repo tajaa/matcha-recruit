@@ -33,8 +33,18 @@ Website-builder frontend for the consumer brand **Gummfit**, host-routed on gumm
   Writers (`account_type='writer'`): `writers/WritersLanding.tsx` at `/cappe/magazines/start`,
   `CappeSignup writerOnly` / `CappeLogin writerOnly` at `/cappe/magazines/signup|login`,
   `writers/WriterHome.tsx` (`/cappe/writer`: their stories, or `onboarding/MagazineOnboarding.tsx`
-  at `/cappe/writer/new`), `issues/Issues.tsx` (`sites/:siteId/issues`). `CappeSidebar` gives a
-  writer the magazine's nav (Stories, Library, Followers = the Subscribers page, Issues, settings).
+  at `/cappe/writer/new`), `emails/Emails.tsx` (`sites/:siteId/emails`: a story emailed to followers;
+  its API still says "issues"). `CappeSidebar` gives a writer the magazine's nav (Stories, Issues,
+  Library, Followers = the Subscribers page, Emails, settings); a business site gets Issues beside Magazine.
+  Issues in print (cappemag07): `issues/IssuesPage.tsx` (`sites/:siteId/issues`, the wall) and
+  `issues/IssueEditor.tsx` (`…/issues/:issueId`): one undoable document (`issues/issueDoc.ts`) with
+  Stories / Cover / Contents tabs (`IssueStories.tsx` + `StoryPicker.tsx`, `CoverPanel.tsx`,
+  `ContentsPanel.tsx`) and the whole issue previewed in `reader/BookFrame.tsx` (its `spread` prop turns to
+  the cover or the contents with the tab). `issues/coverVocab.ts` mirrors the server's cover lists and
+  limits (pinned by a server test); `issueDoc.fitMasthead` mirrors `issue_schema.fit_masthead`.
+  `editor/PictureSlot.tsx` is the library-picture field the story and cover editors share. In a frame a
+  contents entry can't be heard, so `prepareFrame` turns each `#mz-s-` link into a label for a hidden
+  radio that `wireBook` watches.
   Where an account lands after auth is one function: `utils/postAuthHome.ts`.
   Paid readers (cappemag05): the paid section of `settings/MagazineSettings.tsx` (price typed in dollars,
   `settings/price.ts`), "Who can read it" in the story editor (a Paywall block is offered once a story is

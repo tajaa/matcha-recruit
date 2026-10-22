@@ -3,7 +3,7 @@ import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import {
   LayoutGrid, LayoutTemplate, LogOut, Globe, ArrowLeft, FileText, ShoppingBag,
   Receipt, Calendar, MessageSquare, Users, Mail, Inbox, Newspaper, UserCircle, Star, MapPin,
-  Handshake, Wallet, Compass, CreditCard, Landmark, Images, Send, Settings2, Megaphone,
+  Handshake, Wallet, Compass, CreditCard, Landmark, Images, Send, Settings2, BookOpen, Megaphone,
 } from 'lucide-react'
 import { cappeApi, clearCappeTokens } from '../api'
 import { invalidateCappeMeCache } from '../hooks/useCappeMe'
@@ -58,15 +58,17 @@ const SITE_NAV: { to: string; label: string; icon: typeof Globe; end?: boolean }
   { to: 'forms', label: 'Forms', icon: Inbox },
   { to: 'reviews', label: 'Reviews', icon: Star },
   { to: 'stories', label: 'Magazine', icon: Newspaper },
+  { to: 'issues', label: 'Issues', icon: BookOpen },
   { to: 'library', label: 'Library', icon: Images },
 ]
 
 // A writer's account is one magazine: its nav is the magazine, not a site's shop.
 const WRITER_SITE_NAV: typeof SITE_NAV = [
   { to: 'stories', label: 'Stories', icon: Newspaper },
+  { to: 'issues', label: 'Issues', icon: BookOpen },
   { to: 'library', label: 'Library', icon: Images },
   { to: 'subscribers', label: 'Followers', icon: Users },
-  { to: 'issues', label: 'Issues', icon: Send },
+  { to: 'emails', label: 'Emails', icon: Send },
   { to: 'readers', label: 'Readers', icon: UserCircle },
   { to: 'earnings', label: 'Earnings', icon: Landmark },
   { to: 'magazine', label: 'Magazine settings', icon: Settings2 },

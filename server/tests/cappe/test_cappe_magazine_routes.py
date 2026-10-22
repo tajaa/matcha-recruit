@@ -109,9 +109,11 @@ def _render_conn(*, magazine=MAG_ROW, plan="business", stories=None, story=None,
             "AND slug = $2 AND status = 'published' AND hidden_at IS NULL": story,
             "AND id = $2 AND status = 'published' AND hidden_at IS NULL": None,
             "SELECT title, slug, content FROM cappe_pages": {"title": "Home", "slug": "home", "content": "{}"},
+            "FROM cappe_magazine_issue": None,
         },
         fetchval={"SELECT plan FROM cappe_accounts": plan},
         fetch={
+            "FROM cappe_magazine_issue": [],
             "FROM cappe_posts WHERE site_id = $1 AND status = 'published' AND hidden_at IS NULL": stories,
             "SELECT DISTINCT topic": topics if topics is not None else [{"topic": "city"}],
             "FROM cappe_assets WHERE site_id = $1 AND id = ANY": [ASSET_ROW],
@@ -593,7 +595,7 @@ def test_a_story_taking_the_picture_mid_delete_is_a_409_not_a_500(monkeypatch):
         raise ForeignKeyViolationError("cappe_post_assets_asset_id_fkey")
 
     conn = Conn(fetchrow={"FROM cappe_sites": SITE_ROW},
-                fetch={"JOIN cappe_posts p ON p.id = pa.post_id": []},
+                fetch={"JOIN cappe_posts p ON p.id = pa.post_id": [], "FROM cappe_magazine_issue_assets": []},
                 execute={"DELETE FROM cappe_assets": raced})
     monkeypatch.setattr(uploads_mod, "get_connection", lambda: Ctx(conn))
     with route_client(uploads_mod.router, overrides={uploads_mod.require_cappe_account: ACCOUNT}) as client:
@@ -668,6 +670,7 @@ def test_the_front_never_shows_a_story_on_two_pages(monkeypatch, cover_post_id):
     seen = {}
     monkeypatch.setattr(render_mod.mag_reader, "live_stories", live_stories)
     monkeypatch.setattr(render_mod.mag_reader, "live_story", nothing)
+    monkeypatch.setattr(render_mod.mag_issues, "current_issue", nothing)
     monkeypatch.setattr(render_mod.mag_reader, "covers", AsyncMock(return_value={}))
     monkeypatch.setattr(render_mod.mag_reader, "topics_in_use", empty)
     monkeypatch.setattr(render_mod, "_nav", empty)
@@ -683,3 +686,40 @@ def test_the_front_never_shows_a_story_on_two_pages(monkeypatch, cover_post_id):
     assert seen[1]["lead"] == {"id": 0} and seen[2]["lead"] is None
     shown = [s["id"] for s in seen[1]["posts"]] + [s["id"] for s in seen[2]["posts"]]
     assert shown == list(range(1, 25))
+
+
+def test_when_an_issue_leads_the_front_no_story_is_left_out_of_any_page(monkeypatch):
+    stories = [{"id": n} for n in range(30)]
+
+    async def live_stories(conn, site_id, *, exclude=None, limit, offset=0, topic=None):
+        kept = [s for s in stories if s["id"] != exclude]
+        return kept[offset:offset + limit]
+
+    async def empty(*a, **k):
+        return []
+
+    async def current_issue(conn, site_id):
+        return {"id": "issue-3"}
+
+    async def issue_lead(conn, site, magazine, issue):
+        return "<issue>", None
+
+    seen = {}
+    monkeypatch.setattr(render_mod.mag_reader, "live_stories", live_stories)
+    monkeypatch.setattr(render_mod.mag_reader, "covers", AsyncMock(return_value={}))
+    monkeypatch.setattr(render_mod.mag_reader, "topics_in_use", empty)
+    monkeypatch.setattr(render_mod.mag_issues, "current_issue", current_issue)
+    monkeypatch.setattr(render_mod, "_current_issue", issue_lead)
+    monkeypatch.setattr(render_mod, "_nav", empty)
+    monkeypatch.setattr(render_mod, "policy_kinds", empty)
+    monkeypatch.setattr(render_mod, "_site_dict", lambda *a: {})
+    monkeypatch.setattr(render_mod, "_origin", lambda *a: "https://bloom.gummfit.com")
+    monkeypatch.setattr(render_mod.mag_pages, "render_front",
+                        lambda *a, page, **k: seen.setdefault(page, k) and "")
+    site = {"id": uuid4()}
+    for page in (1, 2):
+        asyncio.run(render_mod._front_html(None, site, {"cover_post_id": 7, "topics": []},
+                                           page=page, host="bloom.gummfit.com"))
+    assert seen[1]["current_html"] == "<issue>" and seen[1]["lead"] is None and seen[2]["current_html"] == ""
+    shown = [s["id"] for s in seen[1]["posts"]] + [s["id"] for s in seen[2]["posts"]]
+    assert shown == list(range(24))  # the cover story included: the issue leads, not it

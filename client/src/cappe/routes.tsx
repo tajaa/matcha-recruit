@@ -49,7 +49,9 @@ const Social = lazy(() => import('./pages/site/Social'))
 const Stories = lazy(() => import('./magazine/stories/Stories'))
 const StoryEditor = lazy(() => import('./magazine/editor/StoryEditor'))
 const MagazineSettings = lazy(() => import('./magazine/settings/MagazineSettings'))
-const Issues = lazy(() => import('./magazine/issues/Issues'))
+const Emails = lazy(() => import('./magazine/emails/Emails'))
+const IssuesPage = lazy(() => import('./magazine/issues/IssuesPage'))
+const IssueEditor = lazy(() => import('./magazine/issues/IssueEditor'))
 const Readers = lazy(() => import('./magazine/readers/Readers'))
 const Earnings = lazy(() => import('./magazine/earnings/Earnings'))
 const WritersLanding = lazy(() => import('./magazine/writers/WritersLanding'))
@@ -145,7 +147,9 @@ export default function CappeRoutes() {
           <Route path="sites/:siteId/magazine" element={<MagazineSettings />} />
           <Route path="sites/:siteId/magazine/view" element={<ReaderView />} />
           <Route path="sites/:siteId/library" element={<Library />} />
-          <Route path="sites/:siteId/issues" element={<Issues />} />
+          <Route path="sites/:siteId/emails" element={<Emails />} />
+          <Route path="sites/:siteId/issues" element={<IssuesPage />} />
+          <Route path="sites/:siteId/issues/:issueId" element={<IssueEditor />} />
           <Route path="sites/:siteId/readers" element={<Readers />} />
           <Route path="sites/:siteId/earnings" element={<Earnings />} />
           <Route path="writer" element={<RequireAccountType type="writer"><WriterHome /></RequireAccountType>} />

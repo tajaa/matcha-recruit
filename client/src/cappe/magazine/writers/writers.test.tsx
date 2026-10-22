@@ -3,7 +3,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 import MagazineOnboarding from '../onboarding/MagazineOnboarding'
 import { handleFrom } from './handles'
-import Issues from '../issues/Issues'
+import Emails from '../emails/Emails'
 import WritersLanding from './WritersLanding'
 import WriterHome from './WriterHome'
 import CappeSidebar from '../../components/CappeSidebar'
@@ -84,7 +84,7 @@ const sentIssue: CappeIssue = {
   recipient_count: 40, failed_count: 2, sent_at: '2026-10-20T09:00:00Z', created_at: '2026-10-20T09:00:00Z',
 }
 
-describe('Issues', () => {
+describe('Emails', () => {
   it('sends a test, then the issue, and lists what went out', async () => {
     answer({
       '/issues': [sentIssue],
@@ -94,7 +94,7 @@ describe('Issues', () => {
     api.post.mockImplementation((path: string) => Promise.resolve(path.endsWith('/test') ? { to: 'ana@example.com' }
       : { ...sentIssue, id: 'i-2', story_id: 'p-1', subject: 'Dawn', status: 'sending', recipient_count: 0, failed_count: 0 }))
     vi.spyOn(window, 'confirm').mockReturnValue(true)
-    mount('/cappe/sites/s-1/issues', <Issues />, '/cappe/sites/:siteId/issues')
+    mount('/cappe/sites/s-1/emails', <Emails />, '/cappe/sites/:siteId/emails')
     expect(await screen.findByText(/Sent to 40 · 2 didn’t go/)).toBeInTheDocument()
     const select = screen.getByLabelText('Story')
     expect(Array.from((select as HTMLSelectElement).options).map((o) => o.text)).toEqual(['Before the town wakes'])
@@ -111,7 +111,7 @@ describe('Issues', () => {
 
   it('never sends a paid story whole, and waits for followers', async () => {
     answer({ '/issues': [], '/posts': [story({ access: 'paid' })], '/subscribers': [] })
-    mount('/cappe/sites/s-1/issues', <Issues />, '/cappe/sites/:siteId/issues')
+    mount('/cappe/sites/s-1/emails', <Emails />, '/cappe/sites/:siteId/emails')
     expect(await screen.findByRole('checkbox')).toBeDisabled()
     expect(screen.getByRole('button', { name: 'No followers yet' })).toBeDisabled()
   })
@@ -120,7 +120,7 @@ describe('Issues', () => {
     answer({ '/issues': [], '/posts': [story()], '/subscribers': [{ status: 'subscribed' }] })
     api.post.mockRejectedValue(new Error('This story has already gone to your followers.'))
     vi.spyOn(window, 'confirm').mockReturnValue(true)
-    mount('/cappe/sites/s-1/issues', <Issues />, '/cappe/sites/:siteId/issues')
+    mount('/cappe/sites/s-1/emails', <Emails />, '/cappe/sites/:siteId/emails')
     fireEvent.click(await screen.findByRole('button', { name: 'Send to 1' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('already gone')
   })
@@ -159,7 +159,7 @@ describe('the writer sidebar', () => {
       <CappeSidebar account={writer} />
     </MemoryRouter>)
     expect(screen.getByText('Gummfit Magazines')).toBeInTheDocument()
-    for (const label of ['Stories', 'Library', 'Followers', 'Issues', 'Magazine settings']) {
+    for (const label of ['Stories', 'Issues', 'Library', 'Followers', 'Emails', 'Magazine settings']) {
       expect(screen.getByRole('link', { name: label })).toBeInTheDocument()
     }
     expect(screen.queryByRole('link', { name: 'Storefront' })).not.toBeInTheDocument()
