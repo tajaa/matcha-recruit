@@ -516,6 +516,16 @@ What is built so far:
   paywall marker prints nothing), cut at the paywall otherwise; `no-store, private`. The shelf keeps a
   magazine that is down so its reader can still cancel; resume needs one still taking subscribers. The
   paywall on the magazine's own page links to the dashboard (`pages.reader_path`, `data-mz-alt`).
+- **Readers follow magazines from their account** (`cappemag08`: `cappe_magazine_follows`, PK
+  account+site, both cascade; `services/magazine/follows.py`, routes in `routes/reader.py`). A follow is
+  a one-tap Follow on the reader dashboard and sends NO email: email followers stay `cappe_subscribers`
+  (double opt-in, above), a separate list. It feeds the dashboard's Following list (a magazine that is
+  down stays, `live` false, so it can be unfollowed) and Feed (`GET /reader/feed`: live followed
+  magazines' stories, newest first, one query; capped at `FOLLOW_LIMIT` follows). Which are live is
+  `magazines.live_magazines` — `live_magazine`'s rule for many sites, each owner plan resolved once;
+  keep the two in step. The owner sees a count only (`GET /sites/{id}/magazine/follows`): an account
+  follow carries no consent to share who. A magazine's own page can't see the dashboard's sign-in, so
+  its follow box links to `/cappe/reader/m/<slug>?follow=1` (`data-mz-alt`), which follows on arrival.
 - **An issue in print is one numbered book** (`cappemag07`: `cappe_magazine_issues`,
   `cappe_magazine_issue_stories`, `cappe_magazine_issue_assets`; `services/magazine/issues.py`,
   owner API `routes/issues.py` at `/sites/{id}/magazine/issues…`). It holds stories in order, each with a

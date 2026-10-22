@@ -3,17 +3,20 @@ import { Link, useNavigate } from 'react-router-dom'
 import { BookOpen, Loader2 } from 'lucide-react'
 import { cappeApi } from '../../api'
 import { ui } from '../../components/ui'
-import type { CappeShelfMagazine } from '../../types'
-import { magazineSlugFrom, readerMagazinePath } from './readerPaths'
+import type { CappeFollowedMagazine, CappeShelfMagazine } from '../../types'
+import { setFollowing } from './follow'
+import { magazineSlugFrom, readerMagazinePath, readerPaths } from './readerPaths'
 import StoryCard from './StoryCard'
 import { changeSubscription, compState, subscriptionState } from './subscription'
 
 /** `/cappe/reader` — every magazine the reader subscribes to or was given,
- *  with its latest story, and a way to open another by its address. */
+ *  with its latest story, the magazines they follow, and a way to open
+ *  another by its address. */
 export default function Shelf() {
   const [mags, setMags] = useState<CappeShelfMagazine[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [followed, setFollowed] = useState<CappeFollowedMagazine[] | null>(null)
 
   // A magazine that is down has no page to open (it 404s), so its
   // subscription is stopped from here.
@@ -36,16 +39,31 @@ export default function Shelf() {
     cappeApi.get<{ magazines: CappeShelfMagazine[] }>('/reader/magazines')
       .then((d) => { if (live) setMags(d.magazines) })
       .catch((e) => { if (live) setError(e instanceof Error ? e.message : 'Could not load your magazines') })
+    cappeApi.get<{ magazines: CappeFollowedMagazine[] }>('/reader/following')
+      .then((d) => { if (live) setFollowed(d.magazines) })
+      .catch(() => { if (live) setFollowed([]) })
     return () => { live = false }
   }, [])
+
+  const unfollow = async (m: CappeFollowedMagazine) => {
+    setBusy(true)
+    try {
+      await setFollowing(m.slug, false)
+      setFollowed((fs) => fs && fs.filter((x) => x.site_id !== m.site_id))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not unfollow. Try again.')
+    } finally {
+      setBusy(false)
+    }
+  }
 
   return (
     <div className="mx-auto w-full max-w-5xl px-4 py-8">
       <h1 className={ui.heading}>My magazines</h1>
-      <p className={`mt-1 ${ui.subtitle}`}>Everything you subscribe to, in one place.</p>
+      <p className={`mt-1 ${ui.subtitle}`}>Everything you subscribe to and follow, in one place.</p>
       {error && <p role="alert" className="mt-6 text-sm text-red-400">{error}</p>}
       {mags === null && !error && <div className="flex justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-zinc-500" /></div>}
-      {mags && mags.length === 0 && (
+      {mags && mags.length === 0 && followed?.length === 0 && (
         <div className={`${ui.card} mt-6 p-6 text-sm text-zinc-400`}>
           <BookOpen className="mb-2 h-5 w-5 text-zinc-500" />
           No magazines yet. Open one by its address below, or use “Open it on your dashboard” under any
@@ -89,6 +107,32 @@ export default function Shelf() {
             </li>
           ))}
         </ul>
+      )}
+      {followed && followed.length > 0 && (
+        <section className="mt-10" aria-labelledby="reader-following">
+          <div className="flex items-baseline gap-3">
+            <h2 id="reader-following" className="text-lg font-semibold text-zinc-100">Following</h2>
+            <Link to={readerPaths.feed} className={`ml-auto text-sm ${ui.accentText}`}>Their new stories →</Link>
+          </div>
+          <ul className={`${ui.card} mt-3 divide-y divide-zinc-800`}>
+            {followed.map((m) => (
+              <li key={m.site_id} className="flex items-center gap-3 px-5 py-3"
+                style={m.accent ? { borderLeft: `3px solid ${m.accent}` } : undefined}>
+                <div className="min-w-0">
+                  {m.live ? (
+                    <Link to={readerMagazinePath(m.slug)} className="font-serif text-lg text-zinc-50 hover:underline">{m.name}</Link>
+                  ) : (
+                    <span className="font-serif text-lg text-zinc-400">{m.name}</span>
+                  )}
+                  <p className="truncate text-sm text-zinc-500">{m.live ? m.tagline : 'This magazine isn’t up right now.'}</p>
+                </div>
+                <button type="button" disabled={busy} className={`${ui.btnGhost} ml-auto shrink-0`} onClick={() => void unfollow(m)}>
+                  Unfollow
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
       <OpenMagazine />
     </div>

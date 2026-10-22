@@ -62,6 +62,7 @@ const ReaderLayout = lazy(() => import('./magazine/shelf/ReaderLayout'))
 const Shelf = lazy(() => import('./magazine/shelf/Shelf'))
 const ShelfMagazine = lazy(() => import('./magazine/shelf/ShelfMagazine'))
 const ShelfStory = lazy(() => import('./magazine/shelf/ShelfStory'))
+const ReaderFeed = lazy(() => import('./magazine/shelf/Feed'))
 
 // The Blog page became the magazine's Stories (cappemag02); old links land there.
 function BlogRedirect() {
@@ -106,6 +107,7 @@ export default function CappeRoutes() {
         <Route path="reader/login" element={<CappeLogin readerOnly />} />
         <Route path="reader" element={<ReaderLayout />}>
           <Route index element={<Shelf />} />
+          <Route path="feed" element={<ReaderFeed />} />
           <Route path="m/:slug" element={<ShelfMagazine />} />
           <Route path="m/:slug/:story" element={<ShelfStory />} />
         </Route>
