@@ -78,6 +78,32 @@ async def live_magazine(conn, site) -> Optional[dict[str, Any]]:
     return mag if in_grace(mag) and await _has_readers(conn, site["id"]) else None
 
 
+async def live_magazines(conn, sites: list[dict]) -> dict[UUID, dict[str, Any]]:
+    """`live_magazine` for many sites at once, keyed by site id: one query for
+    the magazines, one for the owners' plans, each plan resolved once. The rule
+    is `live_magazine`'s; only the grace check stays per site (it is rare)."""
+    if not sites:
+        return {}
+    rows = await conn.fetch(f"SELECT {MAG_COLS} FROM cappe_magazines WHERE site_id = ANY($1::uuid[]) AND enabled",
+                            [s["id"] for s in sites])
+    mags = {r["site_id"]: dict(r) for r in rows}
+    owners = list({s["account_id"] for s in sites if s["id"] in mags})
+    plans = {r["id"]: r["plan"] for r in await conn.fetch(
+        "SELECT id, plan FROM cappe_accounts WHERE id = ANY($1::uuid[])", owners)} if owners else {}
+    has: dict[Any, bool] = {}
+    out: dict[UUID, dict[str, Any]] = {}
+    for site in sites:
+        mag = mags.get(site["id"])
+        if not mag:
+            continue
+        plan = plans.get(site["account_id"])
+        if plan not in has:
+            has[plan] = (await resolve_entitlements(plan, conn=conn)).has("magazine")
+        if has[plan] or (in_grace(mag) and await _has_readers(conn, site["id"])):
+            out[site["id"]] = mag
+    return out
+
+
 async def _has_readers(conn, site_id: UUID) -> bool:
     """A subscription to the magazine still billing, or a live comp: the
     readers the grace month is for. With none, losing the plan takes the

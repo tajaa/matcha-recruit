@@ -7,6 +7,7 @@ export const readerPaths = {
   signup: '/cappe/reader/signup',
   login: '/cappe/reader/login',
   home: '/cappe/reader',
+  feed: '/cappe/reader/feed',
 } as const
 
 export const readerMagazinePath = (slug: string) => `/cappe/reader/m/${encodeURIComponent(slug)}`

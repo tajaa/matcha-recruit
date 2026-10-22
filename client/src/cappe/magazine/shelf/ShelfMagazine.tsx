@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
-import { ArrowLeft, ExternalLink, Loader2 } from 'lucide-react'
+import { ArrowLeft, Check, ExternalLink, Loader2, Plus } from 'lucide-react'
 import { cappeApi } from '../../api'
 import { ui } from '../../components/ui'
 import type { CappeReaderMagazine, CappeReaderStoryCard } from '../../types'
 import { priceLabel } from '../settings/price'
+import { setFollowing } from './follow'
 import { readerPaths } from './readerPaths'
 import StoryCard from './StoryCard'
 import { changeSubscription, compState, startCheckout, subscriptionState } from './subscription'
@@ -15,11 +16,14 @@ const SETTLE_TRIES = 5
 const SETTLE_MS = 2000
 
 /** `/cappe/reader/m/:slug` — one magazine: the reader's subscription (or a
- *  way to start one) and its stories, newest first. */
+ *  way to start one), a Follow button, and its stories, newest first.
+ *  `?follow=1` (the magazine's own "Follow it there" link) follows on arrival. */
 export default function ShelfMagazine() {
   const { slug = '' } = useParams<{ slug: string }>()
-  const [params] = useSearchParams()
+  const [params, setParams] = useSearchParams()
   const justSubscribed = params.get('subscribed') === '1'
+  const followOnArrival = params.get('follow') === '1'
+  const arrivalFollowed = useRef<string | null>(null)
   // Bumped to load the magazine again (after a change, or while a new
   // subscription settles); each answer remembers which load it is for.
   const [version, setVersion] = useState(0)
@@ -62,6 +66,18 @@ export default function ShelfMagazine() {
     }
   }
 
+  // Once per magazine, and the request leaves the address so a reload or a
+  // later unfollow doesn't follow again.
+  useEffect(() => {
+    if (!followOnArrival || !mag || arrivalFollowed.current === slug) return
+    arrivalFollowed.current = slug
+    setParams((p) => { p.delete('follow'); return p }, { replace: true })
+    if (mag.following) return
+    setFollowing(slug, true)
+      .then(() => setVersion((v) => v + 1))
+      .catch((e) => setActionError(e instanceof Error ? e.message : 'Could not follow. Try again.'))
+  })
+
   async function loadMore() {
     if (!mag) return
     const page = (more?.slug === slug ? more.page : mag.page) + 1
@@ -90,7 +106,15 @@ export default function ShelfMagazine() {
       {mag && (
         <>
           <header className="mt-4 border-b border-zinc-800 pb-5" style={mag.accent ? { borderBottomColor: mag.accent } : undefined}>
-            <h1 className="font-serif text-3xl text-zinc-50">{mag.name}</h1>
+            <div className="flex flex-wrap items-start gap-3">
+              <h1 className="font-serif text-3xl text-zinc-50">{mag.name}</h1>
+              <button type="button" disabled={busy} aria-pressed={mag.following}
+                className={`${mag.following ? ui.btnGhost : ui.btnPrimary} ml-auto`}
+                onClick={() => act(() => setFollowing(slug, !mag.following))}>
+                {mag.following ? <Check className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                {mag.following ? 'Following' : 'Follow'}
+              </button>
+            </div>
             {mag.tagline && <p className="mt-1 text-zinc-400">{mag.tagline}</p>}
             {mag.origin && (
               <a href={mag.origin} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-300">

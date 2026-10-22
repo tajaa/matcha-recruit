@@ -34,7 +34,9 @@ export default function ShelfStory() {
   const error = current?.error ?? null
 
   const prepare = (doc: Document) => {
-    doc.querySelector('[data-mz-alt]')?.remove()
+    // No scripts run in this frame: the email follow box couldn't send, and
+    // the dashboard has its own Follow button and reader links.
+    doc.querySelectorAll('[data-mz-alt], #mz-follow').forEach((el) => el.remove())
     const actions = doc.querySelector('[data-mz-actions]')
     if (actions) {
       actions.textContent = ''

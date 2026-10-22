@@ -150,18 +150,26 @@ def _pager(base: str, page: int, has_more: bool) -> str:
     return f'<nav class="mz-pager">{"".join(links)}</nav>' if links else ""
 
 
-def follow_html(mag: dict) -> str:
+def follow_html(mag: dict, site_slug: Optional[str] = None) -> str:
     """The reader's "follow by email" box (double opt-in, `routes/public/
-    magazine.py`). Off when the owner turned follows off."""
+    magazine.py`), and a link to follow from a Gummfit account instead (the
+    dashboard follows on arrival, `?follow=1`; `routes/reader.py`). This page
+    can't see the dashboard's sign-in, so the follow happens there. Off when
+    the owner turned follows off."""
+    from ..email import dashboard_url
+
     if not mag.get("follow_enabled", True):
         return ""
     name = escape(mag.get("name") or "")
+    account = (f'<p class="mz-follow__alt" data-mz-alt>Have a Gummfit account? <a href="'
+               f'{escape(dashboard_url(reader_path(site_slug)) + "?follow=1", quote=True)}" rel="noopener">'
+               "Follow it there</a>.</p>" if site_slug else "")
     return (f'<section class="mz-follow" id="mz-follow"><h2 class="mz-follow__title">Follow {name}</h2>'
             "<p>New stories by email. Leave any time.</p>"
             '<form class="mz-follow__form"><label class="mz-sr" for="mz-follow-email">Your email</label>'
             '<input id="mz-follow-email" type="email" required autocomplete="email" placeholder="you@example.com">'
             '<button type="submit">Follow</button></form>'
-            f'<p class="mz-follow__msg" data-mz-msg role="status"></p></section><script>{_FOLLOW_JS}</script>')
+            f'<p class="mz-follow__msg" data-mz-msg role="status"></p>{account}</section><script>{_FOLLOW_JS}</script>')
 
 
 def price_label(cents: int, currency: Optional[str]) -> str:
@@ -237,7 +245,7 @@ def render_front(site: dict, nav: list[dict], mag: dict, *, lead: Optional[dict]
         about = f'<section class="mz-about mz-measure">{render_md(mag["about"])}</section>'
     empty = '<p class="mz-empty">The first stories are on their way.</p>' if not (lead_html or posts) else ""
     body = (_masthead(mag) + _topics_nav(topics) + lead_html + _grid(posts, covers) + empty
-            + _pager(front_path(mag), page, has_more) + about + follow_html(mag))
+            + _pager(front_path(mag), page, has_more) + about + follow_html(mag, site.get("slug")))
     url = f"{origin}{front_path(mag)}" + (f"?page={page}" if page > 1 else "")
     lead_img = current_image or (share_image(covers.get(_key(lead))) if lead else None)
     return _page(site, nav, mag, body, origin=origin, issue_css=bool(current_html), seo={
@@ -376,7 +384,7 @@ def render_story(site: dict, nav: list[dict], mag: dict, post: dict, assets: dic
         more_html = (f'<section class="mz-more"><h2 class="mz-more__title">More from {escape(mag.get("name") or "")}'
                      f'</h2><div class="mz-grid">{cards}</div></section>')
     body = (_masthead(mag, small=True) + book_html(article, edit=edit) + (paywall_script() if paid else "")
-            + follow_html(mag) + more_html)
+            + follow_html(mag, site.get("slug")) + more_html)
     _cover, cover_asset = story_cover(post, assets)
     topic = post.get("topic")
     url = f"{origin}{story_path(post['slug'])}"
