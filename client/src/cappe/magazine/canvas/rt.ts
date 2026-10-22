@@ -33,6 +33,9 @@ export const emptyRt = (): RtDoc => ({ type: 'doc', content: [{ type: 'paragraph
 /** Characters as the server counts them (code points). */
 const chars = (s: string) => (/[\ud800-\udfff]/.test(s) ? Array.from(s).length : s.length)
 
+// Half of a surrogate pair: half an emoji.
+const LONE_HALF = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g
+
 /** A link the page may keep: http(s) or mailto, no control characters. */
 export function cleanHref(v: unknown): string | null {
   const href = typeof v === 'string' ? v.trim() : ''
@@ -82,7 +85,10 @@ function inline(raw: unknown, budget: Budget, depth = 0): RtInline[] {
     if (node.type === 'hardBreak') { out.push({ type: 'hardBreak' }); continue }
     if (node.type === 'text') {
       // Counted and cut by whole characters, as the server does: never half an emoji.
-      const text = clip((typeof node.text === 'string' ? node.text : '').replace(/\r/g, ''), Math.max(budget.chars, 0))
+      // Half an emoji is dropped, as normalize_rt does (_HALVES), so the
+      // client's document and the saved one compare equal.
+      const text = clip((typeof node.text === 'string' ? node.text : '').replace(/\r/g, '').replace(LONE_HALF, ''),
+        Math.max(budget.chars, 0))
       if (!text) continue
       budget.chars -= chars(text)
       const ms = marks(node.marks)
@@ -196,7 +202,12 @@ const escMd = (s: string) => s.replace(/\u00a0/g, ' ').replace(/([\\`*_[\]])/g, 
 
 function escLineStart(line: string): string {
   return line
-    .replace(/^(\s*)(#{1,6})(\s|$)/, '$1\\$2$3')
+    // As rt.py: `#word` is a heading to Python-Markdown, a line of dashes a
+    // rule or an underline, and `=` (which can't be escaped) an underline
+    // unless a space comes first.
+    .replace(/^(\s*)#/, '$1\\#')
+    .replace(/^(\s*)-(?=[\s-]*$)/, '$1\\-')
+    .replace(/^(?=\s*=+\s*$)/, ' ')
     .replace(/^(\s*)>/, '$1\\>')
     .replace(/^(\s*)([-+])(\s)/, '$1\\$2$3')
     .replace(/^(\s*)(\d+)\.(\s)/, '$1$2\\.$3')
@@ -265,5 +276,7 @@ export function rtToMd(doc: RtDoc | null | undefined): string {
  *  it, within the field's length. */
 export function richPatch(doc: unknown, max: number): { rt: RtDoc; md: string } {
   const rt = cleanRt(doc, max) ?? emptyRt()
-  return { rt, md: clip(rtToMd(rt), max) }
+  // The document is within `max`; its Markdown runs longer by the escapes and
+  // marks, and is never cut (as story_schema._rich).
+  return { rt, md: rtToMd(rt) }
 }

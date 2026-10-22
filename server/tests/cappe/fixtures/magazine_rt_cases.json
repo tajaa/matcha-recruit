@@ -731,5 +731,93 @@
   "html": "<ul><li><p>First</p><p>Second</p></li><li><p>Third</p></li></ul>",
   "md": "- First\n\n    Second\n\n- Third",
   "md_reads_back": true
+ },
+ {
+  "name": "a tight list item keeps the spaces around its marks",
+  "rt": {
+   "type": "doc",
+   "content": [
+    {
+     "type": "bulletList",
+     "content": [
+      {
+       "type": "listItem",
+       "content": [
+        {
+         "type": "paragraph",
+         "content": [
+          {
+           "type": "text",
+           "text": "foo "
+          },
+          {
+           "type": "text",
+           "text": "bar",
+           "marks": [
+            {
+             "type": "bold"
+            }
+           ]
+          },
+          {
+           "type": "text",
+           "text": " baz"
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  "html": "<ul><li><p>foo <strong>bar</strong> baz</p></li></ul>",
+  "md": "- foo **bar** baz",
+  "md_reads_back": true
+ },
+ {
+  "name": "words that start a line like a heading, a rule or an underline stay words",
+  "rt": {
+   "type": "doc",
+   "content": [
+    {
+     "type": "paragraph",
+     "content": [
+      {
+       "type": "text",
+       "text": "#hashtag is cool"
+      }
+     ]
+    },
+    {
+     "type": "paragraph",
+     "content": [
+      {
+       "type": "text",
+       "text": "---"
+      }
+     ]
+    },
+    {
+     "type": "paragraph",
+     "content": [
+      {
+       "type": "text",
+       "text": "Title"
+      },
+      {
+       "type": "hardBreak"
+      },
+      {
+       "type": "text",
+       "text": "==="
+      }
+     ]
+    }
+   ]
+  },
+  "html": "<p>#hashtag is cool</p><p>---</p><p>Title<br>===</p>",
+  "md": "\\#hashtag is cool\n\n\\---\n\nTitle  \n ===",
+  "md_reads_back": true
  }
 ]

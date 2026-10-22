@@ -210,6 +210,9 @@ class CappeStoryAssist(BaseModel):
     headlines: Optional[list[dict[str, str]]] = None
     captions: Optional[list[dict[str, str]]] = None
     md: Optional[str] = None
+    # Tighten's passage as a document too: the rich field shows `rt`, so
+    # without it the replaced passage would show blank.
+    rt: Optional[dict[str, Any]] = None
     block: Optional[int] = None
     terms: Optional[list[dict[str, str]]] = None
     draft: Optional[dict[str, Any]] = None

@@ -194,3 +194,23 @@ def test_the_owners_editor_gets_a_document_for_every_rich_field():
     assert [i["a_rt"] for i in blocks[3]["items"]] == [_doc(_p(_t("A"))), _doc(_p(_t("Mine")))]
     assert blocks[4] == {"type": "divider"} and len(blocks) == 5
     assert "rt" not in stored["blocks"][0]  # what was stored is left alone
+
+
+def test_a_tightened_passage_reaches_the_editor_as_a_document():
+    # The response model is what the route returns: a field it lacks is dropped.
+    from app.cappe.models.magazine import CappeStoryAssist
+
+    doc = rt.md_to_rt("Boats go out at **four**.")
+    out = CappeStoryAssist(action="tighten", md="Boats go out at **four**.", rt=doc, block=1)
+    assert out.model_dump(exclude_none=True)["rt"] == doc
+
+
+def test_a_long_passage_full_of_marks_keeps_its_whole_markdown():
+    # 18,000 characters fit a text block; escaped, its Markdown is longer, and
+    # emails, feeds and word counts read that Markdown to its end.
+    words = "2*3_x " * 3_000
+    doc = {"type": "doc", "content": [{"type": "paragraph", "content": [{"type": "text", "text": words.strip()}]}]}
+    block = story_schema.normalize_story({"blocks": [{"type": "text", "rt": doc}]})["blocks"][0]
+    assert len(block["md"]) > 20_000 and block["md"].endswith("2\\*3\\_x")
+    from app.cappe.services.magazine.richtext import md_to_text, render_md
+    assert md_to_text(block["md"]) == words.strip() and render_md(block["md"]).endswith("2*3_x</p>")

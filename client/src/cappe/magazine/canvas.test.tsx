@@ -116,8 +116,11 @@ describe('rich text, as the server keeps it (the shared fixture)', () => {
     expect(rtText({ type: 'doc', content: [{ type: 'heading', attrs: { level: 2 }, content: [t('At sea')] },
       { type: 'paragraph', content: [t('Line'), { type: 'hardBreak' }, t('two')] }] })).toBe('At sea Line two')
     expect(rtText(null)).toBe('')
-    expect(richPatch(doc(t('x'.repeat(50), 'bold')), 20)).toEqual({ rt: doc(t('x'.repeat(20), 'bold')), md: `**${'x'.repeat(18)}` })
+    // The words are cut to the field; their Markdown keeps its marks whole.
+    expect(richPatch(doc(t('x'.repeat(50), 'bold')), 20)).toEqual({ rt: doc(t('x'.repeat(20), 'bold')), md: `**${'x'.repeat(20)}**` })
     expect(richPatch('nope', 20)).toEqual({ rt: emptyRt(), md: '' })
+    // Half an emoji is dropped as the server drops it; a whole one stays.
+    expect(cleanRt(doc(t('Dawn \ud83d and 😀')))).toEqual(doc(t('Dawn  and 😀')))
   })
 })
 
@@ -207,6 +210,10 @@ describe('a story edited on its page', () => {
     // A sidebar's words are shorter than a text block's.
     const side = { ...d, blocks: [...d.blocks, { type: 'sidebar' as const, title: '', md: '' }] }
     expect(applyEdit(side, 5, 'md', doc(t('x'.repeat(5_000))))!.blocks[5]).toMatchObject({ md: 'x'.repeat(4_000) })
+    // The document is cut to the limit; its Markdown (longer by the escapes) is not.
+    const marked = richPatch(doc(t('2*3 '.repeat(1_000).trim())), 4_000)
+    expect(marked.md.endsWith('2\\*3')).toBe(true)
+    expect(marked.md.length).toBeGreaterThan(4_000)
   })
 
   it('cuts words to their length by whole characters, never half an emoji', () => {

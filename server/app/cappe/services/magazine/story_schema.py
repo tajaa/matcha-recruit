@@ -111,7 +111,10 @@ def _rich(b: dict, md_key: str, rt_key: str, limit: int) -> tuple[str, dict]:
     except RtError as exc:
         raise StoryError(str(exc)) from exc
     if doc is not None:
-        return rt_to_md(doc)[:limit], doc
+        # Not cut again: the document is within `limit`, and its Markdown runs
+        # longer by the escapes and marks it adds. A cut here would drop the
+        # end of the story from emails and feeds, or split an escape.
+        return rt_to_md(doc), doc
     md = _str(b.get(md_key), limit)
     return md, md_to_rt(md)
 

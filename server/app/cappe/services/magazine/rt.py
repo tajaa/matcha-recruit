@@ -299,7 +299,13 @@ def _esc_md(text: str) -> str:
 
 
 def _esc_line_start(line: str) -> str:
-    line = re.sub(r"^(\s*)(#{1,6})(\s|$)", r"\1\\\2\3", line)
+    # Python-Markdown reads `#word` as a heading (no space needed), a line of
+    # dashes as a rule or a heading's underline, and a line of `=` under
+    # words as a heading. `=` can't be backslash-escaped; an underline must
+    # start the line, so a space in front keeps it words.
+    line = re.sub(r"^(\s*)#", r"\1\\#", line)
+    line = re.sub(r"^(\s*)-(?=[\s-]*$)", r"\1\\-", line)
+    line = re.sub(r"^(?=\s*=+\s*$)", " ", line)
     line = re.sub(r"^(\s*)>", r"\1\\>", line)
     line = re.sub(r"^(\s*)([-+])(\s)", r"\1\\\2\3", line)
     return re.sub(r"^(\s*)(\d+)\.(\s)", r"\1\2\\.\3", line)
@@ -435,9 +441,13 @@ class _ToRt(HTMLParser):
         top.setdefault("content", []).append(node)
 
     def handle_data(self, data: str) -> None:
-        if not data.strip() and self.stack[-1]["type"] not in ("paragraph", "heading"):
+        top = self.stack[-1]["type"]
+        # A tight list item's words come straight in its <li>: their spaces
+        # (around bold, between two marks) are the words' own; only the
+        # paragraph's ends are trimmed, in md_to_rt.
+        if not data.strip() and top not in ("paragraph", "heading", "listItem"):
             return
-        text = data.replace("\n", " ") if self.stack[-1]["type"] in ("paragraph", "heading") else data.strip()
+        text = data.replace("\n", " ") if top in ("paragraph", "heading", "listItem") else data.strip()
         node: dict = {"type": "text", "text": text}
         if self.marks:
             node["marks"] = [dict(m) for m in self.marks]
@@ -457,7 +467,18 @@ def md_to_rt(md: Optional[str]) -> dict:
     stack = [parser.root]
     while stack:
         n = stack.pop()
-        n.pop("_loose", None)
+        if n.pop("_loose", None):
+            texts = [c for c in n.get("content") or [] if c.get("type") == "text"]
+            if texts:
+                texts[0]["text"] = texts[0]["text"].lstrip()
+                texts[-1]["text"] = texts[-1]["text"].rstrip()
+        for c in n.get("content") or []:
+            # Whitespace between a loose item's blocks made a paragraph of nothing.
+            if c.get("_loose") and not any(t.get("type") != "text" or t.get("text", "").strip()
+                                           for t in c.get("content") or []):
+                c["_drop"] = True
+        if n.get("content"):
+            n["content"] = [c for c in n["content"] if not c.get("_drop")]
         content = n.get("content") or []
         for i, c in enumerate(content):
             if c.get("type") == "text" and i and content[i - 1].get("type") == "hardBreak":
