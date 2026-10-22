@@ -23,7 +23,7 @@ import {
 import ContentsPanel from './ContentsPanel'
 import CoverPanel, { CoverElementSection, CreditSection, PhotoSection, TemplateSection, type Selected } from './CoverPanel'
 import IssueStories from './IssueStories'
-import { addStories, docOf, removeStory, saveBody, type IssueDoc } from './issueDoc'
+import { addStories, docOf, pinStories, removeStory, saveBody, settleIssue, settleStories, type IssueDoc } from './issueDoc'
 import StoryPicker from './StoryPicker'
 
 type Tab = 'stories' | 'cover' | 'contents'
@@ -61,7 +61,7 @@ function Toggle<T extends string>({ value, options, onChange, label }: {
  *  its own pages. The Outline keeps the forms (stories and their order, the
  *  cover, the contents) beside a preview. Releasing it publishes its draft
  *  stories; a released issue stays editable and each save goes live. Saving
- *  saves the issue and every story changed on its pages. */
+ *  saves every story changed on its pages, then the issue. */
 export default function IssueEditor() {
   const { siteId, issueId } = useParams<{ siteId: string; issueId: string }>()
   const navigate = useNavigate()
@@ -189,11 +189,14 @@ export default function IssueEditor() {
   const took = (updated: CappeMagazineIssue, keep: Record<string, StoryDoc> = {}) => {
     setIssue(updated)
     replaceDoc({ ...docOf(updated), ...(Object.keys(keep).length ? { drafts: keep } : {}) })
-    if (updated.published.length) {
-      const ids = new Set(updated.stories.map((s) => s.post_id))
-      setPosts((ps) => ps.map((p) => (ids.has(p.id) && p.status === 'draft' ? { ...p, status: 'published' } : p)))
-      setNote(`Published with the issue: ${updated.published.join(', ')}.`)
-    }
+    published(updated)
+  }
+  /** Drafts the server published with the issue are published here too. */
+  const published = (updated: CappeMagazineIssue) => {
+    if (!updated.published.length) return
+    const ids = new Set(updated.stories.map((s) => s.post_id))
+    setPosts((ps) => ps.map((p) => (ids.has(p.id) && p.status === 'draft' ? { ...p, status: 'published' } : p)))
+    setNote(`Published with the issue: ${updated.published.join(', ')}.`)
   }
 
   const save = async (): Promise<boolean> => {
@@ -201,32 +204,49 @@ export default function IssueEditor() {
     setBusy('save')
     setError(null)
     setNote(null)
+    const sent = current
+    const ids = changed
+    // Each story as saved before, for the undo steps that still show it.
+    const before: Record<string, StoryDoc> = {}
+    for (const id of ids) {
+      const p = info.get(id)
+      if (p?.format === 'blocks') before[id] = storyDocOf(p)
+    }
     try {
-      // The issue first (a draft story it holds is published by a released
-      // issue's save), then each story changed on its pages, in turn.
-      const saved = issueDirty
-        ? await cappeApi.put<CappeMagazineIssue>(`/sites/${siteId}/magazine/issues/${issueId}`, saveBody(current))
-        : issue
-      const keep: Record<string, StoryDoc> = {}
+      // Each story changed on its pages first: a released issue's save
+      // publishes the draft stories in it, and must publish these words,
+      // not the ones stored before.
       const failed: string[] = []
+      const failedIds: string[] = []
       const savedPosts: CappePost[] = []
-      for (const id of changed) {
-        const d = current.drafts![id]
+      for (const id of ids) {
+        const d = sent.drafts![id]
         try {
           savedPosts.push(await cappeApi.put<CappePost>(`/sites/${siteId}/posts/${id}`, storyWordsBody(d)))
         } catch (e) {
-          keep[id] = d
+          failedIds.push(id)
           failed.push(`“${d.fields.title || info.get(id)?.title || 'A story'}” (${e instanceof Error ? e.message : 'not saved'})`)
         }
       }
       if (savedPosts.length) {
         const byId = new Map(savedPosts.map((p) => [p.id, p]))
         setPosts((ps) => ps.map((p) => byId.get(p.id) ?? p))
+        const saved = new Set(byId.keys())
+        const pinned = Object.fromEntries(Object.entries(before).filter(([id]) => saved.has(id)))
+        doc.map((d, present) => (d ? (present ? settleStories(d, sent, saved) : pinStories(d, pinned)) : d))
       }
-      if (issueDirty) took(saved, keep)
-      else replaceDoc({ ...current, drafts: Object.keys(keep).length ? keep : undefined })
+      // Saving the issue would publish a draft story whose new words didn't
+      // save: it waits, so the old words never go out.
+      const held = issueDirty && released && failedIds.some((id) => info.get(id)?.status === 'draft')
+      if (issueDirty && !held) {
+        const saved = await cappeApi.put<CappeMagazineIssue>(`/sites/${siteId}/magazine/issues/${issueId}`, saveBody(sent))
+        setIssue(saved)
+        doc.map((d, present) => (d && present ? settleIssue(d, sent, docOf(saved)) : d))
+        published(saved)
+      }
       if (failed.length) {
-        setError(`Not saved: ${failed.join('; ')}. ${failed.length === 1 ? 'It is' : 'They are'} still here to save again.`)
+        setError(`Not saved: ${failed.join('; ')}. ${failed.length === 1 ? 'It is' : 'They are'} still here to save again.`
+          + (held ? ' The issue waits for it, so nothing is published with its old words.' : ''))
         return false
       }
       return true

@@ -50,3 +50,10 @@ export function blockHasField(type: StoryBlock['type'], path: string): boolean {
 }
 
 export const isRichField = (path: string) => RICH_FIELDS.includes(fieldShape(path).shape)
+
+/** `s` cut to at most `max` characters as the server counts them (whole
+ *  characters, not UTF-16 halves), so an emoji at the cut is never split
+ *  into a half the server can't print. */
+export function clip(s: string, max: number): string {
+  return s.length <= max ? s : Array.from(s).slice(0, max).join('')
+}

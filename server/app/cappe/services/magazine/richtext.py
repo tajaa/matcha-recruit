@@ -101,11 +101,20 @@ def render_md(source: str | None) -> str:
 
 _MD_MARKS = re.compile(r"(\*\*|__|\*|_|`|^#{1,6}\s*|^>\s*|^\s*[-*+]\s+|^\s*\d+\.\s+)", re.M)
 _MD_LINK = re.compile(r"!?\[([^\]]*)\]\([^)]*\)")
+_MD_ESCAPED = re.compile(r"\\([\\`*_{}\[\]()#+\-.!>|~])")
+# Supplementary private use: no typed character is held by mistake.
+_HELD = 0xF0000
+_HELD_CHARS = re.compile("[\U000F0000-\U000F007F]")
 
 
 def md_to_text(source: str | None) -> str:
     """Plain words from Markdown: for word counts, the derived `body`, feeds
     and search."""
-    text = _MD_LINK.sub(r"\1", source or "")
+    # A character escaped as itself (`\[sic\]`, what the editor writes for
+    # typed brackets or stars) is a plain character: held aside while marks
+    # and links are taken out, then put back without its backslash.
+    text = _MD_ESCAPED.sub(lambda m: chr(_HELD + ord(m[1])), source or "")
+    text = _MD_LINK.sub(r"\1", text)
     text = _MD_MARKS.sub("", text)
+    text = _HELD_CHARS.sub(lambda m: chr(ord(m[0]) - _HELD), text)
     return re.sub(r"[ \t]+", " ", text).strip()

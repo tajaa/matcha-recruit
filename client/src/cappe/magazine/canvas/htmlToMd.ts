@@ -81,9 +81,8 @@ function blocks(parent: Node): string[] {
         break
       }
       case 'UL': case 'OL': {
-        const items = Array.from(el.children).filter((c) => c.tagName === 'LI')
-          .map((li) => blocks(li).join(' ').replace(/\n/g, ' ').trim()).filter(Boolean)
-        if (items.length) out.push(items.map((t, i) => (el.tagName === 'OL' ? `${i + 1}. ${t}` : `- ${t}`)).join('\n'))
+        const md = list(el)
+        if (md) out.push(md)
         break
       }
       default: out.push(...blocks(el))
@@ -91,6 +90,36 @@ function blocks(parent: Node): string[] {
   }
   flush()
   return out
+}
+
+/** A list's own (unescaped) start: a nested list among an item's blocks. */
+const LIST_START = /^(- |\d+\. )/
+const indent = (md: string) => md.split('\n').map((l) => (l ? `    ${l}` : l)).join('\n')
+
+/** A list, nesting and all: an item's later blocks are indented four spaces
+ *  under it (a nested list right after its first line, a paragraph after a
+ *  blank line), as Python-Markdown (richtext.render_md) reads them. A list
+ *  WebKit puts beside an item rather than in it belongs to that item. */
+function list(el: Element): string {
+  const items: string[][] = []
+  for (const child of Array.from(el.children)) {
+    if (child.tagName === 'LI') items.push(blocks(child))
+    else if (child.tagName === 'UL' || child.tagName === 'OL') {
+      const nested = list(child)
+      if (!nested) continue
+      if (items.length) items[items.length - 1].push(nested)
+      else items.push([nested])
+    }
+  }
+  const kept = items.filter((parts) => parts.length)
+  // An item with a paragraph after its first: the items are set apart by a
+  // blank line (else the next one reads as part of that paragraph).
+  const loose = kept.some((parts) => parts.slice(1).some((p) => !LIST_START.test(p)))
+  return kept.map((parts, i) => {
+    const [first, ...rest] = parts
+    const head = `${el.tagName === 'OL' ? `${i + 1}.` : '-'} ${first.replace(/\n/g, '\n    ')}`
+    return head + rest.map((p) => (LIST_START.test(p) ? `\n${indent(p)}` : `\n\n${indent(p)}`)).join('')
+  }).join(loose ? '\n\n' : '\n')
 }
 
 /** The Markdown for a rich field's HTML ("" when nothing is in it). */

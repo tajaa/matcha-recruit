@@ -34,6 +34,41 @@ export const saveBody = (doc: IssueDoc) => ({
   })),
 })
 
+const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
+
+/** Whether two documents hold the same issue (its own fields, not its
+ *  stories' words). */
+export const sameIssue = (a: IssueDoc, b: IssueDoc) => same(saveBody(a), saveBody(b))
+
+// What a save learned, settled onto the document as it is now (edits made
+// while the save was out are kept) and onto every state undo and redo can
+// reach (useHistory's `map`).
+
+/** The issue's own fields as the server saved them, unless they were
+ *  changed again while it saved. */
+export function settleIssue(d: IssueDoc, sent: IssueDoc, saved: IssueDoc): IssueDoc {
+  return sameIssue(d, sent) ? { ...saved, ...(d.drafts ? { drafts: d.drafts } : {}) } : d
+}
+
+/** Stories just saved: a draft still as it was sent is now the saved story
+ *  and is dropped; one typed into while saving stays, to save next. */
+export function settleStories(d: IssueDoc, sent: IssueDoc, saved: ReadonlySet<string>): IssueDoc {
+  if (!d.drafts) return d
+  const drafts = Object.fromEntries(Object.entries(d.drafts)
+    .filter(([id, sd]) => !(saved.has(id) && same(sd, sent.drafts?.[id]))))
+  return Object.keys(drafts).length === Object.keys(d.drafts).length ? d
+    : { ...d, drafts: Object.keys(drafts).length ? drafts : undefined }
+}
+
+/** An undone or redone state that showed a saved story as it was before the
+ *  save: given that version as its own draft, so undo still goes back to it
+ *  (and it saves again from there). */
+export function pinStories(d: IssueDoc, before: Record<string, StoryDoc>): IssueDoc {
+  const missing = Object.keys(before).filter((id) => !d.drafts?.[id])
+  if (!missing.length) return d
+  return { ...d, drafts: { ...d.drafts, ...Object.fromEntries(missing.map((id) => [id, before[id]])) } }
+}
+
 /** One decimal, half up: as the server rounds, so a value never differs. */
 export const round1 = (n: number) => Math.floor(n * 10 + 0.5) / 10
 export const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n))

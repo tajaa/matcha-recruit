@@ -124,5 +124,29 @@
     "html": "<p>Fish &amp; chips &lt;3</p>",
     "md": "Fish & chips <3",
     "rendered": "<p>Fish &amp; chips &lt;3</p>"
+  },
+  {
+    "name": "a nested list",
+    "html": "<ul><li>Outer<ul><li>Inner</li></ul></li><li>Next</li></ul>",
+    "md": "- Outer\n    - Inner\n- Next",
+    "rendered": "<ul>\n<li>Outer<ul>\n<li>Inner</li>\n</ul>\n</li>\n<li>Next</li>\n</ul>"
+  },
+  {
+    "name": "a list Safari nests beside its item",
+    "html": "<ul><li>Outer</li><ul><li>Inner</li></ul><li>Next</li></ul>",
+    "md": "- Outer\n    - Inner\n- Next",
+    "rendered": "<ul>\n<li>Outer<ul>\n<li>Inner</li>\n</ul>\n</li>\n<li>Next</li>\n</ul>"
+  },
+  {
+    "name": "numbers inside bullets",
+    "html": "<ul><li>Steps<ol><li>One</li><li>Two</li></ol></li></ul>",
+    "md": "- Steps\n    1. One\n    2. Two",
+    "rendered": "<ul>\n<li>Steps<ol>\n<li>One</li>\n<li>Two</li>\n</ol>\n</li>\n</ul>"
+  },
+  {
+    "name": "an item of two paragraphs",
+    "html": "<ul><li><p>First</p><p>Second</p></li><li><p>Third</p></li></ul>",
+    "md": "- First\n\n    Second\n\n- Third",
+    "rendered": "<ul>\n<li>\n<p>First</p>\n<p>Second</p>\n</li>\n<li>\n<p>Third</p>\n</li>\n</ul>"
   }
 ]

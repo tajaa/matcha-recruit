@@ -523,7 +523,8 @@ What is built so far:
   here" mark and no paywall script; it is `no-store` and owner-only, so the paid part still never reaches a
   reader's page, the cache, the feed or the JSON. The issue's edit preview also takes `stories_content`
   (each story's unsaved words, through `normalize_story` + `check_assets` like a save; a story not in the
-  issue is ignored) and has its own rate bucket (`cappe_issue_edit_preview`, `EDIT_PREVIEWS_PER_HOUR`).
+  issue is ignored; its cover picture is what saving them would leave, the cover block's or none, never the
+  saved one) and has its own rate bucket (`cappe_issue_edit_preview`, `EDIT_PREVIEWS_PER_HOUR`).
   Rich fields come back as HTML and the dashboard stores them as the constrained Markdown `render_md`
   reads (`canvas/htmlToMd.ts`); `tests/cappe/fixtures/magazine_md_cases.json` pins HTML → Markdown on the
   client and Markdown → HTML here. In the frame, Home/End/Page keys are swallowed while typing (on a Mac

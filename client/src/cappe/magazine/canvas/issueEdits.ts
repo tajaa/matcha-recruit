@@ -1,9 +1,9 @@
 import type { CoverDesign } from '../../types'
 import { place, round1, type IssueDoc } from '../issues/issueDoc'
 import type { CoverEl } from './bridge'
-import { FIELD_MAX } from './fields'
+import { FIELD_MAX, clip } from './fields'
 
-const oneLine = (v: string, max: number) => v.replace(/\s*\n\s*/g, ' ').slice(0, max)
+const oneLine = (v: string, max: number) => clip(v.replace(/\s*\n\s*/g, ' '), max)
 
 /** The issue with words typed on its cover or contents (`issue:` fields).
  *  `excerpts`: each story's dek, which the contents show until the story

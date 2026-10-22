@@ -306,6 +306,19 @@
     });
   }
   function hideBar() { bar.style.display = 'none'; linkInput.hidden = true; }
+  // Leaving the link box for anywhere but its field (a click on a picture)
+  // ends the editing the field's own focusout left open for it.
+  bar.addEventListener('focusout', function () {
+    var field = editing;
+    if (!field) return;
+    setTimeout(function () {
+      var a = document.activeElement;
+      if (editing !== field || (a && (field.contains(a) || (a.closest && a.closest('.mze-bar'))))) return;
+      commit(field);
+      editing = null; hideBar();
+      post({ type: 'mz-editing', on: false });
+    }, 0);
+  });
 
   // ── "+": add a block after the one under the pointer ──────────────────
   var plus = document.createElement('button');
