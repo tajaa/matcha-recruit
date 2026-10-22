@@ -273,9 +273,12 @@ async def is_registered_custom_domain(host: str | None) -> bool:
 # --- Site resolution + rendering ---------------------------------------------
 
 async def _resolve_published_site(conn, host: str | None):
-    """Host header → published site row, by subdomain or custom domain."""
+    """Host header → published site row, by subdomain or custom domain.
+    `account_plan` is the owner's plan, read in the same round trip so cache
+    keys can carry it (`_plan_key`)."""
     sub = subdomain_from_host(host)
-    cols = "id, name, slug, subdomain, custom_domain, theme_config, meta_config, timezone, account_id"
+    cols = ("id, name, slug, subdomain, custom_domain, theme_config, meta_config, timezone, account_id, "
+            "(SELECT plan FROM cappe_accounts a WHERE a.id = cappe_sites.account_id) AS account_plan")
     if sub:
         return await conn.fetchrow(
             f"SELECT {cols} FROM cappe_sites WHERE subdomain = $1 AND status = 'published'",
@@ -300,6 +303,14 @@ async def invalidate_render_cache(site_id) -> None:
     public name because `_host_cache` below is route-local state."""
     await invalidate_site_render_cache(site_id)
     _host_cache.clear()
+
+
+def _plan_key(site) -> str:
+    """The owner's plan, for a cache key on a page the plan decides (the
+    magazine). The plan is checked at render, never at save, and a plan
+    change clears no cache: keyed on it, a downgrade misses at once instead
+    of serving the magazine for another `_RENDER_TTL`."""
+    return site.get("account_plan") or "-"
 
 
 def _site_dict(site, policies=(), magazine=None) -> dict:
@@ -343,7 +354,7 @@ async def _render(request: Request, page_slug: str | None) -> HTMLResponse:
         if site is None:
             return _not_found_html("Site not found")
 
-        cache_key = f"cappe:render:{site['id']}:{page_slug or '__home__'}"
+        cache_key = f"cappe:render:{site['id']}:{page_slug or '__home__:' + _plan_key(site)}"
         if redis:
             cached = await cache_get(redis, cache_key)
             if isinstance(cached, str):
@@ -601,18 +612,21 @@ def _origin(site, host: str | None) -> str:
 
 async def _front_html(conn, site, magazine: dict, *, page: int, host: str | None) -> str:
     size = mag_pages.PAGE_SIZE
+    # The lead (the live cover story, else the latest) is worked out on every
+    # page, not only the first: the grid always leaves out the same story, so
+    # page 2 starts where page 1 ended.
     lead = None
-    if page == 1:
-        if magazine.get("cover_post_id"):
-            lead = await mag_reader.live_story(conn, site["id"], post_id=magazine["cover_post_id"])
-        if lead is None:
-            latest = await mag_reader.live_stories(conn, site["id"], limit=1)
-            lead = latest[0] if latest else None
-    exclude = lead["id"] if lead else magazine.get("cover_post_id")
-    posts = await mag_reader.live_stories(conn, site["id"], exclude=exclude, limit=size + 1,
+    if magazine.get("cover_post_id"):
+        lead = await mag_reader.live_story(conn, site["id"], post_id=magazine["cover_post_id"])
+    if lead is None:
+        latest = await mag_reader.live_stories(conn, site["id"], limit=1)
+        lead = latest[0] if latest else None
+    posts = await mag_reader.live_stories(conn, site["id"], exclude=lead["id"] if lead else None, limit=size + 1,
                                           offset=(page - 1) * size)
     has_more = len(posts) > size
     posts = posts[:size]
+    if page != 1:
+        lead = None
     covers = await mag_reader.covers(conn, site["id"], posts + ([lead] if lead else []))
     topics = await mag_reader.topics_in_use(conn, site["id"], list(magazine.get("topics") or []))
     nav = await _nav(conn, site["id"])
@@ -635,7 +649,7 @@ async def _cached_magazine_page(request: Request, key: str, build, *, media_type
         site = await _resolve_published_site(conn, host)
         if site is None:
             return _not_found_html("Site not found")
-        cache_key = f"cappe:render:{site['id']}:__mag__:{key}"
+        cache_key = f"cappe:render:{site['id']}:__mag__:{_plan_key(site)}:{key}"
         headers = tenant_security_headers()
         if redis:
             cached = await cache_get(redis, cache_key)
