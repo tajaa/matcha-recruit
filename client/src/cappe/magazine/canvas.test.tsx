@@ -11,7 +11,7 @@ import { docOf } from './issues/issueDoc'
 import EditFrame from './canvas/EditFrame'
 import { PHONE, SPREAD_MIN, fitFrame } from './canvas/fit'
 import { readMessage, type FrameMessage } from './canvas/bridge'
-import { BLOCK_FIELDS, blockHasField, fieldShape, isRichField } from './canvas/fields'
+import { BLOCK_FIELDS, blockHasField, clip, fieldShape, isRichField } from './canvas/fields'
 import { cleanHref, cleanRt, emptyRt, richPatch, rtText, rtToMd, type RtDoc } from './canvas/rt'
 import { richExtensions } from './frame/extensions'
 import { applyIssueEdit, coverFocal, moveCoverEl } from './canvas/issueEdits'
@@ -209,6 +209,16 @@ describe('a story edited on its page', () => {
     expect(applyEdit(side, 5, 'md', doc(t('x'.repeat(5_000))))!.blocks[5]).toMatchObject({ md: 'x'.repeat(4_000) })
   })
 
+  it('cuts words to their length by whole characters, never half an emoji', () => {
+    const d = story()
+    expect(applyEdit(d, 2, 'caption', `${'x'.repeat(499)}😀`)!.blocks[2]).toMatchObject({ caption: `${'x'.repeat(499)}😀` })
+    const cut = (applyEdit(d, 2, 'caption', `${'x'.repeat(500)}😀`)!.blocks[2] as { caption: string }).caption
+    expect(cut).toBe('x'.repeat(500))
+    expect(clip('ab😀c', 3)).toBe('ab😀')
+    expect(clip('abc', 3)).toBe('abc')
+    expect(applyIssueEdit(docOf(issue()), 'issue:contents.heading', `${'y'.repeat(59)}🌊🌊`, new Map())!.contents.heading).toBe(`${'y'.repeat(59)}🌊`)
+  })
+
   it('drops an edit naming what the story does not have', () => {
     const d = story()
     expect(applyEdit(d, 1, 'caption', 'x')).toBeNull()  // a text block has no caption
@@ -368,6 +378,31 @@ describe('EditFrame', () => {
     send(two.contentWindow!, { type: 'mz-editing', on: false })
     await waitFor(() => expect(frameWith('<p>three</p>')).not.toBeNull())
     expect(onMessage).toHaveBeenCalledWith({ type: 'mz-editing', on: false })
+  })
+
+  it('never shows a render made before words typed on the page', async () => {
+    const onMessage = vi.fn()
+    const props = { place: { target: null, spread: 0 }, stories: ctx.stories, device: 'spread' as const, title: 'Pages', onMessage }
+    const { rerender } = render(<EditFrame html="<p>A</p>" {...props} />)
+    const a = frameWith('<p>A</p>')!
+    send(a.contentWindow!, { type: 'mz-ready' })
+    send(a.contentWindow!, { type: 'mz-shown' })
+    // B starts loading behind A; then words are typed on A.
+    rerender(<EditFrame html="<p>B</p>" {...props} />)
+    const b = frameWith('<p>B</p>')!
+    send(a.contentWindow!, { type: 'mz-editing', on: true })
+    send(b.contentWindow!, { type: 'mz-ready' })
+    send(b.contentWindow!, { type: 'mz-shown' })
+    send(a.contentWindow!, { type: 'mz-edit', story: 'p-1', block: 1, field: 'caption', value: 'NEW WORDS', rich: false })
+    send(a.contentWindow!, { type: 'mz-editing', on: false })
+    // B predates the words: dropped, and A stays until the render of the new words.
+    await waitFor(() => expect(frameWith('<p>B</p>')).toBeNull())
+    expect(screen.getByTitle('Pages')).toBe(a)
+    rerender(<EditFrame html="<p>C</p>" {...props} />)
+    const c = await waitFor(() => { const f = frameWith('<p>C</p>'); if (!f) throw new Error('not yet'); return f })
+    send(c.contentWindow!, { type: 'mz-ready' })
+    send(c.contentWindow!, { type: 'mz-shown' })
+    expect(screen.getByTitle('Pages')).toBe(c)
   })
 
   it('selects on the page what is selected outside it', () => {
@@ -540,7 +575,8 @@ describe('IssueEditor, on its pages', () => {
       : issue({ stories: issue().stories.slice(0, 1), cover: body.cover as CoverDesign })))
     fireEvent.click(screen.getByRole('button', { name: /^Save/ }))
     await waitFor(() => expect(api.put).toHaveBeenCalledTimes(2))
-    const [issuePut, storyPut] = api.put.mock.calls
+    // The story's words first: a released issue's save publishes its drafts.
+    const [storyPut, issuePut] = api.put.mock.calls
     expect(issuePut[0]).toBe('/sites/s-1/magazine/issues/i-1')
     expect(issuePut[1].cover.lines[0]).toMatchObject({ text: 'Low tide now', x: 10, y: 20 })
     expect(issuePut[1].stories[0]).toMatchObject({ contents_line: 'Out with the boats' })
@@ -560,5 +596,61 @@ describe('IssueEditor, on its pages', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Not saved: “Lower tide” (That picture is not in your library.)')
     expect(api.put).toHaveBeenCalledTimes(1)  // the issue itself was unchanged
     expect(screen.getByText('Unsaved (and a story)')).toBeInTheDocument()
+  })
+
+  it('never publishes a draft story with old words: the issue waits for its story', async () => {
+    answer({
+      '/magazine/issues/i-1': issue({ status: 'released', released_at: '2026-10-21T09:00:00Z', stories: [
+        { ...issue().stories[0], post_id: P2, status: 'draft' }] }),
+      '/magazine/issues/options': issueOptions,
+      '/posts': [post({ id: P2, status: 'draft' })],
+      '/assets': { assets: [] },
+      '/magazine': { name: 'The Machine' },
+    })
+    render(<MemoryRouter initialEntries={['/cappe/sites/s-1/issues/i-1']}><Routes>
+      <Route path="/cappe/sites/:siteId/issues/:issueId" element={<IssueEditor />} />
+    </Routes></MemoryRouter>)
+    const page = await shown('<p>edit 1</p>')
+    page.say({ type: 'mz-edit', story: '', block: -1, field: 'issue:lines.0.text', value: 'Low tide now', rich: false })
+    page.say({ type: 'mz-edit', story: P2, block: -1, field: '@title', value: 'Revised', rich: false })
+    await screen.findByText('Unsaved (and a story)')
+    api.put.mockRejectedValue(new Error('Server error'))
+    fireEvent.click(screen.getByRole('button', { name: /^Save/ }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('The issue waits for it')
+    expect(api.put.mock.calls.map(([path]) => path)).toEqual([`/sites/s-1/posts/${P2}`])
+  })
+
+  it('keeps words typed while a save is out', async () => {
+    mountIssue()
+    const page = await shown('<p>edit 1</p>')
+    page.say({ type: 'mz-edit', story: P1, block: -1, field: '@title', value: 'Lower tide', rich: false })
+    await screen.findByText('Unsaved (and a story)')
+    let answerPut: (p: CappePost) => void = () => {}
+    api.put.mockImplementation(() => new Promise((resolve) => { answerPut = resolve }))
+    fireEvent.click(screen.getByRole('button', { name: /^Save/ }))
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1))
+    page.say({ type: 'mz-edit', story: P1, block: -1, field: '@title', value: 'Lowest tide', rich: false })
+    await act(async () => { answerPut(post({ id: P1, status: 'published', title: 'Lower tide' })) })
+    await waitFor(() => expect(screen.getByRole('button', { name: /^Save/ })).toBeEnabled())
+    expect(screen.getByText('Unsaved (and a story)')).toBeInTheDocument()
+    api.put.mockImplementation((_p: string, body: Partial<CappePost>) => Promise.resolve(post({ id: P1, status: 'published', ...body })))
+    fireEvent.click(screen.getByRole('button', { name: /^Save/ }))
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(2))
+    expect(api.put.mock.calls[1][1]).toMatchObject({ title: 'Lowest tide' })
+  })
+
+  it('undoes past a save, back to the words before it', async () => {
+    mountIssue()
+    const page = await shown('<p>edit 1</p>')
+    page.say({ type: 'mz-edit', story: P1, block: -1, field: '@title', value: 'Lower tide', rich: false })
+    await screen.findByText('Unsaved (and a story)')
+    api.put.mockImplementation((_p: string, body: Partial<CappePost>) => Promise.resolve(post({ id: P1, status: 'published', ...body })))
+    fireEvent.click(screen.getByRole('button', { name: /^Save/ }))
+    await waitFor(() => expect(screen.queryByText(/Unsaved/)).toBeNull())
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }))
+    expect(await screen.findByText('Unsaved (and a story)')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /^Save/ }))
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(2))
+    expect(api.put.mock.calls[1][1]).toMatchObject({ title: 'Low tide' })
   })
 })

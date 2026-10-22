@@ -14,6 +14,7 @@ type Action<T> =
   | { kind: 'redo' }
   | { kind: 'reset'; value: T }
   | { kind: 'replace'; value: T }
+  | { kind: 'map'; fn: (t: T, present: boolean) => T }
 
 /** Pure: the history after one action. A `set` that changes nothing is
  *  ignored; one that lands within MERGE_MS of the last (and isn't a `step`,
@@ -40,12 +41,18 @@ export function historyReducer<T>(h: History<T>, a: Action<T>): History<T> {
     case 'replace':
       // The same document, as the server saved it: no undo step of its own.
       return { ...h, present: a.value, at: 0 }
+    case 'map':
+      // Every state, undone and redone ones too, changed alike (what a save
+      // learned), with no undo step of its own.
+      return { past: h.past.map((t) => a.fn(t, false)), present: a.fn(h.present, true), future: h.future.map((t) => a.fn(t, false)), at: 0 }
   }
 }
 
 /** A value with undo and redo. `set(fn)` records an edit (`{ step: true }`
  *  for one that should never merge with typing); `reset` starts a fresh
- *  history (a load); `replace` swaps the value without a step (a save). */
+ *  history (a load); `replace` swaps the value without a step (a save);
+ *  `map(fn)` changes every state at once, on the latest one (what a save
+ *  learned, applied to whatever was done while it was out). */
 export function useHistory<T>(initial: T) {
   const [h, dispatch] = useReducer(historyReducer<T>, { past: [], present: initial, future: [], at: 0 })
   const set = useCallback((next: (t: T) => T, opts?: { step?: boolean }) =>
@@ -54,5 +61,6 @@ export function useHistory<T>(initial: T) {
   const redo = useCallback(() => dispatch({ kind: 'redo' }), [])
   const reset = useCallback((value: T) => dispatch({ kind: 'reset', value }), [])
   const replace = useCallback((value: T) => dispatch({ kind: 'replace', value }), [])
-  return { value: h.present, canUndo: h.past.length > 0, canRedo: h.future.length > 0, set, undo, redo, reset, replace }
+  const map = useCallback((fn: (t: T, present: boolean) => T) => dispatch({ kind: 'map', fn }), [])
+  return { value: h.present, canUndo: h.past.length > 0, canRedo: h.future.length > 0, set, undo, redo, reset, replace, map }
 }

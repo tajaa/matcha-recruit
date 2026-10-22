@@ -283,6 +283,17 @@ class Settings:
     # Platform fee taken on each Cappe storefront sale (basis points). 200 = 2%.
     cappe_platform_fee_bps: int = 200
 
+    # Cappe social growth — one Meta app serves Instagram + Facebook Pages
+    # (services/cappe/social/providers/meta.py). All four unset ⇒ "Connect"
+    # 503s with a setup message; posts/inbox still work for what is stored.
+    # `cappe_meta_verify_token` is the string Meta echoes on webhook
+    # subscription (GET hub.challenge); `cappe_meta_app_secret` signs the
+    # POSTs (X-Hub-Signature-256) and the OAuth code exchange.
+    cappe_meta_app_id: Optional[str] = None
+    cappe_meta_app_secret: Optional[str] = None
+    cappe_meta_verify_token: Optional[str] = None
+    cappe_meta_graph_version: str = "v21.0"
+
     # Cappe domain reselling (Porkbun registrar). We register under our own
     # funded Porkbun account and resell to tenants at wholesale + a flat markup.
     porkbun_api_key: Optional[str] = None
@@ -513,6 +524,10 @@ def load_settings() -> Settings:
         matcha_ir_price_cents=int(os.getenv("MATCHA_IR_PRICE_CENTS", "4900")),
         cappe_stripe_webhook_secret=os.getenv("CAPPE_STRIPE_WEBHOOK_SECRET"),
         cappe_platform_fee_bps=int(os.getenv("CAPPE_PLATFORM_FEE_BPS", "200")),
+        cappe_meta_app_id=os.getenv("CAPPE_META_APP_ID"),
+        cappe_meta_app_secret=os.getenv("CAPPE_META_APP_SECRET"),
+        cappe_meta_verify_token=os.getenv("CAPPE_META_VERIFY_TOKEN"),
+        cappe_meta_graph_version=os.getenv("CAPPE_META_GRAPH_VERSION", "v21.0"),
         porkbun_api_key=os.getenv("PORKBUN_API_KEY"),
         porkbun_secret_key=os.getenv("PORKBUN_SECRET_KEY"),
         cappe_domain_markup_cents=int(os.getenv("CAPPE_DOMAIN_MARKUP_CENTS", "800")),

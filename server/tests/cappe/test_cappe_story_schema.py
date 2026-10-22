@@ -79,6 +79,19 @@ def test_a_rich_fields_document_wins_and_its_markdown_follows():
     huge = {"type": "doc", "content": [_doc("w")["content"][0]] * 15_001}
     with pytest.raises(story_schema.StoryError, match="too long"):
         story_schema.normalize_story({"blocks": [{"type": "text", "rt": huge}]})
+def test_half_a_character_is_never_kept():
+    # An emoji cut in two by a UTF-16 slice (a lone surrogate) can't be printed on a page.
+    out = story_schema.normalize_story({"blocks": [{"type": "photo", "caption": "Dawn \ud83d", "asset_id": None},
+                                                   {"type": "quote", "text": "x\udc00y 😀", "attribution": ""}]})["blocks"]
+    assert out[0]["caption"] == "Dawn" and out[1]["text"] == "xy 😀"
+    from app.cappe.services.magazine.issue_schema import normalize_cover
+    assert normalize_cover({"issue_line": {"text": "No. 3 \ud83d"}})["issue_line"]["text"] == "No. 3"
+
+
+def test_plain_words_read_escaped_markdown_as_typed():
+    md = "A \\[sic\\] note, 2\\*3, snake\\_case and a back\\\\slash.\n\n\\# not a heading\n\n1\\. not a list"
+    assert richtext.md_to_text(md) == "A [sic] note, 2*3, snake_case and a back\\slash.\n\n# not a heading\n\n1. not a list"
+    assert richtext.md_to_text("**bold** and [a link](https://example.com)") == "bold and a link"
 
 
 def test_an_empty_story_is_fine_and_other_shapes_are_not():

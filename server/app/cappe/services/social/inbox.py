@@ -1,0 +1,216 @@
+"""Stored comments and messages, the replies to them, and per-site settings."""
+from __future__ import annotations
+
+import json
+from typing import Any, Optional
+from uuid import UUID
+
+from ..common import loads
+from .providers.base import InboundEvent
+
+SETTINGS_DEFAULTS: dict[str, Any] = {
+    "autoreply_mode": "off",
+    "reply_to_comments": True,
+    "reply_to_messages": True,
+    "tone": "friendly",
+    "business_facts": "",
+    "signature": None,
+    "default_hashtags": [],
+    "max_auto_per_hour": 20,
+    "escalate_words": [],
+}
+SETTINGS_COLUMNS = tuple(SETTINGS_DEFAULTS)
+
+ITEM_COLUMNS = ("i.id, i.site_id, i.connection_id, c.platform, c.handle, i.kind, i.external_id, i.external_parent_id, "
+                "i.author_external_id, i.author_name, i.text, i.received_at, i.status, i.classification")
+REPLY_COLUMNS = "id, inbox_id, site_id, body, mode, status, model, grounding, external_reply_id, error, created_at, sent_at"
+
+
+# ── settings ────────────────────────────────────────────────────────────────
+
+async def get_settings(conn, site_id: UUID) -> dict[str, Any]:
+    row = await conn.fetchrow(
+        f"SELECT {', '.join(SETTINGS_COLUMNS)} FROM cappe_social_settings WHERE site_id = $1", site_id,
+    )
+    merged = dict(SETTINGS_DEFAULTS)
+    if row:
+        merged.update({k: row[k] for k in SETTINGS_COLUMNS if row[k] is not None or k == "signature"})
+    merged["default_hashtags"] = list(merged.get("default_hashtags") or [])
+    merged["escalate_words"] = list(merged.get("escalate_words") or [])
+    return merged
+
+
+async def upsert_settings(conn, site_id: UUID, fields: dict[str, Any]) -> dict[str, Any]:
+    """Write the given columns (already validated) and return the full row."""
+    current = await get_settings(conn, site_id)
+    current.update({k: v for k, v in fields.items() if k in SETTINGS_COLUMNS})
+    await conn.execute(
+        """INSERT INTO cappe_social_settings
+               (site_id, autoreply_mode, reply_to_comments, reply_to_messages, tone, business_facts,
+                signature, default_hashtags, max_auto_per_hour, escalate_words, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+           ON CONFLICT (site_id) DO UPDATE SET
+               autoreply_mode = EXCLUDED.autoreply_mode, reply_to_comments = EXCLUDED.reply_to_comments,
+               reply_to_messages = EXCLUDED.reply_to_messages, tone = EXCLUDED.tone,
+               business_facts = EXCLUDED.business_facts, signature = EXCLUDED.signature,
+               default_hashtags = EXCLUDED.default_hashtags, max_auto_per_hour = EXCLUDED.max_auto_per_hour,
+               escalate_words = EXCLUDED.escalate_words, updated_at = NOW()""",
+        site_id, current["autoreply_mode"], current["reply_to_comments"], current["reply_to_messages"],
+        current["tone"], current["business_facts"], current["signature"], list(current["default_hashtags"]),
+        int(current["max_auto_per_hour"]), list(current["escalate_words"]),
+    )
+    return current
+
+
+# ── items ───────────────────────────────────────────────────────────────────
+
+def _row_to_item(row) -> dict[str, Any]:
+    d = dict(row)
+    d["classification"] = loads(d.get("classification")) or {}
+    return d
+
+
+def _row_to_reply(row) -> dict[str, Any]:
+    d = dict(row)
+    d["grounding"] = loads(d.get("grounding")) or {}
+    return d
+
+
+async def ingest_events(conn, *, connection: dict[str, Any], events: list[InboundEvent]) -> list[dict[str, Any]]:
+    """Store what is new; a re-delivered event is dropped by the unique key.
+    Returns the rows that were actually inserted, in item shape."""
+    inserted: list[dict[str, Any]] = []
+    for event in events:
+        row = await conn.fetchrow(
+            """INSERT INTO cappe_social_inbox
+                   (site_id, connection_id, kind, external_id, external_parent_id, author_external_id,
+                    author_name, text, received_at, raw)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9, NOW()), $10::jsonb)
+               ON CONFLICT (connection_id, external_id) DO NOTHING
+               RETURNING id, site_id, connection_id, kind, external_id, external_parent_id, author_external_id,
+                         author_name, text, received_at, status, classification""",
+            connection["site_id"], connection["id"], event.kind, event.external_id, event.parent_external_id,
+            event.author_external_id, event.author_name, event.text, event.received_at, json.dumps(event.raw),
+        )
+        if row is not None:
+            item = _row_to_item(row)
+            item["platform"] = connection.get("platform")
+            item["handle"] = connection.get("handle")
+            inserted.append(item)
+    return inserted
+
+
+async def list_inbox(conn, site_id: UUID, *, status: Optional[str] = None, limit: int = 50, offset: int = 0) -> list[dict]:
+    rows = await conn.fetch(
+        f"""SELECT {ITEM_COLUMNS} FROM cappe_social_inbox i
+            JOIN cappe_social_connections c ON c.id = i.connection_id
+            WHERE i.site_id = $1 AND ($2::text IS NULL OR i.status = $2)
+            ORDER BY i.received_at DESC LIMIT $3 OFFSET $4""",
+        site_id, status, limit, offset,
+    )
+    items = [_row_to_item(r) for r in rows]
+    replies = await replies_for(conn, [i["id"] for i in items])
+    for item in items:
+        item["replies"] = replies.get(item["id"], [])
+    return items
+
+
+async def get_item(conn, site_id: UUID, inbox_id: UUID) -> Optional[dict]:
+    row = await conn.fetchrow(
+        f"""SELECT {ITEM_COLUMNS} FROM cappe_social_inbox i
+            JOIN cappe_social_connections c ON c.id = i.connection_id
+            WHERE i.id = $1 AND i.site_id = $2""",
+        inbox_id, site_id,
+    )
+    if row is None:
+        return None
+    item = _row_to_item(row)
+    item["replies"] = (await replies_for(conn, [item["id"]])).get(item["id"], [])
+    return item
+
+
+async def replies_for(conn, inbox_ids: list[UUID]) -> dict[Any, list[dict]]:
+    if not inbox_ids:
+        return {}
+    rows = await conn.fetch(
+        f"SELECT {REPLY_COLUMNS} FROM cappe_social_replies WHERE inbox_id = ANY($1::uuid[]) ORDER BY created_at",
+        list(inbox_ids),
+    )
+    out: dict[Any, list[dict]] = {}
+    for r in rows:
+        reply = _row_to_reply(r)
+        out.setdefault(reply["inbox_id"], []).append(reply)
+    return out
+
+
+async def create_reply(
+    conn, *, inbox_id: UUID, site_id: UUID, body: str, mode: str, status: str,
+    model: Optional[str], grounding: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    row = await conn.fetchrow(
+        f"""INSERT INTO cappe_social_replies (inbox_id, site_id, body, mode, status, model, grounding)
+            VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb) RETURNING {REPLY_COLUMNS}""",
+        inbox_id, site_id, body, mode, status, model, json.dumps(grounding or {}),
+    )
+    return _row_to_reply(row)
+
+
+async def get_reply(conn, site_id: UUID, reply_id: UUID) -> Optional[dict]:
+    row = await conn.fetchrow(
+        f"SELECT {REPLY_COLUMNS} FROM cappe_social_replies WHERE id = $1 AND site_id = $2", reply_id, site_id,
+    )
+    return _row_to_reply(row) if row else None
+
+
+async def claim_draft(conn, reply_id: UUID) -> bool:
+    """Take a draft for sending, once: a second click (or another tab) finds
+    it already taken."""
+    row = await conn.fetchrow(
+        "UPDATE cappe_social_replies SET status = 'sending' WHERE id = $1 AND status = 'draft' RETURNING id", reply_id,
+    )
+    return row is not None
+
+
+async def mark_reply(conn, reply_id: UUID, *, status: str, external_reply_id: Optional[str] = None,
+                     error: Optional[str] = None) -> None:
+    await conn.execute(
+        """UPDATE cappe_social_replies SET status = $2, external_reply_id = COALESCE($3, external_reply_id),
+                  error = $4, sent_at = CASE WHEN $2 = 'sent' THEN NOW() ELSE sent_at END
+           WHERE id = $1""",
+        reply_id, status, external_reply_id, error,
+    )
+
+
+async def set_item_status(conn, inbox_id: UUID, status: str, classification: Optional[dict[str, Any]] = None) -> None:
+    await conn.execute(
+        """UPDATE cappe_social_inbox SET status = $2,
+                  classification = CASE WHEN $3::jsonb IS NULL THEN classification ELSE classification || $3::jsonb END,
+                  updated_at = NOW()
+           WHERE id = $1""",
+        inbox_id, status, json.dumps(classification) if classification is not None else None,
+    )
+
+
+async def auto_replies_last_hour(conn, site_id: UUID) -> int:
+    return int(await conn.fetchval(
+        "SELECT count(*) FROM cappe_social_replies WHERE site_id = $1 AND mode = 'auto' "
+        "AND sent_at > NOW() - INTERVAL '1 hour'",
+        site_id,
+    ) or 0)
+
+
+async def counts(conn, site_id: UUID) -> dict[str, int]:
+    row = await conn.fetchrow(
+        """SELECT count(*) FILTER (WHERE status = 'new') AS new_items,
+                  count(*) FILTER (WHERE status IN ('drafted', 'escalated')) AS waiting
+           FROM cappe_social_inbox WHERE site_id = $1""",
+        site_id,
+    )
+    return {"new": int(row["new_items"] or 0), "waiting": int(row["waiting"] or 0)} if row else {"new": 0, "waiting": 0}
+
+
+__all__ = [
+    "SETTINGS_DEFAULTS", "SETTINGS_COLUMNS", "get_settings", "upsert_settings", "ingest_events", "list_inbox",
+    "get_item", "replies_for", "create_reply", "get_reply", "claim_draft", "mark_reply", "set_item_status",
+    "auto_replies_last_hour", "counts",
+]

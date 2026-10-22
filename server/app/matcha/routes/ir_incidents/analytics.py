@@ -15,7 +15,7 @@ handles the HTTP surface for it.
 import json
 import logging
 from datetime import timedelta
-from typing import Optional
+from typing import Literal, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -103,7 +103,10 @@ async def get_analytics_summary(
 
 @router.get("/analytics/trends", response_model=TrendsAnalysis)
 async def get_analytics_trends(
-    period: str = Query("daily", enum=["daily", "weekly", "monthly"]),
+    # A Literal, not Query(enum=...): FastAPI 0.156 removed `enum=`, and it only
+    # ever documented the choices. Validating them here turns an unknown
+    # period into a 422 instead of a KeyError on `trunc_map` below.
+    period: Literal["daily", "weekly", "monthly"] = Query("daily"),
     days: int = Query(30, ge=7, le=365),
     current_user=Depends(require_admin_or_client),
 ):

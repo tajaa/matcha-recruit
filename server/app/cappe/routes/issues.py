@@ -48,7 +48,7 @@ from ..services.magazine.issue_schema import (
     normalize_cover,
 )
 from ..services.magazine.magazines import get_magazine, live_magazine, preview_blocks
-from ..services.magazine.stories import POST_COLS, check_assets, post_row, site_assets
+from ..services.magazine.stories import POST_COLS, check_assets, cover_asset, post_row, site_assets
 from ..services.magazine.story_schema import StoryError, normalize_layout, normalize_story
 from ._shared import get_owned_site
 from .render import _nav, _site_dict, invalidate_render_cache, tenant_security_headers
@@ -169,8 +169,10 @@ async def preview_issue(site_id: UUID, body: CappeMagazineIssuePreview,
                     continue
                 content = normalize_story(draft.content)
                 await check_assets(conn, site_id, content, None)
+                # The cover picture as saving these words would leave it (the
+                # cover block's, or none): never the saved one it replaces.
                 post.update(title=draft.title, excerpt=draft.excerpt, kicker=draft.kicker, byline=draft.byline,
-                            format="blocks", content=content)
+                            format="blocks", content=content, cover_asset_id=cover_asset(content, None))
                 if draft.layout:
                     post["layout"] = normalize_layout(draft.layout)
         except StoryError as exc:

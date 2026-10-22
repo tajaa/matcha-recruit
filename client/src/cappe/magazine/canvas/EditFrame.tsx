@@ -34,7 +34,9 @@ function withEditor(html: string): string {
  *  A new render loads in a second, hidden frame, which turns to `place` (the
  *  selection, else the spread) and then takes the first one's place, so the
  *  page never flashes back to its start. While words are typed the frame is
- *  never replaced: a render that arrives then waits until typing stops. */
+ *  never replaced: a render that arrives then waits until typing stops, and
+ *  one already loading is dropped once words are typed (it was made before
+ *  them; the render of the new words follows). */
 export default function EditFrame({ html, place, stories, device, title, onMessage }: {
   html: string
   /** Where to turn after a reload, and what to select. A change of target
@@ -55,6 +57,8 @@ export default function EditFrame({ html, place, stories, device, title, onMessa
   const [front, setFront] = useState<0 | 1 | null>(null)
   const [editing, setEditing] = useState(false)
   const [loaded, setLoaded] = useState('')
+  // Each render's own number, never reused (a dropped one stays dropped).
+  const [gens, setGens] = useState(0)
 
   // A render not yet on a page goes into the frame not being shown, unless
   // words are being typed (then it waits for them to stop).
@@ -62,7 +66,8 @@ export default function EditFrame({ html, place, stories, device, title, onMessa
     setLoaded(html)
     if (front === null || buffers[front]?.html !== html) {
       const back: 0 | 1 = front === null ? 0 : other(front)
-      const buf = { html, doc: withEditor(html), gen: Math.max(buffers[0]?.gen ?? 0, buffers[1]?.gen ?? 0) + 1 }
+      const buf = { html, doc: withEditor(html), gen: gens + 1 }
+      setGens(gens + 1)
       setBuffers(back === 0 ? [buf, buffers[1]] : [buffers[0], buf])
     }
   }
@@ -70,6 +75,8 @@ export default function EditFrame({ html, place, stories, device, title, onMessa
   const latest = useRef({ place, stories, onMessage, front, buffers })
   useLayoutEffect(() => { latest.current = { place, stories, onMessage, front, buffers } })
   const typing = useRef(false)
+  // Renders made before words were typed on the shown page: never shown.
+  const stale = useRef(new Set<number>())
   // The target the page last told us it selected: not sent back to it.
   const heard = useRef<Place['target']>(null)
 
@@ -85,6 +92,7 @@ export default function EditFrame({ html, place, stories, device, title, onMessa
       const msg = readMessage(e.data, { stories: latest.current.stories })
       if (!msg) return
       const { front: shown, buffers: bufs } = latest.current
+      if (bufs[i] && stale.current.has(bufs[i]!.gen)) return
       if (i !== shown) {
         // The frame being loaded: turn it to the place, then show it, unless
         // typing started on the shown one meanwhile.
@@ -93,12 +101,21 @@ export default function EditFrame({ html, place, stories, device, title, onMessa
         return
       }
       if (msg.type === 'mz-ready') { goto(i); return }
+      if (msg.type === 'mz-edit') {
+        // Words typed here: a render still loading behind predates them.
+        const back = other(i)
+        const behind = bufs[back]
+        if (behind && behind.gen > (bufs[i]?.gen ?? 0) && !stale.current.has(behind.gen)) {
+          stale.current.add(behind.gen)
+          setBuffers((bs) => (bs[back]?.gen === behind.gen ? (back === 0 ? [null, bs[1]] : [bs[0], null]) : bs))
+        }
+      }
       if (msg.type === 'mz-editing') {
         typing.current = msg.on
         setEditing(msg.on)
         // A render that finished loading while words were typed: show it now.
         const back = other(i)
-        if (!msg.on && (bufs[back]?.gen ?? 0) > (bufs[i]?.gen ?? 0)) goto(back)
+        if (!msg.on && (bufs[back]?.gen ?? 0) > (bufs[i]?.gen ?? 0) && !stale.current.has(bufs[back]!.gen)) goto(back)
       }
       if (msg.type === 'mz-select') heard.current = msg.target
       latest.current.onMessage(msg)

@@ -17,6 +17,7 @@ from app.cappe.services.magazine.story_render import render_block, render_blocks
 from tests.cappe.test_cappe_magazine_issues import BASE, _client, _owner, limits, paid_row  # noqa: E402,F401
 from tests.cappe.test_cappe_magazine_routes import (  # noqa: E402
     ASSET,
+    ASSET_ROW,
     OTHER_ASSET,
     POST,
     SENTINEL,
@@ -219,3 +220,20 @@ def test_the_issue_edit_preview_shows_unsaved_stories_checked_as_a_save(monkeypa
     with _client(monkeypatch, _issue_conn()) as client:
         res = client.post(f"{BASE}/preview", json={**body, "edit": False, "stories_content": {str(PAID_ID): unsaved}})
     assert res.status_code == 200 and SENTINEL not in res.text and 'data-mz-f="' not in res.text
+
+
+def test_the_issue_preview_shows_a_cleared_cover_picture_cleared(monkeypatch, limits):  # noqa: F811
+    """A story's saved cover picture is only a fallback for its saved words:
+    unsaved words whose cover has no picture show none, as saving them would."""
+    saved = {**paid_row(), "cover_asset_id": ASSET}
+    conn = _owner(fetch={"SELECT id, title, status FROM cappe_posts": [{"id": PAID_ID, "title": "Paid", "status": "draft"}],
+                         "FROM cappe_posts WHERE site_id = $1 AND id = ANY": [saved],
+                         "FROM cappe_assets WHERE site_id = $1 AND id = ANY": [ASSET_ROW]})
+    body = {"issue_id": None, "number": 7, "cover": {}, "stories": [{"post_id": str(PAID_ID)}]}
+    cleared = {"title": "The night market", "content": {"blocks": [{"type": "cover", "asset_id": None}, {"type": "text", "md": "Words."}]}}
+    with _client(monkeypatch, conn) as client:
+        before = client.post(f"{BASE}/preview", json=body)
+        after = client.post(f"{BASE}/preview", json={**body, "stories_content": {str(PAID_ID): cleared}})
+    assert before.status_code == after.status_code == 200
+    assert ASSET_ROW["url"] in before.text and ASSET_ROW["url"] not in after.text
+
