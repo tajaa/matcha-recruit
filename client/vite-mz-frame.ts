@@ -60,14 +60,17 @@ export function mzFrame(): Plugin {
       const { script, style } = await built
       return `export const frameScript = ${JSON.stringify(script)}\nexport const frameStyle = ${JSON.stringify(style)}`
     },
-    // In dev, a change to the runtime builds it again and reloads the editor.
+    // In dev, a change to the runtime builds it again and reloads the editor —
+    // also a change to what it imports from canvas/ (rt.ts, fields.ts), which
+    // the dashboard uses too, so both sides keep the same rules.
     handleHotUpdate({ file, server }) {
-      if (!file.startsWith(path.resolve(root, DIR) + path.sep)) return
+      const inFrame = file.startsWith(path.resolve(root, DIR) + path.sep)
+      if (!inFrame && !file.startsWith(path.resolve(root, DIR, '..', 'canvas') + path.sep)) return
       built = null
       const mod = server.moduleGraph.getModuleById(RESOLVED)
       if (mod) server.moduleGraph.invalidateModule(mod)
       server.ws.send({ type: 'full-reload' })
-      return []
+      return inFrame ? [] : undefined
     },
   }
 }
