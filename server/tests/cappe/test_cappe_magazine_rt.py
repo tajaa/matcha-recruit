@@ -128,6 +128,13 @@ def test_what_isnt_a_document_and_the_limits():
         normalize_rt(_doc(*[_p(_t("w")) for _ in range(rt.MAX_NODES)]), max_chars=10**7)
 
 
+def test_half_a_character_is_never_kept():
+    # An emoji cut in two (a lone surrogate) can't be printed on a page.
+    assert normalize_rt(_doc(_p(_t("Dawn \ud83d"), _t("x\udc00y 😀", "bold")))) == _doc(_p(_t("Dawn "), _t("xy 😀", "bold")))
+    # Characters are counted whole: an emoji at the limit is kept or cut, never halved.
+    assert normalize_rt(_doc(_p(_t("ab😀c"))), max_chars=3) == _doc(_p(_t("ab😀")))
+
+
 def test_words_and_the_empty_story():
     assert render_rt(None) == "" and render_rt(_doc(_p(), _p(_t("  ")))) == ""
     assert not rt_has_words(None) and not rt_has_words(rt.empty_rt()) and rt_has_words(_doc(_p(_t("x"))))

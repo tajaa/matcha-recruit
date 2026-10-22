@@ -91,11 +91,14 @@ export function startTyping() {
     post({ type: 'mz-editing', on: true })
   })
   document.addEventListener('focusout', (e) => {
-    const f = fieldOf(e.target)
-    if (!f || f !== state.editing) return
-    // Typing a link in the bar keeps the field: only a real leave ends editing.
+    const f = state.editing
+    // Leaving the field, or the link box in its bar: the field and its bar
+    // are one place to type in, and only leaving both ends editing (a click
+    // on a picture with a link half typed must not leave it on).
+    if (!f || (fieldOf(e.target) !== f && !inBar(e.target))) return
     setTimeout(() => {
-      if (inBar(document.activeElement)) return
+      const now = document.activeElement
+      if (now && (f.contains(now) || inBar(now))) return
       commit(f)
       if (state.editing !== f) return // already typing in the next field
       state.editing = null

@@ -105,6 +105,13 @@ describe('rich text, as the server keeps it (the shared fixture)', () => {
     expect(cleanHref('mailto:desk@example.com')).toBe('mailto:desk@example.com')
   })
 
+  it('counts and cuts characters whole, as the server does', () => {
+    // An emoji is one character: 3 characters of "ab😀c" keep it whole.
+    expect(cleanRt(doc(t('ab😀c')), 3)).toEqual(doc(t('ab😀')))
+    expect(cleanRt(doc(t('😀😀'), t('x', 'bold')), 2)).toEqual(doc(t('😀😀')))
+    expect(richPatch(doc(t(`${'x'.repeat(19)}😀😀`)), 20)).toEqual({ rt: doc(t(`${'x'.repeat(19)}😀`)), md: `${'x'.repeat(19)}😀` })
+  })
+
   it('reads its words and keeps a field within its length', () => {
     expect(rtText({ type: 'doc', content: [{ type: 'heading', attrs: { level: 2 }, content: [t('At sea')] },
       { type: 'paragraph', content: [t('Line'), { type: 'hardBreak' }, t('two')] }] })).toBe('At sea Line two')

@@ -598,5 +598,138 @@
   "html": "",
   "md": "",
   "md_reads_back": true
+ },
+ {
+  "name": "numbers in a bulleted list",
+  "rt": {
+   "type": "doc",
+   "content": [
+    {
+     "type": "bulletList",
+     "content": [
+      {
+       "type": "listItem",
+       "content": [
+        {
+         "type": "paragraph",
+         "content": [
+          {
+           "type": "text",
+           "text": "Outer"
+          }
+         ]
+        },
+        {
+         "type": "orderedList",
+         "attrs": {
+          "start": 1
+         },
+         "content": [
+          {
+           "type": "listItem",
+           "content": [
+            {
+             "type": "paragraph",
+             "content": [
+              {
+               "type": "text",
+               "text": "One"
+              }
+             ]
+            }
+           ]
+          },
+          {
+           "type": "listItem",
+           "content": [
+            {
+             "type": "paragraph",
+             "content": [
+              {
+               "type": "text",
+               "text": "Two"
+              }
+             ]
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "type": "listItem",
+       "content": [
+        {
+         "type": "paragraph",
+         "content": [
+          {
+           "type": "text",
+           "text": "Next"
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  "html": "<ul><li><p>Outer</p><ol><li><p>One</p></li><li><p>Two</p></li></ol></li><li><p>Next</p></li></ul>",
+  "md": "- Outer\n    1. One\n    2. Two\n- Next",
+  "md_reads_back": true
+ },
+ {
+  "name": "a list item of two paragraphs",
+  "rt": {
+   "type": "doc",
+   "content": [
+    {
+     "type": "bulletList",
+     "content": [
+      {
+       "type": "listItem",
+       "content": [
+        {
+         "type": "paragraph",
+         "content": [
+          {
+           "type": "text",
+           "text": "First"
+          }
+         ]
+        },
+        {
+         "type": "paragraph",
+         "content": [
+          {
+           "type": "text",
+           "text": "Second"
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "type": "listItem",
+       "content": [
+        {
+         "type": "paragraph",
+         "content": [
+          {
+           "type": "text",
+           "text": "Third"
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  "html": "<ul><li><p>First</p><p>Second</p></li><li><p>Third</p></li></ul>",
+  "md": "- First\n\n    Second\n\n- Third",
+  "md_reads_back": true
  }
 ]

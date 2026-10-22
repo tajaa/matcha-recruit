@@ -137,6 +137,22 @@ describe('the editor on the page', () => {
     expect(sent.at(-1)).toEqual({ type: 'mz-key', key: 'save' })
   })
 
+  it('stops typing when focus leaves a half-typed link for the page', async () => {
+    const words = field('[data-mz-b="1"]')
+    words.focus()
+    await wait(20)
+    expect(lastOf('mz-editing')).toEqual({ type: 'mz-editing', on: true })
+    words.editor!.commands.setTextSelection({ from: 1, to: 3 })
+    key('k', { metaKey: true })
+    const box = document.querySelector('.mze-link') as HTMLInputElement
+    expect(document.activeElement).toBe(box)
+    await wait(20)
+    expect(lastOf('mz-editing')).toEqual({ type: 'mz-editing', on: true })  // still typing: the box is part of the field
+    box.blur()  // a click on a picture
+    await wait(20)
+    expect(lastOf('mz-editing')).toEqual({ type: 'mz-editing', on: false })
+  })
+
   it('hands undo, redo, save and delete to the editor outside when not typing', async () => {
     words().editor!.commands.blur()
     await wait(50)

@@ -41,6 +41,7 @@ MAX_DEPTH = 6
 MAX_NODES = 30_000
 MAX_HREF = 2_000
 LINK_REL = "nofollow ugc noopener"
+_HALVES = re.compile(r"[\ud800-\udfff]")
 
 
 class RtError(ValueError):
@@ -121,7 +122,8 @@ def _inline(raw: Any, budget: _Budget, depth: int = 0) -> list[dict]:
             out.append({"type": "hardBreak"})
         elif kind == "text":
             text = n.get("text") if isinstance(n.get("text"), str) else ""
-            text = text.replace("\r", "")[: max(budget.chars, 0)]
+            # Half of a character (a lone surrogate) can't be printed on a page.
+            text = _HALVES.sub("", text.replace("\r", ""))[: max(budget.chars, 0)]
             if not text:
                 continue
             budget.chars -= len(text)
@@ -339,13 +341,33 @@ def _md_block(b: dict) -> str:
     if kind == "blockquote":
         inner = "\n\n".join(filter(None, (_md_block(c) for c in b["content"])))
         return "\n".join(f"> {line}" if line else ">" for line in inner.split("\n")) if inner else ""
-    lines = []
+    return _md_list(b)
+
+
+# A list's own (unescaped) start: a nested list among an item's blocks
+# (a paragraph that only looks like one is escaped, `\-` or `1\.`).
+_LIST_START = re.compile(r"^(- |\d+\. )")
+
+
+def _indent(md: str) -> str:
+    return "\n".join(f"    {line}" if line else line for line in md.split("\n"))
+
+
+def _md_list(b: dict) -> str:
+    """A list, nesting and all: an item's later blocks are indented four
+    spaces under it (a nested list right after its first line, a paragraph
+    after a blank line), as `richtext.render_md` reads them; with such a
+    paragraph anywhere the items are set apart by blank lines, else the next
+    item would read as part of it."""
+    items = [parts for parts in ([m for m in (_md_block(c) for c in item["content"]) if m] for item in b["content"]) if parts]
+    loose = any(not _LIST_START.match(p) for parts in items for p in parts[1:])
     start = (b.get("attrs") or {}).get("start", 1)
-    for i, item in enumerate(b["content"]):
-        words = " ".join(filter(None, (_md_block(c).replace("\n", " ") for c in item["content"]))).strip()
-        if words:
-            lines.append(f"{start + i}. {words}" if kind == "orderedList" else f"- {words}")
-    return "\n".join(lines)
+    out = []
+    for i, (first, *rest) in enumerate(items):
+        marker = f"{start + i}." if b["type"] == "orderedList" else "-"
+        tail = "".join(("\n" if _LIST_START.match(p) else "\n\n") + _indent(p) for p in rest)
+        out.append(f"{marker} " + first.replace("\n", "\n    ") + tail)
+    return ("\n\n" if loose else "\n").join(out)
 
 
 def rt_to_md(rt: Optional[dict]) -> str:

@@ -6,6 +6,8 @@
  *  server/tests/cappe/fixtures/magazine_rt_cases.json, which the server's
  *  tests read too. The server checks everything again. */
 
+import { clip } from './fields'
+
 export type RtMark = { type: 'link'; attrs: { href: string } } | { type: 'bold' | 'italic' | 'strike' | 'underline' }
 export type RtInline = { type: 'text'; text: string; marks?: RtMark[] } | { type: 'hardBreak' }
 export type RtBlock =
@@ -27,6 +29,9 @@ const obj = (v: unknown): Raw | null => (v && typeof v === 'object' && !Array.is
 const list = (v: unknown): unknown[] => (Array.isArray(v) ? v : [])
 
 export const emptyRt = (): RtDoc => ({ type: 'doc', content: [{ type: 'paragraph' }] })
+
+/** Characters as the server counts them (code points). */
+const chars = (s: string) => (/[\ud800-\udfff]/.test(s) ? Array.from(s).length : s.length)
 
 /** A link the page may keep: http(s) or mailto, no control characters. */
 export function cleanHref(v: unknown): string | null {
@@ -76,9 +81,10 @@ function inline(raw: unknown, budget: Budget, depth = 0): RtInline[] {
     if (!node) continue
     if (node.type === 'hardBreak') { out.push({ type: 'hardBreak' }); continue }
     if (node.type === 'text') {
-      const text = (typeof node.text === 'string' ? node.text : '').replace(/\r/g, '').slice(0, Math.max(budget.chars, 0))
+      // Counted and cut by whole characters, as the server does: never half an emoji.
+      const text = clip((typeof node.text === 'string' ? node.text : '').replace(/\r/g, ''), Math.max(budget.chars, 0))
       if (!text) continue
-      budget.chars -= text.length
+      budget.chars -= chars(text)
       const ms = marks(node.marks)
       const last = out[out.length - 1]
       // Neighbours with the same marks are one run.
@@ -228,14 +234,25 @@ function mdBlock(b: RtBlock): string {
       const inner = b.content.map(mdBlock).filter(Boolean).join('\n\n')
       return inner ? inner.split('\n').map((l) => (l ? `> ${l}` : '>')).join('\n') : ''
     }
-    default: {
-      const start = b.type === 'orderedList' ? b.attrs.start : 1
-      return b.content.flatMap((item, i) => {
-        const words = item.content.map((c) => mdBlock(c).replace(/\n/g, ' ')).filter(Boolean).join(' ').trim()
-        return words ? [b.type === 'orderedList' ? `${start + i}. ${words}` : `- ${words}`] : []
-      }).join('\n')
-    }
+    default: return mdList(b)
   }
+}
+
+/** A list's own (unescaped) start: a nested list among an item's blocks. */
+const LIST_START = /^(- |\d+\. )/
+const indent = (md: string) => md.split('\n').map((l) => (l ? `    ${l}` : l)).join('\n')
+
+/** A list, nesting and all (as rt.py's `_md_list`): an item's later blocks
+ *  indented four spaces under it, items set apart by blank lines when one
+ *  has a paragraph after its first. */
+function mdList(b: Extract<RtBlock, { type: 'bulletList' | 'orderedList' }>): string {
+  const items = b.content.map((item) => item.content.map(mdBlock).filter(Boolean)).filter((parts) => parts.length)
+  const loose = items.some((parts) => parts.slice(1).some((p) => !LIST_START.test(p)))
+  const start = b.type === 'orderedList' ? b.attrs.start : 1
+  return items.map(([first, ...rest], i) => {
+    const marker = b.type === 'orderedList' ? `${start + i}.` : '-'
+    return `${marker} ${first.replace(/\n/g, '\n    ')}${rest.map((p) => (LIST_START.test(p) ? '\n' : '\n\n') + indent(p)).join('')}`
+  }).join(loose ? '\n\n' : '\n')
 }
 
 /** The Markdown the server keeps beside a document (emails, feeds, word
@@ -248,5 +265,5 @@ export function rtToMd(doc: RtDoc | null | undefined): string {
  *  it, within the field's length. */
 export function richPatch(doc: unknown, max: number): { rt: RtDoc; md: string } {
   const rt = cleanRt(doc, max) ?? emptyRt()
-  return { rt, md: rtToMd(rt).slice(0, max) }
+  return { rt, md: clip(rtToMd(rt), max) }
 }

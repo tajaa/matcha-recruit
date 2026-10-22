@@ -1,7 +1,7 @@
 import type { CappePost, StoryBlock, StoryContent } from '../../types'
 import { insertBlock, newBlock } from '../editor/blocks'
 import type { FrameMessage } from './bridge'
-import { FIELD_MAX, SIDEBAR_MD_MAX, blockHasField, fieldShape, isRichField, isStoryField, type StoryField } from './fields'
+import { FIELD_MAX, SIDEBAR_MD_MAX, blockHasField, clip, fieldShape, isRichField, isStoryField, type StoryField } from './fields'
 import { richPatch, type RtDoc } from './rt'
 
 /** A story's header and settings. */
@@ -83,7 +83,7 @@ export function applyEdit(doc: StoryDoc, block: number, field: string, value: st
   if (isStoryField(field)) {
     if (rich) return null
     const key = HEADER[field]
-    const words = value.replace(/\s*\n\s*/g, ' ').slice(0, FIELD_MAX[field])
+    const words = clip(value.replace(/\s*\n\s*/g, ' '), FIELD_MAX[field])
     return doc.fields[key] === words ? doc : { ...doc, fields: { ...doc.fields, [key]: words } }
   }
   const b = doc.blocks[block]
@@ -96,7 +96,7 @@ export function applyEdit(doc: StoryDoc, block: number, field: string, value: st
     next = setIn(b, field, (key) => ({ [key]: md, [docKey(key)]: rt }))
   } else {
     // Only words on a photo keep their line breaks; a caption or a quote is one run.
-    const words = (shape === 'overlays.#.text' ? value : value.replace(/\s*\n\s*/g, ' ')).slice(0, max)
+    const words = clip(shape === 'overlays.#.text' ? value : value.replace(/\s*\n\s*/g, ' '), max)
     next = setIn(b, field, (key) => ({ [key]: words }))
   }
   if (!next) return null

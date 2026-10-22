@@ -322,8 +322,8 @@ What is built so far:
   dashboard's Tiptap editor types). `normalize_rt` keeps only paragraphs, headings 2–3, quotes, lists
   (ordered with `start`), line breaks and the marks link (http/https/mailto only)/bold/italic/strike/
   underline, merges runs, turns anything else (and lists/quotes nested past six levels) into paragraphs
-  of its words without recursion, so nothing typed is dropped, and caps characters and nodes (30,000).
-  `story_schema._rich`: a sent document wins and its `md` is derived (`rt_to_md`, for emails, feeds, word
+  of its words without recursion, so nothing typed is dropped, and caps characters (counted whole: a half-character is dropped, never kept or cut into) and nodes (30,000).
+  `story_schema._rich`: a sent document wins and its `md` is derived (`rt_to_md`: nested lists indented four spaces as `render_md` reads them; for emails, feeds, word
   counts and the iOS `body`); Markdown alone (an old story, Assist, iOS) becomes a document (`md_to_rt`, which never
   fails: past the budget it gives plain paragraphs, so every old story opens).
   The page renders `render_rt` (else `render_md` for a block stored before documents). A single story
