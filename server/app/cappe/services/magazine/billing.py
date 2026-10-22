@@ -73,13 +73,15 @@ async def paid_ready(conn, site: dict) -> tuple[Optional[dict], Optional[dict]]:
     return mag, dict(owner)
 
 
-async def checkout(site: dict, shopper: dict, body) -> dict[str, Any]:
+async def checkout(site: dict, shopper: dict, body, *, return_origins: Optional[list[str]] = None) -> dict[str, Any]:
     """Start a reader's subscription: a `preparing` row under the reader's lock,
     then Stripe Checkout on the writer's account, then the session attached
-    (or expired, if the reader's account was deleted meanwhile)."""
+    (or expired, if the reader's account was deleted meanwhile). Checkout
+    returns to the magazine's own address, or to `return_origins` (the
+    reader's dashboard on gummfit.com)."""
     from .. import recurring
 
-    origins = site_origins(site)
+    origins = return_origins or site_origins(site)
     success, cancel = url_within_origins(body.success_url, origins), url_within_origins(body.cancel_url, origins)
     if not success or not cancel:
         raise HTTPException(422, "Checkout returns must use this magazine's own address")

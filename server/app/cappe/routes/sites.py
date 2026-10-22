@@ -88,7 +88,8 @@ async def _infer_listing_after_publish(site_id: UUID) -> None:
 
 
 async def _enforce_site_limit(conn, account: CappeAccount) -> None:
-    """Raise 403 if the account is at its plan's site cap.
+    """Raise 403 if the account is at its plan's site cap, or is a reader
+    (a reader account subscribes to magazines and owns no sites).
 
     The cap comes from the billing catalog (`site_limit`, NULL = unlimited) so
     it is admin-editable; it used to be a hardcoded `{"free": 1}` dict here.
@@ -98,6 +99,11 @@ async def _enforce_site_limit(conn, account: CappeAccount) -> None:
     site INSERT.  Otherwise two concurrent creates can both observe the same
     count and exceed the cap.
     """
+    if getattr(account, "account_type", None) == "reader":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "reader_account", "message": "A reader account doesn't have sites."},
+        )
     limit = (await resolve_entitlements(account.plan, conn=conn)).site_limit
     if limit is None:
         return

@@ -19,6 +19,7 @@ from datetime import datetime
 from email.utils import format_datetime
 from html import escape
 from pathlib import Path
+from urllib.parse import quote as url_quote
 from typing import Optional
 from xml.sax.saxutils import escape as xml_escape
 
@@ -41,6 +42,11 @@ _SYMBOLS = {"USD": "$", "CAD": "CA$", "AUD": "A$", "NZD": "NZ$", "EUR": "€", "
 
 PAGE_SIZE = 12
 MAX_PAGE = 50
+
+
+def reader_path(site_slug: str) -> str:
+    """A magazine on a reader account's dashboard (the SPA, under /cappe)."""
+    return f"/reader/m/{url_quote(site_slug, safe='')}"
 
 
 def story_path(slug: str) -> str:
@@ -156,22 +162,28 @@ def price_label(cents: int, currency: Optional[str]) -> str:
     return f"{sym}{amount}" if sym else f"{amount} {cur}"
 
 
-def paywall_html(mag: dict, post: dict, *, currency: Optional[str]) -> str:
+def paywall_html(mag: dict, post: dict, *, currency: Optional[str], site_slug: Optional[str] = None) -> str:
     """Under a paid story's free part: the pitch and price (the same for every
     reader, so the page caches), an empty `.mz-paid` box, and the script that
     signs a reader in, starts their subscription, or fills the box. A
     magazine that has stopped taking subscribers still lets the ones it has
-    sign in."""
+    sign in. A link offers the same magazine on a Gummfit reader account's
+    dashboard (`routes/reader.py`)."""
+    from ..email import dashboard_url
+
     open_ = bool(mag.get("paid_enabled") and mag.get("price_cents"))
     price = price_label(int(mag["price_cents"]), currency) if open_ else ""
     pitch = f'<p class="mz-paywall__pitch">{escape(mag["paid_pitch"])}</p>' if mag.get("paid_pitch") else ""
     offer = f'<p class="mz-paywall__price">{escape(price)} a month. Cancel any time.</p>' if open_ else ""
+    alt = (f'<p class="mz-paywall__alt" data-mz-alt>Read with a Gummfit reader account? <a href="'
+           f'{escape(dashboard_url(reader_path(site_slug)), quote=True)}" rel="noopener">Open it on your dashboard</a>.</p>'
+           if site_slug else "")
     return (
         f'<section class="mz-paywall mz-measure" id="mz-paywall" data-mz-story="{escape(post["slug"], quote=True)}" '
         f'data-mz-open="{1 if open_ else 0}" data-mz-price="{escape(price, quote=True)}">'
         f'<p class="mz-paywall__lede">The rest of this story is for subscribers.</p>{pitch}{offer}'
         '<div class="mz-paywall__actions" data-mz-actions><noscript>Turn on JavaScript to subscribe or sign in.'
-        '</noscript></div><p class="mz-paywall__msg" data-mz-msg role="status"></p></section>'
+        f'</noscript></div><p class="mz-paywall__msg" data-mz-msg role="status"></p>{alt}</section>'
         '<div class="mz-story__body mz-paid" data-mz-paid hidden></div>'
         f"<script>{_PAYWALL_JS}</script>"
     )
@@ -262,7 +274,7 @@ def render_story(site: dict, nav: list[dict], mag: dict, post: dict, assets: dic
     if paid:
         free, rest = split_at_paywall(blocks, preview_blocks=preview_blocks)
         # A story no longer than its free preview has nothing to subscribe for.
-        paywall = paywall_html(mag, post, currency=currency) if rest else ""
+        paywall = paywall_html(mag, post, currency=currency, site_slug=site.get("slug")) if rest else ""
     topic = post.get("topic")
     topic_link = (f'<p class="mz-story__topic"><a href="{topic_path(topic)}">{escape(topic_label(topic))}</a></p>'
                   if topic_label(topic) else "")

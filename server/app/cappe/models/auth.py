@@ -18,9 +18,10 @@ class CappeSignup(BaseModel):
     # business = an organization's storefront; personal = a solo professional
     # ("business of one") who gets hired/booked; creator = influencer/content
     # creator on the creator marketplace (media kit + collab offers); writer =
-    # someone who publishes a photo magazine (one magazine-only site). Same
-    # engine, different framing.
-    account_type: Literal["business", "personal", "creator", "writer"] = "business"
+    # someone who publishes a photo magazine (one magazine-only site); reader =
+    # someone who subscribes to magazines and sells nothing (no sites, no
+    # plans). Same engine, different framing.
+    account_type: Literal["business", "personal", "creator", "writer", "reader"] = "business"
     # The paid plan picked on the pricing page, if any. Remembered across the
     # email-confirmation hop so the person lands in checkout for it. Grants
     # nothing by itself.

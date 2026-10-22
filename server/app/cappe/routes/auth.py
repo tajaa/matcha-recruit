@@ -109,6 +109,12 @@ async def signup(body: CappeSignup, request: Request, background: BackgroundTask
     intended_plan = body.intended_plan
     token = None if auto_verify else uuid4()
 
+    if body.account_type == "reader" and (body.grant_token or body.intended_plan):
+        # A reader account sells nothing and holds no plan: a single-use grant
+        # redeemed onto one would be spent for nothing.
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="A reader account doesn't take a plan. Sign up as a writer or a business.")
+
     async with get_connection() as conn:
         grant_id = None
         if body.grant_token:

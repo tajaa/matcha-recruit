@@ -5,6 +5,7 @@ import { CappeApiError, cappePublicGet, cappePublicPost, setCappeTokens } from '
 import { invalidateCappeMeCache } from '../hooks/useCappeMe'
 import { creatorPaths } from '../creators/creatorPaths'
 import { writerPaths } from '../magazine/writers/writerPaths'
+import { readerNext, readerPaths } from '../magazine/shelf/readerPaths'
 import { postAuthHome } from '../utils/postAuthHome'
 import ResendVerification from '../components/ResendVerification'
 import { billingStartPath } from './CappeBilling/paths'
@@ -37,15 +38,17 @@ const ACCOUNT_TYPES: {
 ]
 
 // Cappe account signup — the functional entry at /cappe/website-setup.
-export default function CappeSignup({ creatorOnly = false, brandOnly = false, writerOnly = false }: {
+export default function CappeSignup({ creatorOnly = false, brandOnly = false, writerOnly = false, readerOnly = false }: {
   creatorOnly?: boolean; brandOnly?: boolean
   /** Gummfit Magazines: a writer account, whose next step is naming their magazine. */
   writerOnly?: boolean
+  /** A reader account: subscribes to magazines, sells nothing, has no plan. */
+  readerOnly?: boolean
 }) {
   const navigate = useNavigate()
   const [params] = useSearchParams()
   const [accountType, setAccountType] = useState<CappeAccountType>(
-    writerOnly ? 'writer' : creatorOnly || params.get('type') === 'creator' ? 'creator' : 'business',
+    readerOnly ? 'reader' : writerOnly ? 'writer' : creatorOnly || params.get('type') === 'creator' ? 'creator' : 'business',
   )
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
@@ -58,16 +61,19 @@ export default function CappeSignup({ creatorOnly = false, brandOnly = false, wr
   // A grant link (/signup?grant=…) gives a paid plan free for a while, so it
   // replaces any plan picked on the pricing cards: there is nothing to pay.
   // The pattern mirrors the server's GRANT_TOKEN_PATTERN (models/auth.py).
-  const grantToken = !creatorOnly && !brandOnly && /^[A-Za-z0-9_-]{16,64}$/.test(params.get('grant') ?? '') ? params.get('grant') : null
+  const grantToken = !creatorOnly && !brandOnly && !readerOnly && /^[A-Za-z0-9_-]{16,64}$/.test(params.get('grant') ?? '') ? params.get('grant') : null
   const [grant, setGrant] = useState<CappeSignupGrantInfo | null>(null)
   // Set only when the SERVER says the link can't be used. Until then the token
   // is sent with the signup even if the lookup hasn't answered (or failed for
   // a passing reason), and the server decides: a promised plan is never
   // dropped because the page was quick or the network slow.
   const [grantDead, setGrantDead] = useState<string | null>(null)
-  // A writer names their magazine first and picks a plan when it goes live.
-  const plan = !grantToken && !creatorOnly && !brandOnly && !writerOnly && /^[a-z0-9_]{1,40}$/.test(params.get('plan') ?? '') ? params.get('plan') : null
+  // A writer names their magazine first and picks a plan when it goes live;
+  // a reader has no plan.
+  const plan = !grantToken && !creatorOnly && !brandOnly && !writerOnly && !readerOnly && /^[a-z0-9_]{1,40}$/.test(params.get('plan') ?? '') ? params.get('plan') : null
   const interval = params.get('interval') === 'year' ? 'year' : 'month'
+  // A reader sent here from a magazine keeps where they were going.
+  const signInPath = params.get('next') ? `${readerPaths.login}?next=${encodeURIComponent(params.get('next') ?? '')}` : readerPaths.login
 
   useEffect(() => {
     if (!grantToken) return
@@ -108,6 +114,7 @@ export default function CappeSignup({ creatorOnly = false, brandOnly = false, wr
           creatorOnly ? creatorPaths.home
             : brandOnly ? creatorPaths.brandHome
             : writerOnly ? writerPaths.home
+            : readerOnly ? readerNext(params.get('next'))
               : res.intended_plan && res.account?.account_type !== 'creator'
                 ? billingStartPath(res.intended_plan, res.intended_interval)
                 : postAuthHome(res.account?.account_type),
@@ -139,7 +146,7 @@ export default function CappeSignup({ creatorOnly = false, brandOnly = false, wr
           <h1 className="text-2xl font-semibold tracking-tight text-zinc-50">Confirm your email</h1>
           <p className="mt-2 text-sm leading-relaxed text-zinc-400">
             We sent a confirmation link to <span className="text-zinc-200">{sentTo}</span>. Click it to
-            activate your account and start building. The link works for 24 hours.
+            activate your account and start {readerOnly ? 'reading' : 'building'}. The link works for 24 hours.
           </p>
           <div className="mt-6 space-y-3 rounded-xl border border-zinc-800 bg-zinc-900 p-4 text-left text-xs leading-relaxed text-zinc-500">
             <p>
@@ -155,7 +162,7 @@ export default function CappeSignup({ creatorOnly = false, brandOnly = false, wr
               Wrong address? Go back and fix it
             </button>
           </div>
-          <Link to={creatorOnly ? creatorPaths.login : brandOnly ? creatorPaths.brandLogin : writerOnly ? writerPaths.login : '/cappe/login'} className="mt-6 inline-block text-sm font-medium text-lime-400 hover:text-lime-300">
+          <Link to={creatorOnly ? creatorPaths.login : brandOnly ? creatorPaths.brandLogin : writerOnly ? writerPaths.login : readerOnly ? readerPaths.login : '/cappe/login'} className="mt-6 inline-block text-sm font-medium text-lime-400 hover:text-lime-300">
             Back to sign in
           </Link>
         </div>
@@ -171,15 +178,15 @@ export default function CappeSignup({ creatorOnly = false, brandOnly = false, wr
             G
           </span>
           <h1 className="text-2xl font-semibold tracking-tight text-zinc-50">
-            Create your {creatorOnly ? 'Gummfit Creators' : brandOnly ? 'brand collab' : writerOnly ? 'Gummfit Magazines' : 'Gummfit'} account
+            Create your {creatorOnly ? 'Gummfit Creators' : brandOnly ? 'brand collab' : writerOnly ? 'Gummfit Magazines' : readerOnly ? 'Gummfit reader' : 'Gummfit'} account
           </h1>
           <p className="mt-1 text-sm text-zinc-400">
-            {creatorOnly ? 'Build your creator profile and connect with brands.' : brandOnly ? 'Find Gummfit Creators and manage collaborations.' : writerOnly ? 'Publish your own photo magazine, at your own address.' : 'Build and launch your website in minutes.'}
+            {creatorOnly ? 'Build your creator profile and connect with brands.' : brandOnly ? 'Find Gummfit Creators and manage collaborations.' : writerOnly ? 'Publish your own photo magazine, at your own address.' : readerOnly ? 'Subscribe to magazines and read them all in one place.' : 'Build and launch your website in minutes.'}
           </p>
         </div>
 
         <form onSubmit={onSubmit} className="space-y-4 rounded-2xl border border-zinc-800 bg-zinc-900 p-6 shadow-xl shadow-black/40">
-          {!creatorOnly && !brandOnly && !writerOnly && <div>
+          {!creatorOnly && !brandOnly && !writerOnly && !readerOnly && <div>
             <label className="mb-2 block text-sm font-medium text-zinc-300">I'm building a site for…</label>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
               {ACCOUNT_TYPES.map(({ value, icon: Icon, title, blurb }) => {
@@ -283,7 +290,7 @@ export default function CappeSignup({ creatorOnly = false, brandOnly = false, wr
 
         <p className="mt-4 text-center text-sm text-zinc-500">
           Already have an account?{' '}
-          <Link to={creatorOnly ? creatorPaths.login : brandOnly ? creatorPaths.brandLogin : '/cappe/login'} className="font-medium text-emerald-400 hover:text-emerald-300">
+          <Link to={creatorOnly ? creatorPaths.login : brandOnly ? creatorPaths.brandLogin : readerOnly ? signInPath : '/cappe/login'} className="font-medium text-emerald-400 hover:text-emerald-300">
             Sign in
           </Link>
         </p>

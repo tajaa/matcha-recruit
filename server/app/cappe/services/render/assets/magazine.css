@@ -154,6 +154,8 @@
 .mz-paywall__note a{color:var(--mz-accent)}
 .mz-paywall__msg{min-height:1.25rem;margin:.75rem 0 0;font-size:.9rem}
 .mz-paywall__msg.err{color:#b91c1c}
+.mz-paywall__alt{margin:.5rem 0 0;font-size:.85rem;opacity:.8}
+.mz-paywall__alt a{color:inherit;text-decoration:underline}
 .mz-more{margin-top:4rem;padding-top:1rem;border-top:1px solid var(--line)}
 .mz-more__title{text-align:center;font-family:var(--mz-h);font-size:1.5rem}
 .mz-follow{max-width:var(--mz-measure);margin:3.5rem auto 0;padding:2rem 1.25rem;text-align:center;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
