@@ -275,3 +275,17 @@ def test_the_feed_is_rss_with_full_free_stories_and_only_the_dek_of_paid_ones():
     assert SENTINEL not in xml and "Just the dek" in xml
     assert "<pubDate>Tue, 20 Oct 2026 09:00:00 +0000</pubDate>" in xml
     assert '<guid isPermaLink="true">https://b.test/stories/free</guid>' in xml
+
+
+def test_plain_words_from_bracket_heavy_text_take_linear_time():
+    # Each `[` used to start a scan to the end of the text: quadratic, seconds
+    # for one long story (CodeQL py/polynomial-redos).
+    import time
+
+    from app.cappe.services.magazine.richtext import md_to_text
+
+    started = time.monotonic()
+    md_to_text("[\\" * 50_000 + "[](" * 30_000)
+    assert time.monotonic() - started < 0.5
+    assert md_to_text("See [the harbour](https://example.com/a(b)) and ![x](y.png)") == "See the harbour and x"
+    assert md_to_text("A [link](https://example.com) here") == "A link here"
