@@ -416,3 +416,23 @@ def test_the_paywall_links_to_the_dashboard():
     assert f'href="{dashboard_url("/reader/m/salt")}"' in page and "data-mz-alt" in page
     assert "data-mz-alt" not in pages.paywall_html(MAG, POST, currency="USD")
     assert pages.reader_path("a b/c") == "/reader/m/a%20b%2Fc"
+
+
+@pytest.mark.parametrize("extra", [{"intended_plan": "writer"}, {"grant_token": "g" * 43}])
+def test_a_reader_signup_takes_no_plan_or_grant(monkeypatch, extra):
+    # A single-use grant redeemed onto a reader (who can hold no plan) would be
+    # spent for nothing: refused before it is looked up.
+    from unittest.mock import AsyncMock
+
+    from app.cappe.models.auth import CappeSignup
+    from app.cappe.routes import auth as auth_mod
+
+    monkeypatch.setattr(auth_mod, "check_rate_limit", AsyncMock())
+    monkeypatch.setattr(auth_mod, "hash_password", lambda p: "hash")
+    monkeypatch.setattr(auth_mod, "get_connection", lambda *a, **k: pytest.fail("no database for a refusal"))
+    fields = {"email": "reader@example.com", "password": "longenough1", "name": None, "account_type": "reader",
+              "intended_plan": None, "intended_interval": None, "grant_token": None, **extra}
+    body = CappeSignup.model_construct(**fields)
+    with pytest.raises(HTTPException) as err:
+        asyncio.run(auth_mod.signup(body, SimpleNamespace(headers={}, client=None), None))
+    assert err.value.status_code == 400 and "reader account" in err.value.detail

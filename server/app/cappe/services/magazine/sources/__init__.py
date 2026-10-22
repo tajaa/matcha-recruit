@@ -19,7 +19,7 @@ LABELS = {name: m.LABEL for name, m in SOURCES.items()}
 MAX_QUERY = 120
 MAX_PAGE = 20
 
-__all__ = ["SOURCES", "LABELS", "SourceError", "StockResult", "search", "resolve", "allowed"]
+__all__ = ["SOURCES", "LABELS", "SourceError", "StockResult", "search", "search_page", "resolve", "allowed"]
 
 
 def _module(source: str) -> ModuleType:
@@ -28,18 +28,25 @@ def _module(source: str) -> ModuleType:
     return SOURCES[source]
 
 
-async def search(source: str, query: str, page: int = 0) -> list[StockResult]:
+async def search_page(source: str, query: str, page: int = 0) -> tuple[list[StockResult], bool]:
+    """One page of publishable results, and whether the archive had anything
+    on that page at all: a page whose every hit is filtered out (common at
+    The Met) isn't the end of the results."""
     module = _module(source)
     q = " ".join(query.split())[:MAX_QUERY]
     if not q:
-        return []
+        return [], False
     page = max(0, min(int(page), MAX_PAGE))
 
     async def load():
         return [r.to_dict() for r in await module.search(q, page)]
 
     rows = await cached("search", (source, q.lower(), page), SEARCH_TTL, load) or []
-    return [r for r in (StockResult.from_dict(d) for d in rows) if allowed(r)]
+    return [r for r in (StockResult.from_dict(d) for d in rows) if allowed(r)], bool(rows)
+
+
+async def search(source: str, query: str, page: int = 0) -> list[StockResult]:
+    return (await search_page(source, query, page))[0]
 
 
 async def resolve(source: str, source_id: str, *, fresh: bool = False) -> Optional[StockResult]:
