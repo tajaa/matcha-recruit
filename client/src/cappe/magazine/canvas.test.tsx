@@ -406,12 +406,32 @@ describe('StoryEditor, on the page', () => {
     expect(body.content.blocks[1]).toMatchObject({ type: 'text', md: 'New **words**' })
   })
 
+  it('saves the words typed just before ⌘S on the page', async () => {
+    // The page sends the words and then the key, back to back: the save must
+    // carry those words, not the document from before them.
+    mountStory()
+    const page = await shown('<p>edit 1</p>')
+    api.put.mockImplementation((_p: string, body: Record<string, unknown>) => Promise.resolve(post(body as Partial<CappePost>)))
+    // Both arrive before React renders (two tasks in a row in a browser).
+    act(() => {
+      for (const data of [{ type: 'mz-edit', story: 'preview', block: -1, field: '@title', value: 'Last words', rich: false },
+        { type: 'mz-key', key: 'save' }]) window.dispatchEvent(new MessageEvent('message', { data, source: page.win }))
+    })
+    await waitFor(() => expect(api.put).toHaveBeenCalled())
+    expect(api.put.mock.calls[0][1].title).toBe('Last words')
+  })
+
   it('asks for a picture where the page asks, and deletes the block selected', async () => {
     mountStory()
     const page = await shown('<p>edit 1</p>')
     page.say({ type: 'mz-pick', story: 'preview', block: 0, item: null })
     expect(await screen.findByRole('dialog', { name: 'Choose a picture' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Close picker' }))
+    // The cover selected (the headline left with Escape): Backspace keeps it.
+    page.say({ type: 'mz-select', target: { kind: 'block', story: 'preview', block: 0 } })
+    page.say({ type: 'mz-key', key: 'delete' })
+    await new Promise((r) => setTimeout(r, 50))
+    expect(screen.queryByText('Unsaved')).toBeNull()
     page.say({ type: 'mz-select', target: { kind: 'block', story: 'preview', block: 1 } })
     await screen.findByRole('heading', { name: 'Text' })
     page.say({ type: 'mz-key', key: 'delete' })

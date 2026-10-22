@@ -168,6 +168,12 @@ def test_the_story_preview_marks_the_page_only_when_asked(monkeypatch):
     assert edit.status_code == plain.status_code == 200 and edit.headers["cache-control"] == "no-store"
     assert 'data-mz-f="@title"' in edit.text and "mz-goto" in edit.text and 'data-mz-s="preview"' in edit.text
     assert 'data-mz-f="' not in plain.text and "mz-goto" not in plain.text
+    # A new story's empty headline stays empty on the page to edit (its
+    # placeholder shows); the reader-style preview still says "Untitled story".
+    with _blog_client(monkeypatch, _owner_conn()) as client:
+        empty = client.post(f"/sites/{SITE}/stories/preview", json={"title": "", "content": blocks, "edit": True})
+        unnamed = client.post(f"/sites/{SITE}/stories/preview", json={"title": "", "content": blocks})
+    assert "Untitled story" not in empty.text and "Untitled story" in unnamed.text
 
 
 def _issue_conn():
@@ -221,3 +227,25 @@ def test_the_issue_preview_shows_a_cleared_cover_picture_cleared(monkeypatch, li
     assert before.status_code == after.status_code == 200
     assert ASSET_ROW["url"] in before.text and ASSET_ROW["url"] not in after.text
 
+
+
+def test_a_plain_markdown_post_in_an_issue_is_shown_not_edited():
+    # The issue editor holds only stories' blocks: words typed into a legacy
+    # Markdown post would be dropped, so the page doesn't offer to take them.
+    legacy = {**story(id="p3", slug="old-post", access="free", format="markdown", content={}, body="Old *words*."),
+              "section": None, "contents_line": None}
+    issue = {"id": "i1", "number": 3, "title": "Tide", "cover": normalize_cover({}), "contents": normalize_contents({}),
+             "released_at": WHEN}
+    html = issue_pages.render_issue(SITE_D, [], MAG, issue, [legacy], A, origin="https://x.test", edit=True)
+    article = html[html.index('id="mz-s-old-post"'):]
+    article = article[:article.index("</article>")]
+    assert "Old" in article and "data-mz-f=" not in article and "data-mz-b=" not in article
+
+
+def test_preview_words_keep_only_whole_characters():
+    # Half an emoji would fail the page's UTF-8 encoding: a 500, not a page.
+    from app.cappe.models.magazine import CappeIssueStoryDraft, CappeStoryPreview
+
+    assert CappeIssueStoryDraft(title="Tide \ud83d", byline="Ana\udc00").model_dump()["title"] == "Tide "
+    assert CappeIssueStoryDraft(byline="Ana\udc00").byline == "Ana"
+    assert CappeStoryPreview(title="x\ud83d😀", kicker="\udc00k").title == "x😀"

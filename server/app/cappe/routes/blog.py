@@ -319,7 +319,9 @@ async def preview_story(site_id: UUID, body: CappeStoryPreview,
     text = story_text(content)
     _words, minutes = reading_stats(text)
     post = {
-        "id": "preview", "slug": "preview", "title": body.title or "Untitled story", "excerpt": body.excerpt,
+        # On the page to edit, an empty headline stays empty so its placeholder shows.
+        "id": "preview", "slug": "preview", "title": body.title or ("" if body.edit else "Untitled story"),
+        "excerpt": body.excerpt,
         "kicker": body.kicker, "topic": normalize_topic(body.topic), "layout": normalize_layout(body.layout),
         "byline": body.byline, "access": body.access, "format": "blocks", "content": content,
         "cover_asset_id": body.cover_asset_id, "reading_minutes": minutes,
