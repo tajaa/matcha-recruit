@@ -517,9 +517,17 @@ What is built so far:
   line or a `#mz-s-<slug>` link in. **One paywall script serves every paid story on a page** (each wall
   `[data-mz-paywall]` fills the `[data-mz-paid]` box after it from the per-story `/paid`; the single-story
   page keeps `id="mz-paywall"`), so the paid part of every story stays out of the issue's HTML and cache.
+  **The script asks `GET …/magazine/me` before it fetches any paid part**: a reader without access spends
+  none of the `/paid` allowance (300 an hour), and back from checkout (`?subscribed=1`) it polls only
+  `/magazine/me` (6 tries, 2 s apart) for the webhook, then fetches each part once.
   `/issues` is the archive of covers; the front page leads with the newest released issue (its stories
-  stay in the list below), a story in one links "From No. 3 — read it in the issue", and the sitemap lists
-  them. Cached as `__mag__:issue:{n}` and `__mag__:issues:{page}`; every owner write invalidates.
+  stay in the list below; the lead reads only the first `issue_pages.CURRENT_LIST` titles and slugs,
+  `issues.issue_headlines`), a story in one links "From No. 3 — read it in the issue", and the sitemap
+  lists them. Cached as `__mag__:issue:{n}` and `__mag__:issues:{page}`; every owner write invalidates.
+  The owner's issue preview shows drafts as they will be once released but never an archived story.
+  A story put in another issue between `check_stories` and the save (the `uq_…_issue_stories_post`
+  clash, on the stories' INSERT or the issue's UPDATE) is a 422 that says so: `save_issue` runs both writes
+  in one try that turns it into an IssueError (`_unique_problem`).
 - **The owner edits on the page itself** (2026-10-21): an *edit render* of a story or an issue
   (`POST /sites/{id}/stories/preview` or `…/magazine/issues/preview` with `edit: true`) is the reader's page
   with markers, and each story's rich fields' documents in a `<script type="application/json"

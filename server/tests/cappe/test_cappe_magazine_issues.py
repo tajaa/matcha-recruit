@@ -123,10 +123,14 @@ def test_the_current_issue_is_the_highest_number_out_not_the_last_released():
 
 
 def test_the_front_leads_with_the_current_issue_and_keeps_every_story_below(monkeypatch):
-    _wire(monkeypatch, _issue_render_conn(issue=issue_row(), stories=[in_issue(story_row())]))
+    conn = _issue_render_conn(issue=issue_row(), stories=[in_issue(story_row())])
+    _wire(monkeypatch, conn)
     html = asyncio.run(render_mod.magazine_front(_request("/magazine"))).body.decode()
     assert 'class="mz-current"' in html and 'href="/issues/3"' in html and 'href="/issues/3#mz-s-harbour-at-dawn"' in html
     assert 'class="mz-card mz-card--lead"' not in html and 'href="/stories/harbour-at-dawn"' in html
+    # The lead names a few stories: it reads their titles, not 40 stories' words.
+    listed = [(sql, args) for kind, sql, args in conn.calls if kind == "fetch" and "cappe_magazine_issue_stories" in sql]
+    assert listed and all("content" not in sql and "LIMIT" in sql and args[-1] == 8 for sql, args in listed)
 
 
 def test_a_story_in_a_released_issue_links_to_it(monkeypatch):
@@ -424,6 +428,18 @@ def test_the_preview_renders_unsaved_and_never_caches(monkeypatch, limits):
     with _client(monkeypatch, _owner(fetchrow={"FROM cappe_magazines": None})) as client:
         res = client.post(f"{BASE}/preview", json={"cover": {}, "stories": []})
     assert res.status_code == 200 and "Bloom" in res.text  # no magazine yet: the site's name
+
+
+def test_the_preview_leaves_out_an_archived_story(monkeypatch, limits):
+    def posts(sql, args):
+        # The database's answer: the archived story comes back only if the query lets it.
+        return [] if "status IN ('draft', 'published')" in sql else [story_row(status="archived")]
+
+    conn = _owner(fetch={"SELECT id, title, status FROM cappe_posts": [{"id": POST, "title": "x", "status": "archived"}],
+                         "FROM cappe_posts WHERE site_id = $1 AND id = ANY": posts})
+    with _client(monkeypatch, conn) as client:
+        res = client.post(f"{BASE}/preview", json={"cover": {}, "stories": [{"post_id": str(POST)}]})
+    assert res.status_code == 200 and "mz-s-harbour-at-dawn" not in res.text
 
 
 def test_the_library_keeps_a_cover_picture(monkeypatch):
