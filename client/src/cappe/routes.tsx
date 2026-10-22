@@ -46,6 +46,7 @@ const Messages = lazy(() => import('./pages/site/Messages'))
 const Clients = lazy(() => import('./pages/site/Clients'))
 const Reviews = lazy(() => import('./pages/site/Reviews'))
 const Library = lazy(() => import('./magazine/library/LibraryPage'))
+const Social = lazy(() => import('./pages/site/Social'))
 
 // Cappe — website-builder product, served at /cappe. Self-contained route tree
 // with its own auth (cappe_* tokens, useCappeMe). Public signup/login live
@@ -99,6 +100,7 @@ export default function CappeRoutes() {
           <Route path="sites/:siteId/finances" element={<Finances />} />
           <Route path="sites/:siteId/subscribers" element={<Subscribers />} />
           <Route path="sites/:siteId/campaigns" element={<Campaigns />} />
+          <Route path="sites/:siteId/social" element={<Social />} />
           <Route path="sites/:siteId/forms" element={<Forms />} />
           <Route path="sites/:siteId/bookings" element={<Bookings />} />
           <Route path="sites/:siteId/locations" element={<Locations />} />
