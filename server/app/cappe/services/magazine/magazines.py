@@ -73,7 +73,22 @@ async def live_magazine(conn, site) -> Optional[dict[str, Any]]:
         return None
     plan = await conn.fetchval("SELECT plan FROM cappe_accounts WHERE id = $1", site["account_id"])
     ent = await resolve_entitlements(plan, conn=conn)
-    return mag if ent.has("magazine") or in_grace(mag) else None
+    if ent.has("magazine"):
+        return mag
+    return mag if in_grace(mag) and await _has_readers(conn, site["id"]) else None
+
+
+async def _has_readers(conn, site_id: UUID) -> bool:
+    """A subscription to the magazine still billing, or a live comp: the
+    readers the grace month is for. With none, losing the plan takes the
+    pages down at once."""
+    return bool(await conn.fetchval(
+        "SELECT 1 FROM cappe_shopper_subscriptions WHERE site_id = $1 AND kind = 'magazine' "
+        "AND status IN ('active', 'trialing', 'past_due', 'unpaid', 'paused') "
+        "UNION ALL SELECT 1 FROM cappe_magazine_comps WHERE site_id = $1 AND revoked_at IS NULL "
+        "AND (expires_at IS NULL OR expires_at > NOW()) LIMIT 1",
+        site_id,
+    ))
 
 
 def in_grace(mag: dict, *, now: Optional[datetime] = None) -> bool:

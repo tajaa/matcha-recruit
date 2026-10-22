@@ -260,8 +260,9 @@ def render_story(site: dict, nav: list[dict], mag: dict, post: dict, assets: dic
     paywall = ""
     paid = post.get("access") == "paid"
     if paid:
-        free, _paid = split_at_paywall(blocks, preview_blocks=preview_blocks)
-        paywall = paywall_html(mag, post, currency=currency)
+        free, rest = split_at_paywall(blocks, preview_blocks=preview_blocks)
+        # A story no longer than its free preview has nothing to subscribe for.
+        paywall = paywall_html(mag, post, currency=currency) if rest else ""
     topic = post.get("topic")
     topic_link = (f'<p class="mz-story__topic"><a href="{topic_path(topic)}">{escape(topic_label(topic))}</a></p>'
                   if topic_label(topic) else "")
