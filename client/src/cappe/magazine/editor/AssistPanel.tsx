@@ -92,7 +92,8 @@ export default function AssistPanel({ siteId, postId, title, excerpt, blocks, as
   const canAsk = tab === 'tighten' ? chosenBlock !== null : tab === 'draft' ? notes.trim().length > 0 || blocks.length > 0 : true
 
   return (
-    <section className={`${ui.card} space-y-3 p-4`} aria-label="Assist">
+    // Its fields keep the browser's own undo, not the story's.
+    <section className={`${ui.card} space-y-3 p-4`} aria-label="Assist" data-native-undo>
       <div className="flex items-center justify-between gap-2">
         <h2 className="inline-flex items-center gap-2 text-sm font-medium text-zinc-100"><Wand2 className="h-4 w-4" /> Assist</h2>
         <button type="button" onClick={onClose} className="text-zinc-500 hover:text-zinc-300" aria-label="Close Assist"><X className="h-4 w-4" /></button>

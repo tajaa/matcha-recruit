@@ -48,8 +48,13 @@ async def _material(conn, site_id: UUID, post_id: UUID, account: CappeAccount) -
     if post is None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT,
                             detail="Publish the story first; an issue links to it.")
+    origin = site_public_origin(site)
+    if not origin:
+        # Every link in an issue (the story, unsubscribe) needs the site's own address.
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                            detail="Give your site its address first; an issue links to it.")
     return {"site": site, "mag": mag, "post": post, "assets": await mag_reader.story_assets(conn, site_id, post),
-            "origin": site_public_origin(site) or ""}
+            "origin": origin}
 
 
 def _build(m: dict[str, Any], body: CappeIssueCreate) -> tuple[str, str, str]:
@@ -57,6 +62,16 @@ def _build(m: dict[str, Any], body: CappeIssueCreate) -> tuple[str, str, str]:
         site_name=m["site"]["name"], mag=m["mag"], post=m["post"], assets=m["assets"], origin=m["origin"],
         include_body=body.include_body, subject=(body.subject or "").strip() or None,
     )
+
+
+_ALREADY_SENT = "This story has already gone to your followers."
+
+
+async def _already_sent(conn, post_id: UUID) -> bool:
+    return bool(await conn.fetchval(
+        "SELECT 1 FROM cappe_campaigns WHERE story_id = $1 AND kind = 'issue' AND status IN ('sending', 'sent')",
+        post_id,
+    ))
 
 
 @router.get("/sites/{site_id}/issues", response_model=list[CappeIssue])
@@ -78,12 +93,8 @@ async def send_issue(site_id: UUID, post_id: UUID, body: CappeIssueCreate,
     """Email the story to everyone who follows the magazine."""
     async with get_connection() as conn:
         m = await _material(conn, site_id, post_id, account)
-        if await conn.fetchval(
-            "SELECT 1 FROM cappe_campaigns WHERE story_id = $1 AND kind = 'issue' AND status IN ('sending', 'sent')",
-            post_id,
-        ):
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT,
-                                detail="This story has already gone to your followers.")
+        if await _already_sent(conn, post_id):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_ALREADY_SENT)
         if not await conn.fetchval(
             "SELECT COUNT(*) FROM cappe_subscribers WHERE site_id = $1 AND status = 'subscribed'", site_id,
         ):
@@ -94,7 +105,12 @@ async def send_issue(site_id: UUID, post_id: UUID, body: CappeIssueCreate,
             raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=problem)
     await check_rate_limit(str(account.id), "cappe_campaign_send", SENDS_PER_DAY, 86_400)
     subject, html, text = _build(m, body)
-    async with get_connection() as conn:
+    async with get_connection() as conn, conn.transaction():
+        # Checked again under a per-story lock: two Sends at once (two tabs, a
+        # retry) can't both insert, so a story goes out once.
+        await conn.execute("SELECT pg_advisory_xact_lock(hashtext($1))", f"cappe_issue:{post_id}")
+        if await _already_sent(conn, post_id):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_ALREADY_SENT)
         row = await conn.fetchrow(
             """INSERT INTO cappe_campaigns (site_id, subject, body_html, body_text, from_name, status, kind,
                                             story_id, include_body)
