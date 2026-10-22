@@ -3,7 +3,9 @@ from datetime import datetime
 from typing import Any, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field
+import re
+
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 MastheadStyle = Literal["classic", "literary", "modern", "elegant", "display"]
 
@@ -73,6 +75,15 @@ class CappeMagazineCompCreate(BaseModel):
     note: Optional[str] = Field(default=None, max_length=200)
 
 
+_HALVES = re.compile(r"[\ud800-\udfff]")
+
+
+def _whole_characters(value: Any) -> Any:
+    """Half an emoji (a lone surrogate) can't be printed on a page, and would
+    fail the response's UTF-8 encoding: dropped, as the story schema does."""
+    return _HALVES.sub("", value) if isinstance(value, str) else value
+
+
 class CappeStoryPreview(BaseModel):
     """An unsaved story to render as its page would look."""
     title: str = Field(default="", max_length=255)
@@ -84,6 +95,11 @@ class CappeStoryPreview(BaseModel):
     cover_asset_id: Optional[UUID] = None
     access: Literal["free", "paid"] = "free"
     content: dict[str, Any] = Field(default_factory=dict)
+    # The owner's editor on the page: the story whole, marked for editing,
+    # with the editor's script (services/magazine/story_render.py).
+    edit: bool = False
+
+    _whole = field_validator("title", "excerpt", "kicker", "byline", mode="before")(_whole_characters)
 
 
 class CappeStoryLayoutInfo(BaseModel):
@@ -269,9 +285,24 @@ class CappeMagazineIssueSave(BaseModel):
     stories: Optional[list[CappeIssueStoryRef]] = Field(default=None, max_length=40)
 
 
+class CappeIssueStoryDraft(BaseModel):
+    """A story's unsaved words in the issue editor, previewed in the issue."""
+    title: str = Field(default="", max_length=255)
+    excerpt: Optional[str] = Field(default=None, max_length=600)
+    kicker: Optional[str] = Field(default=None, max_length=60)
+    byline: Optional[str] = Field(default=None, max_length=160)
+    layout: Optional[str] = Field(default=None, max_length=20)
+    content: dict[str, Any] = Field(default_factory=dict)
+
+    _whole = field_validator("title", "excerpt", "kicker", "byline", mode="before")(_whole_characters)
+
+
 class CappeMagazineIssuePreview(BaseModel):
-    """An unsaved issue to render as its book would look."""
+    """An unsaved issue to render as its book would look. `edit`: the owner's
+    editor on the page; `stories_content`: the stories' unsaved words."""
     issue_id: Optional[UUID] = None
+    edit: bool = False
+    stories_content: dict[UUID, CappeIssueStoryDraft] = Field(default_factory=dict, max_length=40)
     number: int = Field(default=1, ge=1, le=9999)
     title: Optional[str] = Field(default=None, max_length=120)
     cover: dict[str, Any] = Field(default_factory=dict)
@@ -373,6 +404,7 @@ __all__ = [
     "CappeMagazineCheckout",
     "CappeMagazineCompCreate",
     "CappeIssueStoryRef",
+    "CappeIssueStoryDraft",
     "CappeMagazineIssueCreate",
     "CappeMagazineIssueSave",
     "CappeMagazineIssuePreview",

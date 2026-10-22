@@ -164,7 +164,7 @@ function editor(over: Partial<CappeMagazineIssue> = {}, posts: CappePost[] = [po
     '/assets': { assets: [{ id: 'a-1', url: 'https://cdn.example.test/a.jpg', alt: 'Boats', credit_line: 'Photo: Ana', kind: 'upload' }] },
     '/magazine': { name: 'The Machine' },
   })
-  return mount('/cappe/sites/s-1/issues/i-1', <IssueEditor />, '/cappe/sites/:siteId/issues/:issueId')
+  return mount('/cappe/sites/s-1/issues/i-1?view=outline', <IssueEditor />, '/cappe/sites/:siteId/issues/:issueId')
 }
 
 describe('IssueEditor', () => {
@@ -305,7 +305,7 @@ describe('IssueEditor', () => {
 
   it('cannot load an issue that is gone', async () => {
     api.get.mockRejectedValue(new Error('Issue not found'))
-    mount('/cappe/sites/s-1/issues/i-1', <IssueEditor />, '/cappe/sites/:siteId/issues/:issueId')
+    mount('/cappe/sites/s-1/issues/i-1?view=outline', <IssueEditor />, '/cappe/sites/:siteId/issues/:issueId')
     expect(await screen.findByRole('alert')).toHaveTextContent('Issue not found')
   })
 })

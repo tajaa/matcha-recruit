@@ -16,6 +16,8 @@
 // and a contents entry (or a link in, /issues/3#mz-s-<story>) turns to it.
 // Keep in step with client/src/cappe/magazine/reader/book.ts, which does the
 // same from outside the script-less preview frames.
+// window.mzBook is for the owner's editor on the page (editor.js): turn to a
+// spread (at once with `now`), which spread an element is on, measure again.
 var box=document.querySelector('[data-mz-book]');if(!box)return;
 var book=box.querySelector('.mz-book'),pages=box.querySelector('.mz-pages'),story=pages.querySelector('[data-mz-flow]')||pages.firstElementChild,end=box.querySelector('.mz-end'),prev=box.querySelector('[data-mz-prev]'),next=box.querySelector('[data-mz-next]'),folio=box.querySelector('[data-mz-folio]');
 var mat=box.querySelector('[data-mz-skip]'),issue=box.hasAttribute('data-mz-issue');
@@ -28,8 +30,10 @@ function pad(){return parseFloat(getComputedStyle(book).paddingLeft)||0;}
 // changes nothing, so the reader's place never moves).
 function extent(){var r=story?story.getClientRects():[],b=book.getBoundingClientRect(),x=0;
 for(var k=0;k<r.length;k++)x=Math.max(x,r[k].right-b.left+book.scrollLeft);return x||book.scrollWidth;}
-// The column an element starts in (0 is the first, the mat's when there is one).
-function column(el){var r=el.getClientRects()[0];if(!r)return -1;
+// The column an element starts in (0 is the first, the mat's when there is one):
+// its first piece with any height (one that starts at the foot of a column
+// leaves an empty sliver there).
+function column(el){var rs=el.getClientRects(),r=null;for(var k=0;k<rs.length&&!r;k++)if(rs[k].height>1)r=rs[k];r=r||rs[0];if(!r)return -1;
 return Math.floor((r.left-book.getBoundingClientRect().left+book.scrollLeft-pad()+2)/(width()/perSpread()));}
 function target(hash){return hash&&hash.indexOf('#mz-s-')===0?document.getElementById(hash.slice(1)):null;}
 function numbers(){var els=box.querySelectorAll('[data-mz-pageno]');
@@ -45,7 +49,7 @@ function show(){var i=at(),per=perSpread(),first=Math.max(1,i*per+1-skip),last=M
 box.setAttribute('data-mz-at',String(i));
 prev.hidden=i<=0;next.hidden=i>=n-1;
 folio.textContent=n>1?(issue&&i===0?'Cover':(first>=last?'Page '+first:'Pages '+first+'–'+last)+' of '+count):'';}
-function go(i){pending=null;cur=clamp(i);var to=cur*width();if(Math.abs(book.scrollLeft-to)>2)book.scrollTo({left:to,behavior:still?'auto':'smooth'});show();}
+function go(i,now){pending=null;cur=clamp(i);var to=cur*width();if(Math.abs(book.scrollLeft-to)>2)book.scrollTo({left:to,behavior:still||now?'auto':'smooth'});show();}
 prev.addEventListener('click',function(){go(cur-1);});
 next.addEventListener('click',function(){go(cur+1);});
 document.addEventListener('keydown',function(e){var t=e.target,tag=t&&t.tagName;
@@ -76,4 +80,5 @@ window.addEventListener('load',refit);
 if(document.fonts&&document.fonts.ready)document.fonts.ready.then(refit);
 pending=target(location.hash);
 refit();
+window.mzBook={go:go,at:at,spreadOf:spreadOf,refit:refit};
 })();

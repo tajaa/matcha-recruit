@@ -36,27 +36,30 @@ def _when(issue: dict):
 
 
 def issue_book(mag: dict, issue: dict, stories: list[dict], assets: dict[str, dict], *, currency: Optional[str],
-               site_slug: Optional[str], preview_blocks: int) -> str:
-    """The issue as one book: the cover, the contents, every story in order."""
+               site_slug: Optional[str], preview_blocks: int, edit: bool = False) -> str:
+    """The issue as one book: the cover, the contents, every story in order.
+    `edit`: the owner's editor on the page, every story whole and marked."""
     hrefs = {str(s["id"]): f"#{story_anchor(s['slug'])}" for s in stories}
     cover = cover_html(issue.get("cover") or {}, mag=mag, number=issue["number"], when=_when(issue),
-                       asset=_cover_asset(issue, assets), hrefs=hrefs, size="half", eager=True)
+                       asset=_cover_asset(issue, assets), hrefs=hrefs, size="half", eager=True, edit=edit)
     face = f'<div class="mz-issue__face">{cover}</div>'
     covers = {str(s["id"]): story_cover(s, assets)[1] for s in stories}
     entries = [{"post": s, "asset": covers.get(str(s["id"])), "section": s.get("section"),
                 "line": s.get("contents_line")} for s in stories]
     label = issue_line_text(issue.get("cover") or {}, issue["number"], _when(issue))
     articles = "".join(
+        # A plain Markdown post isn't edited on the page (the issue editor
+        # holds only stories' blocks): shown as is, nothing typed in it is lost.
         story_article_html(s, assets, mag=mag, currency=currency, site_slug=site_slug, preview_blocks=preview_blocks,
-                           single=False)
+                           single=False, edit=edit and s.get("format") == "blocks")
         for s in stories
     )
     inner = ('<div class="mz-issue" data-mz-flow>'
              '<div class="mz-issue__mat" data-mz-skip aria-hidden="true"></div>'
              '<div class="mz-issue__cover" aria-hidden="true"></div>'
-             f'<div class="mz-issue__contents">{contents_html(issue.get("contents") or {}, entries, label=label)}</div>'
+             f'<div class="mz-issue__contents">{contents_html(issue.get("contents") or {}, entries, label=label, edit=edit)}</div>'
              f"{articles}</div>")
-    return book_html(inner, issue=True, face=face)
+    return book_html(inner, issue=True, face=face, edit=edit)
 
 
 def _issue_ld(mag: dict, issue: dict, stories: list[dict], *, url: str, origin: str, image: Optional[str]) -> str:
@@ -83,10 +86,10 @@ def _issue_ld(mag: dict, issue: dict, stories: list[dict], *, url: str, origin: 
 
 
 def render_issue(site: dict, nav: list[dict], mag: dict, issue: dict, stories: list[dict], assets: dict[str, dict], *,
-                 origin: str, currency: Optional[str] = None, preview_blocks: int = 3) -> str:
+                 origin: str, currency: Optional[str] = None, preview_blocks: int = 3, edit: bool = False) -> str:
     book = issue_book(mag, issue, stories, assets, currency=currency, site_slug=site.get("slug"),
-                      preview_blocks=preview_blocks)
-    paid = any(s.get("access") == "paid" for s in stories)
+                      preview_blocks=preview_blocks, edit=edit)
+    paid = any(s.get("access") == "paid" for s in stories) and not edit
     title = f"{mag.get('name') or ''}, {issue_label(issue)}"
     body = (_masthead(mag, small=True) + f'<h1 class="mz-sr">{escape(title)}</h1>' + book
             + (paywall_script() if paid else "")
@@ -97,7 +100,7 @@ def render_issue(site: dict, nav: list[dict], mag: dict, issue: dict, stories: l
     description = ("In this issue: " + ", ".join(titles[:4])) if titles else (mag.get("tagline") or "")
     extra = _issue_ld(mag, issue, stories, url=url, origin=origin, image=image)
     extra += '<meta name="twitter:card" content="summary_large_image" />'
-    return _page(site, nav, mag, body, origin=origin, extra_head=extra, issue_css=True, seo={
+    return _page(site, nav, mag, body, origin=origin, extra_head=extra, issue_css=True, preview=edit, seo={
         "title": title, "description": description[:300], "image": image, "type": "website", "url": url,
     })
 

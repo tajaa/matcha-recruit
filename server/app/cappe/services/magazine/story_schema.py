@@ -60,8 +60,13 @@ class StoryError(ValueError):
     """The story content can't be stored as given; the message is for the owner."""
 
 
+# Half of a character (an emoji cut by a UTF-16 slice somewhere): never
+# kept, since a page can't be encoded with one in it.
+_HALVES = re.compile(r"[\ud800-\udfff]")
+
+
 def _str(value: Any, limit: int) -> str:
-    return str(value or "").strip()[:limit] if value is not None else ""
+    return _HALVES.sub("", str(value or "")).strip()[:limit] if value is not None else ""
 
 
 def _choice(value: Any, choices: tuple[str, ...]) -> str:

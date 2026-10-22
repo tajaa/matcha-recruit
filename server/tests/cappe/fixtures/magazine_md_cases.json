@@ -1,0 +1,152 @@
+[
+  {
+    "name": "words",
+    "html": "<p>The tide went out.</p>",
+    "md": "The tide went out.",
+    "rendered": "<p>The tide went out.</p>"
+  },
+  {
+    "name": "bold and italic",
+    "html": "<p>A <b>bold</b> and <i>quiet</i> morning.</p>",
+    "md": "A **bold** and *quiet* morning.",
+    "rendered": "<p>A <strong>bold</strong> and <em>quiet</em> morning.</p>"
+  },
+  {
+    "name": "strong and em",
+    "html": "<p><strong>Big</strong> <em>small</em></p>",
+    "md": "**Big** *small*",
+    "rendered": "<p><strong>Big</strong> <em>small</em></p>"
+  },
+  {
+    "name": "spaces stay outside the marks",
+    "html": "<p><b>word </b>next</p>",
+    "md": "**word** next",
+    "rendered": "<p><strong>word</strong> next</p>"
+  },
+  {
+    "name": "both",
+    "html": "<p><b><i>both</i></b></p>",
+    "md": "***both***",
+    "rendered": "<p><strong><em>both</em></strong></p>"
+  },
+  {
+    "name": "a link",
+    "html": "<p>See <a href=\"https://example.com/a(b)\">the site</a>.</p>",
+    "md": "See [the site](https://example.com/a%28b%29).",
+    "rendered": "<p>See <a rel=\"nofollow ugc noopener\" href=\"https://example.com/a%28b%29\">the site</a>.</p>"
+  },
+  {
+    "name": "a link that isn't the web keeps its words",
+    "html": "<p><a href=\"javascript:alert(1)\">click</a></p>",
+    "md": "click",
+    "rendered": "<p>click</p>"
+  },
+  {
+    "name": "headings",
+    "html": "<h2>Part one</h2><p>Text</p><h3>Aside</h3>",
+    "md": "## Part one\n\nText\n\n### Aside",
+    "rendered": "<h2>Part one</h2>\n<p>Text</p>\n<h3>Aside</h3>"
+  },
+  {
+    "name": "a top heading is a section heading",
+    "html": "<h1>Big</h1>",
+    "md": "## Big",
+    "rendered": "<h2>Big</h2>"
+  },
+  {
+    "name": "a quote",
+    "html": "<blockquote>Said it</blockquote>",
+    "md": "> Said it",
+    "rendered": "<blockquote>\n<p>Said it</p>\n</blockquote>"
+  },
+  {
+    "name": "a quote of two paragraphs",
+    "html": "<blockquote><p>One</p><p>Two</p></blockquote>",
+    "md": "> One\n>\n> Two",
+    "rendered": "<blockquote>\n<p>One</p>\n<p>Two</p>\n</blockquote>"
+  },
+  {
+    "name": "bullets",
+    "html": "<ul><li>Salt</li><li>Diesel</li></ul>",
+    "md": "- Salt\n- Diesel",
+    "rendered": "<ul>\n<li>Salt</li>\n<li>Diesel</li>\n</ul>"
+  },
+  {
+    "name": "numbers",
+    "html": "<ol><li>First</li><li>Second</li></ol>",
+    "md": "1. First\n2. Second",
+    "rendered": "<ol>\n<li>First</li>\n<li>Second</li>\n</ol>"
+  },
+  {
+    "name": "Markdown's characters typed",
+    "html": "<p>2 * 3 = 6 and snake_case [x]</p>",
+    "md": "2 \\* 3 = 6 and snake\\_case \\[x\\]",
+    "rendered": "<p>2 * 3 = 6 and snake_case [x]</p>"
+  },
+  {
+    "name": "what would start a heading, a list or a quote",
+    "html": "<p># not a heading</p><p>- not a list</p><p>1. not a list</p><p>&gt; not a quote</p>",
+    "md": "\\# not a heading\n\n\\- not a list\n\n1\\. not a list\n\n\\> not a quote",
+    "rendered": "<p># not a heading</p>\n<p>- not a list</p>\n<p>1. not a list</p>\n<p>&gt; not a quote</p>"
+  },
+  {
+    "name": "a line break",
+    "html": "<p>Line one<br>Line two</p>",
+    "md": "Line one  \nLine two",
+    "rendered": "<p>Line one<br>\nLine two</p>"
+  },
+  {
+    "name": "words then a new paragraph (Chrome)",
+    "html": "First<div>Second</div>",
+    "md": "First\n\nSecond",
+    "rendered": "<p>First</p>\n<p>Second</p>"
+  },
+  {
+    "name": "no-break spaces",
+    "html": "<p>a&nbsp;b&nbsp;</p>",
+    "md": "a b",
+    "rendered": "<p>a b</p>"
+  },
+  {
+    "name": "an empty paragraph",
+    "html": "<p><br></p>",
+    "md": "",
+    "rendered": ""
+  },
+  {
+    "name": "other tags keep their words",
+    "html": "<p><span style=\"color:red\">red</span> <u>under</u><script>alert(1)</script></p>",
+    "md": "red under",
+    "rendered": "<p>red under</p>"
+  },
+  {
+    "name": "HTML's characters",
+    "html": "<p>Fish &amp; chips &lt;3</p>",
+    "md": "Fish & chips <3",
+    "rendered": "<p>Fish &amp; chips &lt;3</p>"
+  },
+  {
+    "name": "a nested list",
+    "html": "<ul><li>Outer<ul><li>Inner</li></ul></li><li>Next</li></ul>",
+    "md": "- Outer\n    - Inner\n- Next",
+    "rendered": "<ul>\n<li>Outer<ul>\n<li>Inner</li>\n</ul>\n</li>\n<li>Next</li>\n</ul>"
+  },
+  {
+    "name": "a list Safari nests beside its item",
+    "html": "<ul><li>Outer</li><ul><li>Inner</li></ul><li>Next</li></ul>",
+    "md": "- Outer\n    - Inner\n- Next",
+    "rendered": "<ul>\n<li>Outer<ul>\n<li>Inner</li>\n</ul>\n</li>\n<li>Next</li>\n</ul>"
+  },
+  {
+    "name": "numbers inside bullets",
+    "html": "<ul><li>Steps<ol><li>One</li><li>Two</li></ol></li></ul>",
+    "md": "- Steps\n    1. One\n    2. Two",
+    "rendered": "<ul>\n<li>Steps<ol>\n<li>One</li>\n<li>Two</li>\n</ol>\n</li>\n</ul>"
+  },
+  {
+    "name": "an item of two paragraphs",
+    "html": "<ul><li><p>First</p><p>Second</p></li><li><p>Third</p></li></ul>",
+    "md": "- First\n\n    Second\n\n- Third",
+    "rendered": "<ul>\n<li>\n<p>First</p>\n<p>Second</p>\n</li>\n<li>\n<p>Third</p>\n</li>\n</ul>"
+  }
+]

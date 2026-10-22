@@ -1,0 +1,63 @@
+/* The owner's editor on the page (editor.js): only in edit renders. The page
+   is the reader's own; this adds what editing needs and nothing a reader
+   sees. */
+
+/* The book stays hidden until the editor has turned it back to the place
+   being edited (mz-goto), so a fresh render never flashes page one; it shows
+   anyway after two seconds. */
+[data-mz-edit]:not(.mze-on){visibility:hidden;animation:mze-show 0s 2s forwards}
+@keyframes mze-show{to{visibility:visible}}
+/* The site's bar scrolls away instead of covering the top of the page. */
+.cz-header{position:relative!important}
+
+/* Words to type into, and what an empty one is for. */
+[data-mz-f]{outline:none;cursor:text;caret-color:#10b981}
+[data-mz-f]:empty::before{content:attr(data-mz-ph);opacity:.38;font-style:italic;pointer-events:none}
+.mz-headline[data-mz-f]:empty::before,.mzc__text[data-mz-f]:empty::before{font-style:normal}
+.mzc__sub[data-mz-f]:empty{display:none}
+.mze-sel .mzc__sub[data-mz-f]:empty{display:block}
+[data-mz-f]:focus{background:rgba(16,185,129,.035)}
+/* A big headline's type reaches past its box and would take the clicks meant
+   for the small lines around it. */
+.mz-kicker[data-mz-f],.mz-dek[data-mz-f],.mz-by [data-mz-f]{position:relative;z-index:1}
+.mz-text[data-mz-f]:empty,.mz-sidebar [data-mz-f]:empty,.mz-qa__a[data-mz-f]:empty{min-height:1.6em}
+
+/* What the pointer is over, and what is selected: boxes drawn over the page
+   (editor.js), one for each piece of a block split across columns. */
+.mze-box{position:fixed;z-index:50;display:none;box-sizing:border-box;border-radius:3px;pointer-events:none}
+.mze-box--hov{border:1px dashed rgba(16,185,129,.75)}
+.mze-box--sel{border:2px solid #10b981}
+
+/* Where a picture goes before one is chosen. */
+.mz-ph-pic{cursor:pointer}
+.mz-ph-pic__box{display:flex;align-items:center;justify-content:center;min-height:9rem;height:100%;padding:1rem;border:2px dashed rgba(60,50,40,.3);
+  border-radius:6px;background:rgba(60,50,40,.04);color:rgba(60,50,40,.62);font:600 .85rem/1.3 system-ui,sans-serif;text-align:center}
+.mz-cover__media.mz-ph-pic{flex:1 1 0;min-height:9rem}
+.mz-ph-note{color:rgba(60,50,40,.55);font:italic .9rem/1.4 system-ui,sans-serif}
+
+/* Where readers without a subscription stop. */
+.mz-paywall-mark{display:flex;align-items:center;gap:.8rem;margin:1.6rem 0;color:#0f766e;font:700 .7rem/1 system-ui,sans-serif;
+  letter-spacing:.14em;text-transform:uppercase;break-inside:avoid}
+.mz-paywall-mark::before,.mz-paywall-mark::after{content:"";flex:1;border-top:2px dashed currentColor}
+
+/* The editor's own controls, drawn over the page. */
+.mze-ui{font:500 13px/1 system-ui,-apple-system,sans-serif;box-sizing:border-box}
+.mze-bar{position:fixed;z-index:60;display:none;align-items:center;gap:2px;padding:4px;border-radius:9px;background:#18181b;
+  box-shadow:0 8px 24px rgba(0,0,0,.35)}
+.mze-bar button{min-width:30px;height:30px;padding:0 7px;border:0;border-radius:6px;background:transparent;color:#f4f4f5;cursor:pointer;
+  font:600 13px/1 system-ui,sans-serif}
+.mze-bar button:hover{background:#27272a}
+.mze-bar button[aria-pressed="true"]{background:#10b981;color:#052e16}
+.mze-bar button[data-cmd="italic"]{font-style:italic;font-family:Georgia,serif}
+.mze-bar .mze-link{width:16rem;height:30px;margin-left:4px;padding:0 8px;border:1px solid #3f3f46;border-radius:6px;background:#09090b;color:#f4f4f5}
+.mze-plus{position:fixed;z-index:55;display:none;width:22px;height:22px;padding:0;border:0;border-radius:50%;background:#10b981;color:#052e16;
+  font:700 16px/22px system-ui,sans-serif;text-align:center;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.3)}
+.mze-menu{position:fixed;z-index:61;display:none;grid-template-columns:1fr 1fr;gap:2px;width:176px;padding:4px;border-radius:9px;
+  background:#18181b;box-shadow:0 8px 24px rgba(0,0,0,.35)}
+.mze-menu button{padding:8px;border:0;border-radius:6px;background:transparent;color:#f4f4f5;text-align:left;cursor:pointer;font:500 13px/1 system-ui,sans-serif}
+.mze-menu button:hover{background:#27272a}
+.mze-grip{position:fixed;z-index:56;display:none;width:18px;height:18px;border:2px solid #fff;border-radius:50%;background:#10b981;
+  box-shadow:0 1px 6px rgba(0,0,0,.45);cursor:move;touch-action:none}
+.mze-width{border-radius:4px;width:12px;cursor:ew-resize}
+.mze-focal{position:fixed;z-index:56;display:none;width:22px;height:22px;border:3px solid #fff;border-radius:50%;background:rgba(16,185,129,.35);
+  box-shadow:0 0 0 2px #10b981,0 2px 10px rgba(0,0,0,.5);cursor:crosshair;touch-action:none}

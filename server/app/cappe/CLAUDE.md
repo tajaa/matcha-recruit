@@ -505,6 +505,31 @@ What is built so far:
   `/issues` is the archive of covers; the front page leads with the newest released issue (its stories
   stay in the list below), a story in one links "From No. 3 — read it in the issue", and the sitemap lists
   them. Cached as `__mag__:issue:{n}` and `__mag__:issues:{page}`; every owner write invalidates.
+- **The owner edits on the page itself** (2026-10-21): an *edit render* of a story or an issue
+  (`POST /sites/{id}/stories/preview` or `…/magazine/issues/preview` with `edit: true`) is the reader's page
+  with markers and `render/assets/editor.js` + `editor.css` inlined (`pages._EDITOR`, after `book.js`). The
+  dashboard shows it in a `sandbox="allow-scripts"` frame **without** allow-same-origin (the dashboard's
+  tokens live in sessionStorage) and listens only to its own frame (`client/src/cappe/magazine/canvas/`).
+  The same renderers take `edit` (`story_render`, `pages.story_article_html`/`render_story`/`book_html`,
+  `issue_render`, `issue_pages`); **only `routes/blog.py` and `routes/issues.py` pass it** (pinned by
+  `test_cappe_magazine_canvas.py`): published pages, the cache, "View as a reader" and the reader dashboard
+  never get it. Markers: `data-mz-edit` on the reader, `data-mz-s` per story (`preview` in the story
+  preview), `data-mz-b` = the block's index in `content.blocks` (counted before anything is skipped; edit
+  mode prints a placeholder for an empty block or a missing picture, `data-mz-pick`), `data-mz-f` +
+  `data-mz-k="plain|rich"` per field (`@title`/`@kicker`/`@excerpt`/`@byline`, then per block exactly what
+  `client/src/cappe/magazine/canvas/fields.ts` lists — a test pins each block type to that list; issue fields
+  are `issue:lines.N.text|sub`, `issue:issue_line.text`, `issue:contents.heading`, `issue:line:<post>`,
+  `issue:section:<first post>`), `data-mz-drag` for words on a photo, `data-mz-focal` on cover pictures,
+  `data-mzc-el` cover elements. An edit render shows **a paid story whole** with a "Subscribers only from
+  here" mark and no paywall script; it is `no-store` and owner-only, so the paid part still never reaches a
+  reader's page, the cache, the feed or the JSON. The issue's edit preview also takes `stories_content`
+  (each story's unsaved words, through `normalize_story` + `check_assets` like a save; a story not in the
+  issue is ignored; its cover picture is what saving them would leave, the cover block's or none, never the
+  saved one) and has its own rate bucket (`cappe_issue_edit_preview`, `EDIT_PREVIEWS_PER_HOUR`).
+  Rich fields come back as HTML and the dashboard stores them as the constrained Markdown `render_md`
+  reads (`canvas/htmlToMd.ts`); `tests/cappe/fixtures/magazine_md_cases.json` pins HTML → Markdown on the
+  client and Markdown → HTML here. In the frame, Home/End/Page keys are swallowed while typing (on a Mac
+  they scroll the whole page out from under the book) and Backspace never navigates back.
 
 ## Social growth (2026-10, `services/social/`, migrations `cappesocial01`–`03`)
 

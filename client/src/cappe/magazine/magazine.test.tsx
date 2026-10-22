@@ -137,7 +137,7 @@ describe('StoryEditor', () => {
 
   it('edits the blocks, previews, and saves the content with the cover', async () => {
     api.put.mockResolvedValue(post({ title: 'Dawn', status: 'published' }))
-    mount('/cappe/sites/s-1/stories/p-1', <StoryEditor />, '/cappe/sites/:siteId/stories/:postId')
+    mount('/cappe/sites/s-1/stories/p-1?view=outline', <StoryEditor />, '/cappe/sites/:siteId/stories/:postId')
     expect(await screen.findByDisplayValue('The harbour at dawn')).toBeInTheDocument()
     expect(screen.getByText('Photo: Ana Ruiz')).toBeInTheDocument()  // the cover slot shows its credit
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
@@ -167,7 +167,7 @@ describe('StoryEditor', () => {
 
   it('picks a picture from the library into a photo block', async () => {
     api.put.mockResolvedValue(post())
-    mount('/cappe/sites/s-1/stories/p-1', <StoryEditor />, '/cappe/sites/:siteId/stories/:postId')
+    mount('/cappe/sites/s-1/stories/p-1?view=outline', <StoryEditor />, '/cappe/sites/:siteId/stories/:postId')
     await screen.findByDisplayValue('The harbour at dawn')
     fireEvent.click(screen.getByRole('button', { name: /Add a block/ }))
     fireEvent.click(screen.getByRole('menuitem', { name: 'Photo' }))
@@ -187,7 +187,7 @@ describe('StoryEditor', () => {
     api.post.mockImplementation((_path: string, body: { action: string }) => Promise.resolve(body.action === 'headlines'
       ? { action: 'headlines', headlines: [{ title: 'Four a.m.', dek: 'Boats go out.', kicker: 'Dispatch' }] }
       : { action: 'search_terms', terms: [{ source: 'nasa', query: 'earth at night' }] }))
-    mount('/sites/s-1/stories/p-1', <StoryEditor />, '/sites/:siteId/stories/:postId')
+    mount('/sites/s-1/stories/p-1?view=outline', <StoryEditor />, '/sites/:siteId/stories/:postId')
     await screen.findByDisplayValue('The harbour at dawn')
     fireEvent.click(screen.getByRole('button', { name: 'Assist' }))
     fireEvent.click(screen.getByRole('button', { name: 'Ask' }))
@@ -205,7 +205,7 @@ describe('StoryEditor', () => {
   })
 
   it('removes and reorders blocks', async () => {
-    mount('/cappe/sites/s-1/stories/p-1', <StoryEditor />, '/cappe/sites/:siteId/stories/:postId')
+    mount('/cappe/sites/s-1/stories/p-1?view=outline', <StoryEditor />, '/cappe/sites/:siteId/stories/:postId')
     await screen.findByDisplayValue('The harbour at dawn')
     fireEvent.click(screen.getByRole('button', { name: /Add a block/ }))
     fireEvent.click(screen.getByRole('menuitem', { name: 'Divider' }))
@@ -220,7 +220,7 @@ describe('StoryEditor', () => {
   it('offers to turn a plain post into a story', async () => {
     answer({ '/posts/p-1': post({ format: 'markdown', content: null, body: 'Old *words*.' }), '/stories/options': OPTIONS, '/assets': { assets: [] } })
     api.put.mockResolvedValue(post({ content: { blocks: [{ type: 'text', md: 'Old *words*.', dropcap: true, columns: 1 }] } }))
-    mount('/cappe/sites/s-1/stories/p-1', <StoryEditor />, '/cappe/sites/:siteId/stories/:postId')
+    mount('/cappe/sites/s-1/stories/p-1?view=outline', <StoryEditor />, '/cappe/sites/:siteId/stories/:postId')
     expect(await screen.findByText(/plain post written as Markdown/)).toBeInTheDocument()
     expect(api.postHtml).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: 'Turn into a story' }))
@@ -232,7 +232,7 @@ describe('StoryEditor', () => {
     api.put.mockRejectedValue(new Error('A picture in this story isn’t in your library any more.'))
     api.delete.mockResolvedValue(undefined)
     vi.spyOn(window, 'confirm').mockReturnValue(true)
-    mount('/cappe/sites/s-1/stories/p-1', <StoryEditor />, '/cappe/sites/:siteId/stories/:postId')
+    mount('/cappe/sites/s-1/stories/p-1?view=outline', <StoryEditor />, '/cappe/sites/:siteId/stories/:postId')
     await screen.findByDisplayValue('The harbour at dawn')
     fireEvent.click(screen.getByRole('button', { name: /Publish/ }))
     expect(await screen.findByRole('alert')).toHaveTextContent('isn’t in your library')
@@ -243,7 +243,7 @@ describe('StoryEditor', () => {
 
   it('switching layout on an empty story fills in that layout’s blocks', async () => {
     answer({ '/posts/p-1': post({ content: { blocks: [newBlock('cover'), newBlock('text')] } }), '/stories/options': OPTIONS, '/assets': { assets: [] } })
-    mount('/cappe/sites/s-1/stories/p-1', <StoryEditor />, '/cappe/sites/:siteId/stories/:postId')
+    mount('/cappe/sites/s-1/stories/p-1?view=outline', <StoryEditor />, '/cappe/sites/:siteId/stories/:postId')
     await screen.findByDisplayValue('The harbour at dawn')
     fireEvent.change(screen.getByLabelText('Layout'), { target: { value: 'photo_essay' } })
     expect(screen.getAllByRole('region').map((s) => s.getAttribute('aria-label'))).toEqual(['Cover block', 'Photo block', 'Text block'])

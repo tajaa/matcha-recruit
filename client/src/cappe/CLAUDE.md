@@ -65,6 +65,26 @@ Website-builder frontend for the consumer brand **Gummfit**, host-routed on gumm
   reader"): the frames are `sandbox="allow-same-origin"` with no scripts, and Safari runs nothing we
   attach inside them, so the arrows, page count and keys are outside and `reader/book.ts` drives the
   pages (see the Cappe server CLAUDE.md, magazines). Don't add listeners to a frame's document.
+  **Editing on the page** (`magazine/canvas/`): the story and issue editors open on **Page** (`?view=outline`
+  opens the **Outline**, today's forms; one undo history serves both). `EditFrame.tsx` is the one frame that
+  runs scripts: `sandbox="allow-scripts"` with no same-origin, so the page's own `editor.js` (server
+  `render/assets/`) runs inside it and talks only by `postMessage`. It is double-buffered (a new render
+  loads hidden, is sent `mz-goto` with the selection or spread, and swaps in on `mz-shown`) and never
+  replaced while words are typed (`mz-editing`). Everything the page sends goes through `bridge.ts`
+  (source, shape, indexes, field names, lengths); `storyDoc.ts` / `issueEdits.ts` apply it and drop an edit
+  that names a block or field the story doesn't have (`fields.ts`, pinned by the server). Text typed with
+  the toolbar arrives as HTML and is stored as Markdown (`htmlToMd.ts`). The panel beside the page is
+  `BlockPanel.tsx` (over `editor/BlockOptions.tsx`, shared with the Outline's `BlockEditor` minus the
+  word boxes), `issues/CoverPanel.tsx`'s exported sections, and `ContentsPanel`. The issue editor keeps an
+  unsaved copy of each story edited on its pages (`IssueDoc.drafts`), previews them with the issue
+  (`stories_content`) and saves each changed story's words first (`storyWordsBody`: never its status),
+  then the issue (a released issue's save publishes its drafts, so it must publish the new words; it waits
+  if a draft's words failed), naming any that fail. A save is settled onto the document as it is by then
+  (`useHistory().map` + `issueDoc.settleIssue`/`settleStories`: words typed meanwhile stay unsaved) and
+  pins each story's pre-save words into the undo states that showed them (`pinStories`), so undo reaches
+  back past a save. `EditFrame` drops a render that was loading when words were typed (it predates them)
+  and numbers renders with a counter that never repeats. Field lengths are cut by whole characters
+  (`fields.clip`), never half an emoji.
 
 ## Backend pairing
 

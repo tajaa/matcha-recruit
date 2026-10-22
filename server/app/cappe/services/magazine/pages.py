@@ -29,7 +29,7 @@ from ..render.sanitize import _js_obj
 from .figures import figure_html, img_html, share_image
 from .magazines import masthead_fonts
 from .richtext import render_md
-from .story_render import cover_html, render_blocks, split_at_paywall
+from .story_render import cover_html, field, render_blocks, split_at_paywall
 from .story_schema import cover_block
 from .topics import topic_label
 
@@ -39,6 +39,10 @@ _ISSUE_CSS = (_ASSETS / "issue.css").read_text(encoding="utf-8")
 _FOLLOW_JS = (_ASSETS / "follow.js").read_text(encoding="utf-8")
 _PAYWALL_JS = (_ASSETS / "paywall.js").read_text(encoding="utf-8")
 _BOOK_JS = (_ASSETS / "book.js").read_text(encoding="utf-8")
+# The owner's editor on the page: only in edit renders (`edit=True`), never on
+# a reader's page or in the cache.
+_EDITOR = (f'<style>{(_ASSETS / "editor.css").read_text(encoding="utf-8")}</style>'
+           f'<script>{(_ASSETS / "editor.js").read_text(encoding="utf-8")}</script>')
 _SYMBOLS = {"USD": "$", "CAD": "CA$", "AUD": "A$", "NZD": "NZ$", "EUR": "€", "GBP": "£"}
 
 PAGE_SIZE = 12
@@ -99,9 +103,12 @@ def _topics_nav(keys: list[str], current: Optional[str] = None) -> str:
     return f'<nav class="mz-topics" aria-label="Topics">{"".join(links)}</nav>' if links else ""
 
 
-def _meta(post: dict) -> str:
+def _meta(post: dict, *, edit: bool = False) -> str:
     bits = []
-    if post.get("byline"):
+    if edit:
+        bits.append(f'<span class="mz-by">By <span{field("@byline", ph="Your name")}>{escape(post.get("byline") or "")}'
+                    "</span></span>")
+    elif post.get("byline"):
         bits.append(f'<span class="mz-by">By {escape(post["byline"])}</span>')
     if post.get("published_at"):
         ts = post["published_at"]
@@ -206,11 +213,12 @@ def paywall_html(mag: dict, post: dict, *, currency: Optional[str], site_slug: O
 
 
 def _page(site: dict, nav: list[dict], mag: dict, body: str, *, origin: str, seo: dict, extra_head: str = "",
-          issue_css: bool = False) -> str:
+          issue_css: bool = False, preview: bool = False) -> str:
+    """`preview`: the owner's editor (the site's own scripts stay idle)."""
     return render_site_html(
         site, {"title": seo.get("title") or mag.get("name"), "slug": "__magazine", "content": {}}, nav,
-        body_override=f'<div class="mz">{body}</div>', extra_head=_head(mag, origin, issue_css=issue_css) + extra_head,
-        seo=seo,
+        preview=preview, body_override=f'<div class="mz">{body}</div>',
+        extra_head=_head(mag, origin, issue_css=issue_css) + extra_head, seo=seo,
     )
 
 
@@ -294,16 +302,18 @@ def story_cover(post: dict, assets: dict[str, dict]) -> tuple[Optional[dict], Op
 
 def story_article_html(post: dict, assets: dict[str, dict], *, mag: dict, currency: Optional[str] = None,
                        site_slug: Optional[str] = None, preview_blocks: int = 3, single: bool = True,
-                       issue: Optional[dict] = None) -> str:
+                       issue: Optional[dict] = None, edit: bool = False) -> str:
     """A story as it is printed: its opener, its free part, then (paid) its
     paywall. In an issue (`single=False`) it carries its anchor for the
     contents to jump to and starts on a new page; on its own page it links to
-    the issue it is in (`issue`)."""
+    the issue it is in (`issue`). In the owner's editor (`edit`) a paid story
+    is printed whole, with a mark where readers without a subscription stop,
+    and the article names its story (`data-mz-s`)."""
     blocks = story_blocks(post)
     cover, cover_asset = story_cover(post, assets)
     free = blocks
     paywall = ""
-    if post.get("access") == "paid":
+    if post.get("access") == "paid" and not edit:
         free, rest = split_at_paywall(blocks, preview_blocks=preview_blocks)
         # A story no longer than its free preview has nothing to subscribe for.
         paywall = paywall_section(mag, post, currency=currency, site_slug=site_slug, single=single) if rest else ""
@@ -317,26 +327,31 @@ def story_article_html(post: dict, assets: dict[str, dict], *, mag: dict, curren
                       f'<a href="{href}">read it in the issue</a></p>')
     layout = escape(post.get("layout") or "standard")
     attrs = "" if single else f' id="mz-s-{escape(post["slug"], quote=True)}"'
+    if edit:
+        attrs += f' data-mz-s="{escape(str(post.get("id") or ""), quote=True)}"'
     cls = f"mz-story mz-layout-{layout}" + ("" if single else " mz-issue__story")
     return (
         f'<article class="{cls}"{attrs}>'
-        + cover_html(post, cover, cover_asset, byline_html=_meta(post))
-        + f'<div class="mz-story__body">{render_blocks(free, assets)}</div>{paywall}{from_issue}{topic_link}</article>'
+        + cover_html(post, cover, cover_asset, byline_html=_meta(post, edit=edit), edit=edit)
+        + f'<div class="mz-story__body">{render_blocks(free, assets, edit=edit)}</div>{paywall}{from_issue}{topic_link}'
+        "</article>"
     )
 
 
 def render_story(site: dict, nav: list[dict], mag: dict, post: dict, assets: dict[str, dict], *,
                  more: list[dict], more_covers: dict[str, dict], origin: str, preview_blocks: int = 3,
-                 currency: Optional[str] = None, issue: Optional[dict] = None) -> str:
-    paid = post.get("access") == "paid"
+                 currency: Optional[str] = None, issue: Optional[dict] = None, edit: bool = False) -> str:
+    """A story's page. `edit`: the owner's editor on the page (whole, marked,
+    with the editor's script; never cached or shown to a reader)."""
+    paid = post.get("access") == "paid" and not edit
     article = story_article_html(post, assets, mag=mag, currency=currency, site_slug=site.get("slug"),
-                                 preview_blocks=preview_blocks, issue=issue)
+                                 preview_blocks=preview_blocks, issue=issue, edit=edit)
     more_html = ""
     if more:
         cards = "".join(card_html(p, more_covers.get(_key(p))) for p in more)
         more_html = (f'<section class="mz-more"><h2 class="mz-more__title">More from {escape(mag.get("name") or "")}'
                      f'</h2><div class="mz-grid">{cards}</div></section>')
-    body = (_masthead(mag, small=True) + book_html(article) + (paywall_script() if paid else "")
+    body = (_masthead(mag, small=True) + book_html(article, edit=edit) + (paywall_script() if paid else "")
             + follow_html(mag) + more_html)
     _cover, cover_asset = story_cover(post, assets)
     topic = post.get("topic")
@@ -348,13 +363,13 @@ def render_story(site: dict, nav: list[dict], mag: dict, post: dict, assets: dic
     if topic_label(topic):
         extra += f'<meta property="article:section" content="{escape(topic_label(topic), quote=True)}" />'
     extra += '<meta name="twitter:card" content="summary_large_image" />'
-    return _page(site, nav, mag, body, origin=origin, extra_head=extra, seo={
+    return _page(site, nav, mag, body, origin=origin, extra_head=extra, preview=edit, seo={
         "title": f"{post.get('title')} — {mag.get('name')}", "description": post.get("excerpt") or "",
         "image": image, "type": "article", "url": url,
     })
 
 
-def book_html(inner: str, *, issue: bool = False, face: str = "") -> str:
+def book_html(inner: str, *, issue: bool = False, face: str = "", edit: bool = False) -> str:
     """The story as pages turned left and right: a matte cover, then glossy
     pages, lying on a dark mat. The words flow from page to page in columns of
     the page's height (a two-page spread from 960 px, one page on a phone);
@@ -368,10 +383,13 @@ def book_html(inner: str, *, issue: bool = False, face: str = "") -> str:
 
     An issue (`issue=True`, `issue_pages.render_issue`) is one book: `face`
     is its cover, drawn over the first page from outside the flowing columns,
-    and `inner` holds the rest (`data-mz-flow`, which the script measures)."""
+    and `inner` holds the rest (`data-mz-flow`, which the script measures).
+
+    `edit`: the owner's editor on the page (`data-mz-edit`, and
+    `render/assets/editor.js` after the book's own script)."""
     what = "The issue" if issue else "The story"
     return (
-        f'<div class="mz-reader" data-mz-book{" data-mz-issue" if issue else ""}>'
+        f'<div class="mz-reader" data-mz-book{" data-mz-issue" if issue else ""}{" data-mz-edit" if edit else ""}>'
         '<button type="button" class="mz-turn mz-turn--prev" data-mz-prev aria-label="Previous page" hidden>&#8249;</button>'
         '<div class="mz-spread">'
         f'<div class="mz-book" tabindex="0" role="region" aria-label="{what}. Use the left and right arrow keys to turn pages.">'
@@ -379,7 +397,7 @@ def book_html(inner: str, *, issue: bool = False, face: str = "") -> str:
         '<div class="mz-gloss" aria-hidden="true"></div></div>'
         '<button type="button" class="mz-turn mz-turn--next" data-mz-next aria-label="Next page" hidden>&#8250;</button>'
         '<p class="mz-folio" data-mz-folio aria-live="polite"></p>'
-        f"</div><script>{_BOOK_JS}</script>"
+        f"</div><script>{_BOOK_JS}</script>{_EDITOR if edit else ''}"
     )
 
 

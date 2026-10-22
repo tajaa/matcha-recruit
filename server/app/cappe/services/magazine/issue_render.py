@@ -29,6 +29,7 @@ from typing import Optional
 
 from .figures import credit_html, credit_text, img_html
 from .issue_schema import issue_line_text
+from .story_render import field
 from .topics import topic_label
 
 _WEIGHT = {"regular": 400, "bold": 700, "black": 900}
@@ -86,7 +87,7 @@ def _scrim(scrim: dict) -> str:
     return f'<div class="mzc__scrim" style="background:{background}"></div>'
 
 
-def _photo(cover: dict, asset: Optional[dict], *, size: str, eager: bool) -> str:
+def _photo(cover: dict, asset: Optional[dict], *, size: str, eager: bool, edit: bool = False) -> str:
     photo = cover.get("photo") or {}
     if not asset:
         return ""
@@ -99,16 +100,21 @@ def _photo(cover: dict, asset: Optional[dict], *, size: str, eager: bool) -> str
     img = img_html(asset, size=size, eager=eager, cls="mzc__img", style=style)
     if not img:
         return ""
-    return f'<div class="mzc__photo mz-filter--{escape(photo.get("filter") or "none")}">{img}</div>'
+    focal_attr = f' data-mz-focal="{x},{y}"' if edit else ""
+    return f'<div class="mzc__photo mz-filter--{escape(photo.get("filter") or "none")}"{focal_attr}>{img}</div>'
 
 
-def _line(index: int, line: dict, hrefs: dict[str, str]) -> str:
+def _line(index: int, line: dict, hrefs: dict[str, str], *, edit: bool = False) -> str:
     text, sub = line.get("text") or "", line.get("sub") or ""
     words = escape(text)
     if line.get("box") == "solid" and text:
         words = f'<span class="mzc__box" style="background:{_colour(line["box_color"])}">{words}</span>'
-    inner = (f'<p class="mzc__text">{words}</p>' if text else "") + (
-        f'<p class="mzc__sub">{escape(sub)}</p>' if sub else "")
+    if edit:
+        inner = (f'<p class="mzc__text"{field(f"issue:lines.{index}.text", ph="Cover line")}>{words}</p>'
+                 f'<p class="mzc__sub"{field(f"issue:lines.{index}.sub", ph="Smaller line")}>{escape(sub)}</p>')
+    else:
+        inner = (f'<p class="mzc__text">{words}</p>' if text else "") + (
+            f'<p class="mzc__sub">{escape(sub)}</p>' if sub else "")
     href = hrefs.get(line.get("post_id") or "")
     if href:
         inner = f'<a class="mzc__link" href="{escape(href, quote=True)}">{inner}</a>'
@@ -118,20 +124,24 @@ def _line(index: int, line: dict, hrefs: dict[str, str]) -> str:
 
 def cover_html(cover: dict, *, mag: dict, number: int, when=None, asset: Optional[dict] = None,
                hrefs: Optional[dict[str, str]] = None, size: str = "card", eager: bool = False,
-               link_credit: bool = True) -> str:
+               link_credit: bool = True, edit: bool = False) -> str:
     """The cover artboard. `hrefs` maps a story's id to where its cover line
     links (only in the book); `link_credit` is off where the cover is itself
-    a link, since a link can't hold another."""
+    a link, since a link can't hold another. `edit`: the owner's editor —
+    each line's words and the issue line can be typed into, every element
+    dragged within `.mzc__art`, and the photo's focus dragged."""
     hrefs = hrefs or {}
     mast, issue_line = cover.get("masthead") or {}, cover.get("issue_line") or {}
-    parts = [_photo(cover, asset, size=size, eager=eager), _scrim(cover.get("scrim") or {}), '<div class="mzc__art">']
+    art = '<div class="mzc__art" data-mz-art>' if edit else '<div class="mzc__art">'
+    parts = [_photo(cover, asset, size=size, eager=eager, edit=edit), _scrim(cover.get("scrim") or {}), art]
     if mast:
         parts.append(f'<p class="mzc__el mzc__mast" data-mzc-el="masthead" style="{element_style(mast)}">'
                      f"{escape(mag.get('name') or '')}</p>")
     if issue_line and not issue_line.get("hidden"):
-        parts.append(f'<p class="mzc__el mzc__issue" data-mzc-el="issue_line" style="{element_style(issue_line)}">'
+        words = field("issue:issue_line.text", ph="No. and date") if edit else ""
+        parts.append(f'<p class="mzc__el mzc__issue" data-mzc-el="issue_line" style="{element_style(issue_line)}"{words}>'
                      f"{escape(issue_line_text(cover, number, when))}</p>")
-    parts += [_line(i, ln, hrefs) for i, ln in enumerate(cover.get("lines") or [])]
+    parts += [_line(i, ln, hrefs, edit=edit) for i, ln in enumerate(cover.get("lines") or [])]
     if asset:
         credit = (credit_html(asset, cropped=True) if link_credit
                   else escape(credit_text(asset, cropped=True)))
@@ -146,7 +156,7 @@ def cover_html(cover: dict, *, mag: dict, number: int, when=None, asset: Optiona
 
 # ── contents ────────────────────────────────────────────────────────────────
 
-def _toc_entry(entry: dict, contents: dict, *, feature: bool) -> str:
+def _toc_entry(entry: dict, contents: dict, *, feature: bool, edit: bool = False) -> str:
     post, asset = entry["post"], entry.get("asset")
     slug = post["slug"]
     pic = ""
@@ -159,7 +169,11 @@ def _toc_entry(entry: dict, contents: dict, *, feature: bool) -> str:
     words = [f'<span class="mz-toc__kicker">{escape(kicker)}</span>' if kicker else "",
              f'<span class="mz-toc__title">{escape(post.get("title") or "")}</span>']
     line = entry.get("line") or (post.get("excerpt") if contents.get("show_deks", True) else None)
-    if line:
+    if edit:
+        # Built apart: quotes nested inside an f-string's braces need Python 3.12 (CI checks 3.11).
+        dek = field(f"issue:line:{post['id']}", ph="A line for the contents")
+        words.append(f'<span class="mz-toc__dek"{dek}>{escape(line or "")}</span>')
+    elif line:
         words.append(f'<span class="mz-toc__dek">{escape(line)}</span>')
     if contents.get("show_bylines") and post.get("byline"):
         words.append(f'<span class="mz-toc__by">By {escape(post["byline"])}</span>')
@@ -168,33 +182,40 @@ def _toc_entry(entry: dict, contents: dict, *, feature: bool) -> str:
             f'<span class="mz-toc__words">{"".join(words)}</span></a>')
 
 
-def contents_html(contents: dict, entries: list[dict], *, label: str) -> str:
+def contents_html(contents: dict, entries: list[dict], *, label: str, edit: bool = False) -> str:
     """The contents: the heading, then the stories in order, grouped under
     their sections, as a list, a grid of pictures, or a feature (the first
     story large)."""
     layout = contents.get("layout") or "list"
-    groups: list[tuple[Optional[str], list[str]]] = []
+    # (section, its entries, the first story in it: what renaming it changes)
+    groups: list[tuple[Optional[str], list[str], str]] = []
     for i, entry in enumerate(entries):
-        html = _toc_entry(entry, contents, feature=layout == "feature" and i == 0)
+        html = _toc_entry(entry, contents, feature=layout == "feature" and i == 0, edit=edit)
         section = entry.get("section")
         if groups and groups[-1][0] == section:
             groups[-1][1].append(html)
         else:
-            groups.append((section, [html]))
+            groups.append((section, [html], str(entry["post"]["id"])))
     # A section's heading is kept on the page with its first row of entries.
     row = 2 if layout == "grid" else 1
+    def sec_head(sec: str, first: str) -> str:
+        words = field(f"issue:section:{first}", ph="Section") if edit else ""
+        return f'<h3 class="mz-contents__sec"{words}>{escape(sec)}</h3>'
+
     body = "".join(
         '<div class="mz-contents__group">'
-        + (f'<div class="mz-contents__keep"><h3 class="mz-contents__sec">{escape(sec)}</h3>{"".join(items[:row])}</div>'
+        + (f'<div class="mz-contents__keep">{sec_head(sec, first)}{"".join(items[:row])}</div>'
            + "".join(items[row:]) if sec else "".join(items))
         + "</div>"
-        for sec, items in groups
+        for sec, items, first in groups
     )
     heading = contents.get("heading") or ""
     accent = _colour(contents.get("accent") or "accent")
     cls = f"mz-contents mz-contents--{escape(layout)}" + ("" if contents.get("show_numbers", True) else " mz-contents--nonum")
-    return (f'<section class="{cls}" style="--mz-c:{accent}">'
-            f'<p class="mz-contents__issue">{escape(label)}</p>'
-            + (f'<h2 class="mz-contents__heading">{escape(heading)}</h2>' if heading else "")
-            + f"{body}</section>")
+    if edit:
+        head = f'<h2 class="mz-contents__heading"{field("issue:contents.heading", ph="Heading")}>{escape(heading)}</h2>'
+    else:
+        head = f'<h2 class="mz-contents__heading">{escape(heading)}</h2>' if heading else ""
+    return (f'<section class="{cls}" style="--mz-c:{accent}"{" data-mz-contents" if edit else ""}>'
+            f'<p class="mz-contents__issue">{escape(label)}</p>{head}{body}</section>')
 
