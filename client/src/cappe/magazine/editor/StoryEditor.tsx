@@ -217,7 +217,10 @@ export default function StoryEditor() {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey) || e.altKey || keys.current.blocked) return
       const k = e.key.toLowerCase()
+      // A field outside the story (Assist's notes) undoes its own typing.
+      const own = e.target instanceof Element && e.target.closest('[data-native-undo]')
       if (k === 's') { e.preventDefault(); keys.current.save() }
+      else if (own) return
       else if (k === 'z' && !e.shiftKey) { e.preventDefault(); keys.current.undo() }
       else if ((k === 'z' && e.shiftKey) || k === 'y') { e.preventDefault(); keys.current.redo() }
     }
