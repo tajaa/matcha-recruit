@@ -252,7 +252,7 @@ export default function StoryEditor() {
               <h2 className="text-sm font-medium text-zinc-100">Choose a picture</h2>
               <button type="button" onClick={() => setPicking(null)} className="text-zinc-500 hover:text-zinc-300" aria-label="Close picker"><X className="h-4 w-4" /></button>
             </div>
-            <LibraryPanel siteId={siteId!} onPick={picking} />
+            <LibraryPanel siteId={siteId!} onPick={picking} postId={postId} />
           </div>
         </div>
       )}

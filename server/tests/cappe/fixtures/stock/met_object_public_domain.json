@@ -1,0 +1,88 @@
+{
+ "objectID": 363984,
+ "isHighlight": false,
+ "accessionNumber": "59.533.1657",
+ "accessionYear": "1959",
+ "isPublicDomain": true,
+ "primaryImage": "https://images.metmuseum.org/CRDImages/dp/original/DP805052.jpg",
+ "primaryImageSmall": "https://images.metmuseum.org/CRDImages/dp/web-large/DP805052.jpg",
+ "additionalImages": [],
+ "constituents": [
+  {
+   "constituentID": 165095,
+   "role": "Artist",
+   "name": "Thomas Rowlandson",
+   "constituentULAN_URL": "http://vocab.getty.edu/page/ulan/500006930",
+   "constituentWikidata_URL": "https://www.wikidata.org/wiki/Q318584",
+   "gender": ""
+  }
+ ],
+ "department": "Drawings and Prints",
+ "objectName": "Drawing",
+ "title": "Harbor scene with the tide out, and beached boats",
+ "culture": "",
+ "period": "",
+ "dynasty": "",
+ "reign": "",
+ "portfolio": "",
+ "artistRole": "Artist",
+ "artistPrefix": "",
+ "artistDisplayName": "Thomas Rowlandson",
+ "artistDisplayBio": "British, London 1757\u20131827 London",
+ "artistSuffix": "",
+ "artistAlphaSort": "Rowlandson, Thomas",
+ "artistNationality": "British",
+ "artistBeginDate": "1757",
+ "artistEndDate": "1827",
+ "artistGender": "",
+ "artistWikidata_URL": "https://www.wikidata.org/wiki/Q318584",
+ "artistULAN_URL": "http://vocab.getty.edu/page/ulan/500006930",
+ "objectDate": "1775\u20131827",
+ "objectBeginDate": 1775,
+ "objectEndDate": 1827,
+ "medium": "Watercolor, pen and ink",
+ "dimensions": "sheet: 10 1/2 x 16 1/4 in. (26.7 x 41.3 cm)",
+ "measurements": [
+  {
+   "elementName": "Sheet",
+   "elementDescription": null,
+   "elementMeasurements": {
+    "Height": 26.6701,
+    "Width": 41.2751
+   }
+  }
+ ],
+ "creditLine": "The Elisha Whittelsey Collection, The Elisha Whittelsey Fund, 1959",
+ "geographyType": "",
+ "city": "",
+ "state": "",
+ "county": "",
+ "country": "",
+ "region": "",
+ "subregion": "",
+ "locale": "",
+ "locus": "",
+ "excavation": "",
+ "river": "",
+ "classification": "Drawings",
+ "rightsAndReproduction": "",
+ "linkResource": "",
+ "metadataDate": "2025-03-06T04:54:30Z",
+ "repository": "Metropolitan Museum of Art, New York, NY",
+ "objectURL": "https://www.metmuseum.org/art/collection/search/363984",
+ "tags": [
+  {
+   "term": "Boats",
+   "AAT_URL": "http://vocab.getty.edu/page/aat/300178749",
+   "Wikidata_URL": "https://www.wikidata.org/wiki/Q35872"
+  },
+  {
+   "term": "Harbors",
+   "AAT_URL": "http://vocab.getty.edu/page/aat/300008678",
+   "Wikidata_URL": "https://www.wikidata.org/wiki/Q283202"
+  }
+ ],
+ "objectWikidata_URL": "",
+ "isTimelineWork": false,
+ "GalleryNumber": ""
+}

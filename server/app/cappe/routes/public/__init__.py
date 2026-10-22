@@ -28,6 +28,7 @@ from . import (
     shopper_web,
     site,
     social_meta,
+    stock,
 )
 from ._common import _validate_intake  # noqa: F401  (test_cappe_offerings imports this)
 
@@ -53,3 +54,4 @@ router.include_router(blog.router)
 # Meta's OAuth callback (a browser redirect tied to a site by its signed state)
 # and the comments/messages webhook (HMAC-verified, handed to the worker).
 router.include_router(social_meta.router)
+router.include_router(stock.router)

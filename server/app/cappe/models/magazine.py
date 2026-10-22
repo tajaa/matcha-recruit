@@ -68,6 +68,72 @@ class CappeStoryOptions(BaseModel):
     topics: list[dict[str, str]]
 
 
+
+
+
+# ── Open imagery (cappemag03) ───────────────────────────────────────────────
+StockSource = Literal["openverse", "smithsonian", "met", "nasa"]
+
+
+class CappeStockResult(BaseModel):
+    """A picture an archive offers. `thumb` is our own signed thumbnail link
+    (routes/public/stock.py); `imported` says it's already in the library."""
+    source: StockSource
+    source_id: str
+    title: str = ""
+    creator: str = ""
+    license: str
+    license_version: str = ""
+    license_url: str = ""
+    provider_label: str = ""
+    landing_url: str = ""
+    credit_line: str = ""
+    width: Optional[int] = None
+    height: Optional[int] = None
+    thumb: str = ""
+    imported: bool = False
+
+
+class CappeStockSearch(BaseModel):
+    source: StockSource
+    query: str
+    page: int
+    results: list[CappeStockResult]
+    has_more: bool
+
+
+class CappeStockKey(BaseModel):
+    source: StockSource
+    source_id: str = Field(min_length=1, max_length=200)
+
+
+class CappeStockImportRequest(BaseModel):
+    items: list[CappeStockKey] = Field(min_length=1, max_length=24)
+    post_id: Optional[UUID] = None
+
+
+class CappeStockTopicRequest(BaseModel):
+    topic: str = Field(max_length=40)
+    count: int = Field(default=12, ge=1, le=24)
+    post_id: Optional[UUID] = None
+
+
+class CappeStockImport(BaseModel):
+    id: UUID
+    source: StockSource
+    source_id: str
+    status: Literal["pending", "working", "ready", "failed", "refused"]
+    error: Optional[str] = None
+    asset_id: Optional[UUID] = None
+    asset: Optional[dict[str, Any]] = None
+    created_at: datetime
+
+
+class CappeStockImports(BaseModel):
+    imports: list[CappeStockImport]
+    remaining_today: Optional[int] = None
+
+
 __all__ = [
     "MastheadStyle",
     "CappeMagazine",
@@ -75,4 +141,12 @@ __all__ = [
     "CappeStoryPreview",
     "CappeStoryLayoutInfo",
     "CappeStoryOptions",
+    "StockSource",
+    "CappeStockResult",
+    "CappeStockSearch",
+    "CappeStockKey",
+    "CappeStockImportRequest",
+    "CappeStockTopicRequest",
+    "CappeStockImport",
+    "CappeStockImports",
 ]

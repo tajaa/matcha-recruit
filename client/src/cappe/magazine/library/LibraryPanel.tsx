@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { ExternalLink, ImagePlus, Loader2, Search, Sparkles, Trash2, X } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
+import { ExternalLink, Globe, ImagePlus, Loader2, Search, Sparkles, Trash2, X } from 'lucide-react'
 import { cappeApi } from '../../api'
 import { ui } from '../../components/ui'
 import type { CappeAsset, CappeAssetKind } from '../../types'
 import { creditEditable, thumbUrl } from './assets'
+import StockSearch from './StockSearch'
 
 const KINDS: { key: '' | CappeAssetKind; label: string }[] = [
   { key: '', label: 'All' },
@@ -16,12 +17,14 @@ const KINDS: { key: '' | CappeAssetKind; label: string }[] = [
  * A site's picture library — uploads, archive imports and AI images — with
  * what a story prints beside each one: alt text, caption and credit.
  *
- * `onPick` turns it into a picker (the story editor uses it); without it the
- * panel is the Library page.
+ * `onPick` turns it into a picker (the story editor uses it, passing its
+ * `postId`); without it the panel is the Library page. "Find free photos"
+ * imports archive pictures into the same list.
  */
-export default function LibraryPanel({ siteId, onPick }: {
+export default function LibraryPanel({ siteId, onPick, postId }: {
   siteId: string
   onPick?: (asset: CappeAsset) => void
+  postId?: string
 }) {
   const [assets, setAssets] = useState<CappeAsset[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -30,6 +33,7 @@ export default function LibraryPanel({ siteId, onPick }: {
   const [search, setSearch] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
+  const [finding, setFinding] = useState(false)
   const generation = useRef(0)
 
   // Typing settles for a moment before the list is asked again.
@@ -61,6 +65,11 @@ export default function LibraryPanel({ siteId, onPick }: {
     setSelectedId(asset.id)
     setAdding(false)
   }
+
+  // An archive import lands at the top without taking over the details pane.
+  const imported = useCallback((asset: CappeAsset) => {
+    setAssets((list) => [asset, ...(list || []).filter((a) => a.id !== asset.id)])
+  }, [])
 
   const removed = (id: string) => {
     setAssets((list) => (list ? list.filter((a) => a.id !== id) : list))
@@ -94,12 +103,17 @@ export default function LibraryPanel({ siteId, onPick }: {
             className={`${ui.input} pl-9`}
           />
         </label>
-        <button type="button" className={ui.btnPrimary} onClick={() => setAdding((v) => !v)}>
+        <button type="button" className={ui.btnGhost} aria-expanded={finding}
+          onClick={() => { setFinding((v) => !v); setAdding(false) }}>
+          <Globe className="h-4 w-4" /> Find free photos
+        </button>
+        <button type="button" className={ui.btnPrimary} onClick={() => { setAdding((v) => !v); setFinding(false) }}>
           <ImagePlus className="h-4 w-4" /> Add a picture
         </button>
       </div>
 
       {adding && <UploadForm siteId={siteId} onDone={added} onCancel={() => setAdding(false)} />}
+      {finding && <StockSearch siteId={siteId} postId={postId} onImported={imported} />}
 
       {loadError && <p role="alert" className="text-sm text-red-400">{loadError}</p>}
 

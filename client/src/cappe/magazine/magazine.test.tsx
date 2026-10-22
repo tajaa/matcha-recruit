@@ -9,7 +9,7 @@ import { assetIdsIn, moveBlock, newBlock } from './editor/blocks'
 import type { CappeAsset, CappeMagazine, CappePost, CappeStoryOptions, StoryBlock } from '../types'
 
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn(), postHtml: vi.fn(), upload: vi.fn(), patch: vi.fn() }))
-vi.mock('../api', () => ({ cappeApi: api }))
+vi.mock('../api', () => ({ cappeApi: api, cappeApiBase: '/api/cappe' }))
 
 const ASSET: CappeAsset = {
   id: 'a-1', kind: 'upload', url: 'https://cdn.example.test/a.jpg', prompt: null, aspect: null, image_size: null,

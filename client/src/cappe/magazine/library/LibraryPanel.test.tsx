@@ -5,7 +5,7 @@ import { creditEditable, thumbUrl } from './assets'
 import type { CappeAsset } from '../../types'
 
 const api = vi.hoisted(() => ({ get: vi.fn(), patch: vi.fn(), delete: vi.fn(), upload: vi.fn() }))
-vi.mock('../../api', () => ({ cappeApi: api }))
+vi.mock('../../api', () => ({ cappeApi: api, cappeApiBase: '/api/cappe' }))
 
 const asset = (over: Partial<CappeAsset> = {}): CappeAsset => ({
   id: 'a-1', kind: 'upload', url: 'https://cdn.example.test/a.jpg', prompt: null, aspect: null,

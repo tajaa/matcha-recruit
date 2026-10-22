@@ -321,6 +321,39 @@ What is built so far:
   own `html.parser` allowlist of p/em/strong/a/h2/h3/lists/blockquote — not bleach, which several
   test modules stub; h1→h2; links http(s)/mailto with `rel="nofollow ugc noopener"`). Credits come
   from the library row, never the block.
+- **Archive pictures come from four sources** (`services/magazine/sources/`, `cappemag03`): Openverse
+  (CC photos from Flickr, Wikimedia and others), the Smithsonian Open Access API, The Met and NASA.
+  Diego approved these for magazines on 2026-10-20; the "Claude + Brave only" rule is Espresso's.
+  Only CC0, public domain, CC BY and CC BY-SA, never mature (`base.ALLOWED_LICENSES`; NC and ND are
+  out because magazines can be paid and a cover crop is an adaptation). Each source filters, and
+  `allowed()` filters again on the way out of the registry, whatever the archive's own filter says:
+  The Met's `isPublicDomain` search filter let copyrighted works through when this was written, so
+  each object's own flag decides. Shapes that bit, checked live 2026-10-21: The Met retired
+  `/v1/search` (410) for `/v1.1/search`; anonymous Openverse stops at 240 results (401 past it, so
+  `openverse.ANON_PAGES`); Smithsonian marks CC0 per image (`media.usage.access`) and resizes at the
+  source (`&max=`); a NASA item's `href` is a manifest, and `~large` is often missing (`best_file`).
+  Keys are optional: `OPENVERSE_CLIENT_ID`/`OPENVERSE_CLIENT_SECRET` (else anonymous and throttled),
+  `SMITHSONIAN_API_KEY` (else `DEMO_KEY`). Searches are cached an hour for everyone (archive data is
+  public); resolves a day.
+- **An import re-checks the license before it downloads** (`services/magazine/imports.py`, worker
+  `workers/tasks/cappe_media_import.py`, on demand, no scheduled task). The route queues
+  `cappe_asset_imports` rows; the worker claims one at a time (`FOR UPDATE SKIP LOCKED`), resolves it
+  again with `fresh=True` (anything no longer allowed is `refused` and never fetched), downloads
+  through `safe_fetch.fetch_public` (25 MB; the Met's web-large copy stands in for an oversized
+  original), runs it through `media.process_image` like an upload, and writes the `kind='stock'`
+  asset (with its credit) and marks the import ready in one transaction. No transaction is open and
+  no lock held during a network call. A failed download is retried up to 3 attempts; the owner's
+  polling (`GET …/library/imports`) re-dispatches anything stuck. A picture deleted from the library
+  can be imported again (`imports.requeueable`).
+- **The daily allowance is the plan's `stock_imports_per_day`** (300 paid, 25 free; a plan may set
+  0), counted per account in the database; a full day is a 429 that says how many are left.
+  Pictures already in the library don't count. "Stock a topic" (`POST …/library/stock-topic`) runs
+  `topics.TOPIC_QUERIES` (fixed searches per topic) and queues what isn't in the library yet.
+- **Archive thumbnails are served from our origin** (`GET /public/stock-thumbs/<token>`,
+  `routes/public/stock.py`): the dashboard's CSP allows images only from itself and CloudFront, so a
+  search result carries a signed path (`sources/thumbs.py`: HMAC from `JWT_SECRET_KEY`, 6 h) and the
+  route fetches only addresses our searches signed, re-encodes them as a small WebP and caches them a
+  day by picture. It is not an open proxy; the archive's file URL never reaches the browser.
 
 ## Social growth (2026-10, `services/social/`, migrations `cappesocial01`–`03`)
 
