@@ -3,7 +3,7 @@ import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import {
   LayoutGrid, LayoutTemplate, LogOut, Globe, ArrowLeft, FileText, ShoppingBag,
   Receipt, Calendar, MessageSquare, Users, Mail, Inbox, Newspaper, UserCircle, Star, MapPin,
-  Handshake, Wallet, Compass, CreditCard, Landmark, Images, Send, Settings2,
+  Handshake, Wallet, Compass, CreditCard, Landmark, Images, Send, Settings2, Megaphone,
 } from 'lucide-react'
 import { cappeApi, clearCappeTokens } from '../api'
 import { invalidateCappeMeCache } from '../hooks/useCappeMe'
@@ -54,6 +54,7 @@ const SITE_NAV: { to: string; label: string; icon: typeof Globe; end?: boolean }
   { to: 'shop', label: 'Storefront', icon: ShoppingBag },
   { to: 'subscribers', label: 'Subscribers', icon: UserCircle },
   { to: 'campaigns', label: 'Newsletter', icon: Mail },
+  { to: 'social', label: 'Social', icon: Megaphone },
   { to: 'forms', label: 'Forms', icon: Inbox },
   { to: 'reviews', label: 'Reviews', icon: Star },
   { to: 'stories', label: 'Magazine', icon: Newspaper },
