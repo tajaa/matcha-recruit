@@ -56,7 +56,10 @@ async def update_site_magazine(site_id: UUID, body: CappeMagazineUpdate,
         fields["topics"] = list(dict.fromkeys(topics))
     for key in ("name", "tagline", "about", "nav_label"):
         if isinstance(fields.get(key), str):
-            fields[key] = fields[key].strip() or (None if key in ("tagline", "about") else fields[key])
+            fields[key] = fields[key].strip() or None
+            if fields[key] is None and key in ("name", "nav_label"):
+                # Spaces alone would print a blank masthead or an invisible link.
+                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"{key} can't be empty")
     async with get_connection() as conn:
         site = await get_owned_site(conn, site_id, account.id)
         if fields.get("cover_post_id"):
