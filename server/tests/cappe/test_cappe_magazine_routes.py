@@ -338,7 +338,7 @@ def test_a_story_is_saved_with_what_its_blocks_decide(monkeypatch, invalidated):
     assert body["format"] == "blocks" and body["word_count"] == 460 and body["reading_minutes"] == 2
     assert body["cover_image_url"] == "https://cdn.example.test/a.jpg" and body["topic"] == "city"
     assert body["content"]["blocks"][0] == {"type": "cover", "asset_id": str(ASSET), "style": "overlay", "tone": "light",
-                                            "focal": {"x": 50, "y": 50}}
+                                            "focal": {"x": 50, "y": 50}, "design": None}
     assert body["body"].startswith("Word Word")
     assert conn.args_for("INSERT INTO cappe_post_assets")[1] == [str(ASSET)]
     assert invalidated == [SITE]
@@ -410,6 +410,7 @@ def test_a_plain_post_becomes_a_story_keeping_its_words(monkeypatch, invalidated
     assert res.status_code == 200, res.text
     content = json.loads(conn.args_for("UPDATE cappe_posts")[conn.sql_for("fetchrow")[-1].index("content") and 1])
     assert content["blocks"][0] == {"type": "text", "md": "Old *words*.", "dropcap": True, "columns": 1, "variant": "body", "align": "left",
+                                    "font": "body", "size": 1, "color": "", "leading": 0, 
                                     "rt": {"type": "doc", "content": [{"type": "paragraph", "content": [
                                         {"type": "text", "text": "Old "}, {"type": "text", "text": "words", "marks": [{"type": "italic"}]},
                                         {"type": "text", "text": "."}]}]}}

@@ -314,6 +314,7 @@ def test_gather_reads_the_story_and_its_pictures():
     unsaved = {"blocks": [{"type": "text", "md": "A new first line."}]}
     m = run(assist.gather(QueryConn(), SITE_ID, POST, action="tighten", block=0, content=unsaved, title="New"))
     assert m.content == {"blocks": [{"type": "text", "md": "A new first line.", "dropcap": False, "columns": 1, "variant": "body", "align": "left",
+                                     "font": "body", "size": 1, "color": "", "leading": 0, 
                                      "rt": {"type": "doc", "content": [{"type": "paragraph", "content": [
                                          {"type": "text", "text": "A new first line."}]}]}}]}
     assert m.title == "New"
@@ -430,7 +431,7 @@ def test_a_draft_never_uses_a_picture_it_wasnt_given(claude):
     blocks = out["draft"]["content"]["blocks"]
     assert [b["type"] for b in blocks] == ["cover", "text", "photo", "photos"]
     assert blocks[0]["asset_id"] is None  # the cover slot stays, empty
-    assert blocks[2]["asset_id"] == A1 and blocks[3]["items"] == [{"asset_id": A1, "caption": ""}]
+    assert blocks[2]["asset_id"] == A1 and blocks[3]["items"] == [{"asset_id": A1, "caption": "", "design": None}]
     assert out["draft"]["title"] == "Four in the morning"
     call = claude.calls[0]
     assert call["effort"] == "medium" and "Out with the boats at 4am" in call["prompt"]

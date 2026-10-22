@@ -102,12 +102,15 @@ describe('StoryEditor — who can read it', () => {
   it('makes a story paid only while the magazine charges, and offers one paywall', async () => {
     answer({ '/posts/p-1': post(), '/stories/options': OPTIONS, '/assets': { assets: [] }, '/magazine': magazine({ paid_enabled: true }) })
     api.put.mockResolvedValue(post({ access: 'paid' }))
-    mount('/sites/s-1/stories/p-1?view=outline', <StoryEditor />, '/sites/:siteId/stories/:postId')
+    mount('/sites/s-1/stories/p-1', <StoryEditor />, '/sites/:siteId/stories/:postId')
     const select = await screen.findByLabelText('Who can read it')
     await waitFor(() => expect(within(select).getByRole('option', { name: /Subscribers/ })).not.toBeDisabled())
     fireEvent.change(select, { target: { value: 'paid' } })
-    fireEvent.click(screen.getByRole('button', { name: /Add a block/ }))
-    expect(screen.getByRole('menuitem', { name: 'Paywall' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Elements' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add paywall to the story' }))
+    // One paywall to a story.
+    expect(await screen.findByRole('heading', { name: 'Paywall' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Add paywall to the story' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /^Save$/ }))
     await waitFor(() => expect(api.put).toHaveBeenCalled())
     expect(api.put.mock.calls[0][1]).toMatchObject({ access: 'paid' })
@@ -115,7 +118,7 @@ describe('StoryEditor — who can read it', () => {
 
   it('points to the settings when the magazine doesn’t charge', async () => {
     answer({ '/posts/p-1': post(), '/stories/options': OPTIONS, '/assets': { assets: [] }, '/magazine': magazine() })
-    mount('/sites/s-1/stories/p-1?view=outline', <StoryEditor />, '/sites/:siteId/stories/:postId')
+    mount('/sites/s-1/stories/p-1', <StoryEditor />, '/sites/:siteId/stories/:postId')
     const select = await screen.findByLabelText('Who can read it')
     expect(within(select).getByRole('option', { name: /Subscribers/ })).toBeDisabled()
     expect(screen.getByRole('link', { name: 'Magazine settings' })).toHaveAttribute('href', '/cappe/sites/s-1/magazine')

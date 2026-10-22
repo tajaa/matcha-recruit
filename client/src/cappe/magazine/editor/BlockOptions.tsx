@@ -1,206 +1,161 @@
-import { ImagePlus, Trash2 } from 'lucide-react'
-import { ui } from '../../components/ui'
+import { AlignCenter, AlignJustify, AlignLeft, AlignRight, ImagePlus, Trash2 } from 'lucide-react'
 import type { CappeAsset, StoryBlock } from '../../types'
-import RichField from './RichField'
+import { ColorField, IconBtn, NumberField, Row, Section, Seg, Select, Slider } from '../workspace/controls'
+import FontField from '../workspace/FontField'
 import PictureSlot from './PictureSlot'
-import PhotoDesigner from './PhotoDesigner'
+import CropTool from './CropTool'
 
-const small = 'rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-sm text-zinc-100'
+type Text = Extract<StoryBlock, { type: 'text' }>
 
-/** A block's settings: its pictures and how it looks. With `words` (the
- *  outline) also the boxes its words are typed in; without (the panel beside
- *  the page) those are typed on the page itself. */
-export default function BlockOptions({ block, assets, onChange, onPickAsset, words = true }: {
+const hint = 'text-[11px] leading-relaxed text-zinc-500'
+
+/** A text block's type: its face, size, colour and line spacing (each
+ *  following the magazine until set), its style, alignment and drop cap. */
+function TextOptions({ block, accent, onChange }: { block: Text; accent?: string; onChange: (b: StoryBlock) => void }) {
+  const set = (patch: Partial<Text>) => onChange({ ...block, ...patch })
+  return (
+    <>
+      <Section title="Type">
+        <FontField value={block.font || 'body'} onChange={(font) => set({ font })} />
+        <Row>
+          <NumberField label="Size, times the story's" short="×" value={block.size ?? 1} min={0.6} max={3} step={0.05} places={2}
+            onChange={(size) => set({ size })} />
+          <NumberField label="Line spacing" short="↕" value={block.leading || 1.6} blank={block.leading ? undefined : 'Auto'}
+            min={0.9} max={3} step={0.05} places={2} onChange={(leading) => set({ leading })} />
+        </Row>
+        <ColorField label="Colour" value={block.color || ''} auto="Page ink" accent={accent} onChange={(color) => set({ color })} />
+        <Seg label="Align" value={block.align || 'left'} onChange={(align) => set({ align })} options={[
+          { key: 'left', label: 'Left', icon: <AlignLeft className="h-3.5 w-3.5" /> },
+          { key: 'center', label: 'Centred', icon: <AlignCenter className="h-3.5 w-3.5" /> },
+          { key: 'right', label: 'Right', icon: <AlignRight className="h-3.5 w-3.5" /> },
+          { key: 'justify', label: 'Justified', icon: <AlignJustify className="h-3.5 w-3.5" /> },
+        ]} />
+        {block.leading ? (
+          <button type="button" className="text-[11px] text-zinc-400 hover:text-zinc-100" onClick={() => set({ leading: 0 })}>Line spacing back to automatic</button>
+        ) : null}
+      </Section>
+      <Section title="Paragraphs">
+        <Select label="Style" value={block.variant || 'body'} onChange={(variant) => set({ variant })} options={[
+          { key: 'body', label: 'Paragraphs' }, { key: 'lede', label: 'Lede (larger opening)' },
+          { key: 'statement', label: 'Statement (big, in the headline type)' }, { key: 'small', label: 'Small print' },
+        ]} />
+        <label className="flex items-center gap-2 text-xs text-zinc-300">
+          <input type="checkbox" checked={block.dropcap} onChange={(e) => set({ dropcap: e.target.checked })} /> Drop cap
+        </label>
+      </Section>
+    </>
+  )
+}
+
+/** A block's settings beside the page: its pictures, its type and how it
+ *  looks (its words are typed on the page itself). */
+export default function BlockOptions({ block, assets, accent, onChange, onPickAsset }: {
   block: StoryBlock
   assets: Map<string, CappeAsset>
+  accent?: string
   onChange: (block: StoryBlock) => void
   /** Open the picker; `done(asset)` is called with the choice. */
   onPickAsset: (done: (asset: CappeAsset) => void) => void
-  words?: boolean
 }) {
   switch (block.type) {
     case 'cover':
       return (
-        <div className="space-y-3">
+        <Section title="Picture and headline">
           <PictureSlot assetId={block.asset_id} assets={assets} label="Cover picture"
             onPick={() => onPickAsset((a) => onChange({ ...block, asset_id: a.id }))}
             onClear={() => onChange({ ...block, asset_id: null })} />
-          <div className="flex flex-wrap gap-3 text-sm">
-            <label className="flex items-center gap-2 text-zinc-300">Style
-              <select value={block.style} onChange={(e) => onChange({ ...block, style: e.target.value as typeof block.style })} className={small}>
-                <option value="overlay">Headline over the picture</option>
-                <option value="stacked">Headline, then the picture</option>
-                <option value="split">Side by side</option>
-              </select>
-            </label>
-            {block.style === 'overlay' && (
-              <label className="flex items-center gap-2 text-zinc-300">Words
-                <select value={block.tone} onChange={(e) => onChange({ ...block, tone: e.target.value as typeof block.tone })} className={small}>
-                  <option value="light">White on dark</option>
-                  <option value="dark">Dark on light</option>
-                </select>
-              </label>
-            )}
-            {block.style !== 'stacked' && (
-              <label className="flex items-center gap-2 text-zinc-300">Focus
-                <input type="range" min={0} max={100} value={block.focal.x} aria-label="Focus left to right"
-                  onChange={(e) => onChange({ ...block, focal: { ...block.focal, x: Number(e.target.value) } })} />
-                <input type="range" min={0} max={100} value={block.focal.y} aria-label="Focus top to bottom"
-                  onChange={(e) => onChange({ ...block, focal: { ...block.focal, y: Number(e.target.value) } })} />
-              </label>
-            )}
-          </div>
-          {!words && <p className="text-xs text-zinc-500">Type the kicker, headline, dek and byline on the page. Drag the dot on the picture to choose what it keeps in view.</p>}
-        </div>
+          <Select label="Style" value={block.style} onChange={(style) => onChange({ ...block, style })} options={[
+            { key: 'overlay', label: 'Headline over the picture' }, { key: 'stacked', label: 'Headline, then the picture' },
+            { key: 'split', label: 'Side by side' },
+          ]} />
+          {block.style === 'overlay' && (
+            <Select label="Headline colour" value={block.tone} onChange={(tone) => onChange({ ...block, tone })}
+              options={[{ key: 'light', label: 'White on dark' }, { key: 'dark', label: 'Dark on light' }]} />
+          )}
+          {block.style !== 'stacked' && (
+            <>
+              <Slider label="Focus →" value={block.focal.x} min={0} max={100} unit="%" onChange={(x) => onChange({ ...block, focal: { ...block.focal, x } })} />
+              <Slider label="Focus ↓" value={block.focal.y} min={0} max={100} unit="%" onChange={(y) => onChange({ ...block, focal: { ...block.focal, y } })} />
+            </>
+          )}
+          <p className={hint}>Type the kicker, headline, dek and byline on the page. Drag the dot on the picture to choose what it keeps in view.</p>
+        </Section>
       )
     case 'text':
-      return (
-        <div className="space-y-2">
-          {words && (
-            <RichField value={block.rt} onChange={(patch) => onChange({ ...block, ...patch })} label="Text" max={20_000}
-              placeholder="Write here. Select words and use the bar above." />
-          )}
-          <div className={`flex flex-wrap gap-3 text-sm text-zinc-300 ${words ? '' : 'flex-col'}`}>
-            <label className="flex items-center gap-2">Style
-              <select value={block.variant || 'body'} onChange={(e) => onChange({ ...block, variant: e.target.value as typeof block.variant })} className={small}>
-                <option value="body">Paragraphs</option>
-                <option value="lede">Lede (larger opening)</option>
-                <option value="statement">Statement (big, in the headline type)</option>
-                <option value="small">Small print</option>
-              </select>
-            </label>
-            <label className="flex items-center gap-2">Align
-              <select value={block.align || 'left'} onChange={(e) => onChange({ ...block, align: e.target.value as typeof block.align })} className={small}>
-                <option value="left">Left</option><option value="center">Centred</option><option value="right">Right</option><option value="justify">Justified</option>
-              </select>
-            </label>
-            <label className="flex items-center gap-2"><input type="checkbox" checked={block.dropcap} onChange={(e) => onChange({ ...block, dropcap: e.target.checked })} /> Drop cap</label>
-          </div>
-        </div>
-      )
+      return <TextOptions block={block} accent={accent} onChange={onChange} />
     case 'photo':
       return (
-        <div className="space-y-3">
+        <Section title="Picture">
           <PictureSlot assetId={block.asset_id} assets={assets}
             onPick={() => onPickAsset((a) => onChange({ ...block, asset_id: a.id }))}
             onClear={() => onChange({ ...block, asset_id: null })} />
-          <div className="flex flex-wrap gap-3">
-            {words && (
-              <input value={block.caption} onChange={(e) => onChange({ ...block, caption: e.target.value })} maxLength={500}
-                placeholder="Caption for this story (the credit comes from the library)" className={`${ui.input} flex-1`} />
-            )}
-            <select value={block.size} onChange={(e) => onChange({ ...block, size: e.target.value as typeof block.size })} className={small} aria-label="Size">
-              <option value="column">Column width</option>
-              <option value="wide">Wide</option>
-              <option value="full">Edge to edge</option>
-            </select>
-          </div>
-          {block.asset_id && assets.get(block.asset_id) && (
-            <PhotoDesigner block={block} asset={assets.get(block.asset_id)!} onChange={onChange} />
-          )}
-        </div>
+          <Select label="Size" value={block.size} onChange={(size) => onChange({ ...block, size })} options={[
+            { key: 'column', label: 'Column width' }, { key: 'wide', label: 'Wide' }, { key: 'full', label: 'Edge to edge' },
+          ]} />
+          {block.asset_id && assets.get(block.asset_id) && <CropTool block={block} asset={assets.get(block.asset_id)!} onChange={onChange} />}
+          <p className={hint}>Type the caption under the picture on the page. The credit comes from the library.</p>
+        </Section>
       )
     case 'photos':
       return (
-        <div className="space-y-3">
-          <label className="flex items-center gap-2 text-sm text-zinc-300">Arrangement
-            <select value={block.layout} onChange={(e) => onChange({ ...block, layout: e.target.value as typeof block.layout })} className={small}>
-              <option value="pair">Pair</option>
-              <option value="trio">Trio</option>
-              <option value="grid">Grid</option>
-              <option value="mosaic">Mosaic</option>
-            </select>
-          </label>
+        <Section title="Pictures">
+          <Select label="Arrangement" value={block.layout} onChange={(layout) => onChange({ ...block, layout })} options={[
+            { key: 'pair', label: 'Pair' }, { key: 'trio', label: 'Trio' }, { key: 'grid', label: 'Grid' }, { key: 'mosaic', label: 'Mosaic' },
+          ]} />
           {block.items.map((item, i) => (
-            <div key={i} className={`flex flex-col gap-2 rounded-lg border border-zinc-800 p-2 ${words ? 'sm:flex-row sm:items-center' : ''}`}>
-              <div className="flex flex-1 items-center gap-2">
-                <div className="min-w-0 flex-1">
-                  <PictureSlot assetId={item.asset_id} assets={assets} label={`Picture ${i + 1}`}
-                    onPick={() => onPickAsset((a) => onChange({ ...block, items: block.items.map((x, j) => (j === i ? { ...x, asset_id: a.id } : x)) }))}
-                    onClear={() => onChange({ ...block, items: block.items.map((x, j) => (j === i ? { ...x, asset_id: null } : x)) })} />
-                </div>
-                {!words && (
-                  <button type="button" aria-label={`Remove picture ${i + 1}`} onClick={() => onChange({ ...block, items: block.items.filter((_, j) => j !== i) })}
-                    className="text-zinc-500 hover:text-red-400"><Trash2 className="h-4 w-4" /></button>
-                )}
+            <div key={i} className="flex items-center gap-2">
+              <div className="min-w-0 flex-1">
+                <PictureSlot assetId={item.asset_id} assets={assets} label={`Picture ${i + 1}`}
+                  onPick={() => onPickAsset((a) => onChange({ ...block, items: block.items.map((x, j) => (j === i ? { ...x, asset_id: a.id } : x)) }))}
+                  onClear={() => onChange({ ...block, items: block.items.map((x, j) => (j === i ? { ...x, asset_id: null } : x)) })} />
               </div>
-              {words && (
-                <>
-                  <input value={item.caption} onChange={(e) => onChange({ ...block, items: block.items.map((x, j) => (j === i ? { ...x, caption: e.target.value } : x)) })}
-                    maxLength={300} placeholder="Caption" className={`${ui.input} sm:w-56`} />
-                  <button type="button" aria-label={`Remove picture ${i + 1}`} onClick={() => onChange({ ...block, items: block.items.filter((_, j) => j !== i) })}
-                    className="text-zinc-500 hover:text-red-400"><Trash2 className="h-4 w-4" /></button>
-                </>
-              )}
+              <IconBtn title={`Remove picture ${i + 1}`} onClick={() => onChange({ ...block, items: block.items.filter((_, j) => j !== i) })}>
+                <Trash2 className="h-3.5 w-3.5" />
+              </IconBtn>
             </div>
           ))}
           {block.items.length < 12 && (
-            <button type="button" className={ui.btnGhost} onClick={() => onChange({ ...block, items: [...block.items, { asset_id: null, caption: '' }] })}>
-              <ImagePlus className="h-4 w-4" /> Add a picture
+            <button type="button" className="inline-flex items-center gap-1.5 text-xs text-zinc-300 hover:text-zinc-50"
+              onClick={() => onChange({ ...block, items: [...block.items, { asset_id: null, caption: '' }] })}>
+              <ImagePlus className="h-3.5 w-3.5" /> Add a picture
             </button>
           )}
-        </div>
+        </Section>
       )
     case 'quote':
       return (
-        <div className="space-y-2">
-          {words && (
-            <textarea value={block.text} onChange={(e) => onChange({ ...block, text: e.target.value })} rows={2} maxLength={400}
-              placeholder="The words to pull out" className={ui.input} />
-          )}
-          <div className="flex flex-wrap gap-3">
-            {words && (
-              <input value={block.attribution} onChange={(e) => onChange({ ...block, attribution: e.target.value })} maxLength={120}
-                placeholder="Who said it" className={`${ui.input} flex-1`} />
-            )}
-            <select value={block.style} onChange={(e) => onChange({ ...block, style: e.target.value as typeof block.style })} className={small} aria-label="Quote style">
-              <option value="big">Big, centred</option>
-              <option value="side">Ruled, in the column</option>
-            </select>
-          </div>
-        </div>
+        <Section title="Look">
+          <Select label="Quote style" value={block.style} onChange={(style) => onChange({ ...block, style })}
+            options={[{ key: 'big', label: 'Big, centred' }, { key: 'side', label: 'Ruled, in the column' }]} />
+          <p className={hint}>Type the words and who said them on the page.</p>
+        </Section>
       )
     case 'sidebar':
-      return words ? (
-        <div className="space-y-2">
-          <input value={block.title} onChange={(e) => onChange({ ...block, title: e.target.value })} maxLength={120} placeholder="Sidebar title" className={ui.input} />
-          <RichField value={block.rt} onChange={(patch) => onChange({ ...block, ...patch })} max={4_000} minHeight="5rem" label="Sidebar"
-            placeholder="Facts, a timeline, where to go" />
-        </div>
-      ) : <p className="text-xs text-zinc-500">A box beside the story. Type its title and words on the page.</p>
+      return <Section title="About"><p className={hint}>A box beside the story. Type its title and words on the page.</p></Section>
     case 'qa':
       return (
-        <div className="space-y-3">
+        <Section title="Questions">
           {block.items.map((item, i) => (
-            <div key={i} className={words ? 'space-y-2 rounded-lg border border-zinc-800 p-2' : 'flex items-center gap-2 text-sm text-zinc-300'}>
-              {words ? (
-                <>
-                  <div className="flex gap-2">
-                    <input value={item.q} onChange={(e) => onChange({ ...block, items: block.items.map((x, j) => (j === i ? { ...x, q: e.target.value } : x)) })}
-                      maxLength={500} placeholder="Question" className={`${ui.input} flex-1`} />
-                    <button type="button" aria-label={`Remove question ${i + 1}`} onClick={() => onChange({ ...block, items: block.items.filter((_, j) => j !== i) })}
-                      className="text-zinc-500 hover:text-red-400"><Trash2 className="h-4 w-4" /></button>
-                  </div>
-                  <RichField value={item.a_rt} max={5_000} minHeight="4rem" label={`Answer ${i + 1}`} placeholder="Answer"
-                    onChange={({ rt, md }) => onChange({ ...block, items: block.items.map((x, j) => (j === i ? { ...x, a_md: md, a_rt: rt } : x)) })} />
-                </>
-              ) : (
-                <>
-                  <span className="min-w-0 flex-1 truncate">{item.q || `Question ${i + 1}`}</span>
-                  <button type="button" aria-label={`Remove question ${i + 1}`} onClick={() => onChange({ ...block, items: block.items.filter((_, j) => j !== i) })}
-                    className="text-zinc-500 hover:text-red-400"><Trash2 className="h-4 w-4" /></button>
-                </>
-              )}
+            <div key={i} className="flex items-center gap-2 text-xs text-zinc-300">
+              <span className="min-w-0 flex-1 truncate">{item.q || `Question ${i + 1}`}</span>
+              <IconBtn title={`Remove question ${i + 1}`} onClick={() => onChange({ ...block, items: block.items.filter((_, j) => j !== i) })}>
+                <Trash2 className="h-3.5 w-3.5" />
+              </IconBtn>
             </div>
           ))}
           {block.items.length < 40 && (
-            <button type="button" className={ui.btnGhost} onClick={() => onChange({ ...block, items: [...block.items, { q: '', a_md: '' }] })}>Add a question</button>
+            <button type="button" className="text-xs text-zinc-300 hover:text-zinc-50" onClick={() => onChange({ ...block, items: [...block.items, { q: '', a_md: '' }] })}>
+              Add a question
+            </button>
           )}
-        </div>
+        </Section>
       )
     case 'divider':
-      return <p className="text-xs text-zinc-500">A short rule between parts of the story.</p>
+      return <Section title="About"><p className={hint}>A short rule between parts of the story.</p></Section>
     case 'paywall':
-      return <p className="text-xs text-zinc-500">Everything below this line is for subscribers, when the story is set to “Subscribers”. Readers see what’s above it free.</p>
+      return <Section title="About"><p className={hint}>Everything below this line is for subscribers, when the story is set to “Subscribers”. Readers see what’s above it free.</p></Section>
+    case 'page':
+      // Its shape and background are the art inspector's (workspace/ArtInspector).
+      return null
   }
 }

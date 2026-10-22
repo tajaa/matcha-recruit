@@ -65,8 +65,25 @@ Website-builder frontend for the consumer brand **Gummfit**, host-routed on gumm
   reader"): the frames are `sandbox="allow-same-origin"` with no scripts, and Safari runs nothing we
   attach inside them, so the arrows, page count and keys are outside and `reader/book.ts` drives the
   pages (see the Cappe server CLAUDE.md, magazines). Don't add listeners to a frame's document.
-  **Editing on the page** (`magazine/canvas/`): the story and issue editors open on **Page** (`?view=outline`
-  opens the **Outline**, today's forms; one undo history serves both). `EditFrame.tsx` is the one frame that
+  **The story editor is one design workspace** (`editor/StoryEditor.tsx` + `magazine/workspace/`, 2026-10-22;
+  there is no Outline any more): a left rail of panels (`AddPanels.tsx`: Text, Photos, Elements; `LayersPanel.tsx`:
+  the story's blocks in order with each picture's layers, topmost first, to select, hide, lock, rename and drag),
+  the story's own pages in the middle (`EditFrame`, with zoom), and a right inspector for what is selected
+  (`LayerInspector.tsx` for layers; `ArtInspector.tsx` for a picture or designed page: what to add on it, what is
+  on it, its own settings; `canvas/BlockPanel.tsx` over `editor/BlockOptions.tsx` for other blocks; the story's
+  settings when nothing is). Words, shapes and pictures go ON the picture or page in hand; blocks go into the
+  story after the block in hand (`workspace/actions.ts`, pure: `addText`/`addShape`/`addImage`/`addBlock`/
+  `addPage`, and `command` for copy/cut/paste/duplicate/group/ungroup/arrange/delete, with a module-level
+  clipboard any picture can paste). A design changed in the panels is drawn on the page at once
+  (`designMessages` → `EditFrame`'s `outbox` → the frame's `mz-design`; worked out during render from the
+  previous document, never in an effect) while the server sets the page again; one changed on the page
+  (`mz-layers`, typing) isn't sent back. Keys pressed in the panels outside a box typed in act on the layers
+  as the page's do (`panelKey`). The design model, ops and renderer are `magazine/design/` (`designOps.ts`,
+  `designRender.ts` = the server's bytes, `fonts.ts`/`fontStack.ts`); controls are `workspace/controls.tsx`
+  (scrub-to-change numbers that take sums, `evalSum`; colour picker with eyedropper; gradient fills) and
+  `FontField.tsx`. On the page, `frame/layers.ts` selects, moves, resizes, turns, snaps (with guides), lassos and
+  nudges layers, and double-click types in one. The issue editor still opens on its pages with the slim panel.
+  **Editing on the page** (`magazine/canvas/`): `EditFrame.tsx` is the one frame that
   runs scripts: `sandbox="allow-scripts"` with no same-origin. It writes the editor runtime
   (`magazine/frame/`, TypeScript + Tiptap) into each page: `vite-mz-frame.ts` bundles it into one script
   and its stylesheet (`virtual:mz-frame`, rebuilt when a frame file changes in dev, empty in Vitest; inlined,
@@ -78,10 +95,9 @@ Website-builder frontend for the consumer brand **Gummfit**, host-routed on gumm
   (source, shape, indexes, field names, lengths); `storyDoc.ts` / `issueEdits.ts` apply it and drop an edit
   that names a block or field the story doesn't have (`fields.ts`, pinned by the server). Rich text arrives
   as a document, cleaned to what the server keeps (`canvas/rt.ts` `cleanRt`, with `rtToMd` for the Markdown
-  beside it; both pinned by `server/tests/cappe/fixtures/magazine_rt_cases.json`), and the Outline types the
-  same documents (`editor/RichField.tsx`, same `frame/extensions.ts` schema). The panel beside the page is
-  `BlockPanel.tsx` (over `editor/BlockOptions.tsx`, shared with the Outline's `BlockEditor` minus the
-  word boxes), `issues/CoverPanel.tsx`'s exported sections, and `ContentsPanel`. The issue editor keeps an
+  beside it; both pinned by `server/tests/cappe/fixtures/magazine_rt_cases.json`). The issue editor's panel
+  beside the page is `BlockPanel.tsx` (over `editor/BlockOptions.tsx`), `issues/CoverPanel.tsx`'s exported
+  sections, and `ContentsPanel`. The issue editor keeps an
   unsaved copy of each story edited on its pages (`IssueDoc.drafts`), previews them with the issue
   (`stories_content`) and saves each changed story's words first (`storyWordsBody`: never its status),
   then the issue (a released issue's save publishes its drafts, so it must publish the new words; it waits

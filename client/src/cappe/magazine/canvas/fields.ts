@@ -7,13 +7,14 @@ import type { StoryBlock } from '../../types'
 export const BLOCK_FIELDS: Record<StoryBlock['type'], readonly string[]> = {
   cover: [],
   text: ['md'],
-  photo: ['caption', 'overlays.#.text'],
+  photo: ['caption'],
   photos: ['items.#.caption'],
   quote: ['text', 'attribution'],
   sidebar: ['title', 'md'],
   qa: ['items.#.q', 'items.#.a_md'],
   divider: [],
   paywall: [],
+  page: [],
 }
 
 /** A story's own lines (its header): the same on every page it is on. */
@@ -29,10 +30,10 @@ export const RICH_FIELDS: readonly string[] = ['md', 'items.#.a_md']
  *  issue_schema.py, models/magazine.py). */
 export const FIELD_MAX: Record<string, number> = {
   '@title': 255, '@kicker': 60, '@excerpt': 600, '@byline': 160,
-  md: 20_000, caption: 500, 'overlays.#.text': 300, 'items.#.caption': 300, text: 400, attribution: 120,
+  md: 20_000, caption: 500, 'items.#.caption': 300, text: 400, attribution: 120,
   title: 120, 'items.#.q': 500, 'items.#.a_md': 5_000,
   'issue:lines.#.text': 140, 'issue:lines.#.sub': 200, 'issue:issue_line.text': 80, 'issue:contents.heading': 60,
-  'issue:line': 200, 'issue:section': 40,
+  'issue:line': 200, 'issue:section': 40, design: 2_000,
 }
 /** A sidebar's words are shorter than a text block's. */
 export const SIDEBAR_MD_MAX = 4_000
@@ -51,6 +52,15 @@ export function blockHasField(type: StoryBlock['type'], path: string): boolean {
 }
 
 export const isRichField = (path: string) => RICH_FIELDS.includes(fieldShape(path).shape)
+
+/** The words of a design's text layer (`design.<layer>`, or a picture in a
+ *  group's: `items.<n>.design.<layer>`): rich text, at most MAX_TEXT. */
+export const DESIGN_FIELD = /^(?:items\.(\d{1,2})\.)?design\.([a-z0-9]{1,12})$/
+
+export function designField(path: string): { item: number | null; id: string } | null {
+  const m = DESIGN_FIELD.exec(path)
+  return m ? { item: m[1] === undefined ? null : Number(m[1]), id: m[2] } : null
+}
 
 /** `s` cut to at most `max` characters as the server counts them (whole
  *  characters, not UTF-16 halves), so an emoji at the cut is never split

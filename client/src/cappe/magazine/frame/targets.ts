@@ -19,7 +19,12 @@ export function targetOf(el: Element): FrameTarget {
   if (el.closest('.mz-issue__face')) return { kind: 'cover', el: 'photo' }
   if (el.closest('[data-mz-contents]')) return { kind: 'contents' }
   const b = el.closest('[data-mz-b]')
-  if (b) return { kind: 'block', story: storyOf(b), block: Number(b.getAttribute('data-mz-b')) }
+  if (b) {
+    const story = storyOf(b), block = Number(b.getAttribute('data-mz-b'))
+    // One picture of a photo group: its own design is what gets worked on.
+    const item = b.classList.contains('mz-photos') ? el.closest('[data-mz-item]') : null
+    return item ? { kind: 'block', story, block, item: Number(item.getAttribute('data-mz-item')) } : { kind: 'block', story, block }
+  }
   const a = el.closest('[data-mz-s]')
   if (a) return { kind: 'story', story: a.getAttribute('data-mz-s') ?? '' }
   return { kind: 'none' }
@@ -33,11 +38,19 @@ export function elFor(t: FrameTarget | null | undefined): Element | null {
     case 'contents': return document.querySelector('[data-mz-contents]')
     case 'block': case 'story': {
       const art = document.querySelector(`[data-mz-s="${esc(t.story)}"]`)
-      return t.kind === 'story' ? art : art?.querySelector(`[data-mz-b="${t.block | 0}"]`) ?? null
+      if (t.kind === 'story') return art
+      const block = art?.querySelector(`[data-mz-b="${t.block | 0}"]`) ?? null
+      return t.item === undefined ? block : block?.querySelector(`[data-mz-item="${t.item | 0}"]`) ?? block
+    }
+    case 'layer': {
+      const block = document.querySelector(`[data-mz-s="${esc(t.story)}"] [data-mz-b="${t.block | 0}"]`)
+      const design = block?.querySelector(`.mzd[data-mzd="${t.item === null ? 'design' : `items.${t.item | 0}.design`}"]`)
+      return design?.querySelector(`[data-mzd-l="${esc(t.ids[0] ?? '')}"]`) ?? null
     }
     default: return null
   }
 }
 
-/** Selected things get an outline; a story or nothing doesn't. */
-export const outlined = (t: FrameTarget) => t.kind !== 'story' && t.kind !== 'none'
+/** Selected things get an outline; a story or nothing doesn't, and layers
+ *  get their own frame with handles (layers.ts). */
+export const outlined = (t: FrameTarget) => t.kind !== 'story' && t.kind !== 'none' && t.kind !== 'layer'

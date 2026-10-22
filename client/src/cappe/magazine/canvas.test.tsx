@@ -11,7 +11,8 @@ import { docOf } from './issues/issueDoc'
 import EditFrame from './canvas/EditFrame'
 import { PHONE, SPREAD_MIN, fitFrame } from './canvas/fit'
 import { readMessage, type FrameMessage } from './canvas/bridge'
-import { BLOCK_FIELDS, blockHasField, clip, fieldShape, isRichField } from './canvas/fields'
+import { BLOCK_FIELDS, blockHasField, clip, designField, fieldShape, isRichField } from './canvas/fields'
+import { newText } from './design/designOps'
 import { cleanHref, cleanRt, emptyRt, richPatch, rtText, rtToMd, type RtDoc } from './canvas/rt'
 import { richExtensions } from './frame/extensions'
 import { applyIssueEdit, coverFocal, moveCoverEl } from './canvas/issueEdits'
@@ -35,7 +36,7 @@ const photo = (over: Partial<Extract<StoryBlock, { type: 'photo' }>> = {}): Stor
 const story = (): StoryDoc => ({
   fields: { title: 'Low tide', kicker: '', excerpt: 'Boats.', byline: 'Ana', topic: '', layout: 'standard', status: 'draft', access: 'free' },
   blocks: [newBlock('cover'), text('First words.'),
-    photo({ asset_id: 'a-1', caption: 'Dawn', overlays: [{ x: 50, y: 50, text: 'Hi', size: 'm', tone: 'light', box: false, align: 'center' }] }),
+    photo({ asset_id: 'a-1', caption: 'Dawn', design: { layers: [{ ...newText(null, 'heading'), id: 'hi', rt: doc(t('Hi')) }] } }),
     { type: 'photos', layout: 'pair', items: [{ asset_id: null, caption: '' }, { asset_id: 'a-1', caption: 'Two' }] },
     { type: 'qa', items: [{ q: 'Why?', a_md: 'Because.' }] }],
 })
@@ -132,7 +133,12 @@ describe('the field allowlist', () => {
   it('knows which block has which words, and which are written with the toolbar', () => {
     expect(blockHasField('text', 'md')).toBe(true)
     expect(blockHasField('text', 'caption')).toBe(false)
-    expect(blockHasField('photo', 'overlays.3.text')).toBe(true)
+    expect(blockHasField('photo', 'overlays.3.text')).toBe(false)
+    // Words laid on a picture: a layer of its design, by id.
+    expect(designField('design.hi')).toEqual({ item: null, id: 'hi' })
+    expect(designField('items.3.design.l12')).toEqual({ item: 3, id: 'l12' })
+    expect(designField('design.Hi')).toBeNull()
+    expect(designField('overlays.0.text')).toBeNull()
     expect(blockHasField('qa', 'items.0.a_md')).toBe(true)
     expect(BLOCK_FIELDS.divider).toEqual([])
     expect(isRichField('items.4.a_md')).toBe(true)
@@ -150,8 +156,16 @@ describe('readMessage', () => {
       .toMatchObject({ story: '', block: -1, field: 'issue:lines.0.text' })
     expect(readMessage({ type: 'mz-move', target: { kind: 'cover', el: 'line:2' }, x: 140, y: -3, w: 40 }, ctx))
       .toEqual({ type: 'mz-move', target: { kind: 'cover', el: 'line:2' }, x: 100, y: 0, w: 40 })
-    expect(readMessage({ type: 'mz-move', target: { kind: 'overlay', story: 'p-1', block: 2, overlay: 'overlays.1' }, x: 5, y: 6 }, ctx))
-      .toEqual({ type: 'mz-move', target: { kind: 'overlay', story: 'p-1', block: 2, overlay: 1 }, x: 5, y: 6, w: null })
+    // Layers moved on the page: their numbers held to what the server keeps.
+    expect(readMessage({ type: 'mz-layers', story: 'p-1', block: 2, item: null, changes: [{ id: 'hi', x: 250, y: -3, w: 40, rot: 400, autosize: 'none' }] }, ctx))
+      .toEqual({ type: 'mz-layers', story: 'p-1', block: 2, item: null, changes: [{ id: 'hi', x: 200, y: -3, w: 40, rot: 180, autosize: 'none' }] })
+    expect(readMessage({ type: 'mz-layers', story: 'p-1', block: 3, item: 1, changes: [{ id: 'a1', size: 99 }] }, ctx))
+      .toMatchObject({ item: 1, changes: [{ id: 'a1', size: 60 }] })
+    expect(readMessage({ type: 'mz-select', target: { kind: 'layer', story: 'p-1', block: 2, item: null, ids: ['hi', 'hi', 'b2'] } }, ctx))
+      .toEqual({ type: 'mz-select', target: { kind: 'layer', story: 'p-1', block: 2, item: null, ids: ['hi', 'b2'] } })
+    expect(readMessage({ type: 'mz-edit', story: 'p-1', block: 3, field: 'items.1.design.hi', value: doc(t('x')), rich: true }, ctx))
+      .toMatchObject({ field: 'items.1.design.hi' })
+    expect(readMessage({ type: 'mz-key', key: 'group' }, ctx)).toEqual({ type: 'mz-key', key: 'group' })
     expect(readMessage({ type: 'mz-pick', story: 'p-1', block: 3, item: null }, ctx)).toMatchObject({ item: null })
     // A rich field's document arrives cleaned to what the server keeps.
     const sent = { type: 'doc', content: [{ type: 'paragraph', content: [
@@ -188,7 +202,15 @@ describe('readMessage', () => {
       { type: 'mz-pick', story: 'p-1', block: 1, item: 'all' },
       { type: 'mz-move', target: { kind: 'cover', el: 'photo' }, x: 1, y: 1 },
       { type: 'mz-move', target: { kind: 'cover', el: 'masthead' }, x: Number.NaN, y: 1 },
-      { type: 'mz-move', target: { kind: 'overlay', story: 'p-1', block: 2, overlay: 'items.1' }, x: 1, y: 1 },
+      { type: 'mz-move', target: { kind: 'overlay', story: 'p-1', block: 2, overlay: 1 }, x: 1, y: 1 },
+      { type: 'mz-layers', story: 'p-1', block: 2, item: null, changes: [] },
+      { type: 'mz-layers', story: 'p-1', block: 2, item: null, changes: [{ id: 'Bad id', x: 1 }] },
+      { type: 'mz-layers', story: 'p-1', block: 2, item: null, changes: [{ id: 'hi', x: 'far' }] },
+      { type: 'mz-layers', story: 'p-1', block: 2, item: 'all', changes: [{ id: 'hi', x: 1 }] },
+      { type: 'mz-layers', story: 'someone-else', block: 2, item: null, changes: [{ id: 'hi', x: 1 }] },
+      { type: 'mz-layers', story: 'p-1', block: 2, item: null, changes: Array.from({ length: 201 }, () => ({ id: 'hi' })) },
+      { type: 'mz-select', target: { kind: 'layer', story: 'p-1', block: 2, item: null, ids: [] } },
+      { type: 'mz-select', target: { kind: 'layer', story: 'p-1', block: 2, item: null, ids: ['<b>'] } },
       { type: 'mz-key', key: 'rm -rf' },
     ]
     for (const b of bad) expect(readMessage(b, ctx)).toBeNull()
@@ -202,7 +224,9 @@ describe('a story edited on its page', () => {
     const words = doc(t('New '), t('words', 'bold'))
     expect(applyEdit(d, 1, 'md', words)!.blocks[1]).toMatchObject({ md: 'New **words**', rt: words })
     expect(applyEdit(d, 2, 'caption', 'Morning')!.blocks[2]).toMatchObject({ caption: 'Morning' })
-    expect(applyEdit(d, 2, 'overlays.0.text', 'Two\nlines')!.blocks[2]).toMatchObject({ overlays: [{ text: 'Two\nlines' }] })
+    expect(applyEdit(d, 2, 'design.hi', doc(t('Two')))!.blocks[2]).toMatchObject({ design: { layers: [{ id: 'hi', rt: doc(t('Two')) }] } })
+    expect(applyEdit(d, 2, 'design.nope', doc(t('Two')))).toBeNull()  // no such layer
+    expect(applyEdit(d, 2, 'design.hi', 'Two')).toBeNull()  // a layer's words arrive as a document
     expect(applyEdit(d, 3, 'items.1.caption', 'Second')!.blocks[3]).toMatchObject({ items: [{ caption: '' }, { caption: 'Second' }] })
     expect(applyEdit(d, 4, 'items.0.a_md', doc(t('Yes')))!.blocks[4]).toMatchObject({ items: [{ q: 'Why?', a_md: 'Yes', a_rt: doc(t('Yes')) }] })
     expect(applyEdit(d, -1, '@kicker', 'x'.repeat(90))!.fields.kicker).toHaveLength(60)
@@ -242,9 +266,10 @@ describe('a story edited on its page', () => {
     const added = storyFromMessage(d, { type: 'mz-insert', story: 'p-1', at: 0, kind: 'quote' })!
     expect(added).toMatchObject({ step: true, select: 1 })
     expect(added.doc.blocks.map((b) => b.type)).toEqual(['cover', 'quote', 'text', 'photo', 'photos', 'qa'])
-    const moved = storyFromMessage(d, { type: 'mz-move', target: { kind: 'overlay', story: 'p-1', block: 2, overlay: 0 }, x: 12.6, y: 80, w: null })!
-    expect(moved.doc.blocks[2]).toMatchObject({ overlays: [{ x: 13, y: 80 }] })
-    expect(storyFromMessage(d, { type: 'mz-move', target: { kind: 'overlay', story: 'p-1', block: 1, overlay: 0 }, x: 1, y: 1, w: null })).toBeNull()
+    const moved = storyFromMessage(d, { type: 'mz-layers', story: 'p-1', block: 2, item: null, changes: [{ id: 'hi', x: 12.66, y: 80, autosize: 'none' }] })!
+    expect(moved.step).toBe(true)
+    expect(moved.doc.blocks[2]).toMatchObject({ design: { layers: [{ id: 'hi', x: 12.7, y: 80, autosize: 'none' }] } })
+    expect(storyFromMessage(d, { type: 'mz-layers', story: 'p-1', block: 1, item: null, changes: [{ id: 'hi', x: 1 }] })).toBeNull()
     const focused = storyFromMessage(d, { type: 'mz-focal', target: { kind: 'block', story: 'p-1', block: 0 }, x: 20, y: 70 })!
     expect(focused.doc.blocks[0]).toMatchObject({ focal: { x: 20, y: 70 } })
     expect(storyFromMessage(d, { type: 'mz-focal', target: { kind: 'block', story: 'p-1', block: 1 }, x: 2, y: 2 })).toBeNull()
@@ -481,7 +506,7 @@ describe('StoryEditor, on the page', () => {
     // A block clicked: its settings, not its words.
     page.say({ type: 'mz-select', target: { kind: 'block', story: 'preview', block: 1 } })
     expect(await screen.findByRole('heading', { name: 'Text' })).toBeInTheDocument()
-    expect(screen.getByText('Align')).toBeInTheDocument()
+    expect(screen.getByRole('group', { name: 'Align' })).toBeInTheDocument()
     expect(screen.queryByText('Columns')).toBeNull()  // a book page is already a column
     expect(screen.queryByLabelText('Text')).toBeNull()
 
@@ -546,13 +571,67 @@ describe('StoryEditor, on the page', () => {
     expect(screen.getByText('Unsaved')).toBeInTheDocument()
   })
 
-  it('opens the outline from the address, and switches between them', async () => {
+  it('adds a designed page and words on it from the panels, draws them at once, and takes layer keys', async () => {
     mountStory()
-    await shown('<p>edit 1</p>')
-    fireEvent.click(screen.getByRole('button', { name: 'Outline' }))
-    expect(await screen.findByLabelText('Headline')).toHaveValue('Low tide')
-    fireEvent.click(screen.getByRole('button', { name: 'Page' }))
-    expect(screen.queryByLabelText('Headline')).toBeNull()
+    const page = await shown('<p>edit 1</p>')
+    const designs = () => page.posted.mock.calls.map(([m]) => m as { type: string; design?: { layers: { id: string }[] } })
+      .filter((m) => m.type === 'mz-design')
+    const lastLayers = () => designs().at(-1)!.design!.layers
+    expect(screen.getByRole('tree', { name: 'The story’s layers' })).toBeInTheDocument()
+
+    // A designed page from Elements, after the block selected; selected on the page too.
+    page.say({ type: 'mz-select', target: { kind: 'block', story: 'preview', block: 1 } })
+    await screen.findByRole('heading', { name: 'Text' })
+    fireEvent.click(screen.getByRole('button', { name: 'Elements' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add a designed page, 4:5' }))
+    expect(await screen.findByRole('heading', { name: 'Designed page' })).toBeInTheDocument()
+    await waitFor(() => expect(page.posted).toHaveBeenCalledWith({ type: 'mz-select', target: { kind: 'block', story: 'preview', block: 2 } }, '*'))
+
+    // Words on it: drawn on the page at once, in the face the panel chose; the layer's inspector.
+    fireEvent.click(screen.getByRole('button', { name: 'Add heading' }))
+    expect(await screen.findByRole('textbox', { name: 'Layer name' })).toBeInTheDocument()
+    await waitFor(() => expect(designs()).toHaveLength(1))
+    expect(designs()[0]).toMatchObject({ story: 'preview', block: 2, item: null, path: 'design' })
+    expect(lastLayers()).toEqual([expect.objectContaining({ kind: 'text', font: 'heading', color: '#111111' })])
+    const id = lastLayers()[0].id
+
+    // Keys from the page and from the panels act on the layers selected.
+    page.say({ type: 'mz-key', key: 'duplicate' })
+    await waitFor(() => expect(lastLayers()).toHaveLength(2))
+    fireEvent.keyDown(document.body, { key: 'Backspace' })
+    await waitFor(() => expect(lastLayers()).toHaveLength(1))
+    // Typing in a box of the panels is never a layer key.
+    fireEvent.click(screen.getByRole('button', { name: 'Layers' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Undo' }))
+    await waitFor(() => expect(lastLayers()).toHaveLength(2))
+
+    // A layer picked in the tree: selected on the page as well.
+    fireEvent.click(screen.getAllByText('Add a heading')[0])
+    await waitFor(() => expect(page.posted).toHaveBeenCalledWith(
+      { type: 'mz-select', target: expect.objectContaining({ kind: 'layer', block: 2, item: null }) }, '*'))
+    fireEvent.keyDown(screen.getByRole('textbox', { name: 'Layer name' }), { key: 'Backspace' })
+    expect(lastLayers()).toHaveLength(2)
+
+    // Moved on the page: kept, and not drawn back (the page has it already).
+    const drawnBefore = designs().length
+    page.say({ type: 'mz-layers', story: 'preview', block: 2, item: null, changes: [{ id, x: 5, y: 6 }] })
+    expect(await screen.findByText('Unsaved')).toBeInTheDocument()
+    await new Promise((r) => setTimeout(r, 30))
+    expect(designs()).toHaveLength(drawnBefore)
+
+    // Zoom: in, and back to the size that fits.
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }))
+    expect(screen.getByRole('button', { name: 'Fit' })).toHaveTextContent('125%')
+    fireEvent.click(screen.getByRole('button', { name: 'Fit' }))
+    expect(screen.getByRole('button', { name: 'Fit' })).toHaveTextContent('Fit')
+
+    api.put.mockImplementation((_p: string, body: Record<string, unknown>) => Promise.resolve(post(body as Partial<CappePost>)))
+    page.say({ type: 'mz-key', key: 'save' })
+    await waitFor(() => expect(api.put).toHaveBeenCalled())
+    const saved = api.put.mock.calls[0][1].content.blocks[2]
+    expect(saved).toMatchObject({ type: 'page', aspect: '4:5' })
+    expect(saved.design.layers).toHaveLength(2)
+    expect(saved.design.layers.find((l: { id: string }) => l.id === id)).toMatchObject({ x: 5, y: 6 })
   })
 })
 

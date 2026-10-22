@@ -280,3 +280,55 @@ export function richPatch(doc: unknown, max: number): { rt: RtDoc; md: string } 
   // marks, and is never cut (as story_schema._rich).
   return { rt, md: rtToMd(rt) }
 }
+
+// ── HTML (as rt.py's render_rt) ─────────────────────────────────────────────
+// Only what the editor draws itself (a design's words, put on the page at
+// once while the server sets it again: design/designRender.ts); the page the
+// server sends is the server's. magazine_rt_cases.json holds the two equal.
+
+const LINK_REL = 'nofollow ugc noopener'
+const TAGS = { bold: 'strong', italic: 'em', underline: 'u', strike: 's' } as const
+
+/** As Python's `html.escape`: `quote` escapes both quotes too. */
+export const escHtml = (s: string, quote = true) => {
+  const out = s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  return quote ? out.replace(/"/g, '&quot;').replace(/'/g, '&#x27;') : out
+}
+
+function htmlInline(nodes: RtInline[] = []): string {
+  return nodes.map((n) => {
+    if (n.type === 'hardBreak') return '<br>'
+    let html = escHtml(n.text, false)
+    for (const m of [...(n.marks || [])].reverse()) {
+      html = m.type === 'link'
+        ? `<a rel="${LINK_REL}" href="${escHtml(m.attrs.href)}">${html}</a>`
+        : `<${TAGS[m.type]}>${html}</${TAGS[m.type]}>`
+    }
+    return html
+  }).join('')
+}
+
+function htmlBlock(b: RtBlock): string {
+  switch (b.type) {
+    case 'paragraph': return `<p>${htmlInline(b.content)}</p>`
+    case 'heading': return `<h${b.attrs.level}>${htmlInline(b.content)}</h${b.attrs.level}>`
+    case 'blockquote': return `<blockquote>${b.content.map(htmlBlock).join('')}</blockquote>`
+    default: {
+      const tag = b.type === 'bulletList' ? 'ul' : 'ol'
+      const start = b.type === 'orderedList' ? b.attrs?.start ?? 1 : 1
+      const attr = tag === 'ol' && start !== 1 ? ` start="${start}"` : ''
+      return `<${tag}${attr}>${b.content.map((item) => `<li>${item.content.map(htmlBlock).join('')}</li>`).join('')}</${tag}>`
+    }
+  }
+}
+
+const hasWords = (nodes: unknown[]): boolean => nodes.some((n) => {
+  const node = obj(n)
+  return !!node && ((node.type === 'text' && String(node.text ?? '').trim() !== '') || hasWords(list(node.content)))
+})
+
+/** Safe HTML for a cleaned document ('' when it has no words). */
+export function rtToHtml(doc: RtDoc | null | undefined): string {
+  if (!doc || !hasWords(doc.content)) return ''
+  return doc.content.map(htmlBlock).join('')
+}

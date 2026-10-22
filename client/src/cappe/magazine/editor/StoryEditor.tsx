@@ -1,28 +1,34 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react'
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { ArrowLeft, BookOpen, Eye, Loader2, Monitor, Plus, Redo2, Smartphone, Trash2, Undo2, Wand2, X } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Link, useNavigate, useParams } from 'react-router-dom'
+import {
+  ArrowLeft, BookOpen, Image as ImageIcon, Layers, Loader2, Minus, Monitor, Plus, Redo2, Shapes, Smartphone, Trash2, Type, Undo2, Wand2, X,
+} from 'lucide-react'
 import { cappeApi } from '../../api'
 import { ui } from '../../components/ui'
-import type {
-  CappeAsset, CappeMagazine, CappePost, CappeStockSource, CappeStoryOptions, StoryBlock, StoryLayout,
-} from '../../types'
+import type { CappeAsset, CappeMagazine, CappePost, CappeStockSource, CappeStoryOptions, StoryBlock, StoryLayout } from '../../types'
 import LibraryPanel from '../library/LibraryPanel'
 import AssistPanel from './AssistPanel'
-import BlockEditor from './BlockEditor'
 import StorySettings from './StorySettings'
 import { confirmLeave } from '../../utils/unsavedGuard'
 import { useUnsavedGuard } from '../../pages/site/PageEditor/useUnsavedGuard'
-import { BLOCK_LABELS, duplicateBlock, insertBlock, moveBlock, newBlock, withCaption, withText } from './blocks'
+import { duplicateBlock, moveBlock, newBlock, withCaption, withText } from './blocks'
 import { useHistory } from './history'
 import BookFrame from '../reader/BookFrame'
 import BlockPanel, { PanelHead } from '../canvas/BlockPanel'
 import EditFrame, { type Device } from '../canvas/EditFrame'
-import type { FrameMessage, FrameTarget, Place } from '../canvas/bridge'
+import type { FrameKey, FrameMessage, FrameTarget, Place } from '../canvas/bridge'
 import {
-  storyDocOf, storyFromMessage, storyPreviewBody, storySaveBody, withPicture, type StoryDoc, type StoryFields,
+  changeDesign, storyDocOf, storyFromMessage, storyPreviewBody, storySaveBody, withPicture, type StoryDoc, type StoryFields,
 } from '../canvas/storyDoc'
-
-const ADDABLE: StoryBlock['type'][] = ['text', 'photo', 'photos', 'quote', 'sidebar', 'qa', 'divider']
+import { designOf, holdsDesign, mapLayers, moveLayer, patchLayers, type ArtAt, type LayerPatch, type TextPreset } from '../design/designOps'
+import type { Design, PageAspect, ShapeKind } from '../design/types'
+import {
+  addBlock, addImage, addPage, addShape, addText, artOf, command, designMessages, layerTarget, panelKey, type Clipboard, type Did,
+} from '../workspace/actions'
+import { ElementsPanel, PhotosPanel, TextPanel } from '../workspace/AddPanels'
+import ArtInspector from '../workspace/ArtInspector'
+import LayerInspector from '../workspace/LayerInspector'
+import LayersPanel from '../workspace/LayersPanel'
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 const MOD = isMac ? '⌘' : 'Ctrl+'
@@ -31,39 +37,19 @@ const MOD = isMac ? '⌘' : 'Ctrl+'
 const ON_PAGE = 'preview'
 const PAGE_STORIES: ReadonlySet<string> = new Set([ON_PAGE])
 
-type View = 'page' | 'outline'
+/** Times the size that fits the pane. */
+const ZOOMS = [0.5, 0.75, 1, 1.25, 1.5, 2, 3]
 
-/** A thin "+" between blocks that opens the kinds of block to put there. */
-function InsertMenu({ open, onToggle, onPick, withCover, withPaywall, last }: {
-  open: boolean
-  onToggle: () => void
-  onPick: (type: StoryBlock['type']) => void
-  withCover: boolean
-  /** A paid story without its paywall yet: the line can go here. */
-  withPaywall: boolean
-  last?: boolean
-}) {
-  return (
-    <div className={last ? '' : 'group -my-2 flex flex-col items-center'}>
-      {last
-        ? <button type="button" className={ui.btnGhost} onClick={onToggle} aria-expanded={open}><Plus className="h-4 w-4" /> Add a block</button>
-        : (
-          <button type="button" onClick={onToggle} aria-expanded={open} aria-label="Insert a block here"
-            className={`flex h-5 w-full items-center gap-2 text-zinc-600 hover:text-emerald-400 focus-visible:text-emerald-400 ${open ? 'text-emerald-400' : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100'}`}>
-            <span className="h-px flex-1 bg-current opacity-40" /><Plus className="h-3.5 w-3.5" /><span className="h-px flex-1 bg-current opacity-40" />
-          </button>
-        )}
-      {open && (
-        <div className={`flex flex-wrap gap-2 ${last ? 'mt-2' : 'my-2 justify-center'}`} role="menu">
-          {withCover && <button type="button" role="menuitem" className={ui.btnGhost} onClick={() => onPick('cover')}>Cover</button>}
-          {[...ADDABLE, ...(withPaywall ? ['paywall' as const] : [])].map((t) => (
-            <button key={t} type="button" role="menuitem" className={ui.btnGhost} onClick={() => onPick(t)}>{BLOCK_LABELS[t]}</button>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
+type Tab = 'text' | 'photos' | 'elements' | 'layers'
+const TABS: { key: Tab; label: string; icon: typeof Type }[] = [
+  { key: 'text', label: 'Text', icon: Type },
+  { key: 'photos', label: 'Photos', icon: ImageIcon },
+  { key: 'elements', label: 'Elements', icon: Shapes },
+  { key: 'layers', label: 'Layers', icon: Layers },
+]
+
+/** Layers copied: any picture or page of any story can take them. */
+const clipboard: Clipboard = { layers: [], from: '' }
 
 /** Two or three buttons, one of them on. */
 function Toggle<T extends string>({ value, options, onChange, label }: {
@@ -81,14 +67,28 @@ function Toggle<T extends string>({ value, options, onChange, label }: {
   )
 }
 
-/** `sites/:siteId/stories/:postId` — one story. On the Page, it is edited
- *  as readers will see it: words typed straight onto its pages, a block's
- *  pictures and look in the panel beside them. The Outline is the same story
- *  as a column of forms, with a preview. Both share one undo history. */
+/** Smaller, the size that fits, larger. */
+function Zoom({ value, onChange }: { value: number; onChange: (z: number) => void }) {
+  const i = ZOOMS.indexOf(value)
+  const btn = 'rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 disabled:opacity-30'
+  return (
+    <div className="flex items-center rounded-lg border border-zinc-800 p-0.5" role="group" aria-label="Zoom">
+      <button type="button" className={btn} aria-label="Zoom out" title="Zoom out" disabled={i <= 0} onClick={() => onChange(ZOOMS[i - 1])}><Minus className="h-3.5 w-3.5" /></button>
+      <button type="button" onClick={() => onChange(1)} title="Fit the pages to the window" aria-label="Fit"
+        className="w-12 text-center text-xs tabular-nums text-zinc-300 hover:text-zinc-50">{value === 1 ? 'Fit' : `${Math.round(value * 100)}%`}</button>
+      <button type="button" className={btn} aria-label="Zoom in" title="Zoom in" disabled={i >= ZOOMS.length - 1} onClick={() => onChange(ZOOMS[i + 1])}><Plus className="h-3.5 w-3.5" /></button>
+    </div>
+  )
+}
+
+/** `sites/:siteId/stories/:postId` — one story, in one design workspace:
+ *  what to add on the left (text, photos, elements, the story's layers), the
+ *  story's own pages in the middle, laid out as readers see them, where words
+ *  are typed and layers are placed, and on the right everything about what
+ *  is selected. One undo history covers it all. */
 export default function StoryEditor() {
   const { siteId, postId } = useParams<{ siteId: string; postId: string }>()
   const navigate = useNavigate()
-  const [params] = useSearchParams()
   const [post, setPost] = useState<CappePost | null>(null)
   // The headline fields and the blocks are one document with undo and redo.
   const doc = useHistory<StoryDoc | null>(null)
@@ -98,20 +98,17 @@ export default function StoryEditor() {
   const [assets, setAssets] = useState<Map<string, CappeAsset>>(new Map())
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
-  const [savedAt, setSavedAt] = useState<number | null>(null)
+  const [saved, setSaved] = useState(false)
   const [picking, setPicking] = useState<((a: CappeAsset) => void) | null>(null)
-  const [insertAt, setInsertAt] = useState<number | null>(null)
-  const [dropAt, setDropAt] = useState<number | null>(null)
-  const [dragging, setDragging] = useState<number | null>(null)
   const [assisting, setAssisting] = useState(false)
   const [finding, setFinding] = useState<{ source: CappeStockSource; query: string } | null>(null)
   const [preview, setPreview] = useState<string>('')
-  const [previewOpen, setPreviewOpen] = useState(true)
   // Whether the magazine takes paid subscribers: a story can only become paid then.
   const [paidOn, setPaidOn] = useState(false)
+  const [accent, setAccent] = useState('#10b981')
   const previewGen = useRef(0)
-  // The page to edit on.
-  const [view, setView] = useState<View>(params.get('view') === 'outline' ? 'outline' : 'page')
+  const [tab, setTab] = useState<Tab | null>('layers')
+  const [zoom, setZoom] = useState(1)
   const [device, setDevice] = useState<Device>('spread')
   const [asReader, setAsReader] = useState(false)
   const [page, setPage] = useState('')
@@ -131,7 +128,7 @@ export default function StoryEditor() {
   useEffect(() => {
     let cancelled = false
     cappeApi.get<CappeMagazine>(`/sites/${siteId}/magazine`)
-      .then((m) => { if (!cancelled) setPaidOn(!!m.paid_enabled) })
+      .then((m) => { if (!cancelled) { setPaidOn(!!m.paid_enabled); if (m.accent) setAccent(m.accent) } })
       .catch(() => { /* treated as off; the server decides anyway */ })
     return () => { cancelled = true }
   }, [siteId])
@@ -153,15 +150,12 @@ export default function StoryEditor() {
   }, [siteId, postId, resetDoc])
 
   const isStory = post?.format === 'blocks'
-  const onPage = isStory && view === 'page'
   const dirty = useMemo(() => !!post && !!doc.value && JSON.stringify(doc.value) !== JSON.stringify(storyDocOf(post)),
     [post, doc.value])
 
-  // The preview (the outline's, and the page as a reader sees it) follows the
-  // editor, a moment after typing settles.
-  const wantPreview = isStory && (view === 'outline' ? previewOpen : asReader)
+  // The page as a reader sees it follows the editor, a moment after typing settles.
   useEffect(() => {
-    if (!doc.value || !wantPreview) return
+    if (!doc.value || !isStory || !asReader) return
     const d = doc.value
     const gen = ++previewGen.current
     const t = setTimeout(() => {
@@ -170,12 +164,12 @@ export default function StoryEditor() {
         .catch(() => { /* the last good preview stays up */ })
     }, 600)
     return () => clearTimeout(t)
-  }, [siteId, doc.value, wantPreview])
+  }, [siteId, doc.value, isStory, asReader])
 
   // The page to edit on: rendered again after each change, but never while
   // words are being typed on it (they are already there).
   useEffect(() => {
-    if (!doc.value || !onPage || asReader || typing) return
+    if (!doc.value || !isStory || asReader || typing) return
     const d = doc.value
     const gen = ++pageGen.current
     const t = setTimeout(() => {
@@ -185,7 +179,18 @@ export default function StoryEditor() {
         .catch((e) => { if (gen === pageGen.current) setPageError(e instanceof Error ? e.message : 'Could not show the page') })
     }, 250)
     return () => clearTimeout(t)
-  }, [siteId, doc.value, onPage, asReader, typing])
+  }, [siteId, doc.value, isStory, asReader, typing])
+
+  // A design changed here (the panels, undo) is drawn on the page at once;
+  // the server's page follows. `drawn` is the story the page already shows
+  // (a change made on the page itself is there before it reaches us).
+  const [drawn, setDrawn] = useState<StoryDoc | null>(null)
+  const [outbox, setOutbox] = useState<{ seq: number; messages: Record<string, unknown>[] }>({ seq: 0, messages: [] })
+  if (doc.value && doc.value !== drawn) {
+    const messages = designMessages(drawn, doc.value, ON_PAGE, assets)
+    setDrawn(doc.value)
+    if (messages.length) setOutbox((o) => ({ seq: o.seq + 1, messages }))
+  }
 
   const setField = <K extends keyof StoryFields>(key: K, value: StoryFields[K]) => setFields((f) => ({ ...f, [key]: value }))
 
@@ -197,13 +202,6 @@ export default function StoryEditor() {
     })
   }, [])
 
-  // From "Find pictures": the chosen picture joins the story as a photo block.
-  const addPhoto = (a: CappeAsset) => {
-    setAssets((m) => new Map(m).set(a.id, a))
-    setBlocks((bs) => [...bs, { ...newBlock('photo'), asset_id: a.id } as StoryBlock], true)
-    setFinding(null)
-  }
-
   const save = async (status?: CappePost['status']) => {
     if (!doc.value || !post) return
     setSaving(true)
@@ -213,7 +211,7 @@ export default function StoryEditor() {
       const updated = await cappeApi.put<CappePost>(`/sites/${siteId}/posts/${postId}`, storySaveBody(d, post))
       setPost(updated)
       replaceDoc(storyDocOf(updated))
-      setSavedAt(Date.now())
+      setSaved(true)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not save')
     } finally {
@@ -243,24 +241,65 @@ export default function StoryEditor() {
   useUnsavedGuard(() => dirty)
 
   const select = (target: FrameTarget | null) => setPlace((p) => ({ ...p, target }))
-  const selected = place.target?.kind === 'block' && blocks[place.target.block] ? place.target.block : null
+  const target = place.target
   const removeBlock = (i: number) => {
     setBlocks((bs) => bs.filter((_, j) => j !== i), true)
     select(null)
   }
-  const moveSelected = (i: number, d: -1 | 1) => {
-    const next = moveBlock(blocks, i, i + d)
+  const moveTo = (from: number, to: number) => {
+    const next = moveBlock(blocks, from, to)
     if (next === blocks) return
     setBlocks(next, true)
-    select({ kind: 'block', story: ON_PAGE, block: i + d })
+    select({ kind: 'block', story: ON_PAGE, block: next.indexOf(blocks[from]) })
+  }
+
+  /** A change worked out from the story as it is now: one undo step, then
+   *  what it selects. */
+  const latest = useRef<StoryDoc | null>(null)
+  useEffect(() => { latest.current = doc.value })
+  const apply = (fn: (d: StoryDoc) => Did | null) => {
+    const d = latest.current
+    const r = d ? fn(d) : null
+    if (!r) return
+    setDoc(() => r.doc, { step: true })
+    select(r.select)
+  }
+  /** A design changed by the panels (merged into one undo step while a
+   *  number is dragged or a colour picked). */
+  const changeArt = (art: ArtAt, fn: (d: Design) => Design, step = false) =>
+    setDoc((d) => (d ? changeDesign(d, art.block, art.item, fn) ?? d : d), { step })
+
+  // What is added goes ON the picture or page in hand, or into the story.
+  const art = doc.value ? artOf(doc.value, target) : null
+  const add = {
+    text: (p: TextPreset) => { if (art) apply((d) => addText(d, ON_PAGE, art, p)) },
+    shape: (s: ShapeKind, square?: boolean) => { if (art) apply((d) => addShape(d, ON_PAGE, art, assets, s, square)) },
+    image: (a: CappeAsset) => {
+      const all = new Map(assets).set(a.id, a)
+      apply((d) => (art ? addImage(d, ON_PAGE, art, all, a) : addBlock(d, ON_PAGE, target, { ...newBlock('photo'), asset_id: a.id } as StoryBlock)))
+    },
+    block: (type: StoryBlock['type']) => apply((d) => addBlock(d, ON_PAGE, target, newBlock(type))),
+    page: (aspect: PageAspect) => apply((d) => addPage(d, ON_PAGE, target, aspect)),
+  }
+
+  /** A command from the page, a key in the panels or a button. */
+  const runCommand = (key: FrameKey) => {
+    if (target?.kind === 'block' && key === 'delete') {
+      // Not the cover: it is the story's header, and a stray Backspace after
+      // leaving the headline would take it and its picture.
+      if (target.item === undefined && blocks[target.block] && blocks[target.block].type !== 'cover') removeBlock(target.block)
+      return
+    }
+    apply((d) => command(d, ON_PAGE, target, key, clipboard))
   }
 
   // ⌘S saves, ⌘Z undoes, ⇧⌘Z (or ⌘Y) redoes — anywhere in the editor, but
   // not while the picture picker is open over it. On the page they come from
-  // the page itself (`mz-key`).
-  const keys = useRef({ save: () => {}, undo: doc.undo, redo: doc.redo, blocked: false })
+  // the page itself (`mz-key`). Layer keys (copy, paste, group, Delete…) work
+  // in the panels too, outside the boxes typed in.
+  const keys = useRef({ save: () => {}, undo: doc.undo, redo: doc.redo, command: (() => {}) as (k: FrameKey) => void, blocked: false })
   useEffect(() => {
-    keys.current = { save: () => { if (dirty && !saving) save() }, undo: doc.undo, redo: doc.redo, blocked: !!(picking || finding) }
+    keys.current = { save: () => { if (dirty && !saving) save() }, undo: doc.undo, redo: doc.redo, command: runCommand, blocked: !!(picking || finding) }
   })
   // ⌘S on the page arrives right after the words typed there: the save runs
   // once a render has those words in the document, not from this render's.
@@ -268,14 +307,21 @@ export default function StoryEditor() {
   useEffect(() => { if (saveAsked) keys.current.save() }, [saveAsked])
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey) || e.altKey || keys.current.blocked) return
-      const k = e.key.toLowerCase()
-      // A field outside the story (Assist's notes) undoes its own typing.
-      const own = e.target instanceof Element && e.target.closest('[data-native-undo]')
-      if (k === 's') { e.preventDefault(); keys.current.save() }
-      else if (own) return
-      else if (k === 'z' && !e.shiftKey) { e.preventDefault(); keys.current.undo() }
-      else if ((k === 'z' && e.shiftKey) || k === 'y') { e.preventDefault(); keys.current.redo() }
+      if (keys.current.blocked) return
+      const el = e.target instanceof Element ? e.target : null
+      const typingHere = !!el?.closest('input, textarea, select, [contenteditable="true"], [role="dialog"]')
+      const mod = e.metaKey || e.ctrlKey
+      if (mod && !e.altKey) {
+        const k = e.key.toLowerCase()
+        // A field outside the story (Assist's notes) undoes its own typing.
+        const own = el?.closest('[data-native-undo]')
+        if (k === 's') { e.preventDefault(); keys.current.save(); return }
+        if (!own && k === 'z' && !e.shiftKey) { e.preventDefault(); keys.current.undo(); return }
+        if (!own && ((k === 'z' && e.shiftKey) || k === 'y')) { e.preventDefault(); keys.current.redo(); return }
+      }
+      if (typingHere) return
+      const cmd = panelKey(e)
+      if (cmd) { e.preventDefault(); keys.current.command(cmd) }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -293,9 +339,7 @@ export default function StoryEditor() {
         if (msg.key === 'save') setSaveAsked((n) => n + 1)
         else if (msg.key === 'undo') doc.undo()
         else if (msg.key === 'redo') doc.redo()
-        // Not the cover: it is the story's header, and a stray Backspace after
-        // leaving the headline would take it and its picture.
-        else if (selected !== null && blocks[selected]?.type !== 'cover') removeBlock(selected)
+        else runCommand(msg.key)
         return
       case 'mz-pick': {
         const { block, item } = msg
@@ -308,40 +352,13 @@ export default function StoryEditor() {
         if (!doc.value) return
         const r = storyFromMessage(doc.value, msg)
         if (!r) return
+        // The page already shows it.
+        setDrawn(r.doc)
         setDoc((d) => (d ? storyFromMessage(d, msg)?.doc ?? d : d), { step: r.step })
         if (r.select !== undefined) select({ kind: 'block', story: ON_PAGE, block: r.select })
       }
     }
   }
-
-  const offerPaywall = fields?.access === 'paid' && !blocks.some((b) => b.type === 'paywall')
-  const insert = (type: StoryBlock['type'], at: number) => {
-    setBlocks((bs) => insertBlock(bs, at, newBlock(type)), true)
-    setInsertAt(null)
-  }
-
-  // Drag a block by its grip and drop it on another block to put it there.
-  const dragStart = (i: number) => (e: DragEvent) => {
-    setDragging(i)
-    e.dataTransfer.effectAllowed = 'move'
-    e.dataTransfer.setData('text/plain', String(i))
-    const card = (e.currentTarget as HTMLElement).closest('[data-block]')
-    if (card) e.dataTransfer.setDragImage(card, 24, 24)
-  }
-  const dragOver = (j: number) => (e: DragEvent) => {
-    if (dragging === null || blocks[j]?.type === 'cover') return
-    e.preventDefault()
-    e.dataTransfer.dropEffect = 'move'
-    if (dropAt !== j) setDropAt(j)
-  }
-  const drop = (j: number) => (e: DragEvent) => {
-    e.preventDefault()
-    const from = dragging
-    setDragging(null)
-    setDropAt(null)
-    if (from !== null) setBlocks((bs) => moveBlock(bs, from, j), true)
-  }
-  const dragEnd = () => { setDragging(null); setDropAt(null) }
 
   const remove = async () => {
     if (!window.confirm('Delete this story? This can’t be undone.')) return
@@ -353,32 +370,107 @@ export default function StoryEditor() {
     }
   }
 
+  const libraryAssets = useMemo(() => [...assets.values()].sort((a, b) => (b.created_at || '').localeCompare(a.created_at || '')), [assets])
+
   if (error && !post) return <p role="alert" className="p-8 text-sm text-red-400">{error}</p>
   if (!post || !fields || !options) return <div className="flex justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-zinc-400" /></div>
 
-  const settings = (narrow: boolean) => (
-    <StorySettings fields={fields} options={options} isStory={isStory} paidOn={paidOn} siteId={siteId!} narrow={narrow}
-      onField={setField} onLayout={startFromLayout} />
-  )
+  const offerPaywall = fields.access === 'paid' && !blocks.some((b) => b.type === 'paywall')
+
+  /** The right-hand panel: everything about what is selected. */
+  const inspector = () => {
+    const t = target
+    if (t?.kind === 'layer') {
+      const d = designOf(blocks[t.block], t.item)
+      const at = { block: t.block, item: t.item }
+      if (d) {
+        return (
+          <LayerInspector design={d} ids={t.ids} accent={accent} onChange={(fn) => changeArt(at, fn)} onCommand={runCommand}
+            onReplacePicture={(id) => pickAsset((a) => changeArt(at, (x) => patchLayers(x, [id], { asset_id: a.id } as LayerPatch), true))} />
+        )
+      }
+    }
+    if (t?.kind === 'block' && blocks[t.block]) {
+      const b = blocks[t.block]
+      const item = t.item ?? null
+      if (holdsDesign(b, item)) {
+        const at = { block: t.block, item }
+        return (
+          <ArtInspector blocks={blocks} art={at} assets={assets} accent={accent}
+            handlers={{
+              onText: add.text, onShape: add.shape,
+              onImage: () => pickAsset((a) => add.image(a)),
+              onSelectLayers: (ids) => select(layerTarget(ON_PAGE, at, ids)),
+              onToggle: (id, key) => changeArt(at, (x) => mapLayers(x, [id], (l) => ({ ...l, [key]: !l[key] })), true),
+              onRename: (id, name) => changeArt(at, (x) => patchLayers(x, [id], { name } as LayerPatch), true),
+              onMoveLayer: (id, to, where) => changeArt(at, (x) => moveLayer(x, id, to, where), true),
+            }}
+            onBlock={(nb) => setBlocks((bs) => bs.map((x, j) => (j === t.block ? nb : x)))}
+            onMove={(dl) => moveTo(t.block, t.block + dl)}
+            onDuplicate={() => setBlocks((bs) => duplicateBlock(bs, t.block), true)}
+            onRemove={() => removeBlock(t.block)}
+            onPickAsset={pickAsset} onClose={() => select(null)}
+            onWhole={() => select({ kind: 'block', story: ON_PAGE, block: t.block })} />
+        )
+      }
+      return (
+        <BlockPanel block={b} index={t.block} count={blocks.length} minIndex={blocks[0]?.type === 'cover' ? 1 : 0} assets={assets} accent={accent}
+          onChange={(nb) => setBlocks((bs) => bs.map((x, j) => (j === t.block ? nb : x)))}
+          onMove={(dl) => moveTo(t.block, t.block + dl)}
+          onDuplicate={() => setBlocks((bs) => duplicateBlock(bs, t.block), true)}
+          onRemove={() => removeBlock(t.block)}
+          onPickAsset={pickAsset} onClose={() => select(null)} />
+      )
+    }
+    return (
+      <div>
+        <PanelHead title="The story" />
+        <div className="space-y-4 p-4">
+          <p className="text-xs leading-relaxed text-zinc-500">
+            Click anything on the pages to change it. Type straight into the headline and the text. Click a picture to lay words, shapes
+            and pictures on it, then drag them, resize them from a corner and turn them from the knob. Add things from the left.
+          </p>
+          <StorySettings fields={fields} options={options} isStory={isStory} paidOn={paidOn} siteId={siteId!} narrow
+            onField={setField} onLayout={startFromLayout} />
+          <button type="button" onClick={remove} className={`inline-flex items-center gap-2 text-sm ${ui.danger}`}><Trash2 className="h-4 w-4" /> Delete story</button>
+        </div>
+      </div>
+    )
+  }
+
+  const panel = () => {
+    switch (tab) {
+      case 'text': return <TextPanel canArt={!!art} onText={add.text} onBlock={add.block} />
+      case 'photos': return <PhotosPanel assets={libraryAssets} canArt={!!art} onUse={add.image} onMore={() => pickAsset((a) => add.image(a))} />
+      case 'elements': return <ElementsPanel canArt={!!art} onShape={add.shape} onPage={add.page} onBlock={add.block}
+        withCover={blocks[0]?.type !== 'cover'} withPaywall={offerPaywall} />
+      case 'layers': return (
+        <LayersPanel blocks={blocks} target={target} story={ON_PAGE} assets={assets} onSelect={select}
+          onToggle={(at, id, key) => changeArt(at, (x) => mapLayers(x, [id], (l) => ({ ...l, [key]: !l[key] })), true)}
+          onRename={(at, id, name) => changeArt(at, (x) => patchLayers(x, [id], { name } as LayerPatch), true)}
+          onMoveLayer={(at, id, to, where) => changeArt(at, (x) => moveLayer(x, id, to, where), true)}
+          onMoveBlock={moveTo} />
+      )
+      default: return null
+    }
+  }
 
   return (
-    <div className="flex h-full min-h-screen flex-col">
-      <header className="flex flex-wrap items-center gap-3 border-b border-zinc-800 px-5 py-3">
+    <div className="flex h-dvh flex-col overflow-hidden">
+      <header className="flex flex-wrap items-center gap-3 border-b border-zinc-800 px-4 py-2.5">
         <Link to={`/cappe/sites/${siteId}/stories`} onClick={(e) => { if (!confirmLeave()) e.preventDefault() }}
           className="inline-flex items-center gap-1 text-sm text-zinc-400 hover:text-zinc-100"><ArrowLeft className="h-4 w-4" /> Stories</Link>
+        <h1 className="max-w-[16rem] truncate text-sm font-medium text-zinc-100">{fields.title || 'Untitled story'}</h1>
         <span className={`${ui.badge} ${post.status === 'published' ? 'bg-emerald-500/15 text-emerald-400' : 'bg-zinc-800 text-zinc-400'}`}>{post.status}</span>
         {post.hidden && <span className={`${ui.badge} bg-red-500/15 text-red-400`}>hidden by Gummfit</span>}
         <span className="text-xs text-zinc-500">{isStory ? `${post.reading_minutes || 0} min read · ${post.word_count} words` : 'Plain post'}</span>
         {isStory && (
-          <Toggle label="Edit on" value={view} onChange={setView}
-            options={[{ key: 'page', label: 'Page' }, { key: 'outline', label: 'Outline' }]} />
-        )}
-        {onPage && (
           <>
             <Toggle label="Size" value={device} onChange={setDevice} options={[
               { key: 'spread', label: 'Two pages, as on a computer', icon: <Monitor className="h-4 w-4" /> },
               { key: 'phone', label: 'A phone', icon: <Smartphone className="h-4 w-4" /> },
             ]} />
+            {!asReader && <Zoom value={zoom} onChange={setZoom} />}
             <label className="flex items-center gap-1.5 text-xs text-zinc-400" title="The page as a reader sees it, paywall and all">
               <input type="checkbox" checked={asReader} onChange={(e) => setAsReader(e.target.checked)} /> As a reader
             </label>
@@ -395,10 +487,9 @@ export default function StoryEditor() {
             disabled={!doc.canUndo} onClick={doc.undo} aria-label="Undo" title={`Undo (${MOD}Z)`}><Undo2 className="h-4 w-4" /></button>
           <button type="button" className="rounded p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 disabled:opacity-30"
             disabled={!doc.canRedo} onClick={doc.redo} aria-label="Redo" title={`Redo (${isMac ? '⇧⌘Z' : 'Ctrl+Y'})`}><Redo2 className="h-4 w-4" /></button>
-          {savedAt && !dirty && <span className="text-xs text-emerald-400">Saved</span>}
+          {saved && !dirty && <span className="text-xs text-emerald-400">Saved</span>}
           {dirty && <span className="text-xs text-zinc-500">Unsaved</span>}
           {isStory && <button type="button" className={ui.btnGhost} onClick={() => setAssisting((v) => !v)} aria-pressed={assisting}><Wand2 className="h-4 w-4" /> Assist</button>}
-          {isStory && view === 'outline' && <button type="button" className={ui.btnGhost} onClick={() => setPreviewOpen((v) => !v)} aria-pressed={previewOpen}><Eye className="h-4 w-4" /> Preview</button>}
           <button type="button" className={ui.btnGhost} disabled={saving || !dirty} onClick={() => save()} title={`Save (${MOD}S)`}>Save</button>
           {post.status !== 'published'
             ? <button type="button" className={ui.btnPrimary} disabled={saving} onClick={() => save('published')}>{saving && <Loader2 className="h-4 w-4 animate-spin" />} Publish</button>
@@ -408,7 +499,7 @@ export default function StoryEditor() {
       {error && <p role="alert" className="border-b border-red-500/30 bg-red-500/10 px-5 py-2 text-sm text-red-300">{error}</p>}
 
       {assisting && isStory && (
-        <div className="border-b border-zinc-800 p-5">
+        <div className="max-h-[45vh] overflow-y-auto border-b border-zinc-800 p-5">
           <AssistPanel siteId={siteId!} postId={postId!} title={fields.title} excerpt={fields.excerpt} blocks={blocks}
             assets={assets} onClose={() => setAssisting(false)}
             onHeadline={(h) => setDoc((d) => (d ? { ...d, fields: { ...d.fields, title: h.title, excerpt: h.dek || d.fields.excerpt, kicker: h.kicker || d.fields.kicker } } : d), { step: true })}
@@ -423,9 +514,34 @@ export default function StoryEditor() {
         </div>
       )}
 
-      {onPage ? (
-        <div className="grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1fr)_20rem]">
-          <div className="relative h-[calc(100dvh-3.9rem)] min-h-[32rem] bg-zinc-950">
+      {!isStory ? (
+        <div className="overflow-y-auto p-5">
+          <section className={`${ui.card} max-w-3xl space-y-3 p-4`}>
+            <p className="text-sm text-zinc-300">This is a plain post written as Markdown. Turn it into a story to lay it out with pictures.</p>
+            <textarea value={post.body || ''} readOnly rows={8} className={`${ui.input} font-mono text-[13px] opacity-80`} aria-label="Post body" />
+            <button type="button" className={ui.btnPrimary} disabled={saving} onClick={becomeStory}>Turn into a story</button>
+          </section>
+        </div>
+      ) : (
+        <div className="flex min-h-0 flex-1">
+          <nav className="flex w-16 shrink-0 flex-col items-center gap-1 border-r border-zinc-800 bg-zinc-950 py-2" aria-label="Add and arrange">
+            {TABS.map(({ key, label, icon: Icon }) => (
+              <button key={key} type="button" aria-pressed={tab === key} onClick={() => setTab((v) => (v === key ? null : key))}
+                className={`flex w-14 flex-col items-center gap-0.5 rounded-md py-2 text-[10px] ${tab === key ? 'bg-zinc-800 text-zinc-50' : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100'}`}>
+                <Icon className="h-5 w-5" />{label}
+              </button>
+            ))}
+          </nav>
+          {tab && (
+            <aside className="w-64 shrink-0 overflow-y-auto border-r border-zinc-800 bg-zinc-950/80" aria-label={TABS.find((x) => x.key === tab)?.label}>
+              <div className="flex items-center justify-between border-b border-zinc-800 px-3 py-2">
+                <h2 className="text-xs font-semibold uppercase tracking-widest text-zinc-400">{TABS.find((x) => x.key === tab)?.label}</h2>
+                <button type="button" onClick={() => setTab(null)} aria-label="Close the panel" className="text-zinc-500 hover:text-zinc-200"><X className="h-4 w-4" /></button>
+              </div>
+              {panel()}
+            </aside>
+          )}
+          <main className="relative min-w-0 flex-1 bg-zinc-950">
             {pageError && !asReader && (
               <p role="alert" className="absolute inset-x-0 top-0 z-10 bg-red-500/90 px-4 py-2 text-sm text-white">
                 The page couldn’t be set with the last change: {pageError}
@@ -434,93 +550,11 @@ export default function StoryEditor() {
             {asReader
               ? <BookFrame html={preview} title="The story as a reader sees it" keepPlace className="h-full" />
               : <EditFrame html={page} place={place} stories={PAGE_STORIES} device={device} title="The story's pages, to edit"
-                  onMessage={onFrame} />}
-          </div>
-          <aside className="overflow-y-auto border-l border-zinc-800 bg-zinc-950/60 lg:h-[calc(100dvh-3.9rem)]" aria-label="Selected">
-            {selected !== null ? (
-              <BlockPanel block={blocks[selected]} index={selected} count={blocks.length} assets={assets}
-                onChange={(nb) => setBlocks((bs) => bs.map((x, j) => (j === selected ? nb : x)))}
-                onMove={(d) => moveSelected(selected, d)}
-                onDuplicate={() => setBlocks((bs) => duplicateBlock(bs, selected), true)}
-                onRemove={() => removeBlock(selected)}
-                onPickAsset={pickAsset} onClose={() => select(null)} />
-            ) : (
-              <div>
-                <PanelHead title="The story" />
-                <div className="space-y-4 p-4">
-                  <p className="text-xs leading-relaxed text-zinc-500">
-                    Click anything on the page to change it: type straight into the headline and the text; select words for bold,
-                    italic, links, headings and lists. Hover between blocks for a <span className="text-emerald-400">+</span> to add one.
-                    Drag words on a photo, or the dot on a cover picture, to move them.
-                  </p>
-                  {settings(true)}
-                  <button type="button" onClick={remove} className={`inline-flex items-center gap-2 text-sm ${ui.danger}`}><Trash2 className="h-4 w-4" /> Delete story</button>
-                </div>
-              </div>
-            )}
+                  onMessage={onFrame} zoom={zoom} outbox={outbox} />}
+          </main>
+          <aside className="w-72 shrink-0 overflow-y-auto border-l border-zinc-800 bg-zinc-950/60" aria-label="Selected">
+            {inspector()}
           </aside>
-        </div>
-      ) : (
-        <div className={`grid flex-1 ${previewOpen && isStory ? 'lg:grid-cols-2' : ''}`}>
-          <div className="space-y-4 overflow-y-auto p-5">
-            <section className={`${ui.card} space-y-3 p-4`}>
-              <input value={fields.title} onChange={(e) => setField('title', e.target.value)} maxLength={255} placeholder="Headline"
-                className="w-full bg-transparent text-2xl font-semibold text-zinc-50 outline-none placeholder:text-zinc-600" aria-label="Headline" />
-              <div className="grid gap-3 sm:grid-cols-2">
-                <input value={fields.kicker} onChange={(e) => setField('kicker', e.target.value)} maxLength={60} placeholder="Kicker (the small line over the headline)" className={ui.input} aria-label="Kicker" />
-                <input value={fields.byline} onChange={(e) => setField('byline', e.target.value)} maxLength={160} placeholder="Byline" className={ui.input} aria-label="Byline" />
-              </div>
-              <textarea value={fields.excerpt} onChange={(e) => setField('excerpt', e.target.value)} rows={2} maxLength={600}
-                placeholder="Dek: one or two sentences that sell the story" className={ui.input} aria-label="Dek" />
-              {settings(false)}
-            </section>
-
-            {!isStory ? (
-              <section className={`${ui.card} space-y-3 p-4`}>
-                <p className="text-sm text-zinc-300">This is a plain post written as Markdown. Turn it into a story to lay it out with pictures.</p>
-                <textarea value={post.body || ''} readOnly rows={8} className={`${ui.input} font-mono text-[13px] opacity-80`} aria-label="Post body" />
-                <button type="button" className={ui.btnPrimary} disabled={saving} onClick={becomeStory}>Turn into a story</button>
-              </section>
-            ) : (
-              <>
-                {blocks.map((b, i) => (
-                  <div key={i} className="space-y-4">
-                    {b.type !== 'cover' && (
-                      <InsertMenu open={insertAt === i} onToggle={() => setInsertAt((v) => (v === i ? null : i))}
-                        onPick={(t) => insert(t, i)} withCover={i === 0} withPaywall={offerPaywall} />
-                    )}
-                    <div data-block={i} onDragOver={dragOver(i)} onDrop={drop(i)} onDragEnd={dragEnd}
-                      onDragLeave={() => setDropAt((v) => (v === i ? null : v))}
-                      className={`rounded-xl ${dropAt === i && dragging !== i ? 'ring-2 ring-emerald-500' : ''}`}>
-                      <BlockEditor block={b} index={i} count={blocks.length} assets={assets}
-                        onChange={(nb) => setBlocks((bs) => bs.map((x, j) => (j === i ? nb : x)))}
-                        onMove={(d) => setBlocks((bs) => moveBlock(bs, i, i + d), true)}
-                        onRemove={() => setBlocks((bs) => bs.filter((_, j) => j !== i), true)}
-                        onDuplicate={() => setBlocks((bs) => duplicateBlock(bs, i), true)}
-                        onDragStart={dragStart(i)}
-                        onPickAsset={pickAsset} />
-                    </div>
-                  </div>
-                ))}
-                <div>
-                  <InsertMenu last open={insertAt === blocks.length} onToggle={() => setInsertAt((v) => (v === blocks.length ? null : blocks.length))}
-                    onPick={(t) => insert(t, blocks.length)} withCover={blocks[0]?.type !== 'cover'} withPaywall={offerPaywall} />
-                </div>
-              </>
-            )}
-
-            <div className="pt-4">
-              <button type="button" onClick={remove} className={`inline-flex items-center gap-2 text-sm ${ui.danger}`}><Trash2 className="h-4 w-4" /> Delete story</button>
-            </div>
-          </div>
-
-          {previewOpen && isStory && (
-            <div className="hidden border-l border-zinc-800 bg-zinc-950 lg:block">
-              {/* Pinned to the screen while the blocks scroll, so a page is a
-                  screen's height. A fresh preview opens on the spread being read. */}
-              <BookFrame html={preview} title="Story preview" keepPlace className="sticky top-0 h-[calc(100dvh-3.9rem)]" />
-            </div>
-          )}
         </div>
       )}
 
@@ -533,7 +567,8 @@ export default function StoryEditor() {
               <button type="button" onClick={() => { setPicking(null); setFinding(null) }} className="text-zinc-500 hover:text-zinc-300" aria-label="Close picker"><X className="h-4 w-4" /></button>
             </div>
             {finding && <p className="mb-3 text-xs text-zinc-500">Import pictures, then click one and “Use this picture” to add it to the story as a photo.</p>}
-            <LibraryPanel siteId={siteId!} onPick={picking || (finding ? addPhoto : undefined)} postId={postId}
+            <LibraryPanel siteId={siteId!} postId={postId}
+              onPick={picking || (finding ? (a: CappeAsset) => { setAssets((m) => new Map(m).set(a.id, a)); add.image(a); setFinding(null) } : undefined)}
               stockQuery={picking ? undefined : finding || undefined} />
           </div>
         </div>

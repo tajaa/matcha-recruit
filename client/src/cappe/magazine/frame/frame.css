@@ -67,3 +67,31 @@
 .mze-width{border-radius:4px;width:12px;cursor:ew-resize}
 .mze-focal{position:fixed;z-index:56;display:none;width:22px;height:22px;border:3px solid #fff;border-radius:50%;background:rgba(16,185,129,.35);
   box-shadow:0 0 0 2px #10b981,0 2px 10px rgba(0,0,0,.5);cursor:crosshair;touch-action:none}
+
+/* Designs (layers.ts): layers to click, drag and type into. Handles keep
+   their size on screen at any zoom (--mze-k is one over the zoom). */
+.mzd [data-mzd-l]{cursor:move}
+.mzd [data-mzd-lock]{cursor:default}
+.mzd [data-mz-f][contenteditable="true"]{cursor:text;user-select:text}
+.mzd [data-mz-f]:focus{background:transparent}
+.mzd img{-webkit-user-drag:none;user-select:none}
+.mzd__t[data-mz-f]:empty{min-height:1em}
+.mze-lsel,.mze-lhov,.mze-lout,.mze-marquee{position:fixed;z-index:52;display:none;box-sizing:border-box;pointer-events:none;transform-origin:50% 50%}
+.mze-lsel{border:calc(1.5px * var(--mze-k,1)) solid #10b981;box-shadow:0 0 0 calc(1px * var(--mze-k,1)) rgba(255,255,255,.55)}
+.mze-lsel--typing{border-style:dashed}
+.mze-lhov{border:calc(1px * var(--mze-k,1)) solid rgba(16,185,129,.85)}
+.mze-lout{border:calc(1px * var(--mze-k,1)) solid rgba(16,185,129,.9)}
+.mze-h,.mze-rot{position:fixed;z-index:57;display:none;box-sizing:border-box;width:calc(10px * var(--mze-k,1));height:calc(10px * var(--mze-k,1));
+  margin:calc(-5px * var(--mze-k,1)) 0 0 calc(-5px * var(--mze-k,1));border:calc(1.5px * var(--mze-k,1)) solid #10b981;border-radius:2px;
+  background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.35);touch-action:none}
+.mze-h--nw,.mze-h--se{cursor:nwse-resize}
+.mze-h--ne,.mze-h--sw{cursor:nesw-resize}
+.mze-h--n,.mze-h--s{cursor:ns-resize}
+.mze-h--e,.mze-h--w{cursor:ew-resize}
+.mze-rot{width:calc(14px * var(--mze-k,1));height:calc(14px * var(--mze-k,1));margin:calc(-7px * var(--mze-k,1)) 0 0 calc(-7px * var(--mze-k,1));
+  border-radius:50%;cursor:grab;background:#10b981;border-color:#fff}
+.mze-rot:active{cursor:grabbing}
+.mze-guide{position:fixed;z-index:58;display:none;pointer-events:none;background:#ec4899}
+.mze-guide--v{width:calc(1px * var(--mze-k,1))}
+.mze-guide--h{height:calc(1px * var(--mze-k,1))}
+.mze-marquee{border:calc(1px * var(--mze-k,1)) solid #10b981;background:rgba(16,185,129,.1)}

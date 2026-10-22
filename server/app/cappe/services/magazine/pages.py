@@ -28,17 +28,20 @@ from xml.sax.saxutils import escape as xml_escape
 from ..render.design import _font_stack, _gfonts_link
 from ..render.page import render_site_html
 from ..render.sanitize import _js_obj
+from .design_schema import design_fonts, walk_layers
 from .figures import figure_html, img_html, share_image
+from .fonts import Uses, add_use, fonts_links
 from .magazines import masthead_fonts
 from .richtext import render_md
 from .rt import RtError, md_to_rt, normalize_rt
 from .story_render import cover_html, field, render_blocks, split_at_paywall
-from .story_schema import cover_block
+from .story_schema import cover_block, with_designs
 from .topics import topic_label
 
 _ASSETS = Path(__file__).resolve().parent.parent / "render" / "assets"
 _CSS = (_ASSETS / "magazine.css").read_text(encoding="utf-8")
 _ISSUE_CSS = (_ASSETS / "issue.css").read_text(encoding="utf-8")
+_DESIGN_CSS = (_ASSETS / "design.css").read_text(encoding="utf-8")
 _FOLLOW_JS = (_ASSETS / "follow.js").read_text(encoding="utf-8")
 _PAYWALL_JS = (_ASSETS / "paywall.js").read_text(encoding="utf-8")
 _BOOK_JS = (_ASSETS / "book.js").read_text(encoding="utf-8")
@@ -79,7 +82,7 @@ def _head(mag: dict, origin: str, *, issue_css: bool = False) -> str:
         vars_ += f"--mz-accent:{accent};"
     feed = escape(f"{origin}/feed.xml", quote=True)
     title = escape(mag.get("name") or "", quote=True)
-    css = _CSS + (_ISSUE_CSS if issue_css else "")
+    css = _CSS + _DESIGN_CSS + (_ISSUE_CSS if issue_css else "")
     return (_gfonts_link(heading, body) + f"<style>.mz{{{vars_}}}{css}</style>"
             f'<link rel="alternate" type="application/rss+xml" title="{title}" href="{feed}" />')
 
@@ -288,7 +291,7 @@ def article_ld(post: dict, mag: dict, *, url: str, image: Optional[str], paid: b
 def story_blocks(post: dict) -> list[dict]:
     """A story's blocks; a legacy Markdown post is one text block."""
     if post.get("format") == "blocks":
-        return list((post.get("content") or {}).get("blocks") or [])
+        return with_designs(list((post.get("content") or {}).get("blocks") or []))
     return [{"type": "text", "md": post.get("body") or "", "dropcap": False, "columns": 1}]
 
 
@@ -331,17 +334,40 @@ def story_article_html(post: dict, assets: dict[str, dict], *, mag: dict, curren
     cls = f"mz-story mz-layout-{layout}" + ("" if single else " mz-issue__story")
     return (
         f'<article class="{cls}"{attrs}>'
-        + cover_html(post, cover, cover_asset, byline_html=_meta(post, edit=edit), edit=edit)
+        + cover_html(post, cover, cover_asset, byline_html=_meta(post, edit=edit), edit=edit, assets=assets)
         + f'<div class="mz-story__body">{render_blocks(free, assets, edit=edit)}</div>{paywall}{from_issue}{topic_link}'
         + (rich_registry(blocks) if edit else "")
         + "</article>"
     )
 
 
+def story_fonts(blocks: list[dict], uses: Optional[Uses] = None) -> Uses:
+    """The faces a story sets beyond the magazine's own pair: its text blocks'
+    and its designs'."""
+    uses = uses if uses is not None else {}
+    for b in blocks:
+        if b.get("type") == "text" and b.get("font") and b["font"] != "body":
+            add_use(uses, b["font"], 400, False)
+            add_use(uses, b["font"], 700, False)
+            add_use(uses, b["font"], 400, True)
+        design_fonts(b.get("design"), uses)
+        for item in b.get("items") or []:
+            if isinstance(item, dict):
+                design_fonts(item.get("design"), uses)
+    return uses
+
+
+def _layer_docs(docs: dict[str, dict], block: int, path: str, design: Optional[dict]) -> None:
+    for lay in walk_layers((design or {}).get("layers") or []):
+        if lay.get("kind") == "text":
+            docs[f"{block}|{path}.{lay['id']}"] = lay.get("rt") or md_to_rt("")
+
+
 def rich_registry(blocks: list[dict]) -> str:
     """The documents behind a story's rich fields, for the editor on the page
     to open them exactly (`"<block>|<field>"` → document), not by reading the
-    page's HTML back. Only in edit renders."""
+    page's HTML back: its text, sidebars and answers, and the words in its
+    designs (`design.<layer>`). Only in edit renders."""
     docs: dict[str, dict] = {}
     for i, b in enumerate(blocks):
         kind = b.get("type")
@@ -350,6 +376,10 @@ def rich_registry(blocks: list[dict]) -> str:
         elif kind == "qa":
             for j, item in enumerate(b.get("items") or []):
                 docs[f"{i}|items.{j}.a_md"] = _doc(item, "a_md", "a_rt")
+        _layer_docs(docs, i, "design", b.get("design"))
+        for j, item in enumerate(b.get("items") or []):
+            if isinstance(item, dict):
+                _layer_docs(docs, i, f"items.{j}.design", item.get("design"))
     data = json.dumps(docs, ensure_ascii=False, separators=(",", ":")).replace("<", "\\u003c")
     return f'<script type="application/json" data-mz-rt>{data}</script>'
 
@@ -381,7 +411,7 @@ def render_story(site: dict, nav: list[dict], mag: dict, post: dict, assets: dic
     topic = post.get("topic")
     url = f"{origin}{story_path(post['slug'])}"
     image = share_image(cover_asset)
-    extra = article_ld(post, mag, url=url, image=image, paid=paid)
+    extra = fonts_links(story_fonts(story_blocks(post))) + article_ld(post, mag, url=url, image=image, paid=paid)
     if post.get("published_at"):
         extra += f'<meta property="article:published_time" content="{escape(post["published_at"].isoformat(), quote=True)}" />'
     if topic_label(topic):

@@ -37,7 +37,7 @@ function withEditor(html: string): string {
  *  never replaced: a render that arrives then waits until typing stops, and
  *  one already loading is dropped once words are typed (it was made before
  *  them; the render of the new words follows). */
-export default function EditFrame({ html, place, stories, device, title, onMessage }: {
+export default function EditFrame({ html, place, stories, device, title, onMessage, zoom = 1, outbox }: {
   html: string
   /** Where to turn after a reload, and what to select. A change of target
    *  from outside (the panel, the outline) selects it on the page too. */
@@ -48,6 +48,11 @@ export default function EditFrame({ html, place, stories, device, title, onMessa
   title: string
   /** Every checked message from the shown page. */
   onMessage: (m: FrameMessage) => void
+  /** Times the size that fits the pane (1): bigger scrolls. */
+  zoom?: number
+  /** Messages for the shown page (a design drawn at once), sent each time
+   *  `seq` changes. */
+  outbox?: { seq: number; messages: Record<string, unknown>[] }
 }) {
   const pane = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState({ w: 0, h: 0 })
@@ -143,6 +148,23 @@ export default function EditFrame({ html, place, stories, device, title, onMessa
 
   const fit = fitFrame(device, size.w, size.h)
   const layout = fit ? `${device}:${fit.width}x${Math.round(fit.height)}` : device
+  const scale = fit ? fit.scale * zoom : 1
+
+  // The page's handles keep their size on screen at any zoom.
+  useEffect(() => {
+    if (front === null) return
+    const win = (front === 0 ? frame0 : frame1).current?.contentWindow
+    win?.postMessage({ type: 'mz-zoom', scale }, '*')
+  }, [scale, front])
+
+  // What the editor has for the shown page (a design changed in the panels).
+  const sent = useRef(0)
+  useEffect(() => {
+    if (front === null || !outbox || outbox.seq === sent.current) return
+    sent.current = outbox.seq
+    const win = (front === 0 ? frame0 : frame1).current?.contentWindow
+    for (const m of outbox.messages) win?.postMessage(m, '*')
+  }, [outbox, front])
 
   // A page laid out at a new size (the phone, a wider pane) has its pages
   // set again: turn back to what is selected once the book has refitted.
@@ -158,12 +180,17 @@ export default function EditFrame({ html, place, stories, device, title, onMessa
   }, [layout])
 
   const phone = device === 'phone'
+  // Zoomed in, the page is larger than the pane: it scrolls, centred while it fits.
+  const outerW = fit ? (fit.width + 2 * fit.bezel) * scale : 0, outerH = fit ? (fit.height + 2 * fit.bezel) * scale : 0
+  const left = fit ? (zoom === 1 ? fit.left : Math.max(0, (size.w - outerW) / 2)) : 0
+  const top = fit ? (zoom === 1 ? fit.top : Math.max(phone ? 16 : 0, (size.h - outerH) / 2)) : 0
   return (
-    <div ref={pane} className={`relative h-full min-h-0 w-full overflow-hidden ${phone ? 'bg-zinc-900' : ''}`}>
+    <div ref={pane} className={`relative h-full min-h-0 w-full ${zoom === 1 ? 'overflow-hidden' : 'overflow-auto'} ${phone ? 'bg-zinc-900' : ''}`}>
+      {fit && zoom !== 1 && <div aria-hidden style={{ width: left + outerW, height: top + outerH + 16 }} />}
       <div className={`absolute ${phone ? 'box-content overflow-hidden rounded-[2rem] border-zinc-700 shadow-2xl' : ''} ${fit ? '' : 'inset-0'}`}
         style={fit ? {
-          left: fit.left, top: fit.top, width: fit.width, height: fit.height, borderWidth: fit.bezel,
-          transform: fit.scale === 1 ? undefined : `scale(${fit.scale})`, transformOrigin: '0 0',
+          left, top, width: fit.width, height: fit.height, borderWidth: fit.bezel,
+          transform: scale === 1 ? undefined : `scale(${scale})`, transformOrigin: '0 0',
         } : undefined}>
         {buffers.map((b, i) => (
           <iframe key={b ? b.gen : `empty-${i}`} ref={i === 0 ? frame0 : frame1} title={i === front ? title : `${title} (loading)`}
@@ -174,9 +201,10 @@ export default function EditFrame({ html, place, stories, device, title, onMessa
       {front === null && (
         <p className="absolute inset-0 flex items-center justify-center text-sm text-zinc-500">Setting the pages…</p>
       )}
-      {fit && fit.scale < 0.999 && (
-        <p className="pointer-events-none absolute bottom-2 right-3 rounded bg-black/60 px-2 py-0.5 text-[11px] text-zinc-300">
-          {Math.round(fit.scale * 100)}% of a reader’s {phone ? 'phone' : 'window'}
+      {fit && Math.abs(scale - 1) > 0.001 && (
+        <p className="pointer-events-none sticky bottom-2 ml-auto mr-3 w-fit rounded bg-black/60 px-2 py-0.5 text-[11px] text-zinc-300"
+          style={{ position: zoom === 1 ? 'absolute' : 'sticky', right: zoom === 1 ? 12 : undefined, bottom: 8 }}>
+          {Math.round(scale * 100)}% of a reader’s {phone ? 'phone' : 'window'}
         </p>
       )}
     </div>

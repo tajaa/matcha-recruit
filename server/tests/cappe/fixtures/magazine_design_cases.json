@@ -1,0 +1,1358 @@
+[
+ {
+  "name": "a headline over a photo",
+  "design": {
+   "layers": [
+    {
+     "id": "head",
+     "kind": "text",
+     "name": "Headline",
+     "x": 8.0,
+     "y": 6.5,
+     "w": 84.0,
+     "h": 20,
+     "rot": -4.0,
+     "flip_x": false,
+     "flip_y": false,
+     "opacity": 90,
+     "blend": "normal",
+     "hidden": false,
+     "locked": false,
+     "link": "",
+     "fill": {
+      "kind": "none",
+      "color": "#000000",
+      "angle": 180,
+      "stops": []
+     },
+     "stroke": {
+      "color": "#000000",
+      "width": 0,
+      "style": "solid"
+     },
+     "radius": [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+     ],
+     "shadows": [
+      {
+       "inner": false,
+       "x": 0.0,
+       "y": 0.3,
+       "blur": 2.0,
+       "spread": 0,
+       "color": "#00000099"
+      }
+     ],
+     "blur": 0,
+     "rt": {
+      "type": "doc",
+      "content": [
+       {
+        "type": "paragraph",
+        "content": [
+         {
+          "type": "text",
+          "text": "Under "
+         },
+         {
+          "type": "text",
+          "text": "the",
+          "marks": [
+           {
+            "type": "bold"
+           }
+          ]
+         },
+         {
+          "type": "text",
+          "text": " tower",
+          "marks": [
+           {
+            "type": "italic"
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "type": "paragraph",
+        "content": [
+         {
+          "type": "text",
+          "text": "by the bay",
+          "marks": [
+           {
+            "type": "link",
+            "attrs": {
+             "href": "https://example.test/a?b=1&c=2"
+            }
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     "font": "Anton",
+     "size": 9.0,
+     "weight": 400,
+     "italic": false,
+     "color": "#ffffff",
+     "align": "center",
+     "valign": "top",
+     "leading": 0.95,
+     "tracking": 0.05,
+     "case": "upper",
+     "pad": 0,
+     "autosize": "height"
+    }
+   ]
+  },
+  "assets": {
+   "11111111-1111-4111-8111-111111111111": {
+    "id": "11111111-1111-4111-8111-111111111111",
+    "url": "https://cdn.example.test/tower.jpg",
+    "alt": "The \"tower\" & bay",
+    "width": 1600,
+    "height": 1200,
+    "variants": {
+     "webp": [
+      {
+       "w": 960,
+       "url": "https://cdn.example.test/tower-960.webp"
+      },
+      {
+       "w": 480,
+       "url": "https://cdn.example.test/tower-480.webp"
+      },
+      {
+       "w": 1440,
+       "url": "https://cdn.example.test/tower-1440.webp"
+      }
+     ]
+    }
+   }
+  },
+  "edit": false,
+  "path": "design",
+  "picture": null,
+  "html": "<div class=\"mzd\"><div class=\"mzd__l mzd__l--text mzd__l--auto\" style=\"--x:8;--y:6.5;--w:84;transform:rotate(-4deg);opacity:0.9\"><div class=\"mzd__t\" style=\"font-family:&#x27;Anton&#x27;, system-ui, -apple-system, sans-serif;font-size:calc(9 * var(--bw));font-weight:400;color:#ffffff;text-align:center;line-height:0.95;letter-spacing:0.05em;text-transform:uppercase;text-shadow:calc(0 * var(--bw)) calc(0.3 * var(--bw)) calc(2 * var(--bw)) #00000099\"><p>Under <strong>the</strong><em> tower</em></p><p><a rel=\"nofollow ugc noopener\" href=\"https://example.test/a?b=1&amp;c=2\">by the bay</a></p></div></div></div>"
+ },
+ {
+  "name": "a boxed caption in a fixed box",
+  "design": {
+   "layers": [
+    {
+     "id": "cap",
+     "kind": "text",
+     "name": "",
+     "x": 4.0,
+     "y": 70.0,
+     "w": 50.0,
+     "h": 22.0,
+     "rot": 0,
+     "flip_x": false,
+     "flip_y": false,
+     "opacity": 100,
+     "blend": "normal",
+     "hidden": false,
+     "locked": false,
+     "link": "",
+     "fill": {
+      "kind": "solid",
+      "color": "#000000aa",
+      "angle": 180,
+      "stops": []
+     },
+     "stroke": {
+      "color": "#ffffff",
+      "width": 0.2,
+      "style": "dotted"
+     },
+     "radius": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "shadows": [
+      {
+       "inner": false,
+       "x": 0.0,
+       "y": 0.5,
+       "blur": 1.0,
+       "spread": 0.2,
+       "color": "#0000004d"
+      },
+      {
+       "inner": true,
+       "x": 0.0,
+       "y": 0.0,
+       "blur": 0.8,
+       "spread": 0,
+       "color": "#ffffff33"
+      }
+     ],
+     "blur": 0,
+     "rt": {
+      "type": "doc",
+      "content": [
+       {
+        "type": "paragraph",
+        "content": [
+         {
+          "type": "text",
+          "text": "Dawn <script>alert(1)</script>"
+         }
+        ]
+       }
+      ]
+     },
+     "font": "body",
+     "size": 2.4,
+     "weight": 500,
+     "italic": true,
+     "color": "accent",
+     "align": "justify",
+     "valign": "bottom",
+     "leading": 1.15,
+     "tracking": 0,
+     "case": "none",
+     "pad": 1.5,
+     "autosize": "none"
+    }
+   ]
+  },
+  "assets": {
+   "11111111-1111-4111-8111-111111111111": {
+    "id": "11111111-1111-4111-8111-111111111111",
+    "url": "https://cdn.example.test/tower.jpg",
+    "alt": "The \"tower\" & bay",
+    "width": 1600,
+    "height": 1200,
+    "variants": {
+     "webp": [
+      {
+       "w": 960,
+       "url": "https://cdn.example.test/tower-960.webp"
+      },
+      {
+       "w": 480,
+       "url": "https://cdn.example.test/tower-480.webp"
+      },
+      {
+       "w": 1440,
+       "url": "https://cdn.example.test/tower-1440.webp"
+      }
+     ]
+    }
+   }
+  },
+  "edit": false,
+  "path": "design",
+  "picture": null,
+  "html": "<div class=\"mzd\"><div class=\"mzd__l mzd__l--text mzd__l--vb\" style=\"--x:4;--y:70;--w:50;--h:22;background:#000000aa;border:calc(0.2 * var(--bw)) dotted #ffffff;border-radius:calc(1 * var(--bw)) calc(1 * var(--bw)) calc(1 * var(--bw)) calc(1 * var(--bw));box-shadow:calc(0 * var(--bw)) calc(0.5 * var(--bw)) calc(1 * var(--bw)) calc(0.2 * var(--bw)) #0000004d,inset calc(0 * var(--bw)) calc(0 * var(--bw)) calc(0.8 * var(--bw)) calc(0 * var(--bw)) #ffffff33;padding:calc(1.5 * var(--bw))\"><div class=\"mzd__t\" style=\"font-family:var(--mz-b);font-size:calc(2.4 * var(--bw));font-weight:500;font-style:italic;color:var(--mz-accent);text-align:justify;line-height:1.15\"><p>Dawn &lt;script&gt;alert(1)&lt;/script&gt;</p></div></div></div>"
+ },
+ {
+  "name": "shapes, paint and effects",
+  "design": {
+   "layers": [
+    {
+     "id": "band",
+     "kind": "shape",
+     "name": "",
+     "x": 0.0,
+     "y": 60.0,
+     "w": 100.0,
+     "h": 40.0,
+     "rot": 0,
+     "flip_x": false,
+     "flip_y": false,
+     "opacity": 100,
+     "blend": "multiply",
+     "hidden": false,
+     "locked": false,
+     "link": "",
+     "fill": {
+      "kind": "linear",
+      "color": "#000000",
+      "angle": 0,
+      "stops": [
+       {
+        "color": "#000000cc",
+        "at": 0
+       },
+       {
+        "color": "#00000000",
+        "at": 100
+       }
+      ]
+     },
+     "stroke": {
+      "color": "#e11d48",
+      "width": 0.4,
+      "style": "dashed"
+     },
+     "radius": [
+      2.0,
+      2.0,
+      0.0,
+      0.0
+     ],
+     "shadows": [
+      {
+       "inner": false,
+       "x": 0.0,
+       "y": 1.0,
+       "blur": 3.0,
+       "spread": 0.0,
+       "color": "#00000040"
+      },
+      {
+       "inner": true,
+       "x": 0.0,
+       "y": 0.2,
+       "blur": 0.6,
+       "spread": 0.0,
+       "color": "#ffffff26"
+      }
+     ],
+     "blur": 0.5,
+     "shape": "rect"
+    },
+    {
+     "id": "sun",
+     "kind": "shape",
+     "name": "",
+     "x": 70.0,
+     "y": 8.0,
+     "w": 18.0,
+     "h": 24.0,
+     "rot": 0,
+     "flip_x": false,
+     "flip_y": false,
+     "opacity": 100,
+     "blend": "normal",
+     "hidden": false,
+     "locked": false,
+     "link": "",
+     "fill": {
+      "kind": "radial",
+      "color": "#000000",
+      "angle": 180,
+      "stops": [
+       {
+        "color": "#fde047",
+        "at": 0
+       },
+       {
+        "color": "#f97316",
+        "at": 70
+       },
+       {
+        "color": "#f9731600",
+        "at": 100
+       }
+      ]
+     },
+     "stroke": {
+      "color": "#000000",
+      "width": 0,
+      "style": "solid"
+     },
+     "radius": [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+     ],
+     "shadows": [],
+     "blur": 0,
+     "shape": "ellipse"
+    },
+    {
+     "id": "rule",
+     "kind": "shape",
+     "name": "",
+     "x": 10.0,
+     "y": 50.0,
+     "w": 80.0,
+     "h": 2.0,
+     "rot": 0,
+     "flip_x": false,
+     "flip_y": true,
+     "opacity": 100,
+     "blend": "normal",
+     "hidden": false,
+     "locked": false,
+     "link": "",
+     "fill": {
+      "kind": "none",
+      "color": "#000000",
+      "angle": 180,
+      "stops": []
+     },
+     "stroke": {
+      "color": "accent",
+      "width": 0.3,
+      "style": "solid"
+     },
+     "radius": [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+     ],
+     "shadows": [],
+     "blur": 0,
+     "shape": "line"
+    }
+   ]
+  },
+  "assets": {
+   "11111111-1111-4111-8111-111111111111": {
+    "id": "11111111-1111-4111-8111-111111111111",
+    "url": "https://cdn.example.test/tower.jpg",
+    "alt": "The \"tower\" & bay",
+    "width": 1600,
+    "height": 1200,
+    "variants": {
+     "webp": [
+      {
+       "w": 960,
+       "url": "https://cdn.example.test/tower-960.webp"
+      },
+      {
+       "w": 480,
+       "url": "https://cdn.example.test/tower-480.webp"
+      },
+      {
+       "w": 1440,
+       "url": "https://cdn.example.test/tower-1440.webp"
+      }
+     ]
+    }
+   }
+  },
+  "edit": false,
+  "path": "design",
+  "picture": null,
+  "html": "<div class=\"mzd\"><div class=\"mzd__l mzd__l--shape\" style=\"--x:0;--y:60;--w:100;--h:40;mix-blend-mode:multiply;background:linear-gradient(0deg,#000000cc 0%,#00000000 100%);border:calc(0.4 * var(--bw)) dashed #e11d48;border-radius:calc(2 * var(--bw)) calc(2 * var(--bw)) calc(0 * var(--bw)) calc(0 * var(--bw));box-shadow:calc(0 * var(--bw)) calc(1 * var(--bw)) calc(3 * var(--bw)) calc(0 * var(--bw)) #00000040,inset calc(0 * var(--bw)) calc(0.2 * var(--bw)) calc(0.6 * var(--bw)) calc(0 * var(--bw)) #ffffff26;filter:blur(calc(0.5 * var(--bw)))\"></div><div class=\"mzd__l mzd__l--shape\" style=\"--x:70;--y:8;--w:18;--h:24;background:radial-gradient(circle,#fde047 0%,#f97316 70%,#f9731600 100%);border-radius:50%\"></div><div class=\"mzd__l mzd__l--shape mzd__l--line\" style=\"--x:10;--y:50;--w:80;--h:2;transform:scale(1,-1)\"><i class=\"mzd__line\" style=\"border-top:calc(0.3 * var(--bw)) solid var(--mz-accent)\"></i></div></div>"
+ },
+ {
+  "name": "a picture on a picture",
+  "design": {
+   "layers": [
+    {
+     "id": "inset",
+     "kind": "image",
+     "name": "",
+     "x": 55.0,
+     "y": 10.0,
+     "w": 40.0,
+     "h": 30.0,
+     "rot": 0,
+     "flip_x": true,
+     "flip_y": false,
+     "opacity": 100,
+     "blend": "normal",
+     "hidden": false,
+     "locked": false,
+     "link": "",
+     "fill": {
+      "kind": "none",
+      "color": "#000000",
+      "angle": 180,
+      "stops": []
+     },
+     "stroke": {
+      "color": "#ffffff",
+      "width": 0.5,
+      "style": "solid"
+     },
+     "radius": [
+      3.0,
+      3.0,
+      3.0,
+      3.0
+     ],
+     "shadows": [
+      {
+       "inner": false,
+       "x": 0.2,
+       "y": 0.6,
+       "blur": 1.5,
+       "spread": 0,
+       "color": "#00000080"
+      },
+      {
+       "inner": true,
+       "x": 0.0,
+       "y": 0.0,
+       "blur": 1.0,
+       "spread": 0,
+       "color": "#000000"
+      }
+     ],
+     "blur": 0,
+     "asset_id": "11111111-1111-4111-8111-111111111111",
+     "fit": "contain",
+     "focal": {
+      "x": 30,
+      "y": 70
+     },
+     "zoom": 150,
+     "filter": "bw"
+    }
+   ]
+  },
+  "assets": {
+   "11111111-1111-4111-8111-111111111111": {
+    "id": "11111111-1111-4111-8111-111111111111",
+    "url": "https://cdn.example.test/tower.jpg",
+    "alt": "The \"tower\" & bay",
+    "width": 1600,
+    "height": 1200,
+    "variants": {
+     "webp": [
+      {
+       "w": 960,
+       "url": "https://cdn.example.test/tower-960.webp"
+      },
+      {
+       "w": 480,
+       "url": "https://cdn.example.test/tower-480.webp"
+      },
+      {
+       "w": 1440,
+       "url": "https://cdn.example.test/tower-1440.webp"
+      }
+     ]
+    }
+   }
+  },
+  "edit": false,
+  "path": "design",
+  "picture": null,
+  "html": "<div class=\"mzd\"><div class=\"mzd__l mzd__l--image\" style=\"--x:55;--y:10;--w:40;--h:30;transform:scale(-1,1);border:calc(0.5 * var(--bw)) solid #ffffff;border-radius:calc(3 * var(--bw)) calc(3 * var(--bw)) calc(3 * var(--bw)) calc(3 * var(--bw));filter:drop-shadow(calc(0.2 * var(--bw)) calc(0.6 * var(--bw)) calc(1.5 * var(--bw)) #00000080)\"><img src=\"https://cdn.example.test/tower.jpg\" alt=\"The &quot;tower&quot; &amp; bay\" srcset=\"https://cdn.example.test/tower-480.webp 480w, https://cdn.example.test/tower-960.webp 960w, https://cdn.example.test/tower-1440.webp 1440w\" sizes=\"(min-width: 1140px) 1080px, 100vw\" width=\"1600\" height=\"1200\" loading=\"lazy\" decoding=\"async\" class=\"mzd__img\" style=\"object-fit:contain;object-position:30% 70%;transform:scale(1.5);filter:grayscale(1)\" /></div></div>"
+ },
+ {
+  "name": "a group, a hidden layer and a link",
+  "design": {
+   "layers": [
+    {
+     "id": "grp",
+     "kind": "group",
+     "name": "",
+     "x": 10,
+     "y": 10,
+     "w": 40,
+     "h": 20,
+     "rot": 0,
+     "flip_x": false,
+     "flip_y": false,
+     "opacity": 50,
+     "blend": "screen",
+     "hidden": false,
+     "locked": false,
+     "link": "",
+     "children": [
+      {
+       "id": "a",
+       "kind": "shape",
+       "name": "",
+       "x": 10.0,
+       "y": 10.0,
+       "w": 20.0,
+       "h": 20.0,
+       "rot": 0,
+       "flip_x": false,
+       "flip_y": false,
+       "opacity": 100,
+       "blend": "normal",
+       "hidden": false,
+       "locked": false,
+       "link": "",
+       "fill": {
+        "kind": "solid",
+        "color": "#ffffff",
+        "angle": 180,
+        "stops": []
+       },
+       "stroke": {
+        "color": "#000000",
+        "width": 0,
+        "style": "solid"
+       },
+       "radius": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+       ],
+       "shadows": [],
+       "blur": 0,
+       "shape": "rect"
+      },
+      {
+       "id": "b",
+       "kind": "text",
+       "name": "",
+       "x": 12.0,
+       "y": 12.0,
+       "w": 16.0,
+       "h": 20,
+       "rot": 0,
+       "flip_x": false,
+       "flip_y": false,
+       "opacity": 100,
+       "blend": "normal",
+       "hidden": false,
+       "locked": false,
+       "link": "",
+       "fill": {
+        "kind": "none",
+        "color": "#000000",
+        "angle": 180,
+        "stops": []
+       },
+       "stroke": {
+        "color": "#000000",
+        "width": 0,
+        "style": "solid"
+       },
+       "radius": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+       ],
+       "shadows": [],
+       "blur": 0,
+       "rt": {
+        "type": "doc",
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "Inside"
+           }
+          ]
+         }
+        ]
+       },
+       "font": "Playfair Display",
+       "size": 6,
+       "weight": 900,
+       "italic": true,
+       "color": "#ffffff",
+       "align": "left",
+       "valign": "top",
+       "leading": 1.15,
+       "tracking": 0,
+       "case": "title",
+       "pad": 0,
+       "autosize": "height"
+      }
+     ]
+    },
+    {
+     "id": "gone",
+     "kind": "shape",
+     "name": "",
+     "x": 10,
+     "y": 10,
+     "w": 40,
+     "h": 20,
+     "rot": 0,
+     "flip_x": false,
+     "flip_y": false,
+     "opacity": 100,
+     "blend": "normal",
+     "hidden": true,
+     "locked": false,
+     "link": "",
+     "fill": {
+      "kind": "solid",
+      "color": "#ff0000",
+      "angle": 180,
+      "stops": []
+     },
+     "stroke": {
+      "color": "#000000",
+      "width": 0,
+      "style": "solid"
+     },
+     "radius": [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+     ],
+     "shadows": [],
+     "blur": 0,
+     "shape": "rect"
+    },
+    {
+     "id": "go",
+     "kind": "text",
+     "name": "",
+     "x": 5.0,
+     "y": 90.0,
+     "w": 30.0,
+     "h": 20,
+     "rot": 0,
+     "flip_x": false,
+     "flip_y": false,
+     "opacity": 100,
+     "blend": "normal",
+     "hidden": false,
+     "locked": false,
+     "link": "https://example.test/next",
+     "fill": {
+      "kind": "none",
+      "color": "#000000",
+      "angle": 180,
+      "stops": []
+     },
+     "stroke": {
+      "color": "#000000",
+      "width": 0,
+      "style": "solid"
+     },
+     "radius": [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+     ],
+     "shadows": [],
+     "blur": 0,
+     "rt": {
+      "type": "doc",
+      "content": [
+       {
+        "type": "paragraph",
+        "content": [
+         {
+          "type": "text",
+          "text": "Read on"
+         }
+        ]
+       }
+      ]
+     },
+     "font": "Inter",
+     "size": 2.0,
+     "weight": 700,
+     "italic": false,
+     "color": "#ffffff",
+     "align": "left",
+     "valign": "top",
+     "leading": 1.15,
+     "tracking": 0,
+     "case": "none",
+     "pad": 0,
+     "autosize": "height"
+    }
+   ]
+  },
+  "assets": {
+   "11111111-1111-4111-8111-111111111111": {
+    "id": "11111111-1111-4111-8111-111111111111",
+    "url": "https://cdn.example.test/tower.jpg",
+    "alt": "The \"tower\" & bay",
+    "width": 1600,
+    "height": 1200,
+    "variants": {
+     "webp": [
+      {
+       "w": 960,
+       "url": "https://cdn.example.test/tower-960.webp"
+      },
+      {
+       "w": 480,
+       "url": "https://cdn.example.test/tower-480.webp"
+      },
+      {
+       "w": 1440,
+       "url": "https://cdn.example.test/tower-1440.webp"
+      }
+     ]
+    }
+   }
+  },
+  "edit": false,
+  "path": "design",
+  "picture": null,
+  "html": "<div class=\"mzd\"><div class=\"mzd__g\" style=\"--x:10;--y:10;--w:40;--h:20;opacity:0.5;mix-blend-mode:screen\"><div class=\"mzd__l mzd__l--shape\" style=\"--x:10;--y:10;--w:20;--h:20;background:#ffffff\"></div><div class=\"mzd__l mzd__l--text mzd__l--auto\" style=\"--x:12;--y:12;--w:16\"><div class=\"mzd__t\" style=\"font-family:&#x27;Playfair Display&#x27;, Georgia, &#x27;Times New Roman&#x27;, serif;font-size:calc(6 * var(--bw));font-weight:900;font-style:italic;color:#ffffff;text-align:left;line-height:1.15;text-transform:capitalize\"><p>Inside</p></div></div></div><a class=\"mzd__l mzd__l--text mzd__l--auto\" style=\"--x:5;--y:90;--w:30\" href=\"https://example.test/next\" rel=\"nofollow ugc noopener\"><div class=\"mzd__t\" style=\"font-family:&#x27;Inter&#x27;, system-ui, -apple-system, &#x27;Segoe UI&#x27;, sans-serif;font-size:calc(2 * var(--bw));font-weight:700;color:#ffffff;text-align:left;line-height:1.15\"><p>Read on</p></div></a></div>"
+ },
+ {
+  "name": "the same, in the editor",
+  "design": {
+   "layers": [
+    {
+     "id": "grp",
+     "kind": "group",
+     "name": "",
+     "x": 10,
+     "y": 10,
+     "w": 40,
+     "h": 20,
+     "rot": 0,
+     "flip_x": false,
+     "flip_y": false,
+     "opacity": 50,
+     "blend": "screen",
+     "hidden": false,
+     "locked": false,
+     "link": "",
+     "children": [
+      {
+       "id": "a",
+       "kind": "shape",
+       "name": "",
+       "x": 10.0,
+       "y": 10.0,
+       "w": 20.0,
+       "h": 20.0,
+       "rot": 0,
+       "flip_x": false,
+       "flip_y": false,
+       "opacity": 100,
+       "blend": "normal",
+       "hidden": false,
+       "locked": false,
+       "link": "",
+       "fill": {
+        "kind": "solid",
+        "color": "#ffffff",
+        "angle": 180,
+        "stops": []
+       },
+       "stroke": {
+        "color": "#000000",
+        "width": 0,
+        "style": "solid"
+       },
+       "radius": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+       ],
+       "shadows": [],
+       "blur": 0,
+       "shape": "rect"
+      },
+      {
+       "id": "b",
+       "kind": "text",
+       "name": "",
+       "x": 12.0,
+       "y": 12.0,
+       "w": 16.0,
+       "h": 20,
+       "rot": 0,
+       "flip_x": false,
+       "flip_y": false,
+       "opacity": 100,
+       "blend": "normal",
+       "hidden": false,
+       "locked": false,
+       "link": "",
+       "fill": {
+        "kind": "none",
+        "color": "#000000",
+        "angle": 180,
+        "stops": []
+       },
+       "stroke": {
+        "color": "#000000",
+        "width": 0,
+        "style": "solid"
+       },
+       "radius": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+       ],
+       "shadows": [],
+       "blur": 0,
+       "rt": {
+        "type": "doc",
+        "content": [
+         {
+          "type": "paragraph",
+          "content": [
+           {
+            "type": "text",
+            "text": "Inside"
+           }
+          ]
+         }
+        ]
+       },
+       "font": "Playfair Display",
+       "size": 6,
+       "weight": 900,
+       "italic": true,
+       "color": "#ffffff",
+       "align": "left",
+       "valign": "top",
+       "leading": 1.15,
+       "tracking": 0,
+       "case": "title",
+       "pad": 0,
+       "autosize": "height"
+      }
+     ]
+    },
+    {
+     "id": "gone",
+     "kind": "shape",
+     "name": "",
+     "x": 10,
+     "y": 10,
+     "w": 40,
+     "h": 20,
+     "rot": 0,
+     "flip_x": false,
+     "flip_y": false,
+     "opacity": 100,
+     "blend": "normal",
+     "hidden": true,
+     "locked": false,
+     "link": "",
+     "fill": {
+      "kind": "solid",
+      "color": "#ff0000",
+      "angle": 180,
+      "stops": []
+     },
+     "stroke": {
+      "color": "#000000",
+      "width": 0,
+      "style": "solid"
+     },
+     "radius": [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+     ],
+     "shadows": [],
+     "blur": 0,
+     "shape": "rect"
+    },
+    {
+     "id": "go",
+     "kind": "text",
+     "name": "",
+     "x": 5.0,
+     "y": 90.0,
+     "w": 30.0,
+     "h": 20,
+     "rot": 0,
+     "flip_x": false,
+     "flip_y": false,
+     "opacity": 100,
+     "blend": "normal",
+     "hidden": false,
+     "locked": false,
+     "link": "https://example.test/next",
+     "fill": {
+      "kind": "none",
+      "color": "#000000",
+      "angle": 180,
+      "stops": []
+     },
+     "stroke": {
+      "color": "#000000",
+      "width": 0,
+      "style": "solid"
+     },
+     "radius": [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+     ],
+     "shadows": [],
+     "blur": 0,
+     "rt": {
+      "type": "doc",
+      "content": [
+       {
+        "type": "paragraph",
+        "content": [
+         {
+          "type": "text",
+          "text": "Read on"
+         }
+        ]
+       }
+      ]
+     },
+     "font": "Inter",
+     "size": 2.0,
+     "weight": 700,
+     "italic": false,
+     "color": "#ffffff",
+     "align": "left",
+     "valign": "top",
+     "leading": 1.15,
+     "tracking": 0,
+     "case": "none",
+     "pad": 0,
+     "autosize": "height"
+    }
+   ]
+  },
+  "assets": {
+   "11111111-1111-4111-8111-111111111111": {
+    "id": "11111111-1111-4111-8111-111111111111",
+    "url": "https://cdn.example.test/tower.jpg",
+    "alt": "The \"tower\" & bay",
+    "width": 1600,
+    "height": 1200,
+    "variants": {
+     "webp": [
+      {
+       "w": 960,
+       "url": "https://cdn.example.test/tower-960.webp"
+      },
+      {
+       "w": 480,
+       "url": "https://cdn.example.test/tower-480.webp"
+      },
+      {
+       "w": 1440,
+       "url": "https://cdn.example.test/tower-1440.webp"
+      }
+     ]
+    }
+   }
+  },
+  "edit": true,
+  "path": "items.1.design",
+  "picture": null,
+  "html": "<div class=\"mzd\" data-mzd=\"items.1.design\"><i class=\"mzd__box\" aria-hidden=\"true\"></i><div class=\"mzd__g\" style=\"--x:10;--y:10;--w:40;--h:20;opacity:0.5;mix-blend-mode:screen\" data-mzd-l=\"grp\"><div class=\"mzd__l mzd__l--shape\" style=\"--x:10;--y:10;--w:20;--h:20;background:#ffffff\" data-mzd-l=\"a\"></div><div class=\"mzd__l mzd__l--text mzd__l--auto\" style=\"--x:12;--y:12;--w:16\" data-mzd-l=\"b\"><div class=\"mzd__t\" style=\"font-family:&#x27;Playfair Display&#x27;, Georgia, &#x27;Times New Roman&#x27;, serif;font-size:calc(6 * var(--bw));font-weight:900;font-style:italic;color:#ffffff;text-align:left;line-height:1.15;text-transform:capitalize\" data-mz-f=\"items.1.design.b\" data-mz-k=\"rich\" data-mz-lazy data-mz-ph=\"Type something\"><p>Inside</p></div></div></div><div class=\"mzd__l mzd__l--text mzd__l--auto\" style=\"--x:5;--y:90;--w:30\" data-mzd-l=\"go\"><div class=\"mzd__t\" style=\"font-family:&#x27;Inter&#x27;, system-ui, -apple-system, &#x27;Segoe UI&#x27;, sans-serif;font-size:calc(2 * var(--bw));font-weight:700;color:#ffffff;text-align:left;line-height:1.15\" data-mz-f=\"items.1.design.go\" data-mz-k=\"rich\" data-mz-lazy data-mz-ph=\"Type something\"><p>Read on</p></div></div></div>"
+ },
+ {
+  "name": "a locked layer, in the editor",
+  "design": {
+   "layers": [
+    {
+     "id": "lock",
+     "kind": "shape",
+     "name": "",
+     "x": 0.0,
+     "y": 0.0,
+     "w": 100.0,
+     "h": 100.0,
+     "rot": 0,
+     "flip_x": false,
+     "flip_y": false,
+     "opacity": 100,
+     "blend": "normal",
+     "hidden": false,
+     "locked": true,
+     "link": "",
+     "fill": {
+      "kind": "solid",
+      "color": "#00000033",
+      "angle": 180,
+      "stops": []
+     },
+     "stroke": {
+      "color": "#000000",
+      "width": 0,
+      "style": "solid"
+     },
+     "radius": [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+     ],
+     "shadows": [],
+     "blur": 0,
+     "shape": "rect"
+    },
+    {
+     "id": "empty",
+     "kind": "text",
+     "name": "",
+     "x": 10.0,
+     "y": 40.0,
+     "w": 80.0,
+     "h": 20,
+     "rot": 0,
+     "flip_x": false,
+     "flip_y": false,
+     "opacity": 100,
+     "blend": "normal",
+     "hidden": false,
+     "locked": false,
+     "link": "",
+     "fill": {
+      "kind": "none",
+      "color": "#000000",
+      "angle": 180,
+      "stops": []
+     },
+     "stroke": {
+      "color": "#000000",
+      "width": 0,
+      "style": "solid"
+     },
+     "radius": [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+     ],
+     "shadows": [],
+     "blur": 0,
+     "rt": {
+      "type": "doc",
+      "content": [
+       {
+        "type": "paragraph"
+       }
+      ]
+     },
+     "font": "heading",
+     "size": 6,
+     "weight": 700,
+     "italic": false,
+     "color": "#ffffff",
+     "align": "left",
+     "valign": "top",
+     "leading": 1.15,
+     "tracking": 0,
+     "case": "none",
+     "pad": 0,
+     "autosize": "height"
+    }
+   ]
+  },
+  "assets": {
+   "11111111-1111-4111-8111-111111111111": {
+    "id": "11111111-1111-4111-8111-111111111111",
+    "url": "https://cdn.example.test/tower.jpg",
+    "alt": "The \"tower\" & bay",
+    "width": 1600,
+    "height": 1200,
+    "variants": {
+     "webp": [
+      {
+       "w": 960,
+       "url": "https://cdn.example.test/tower-960.webp"
+      },
+      {
+       "w": 480,
+       "url": "https://cdn.example.test/tower-480.webp"
+      },
+      {
+       "w": 1440,
+       "url": "https://cdn.example.test/tower-1440.webp"
+      }
+     ]
+    }
+   }
+  },
+  "edit": true,
+  "path": "design",
+  "picture": null,
+  "html": "<div class=\"mzd\" data-mzd=\"design\"><i class=\"mzd__box\" aria-hidden=\"true\"></i><div class=\"mzd__l mzd__l--shape\" style=\"--x:0;--y:0;--w:100;--h:100;background:#00000033\" data-mzd-l=\"lock\" data-mzd-lock></div><div class=\"mzd__l mzd__l--text mzd__l--auto\" style=\"--x:10;--y:40;--w:80\" data-mzd-l=\"empty\"><div class=\"mzd__t\" style=\"font-family:var(--mz-h);font-size:calc(6 * var(--bw));font-weight:700;color:#ffffff;text-align:left;line-height:1.15\" data-mz-f=\"design.empty\" data-mz-k=\"rich\" data-mz-lazy data-mz-ph=\"Type something\"></div></div></div>"
+ },
+ {
+  "name": "on a cover's picture",
+  "design": {
+   "layers": [
+    {
+     "id": "head",
+     "kind": "text",
+     "name": "Headline",
+     "x": 8.0,
+     "y": 6.5,
+     "w": 84.0,
+     "h": 20,
+     "rot": -4.0,
+     "flip_x": false,
+     "flip_y": false,
+     "opacity": 90,
+     "blend": "normal",
+     "hidden": false,
+     "locked": false,
+     "link": "",
+     "fill": {
+      "kind": "none",
+      "color": "#000000",
+      "angle": 180,
+      "stops": []
+     },
+     "stroke": {
+      "color": "#000000",
+      "width": 0,
+      "style": "solid"
+     },
+     "radius": [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+     ],
+     "shadows": [
+      {
+       "inner": false,
+       "x": 0.0,
+       "y": 0.3,
+       "blur": 2.0,
+       "spread": 0,
+       "color": "#00000099"
+      }
+     ],
+     "blur": 0,
+     "rt": {
+      "type": "doc",
+      "content": [
+       {
+        "type": "paragraph",
+        "content": [
+         {
+          "type": "text",
+          "text": "Under "
+         },
+         {
+          "type": "text",
+          "text": "the",
+          "marks": [
+           {
+            "type": "bold"
+           }
+          ]
+         },
+         {
+          "type": "text",
+          "text": " tower",
+          "marks": [
+           {
+            "type": "italic"
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "type": "paragraph",
+        "content": [
+         {
+          "type": "text",
+          "text": "by the bay",
+          "marks": [
+           {
+            "type": "link",
+            "attrs": {
+             "href": "https://example.test/a?b=1&c=2"
+            }
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     "font": "Anton",
+     "size": 9.0,
+     "weight": 400,
+     "italic": false,
+     "color": "#ffffff",
+     "align": "center",
+     "valign": "top",
+     "leading": 0.95,
+     "tracking": 0.05,
+     "case": "upper",
+     "pad": 0,
+     "autosize": "height"
+    }
+   ]
+  },
+  "assets": {
+   "11111111-1111-4111-8111-111111111111": {
+    "id": "11111111-1111-4111-8111-111111111111",
+    "url": "https://cdn.example.test/tower.jpg",
+    "alt": "The \"tower\" & bay",
+    "width": 1600,
+    "height": 1200,
+    "variants": {
+     "webp": [
+      {
+       "w": 960,
+       "url": "https://cdn.example.test/tower-960.webp"
+      },
+      {
+       "w": 480,
+       "url": "https://cdn.example.test/tower-480.webp"
+      },
+      {
+       "w": 1440,
+       "url": "https://cdn.example.test/tower-1440.webp"
+      }
+     ]
+    }
+   }
+  },
+  "edit": false,
+  "path": "design",
+  "picture": [
+   1.3333333,
+   0.37,
+   0.5
+  ],
+  "html": "<div class=\"mzd\" style=\"--ar:1.3333;--fx:0.37;--fy:0.5\"><div class=\"mzd__l mzd__l--text mzd__l--auto\" style=\"--x:8;--y:6.5;--w:84;transform:rotate(-4deg);opacity:0.9\"><div class=\"mzd__t\" style=\"font-family:&#x27;Anton&#x27;, system-ui, -apple-system, sans-serif;font-size:calc(9 * var(--bw));font-weight:400;color:#ffffff;text-align:center;line-height:0.95;letter-spacing:0.05em;text-transform:uppercase;text-shadow:calc(0 * var(--bw)) calc(0.3 * var(--bw)) calc(2 * var(--bw)) #00000099\"><p>Under <strong>the</strong><em> tower</em></p><p><a rel=\"nofollow ugc noopener\" href=\"https://example.test/a?b=1&amp;c=2\">by the bay</a></p></div></div></div>"
+ },
+ {
+  "name": "an empty design in the editor",
+  "design": {
+   "layers": []
+  },
+  "assets": {
+   "11111111-1111-4111-8111-111111111111": {
+    "id": "11111111-1111-4111-8111-111111111111",
+    "url": "https://cdn.example.test/tower.jpg",
+    "alt": "The \"tower\" & bay",
+    "width": 1600,
+    "height": 1200,
+    "variants": {
+     "webp": [
+      {
+       "w": 960,
+       "url": "https://cdn.example.test/tower-960.webp"
+      },
+      {
+       "w": 480,
+       "url": "https://cdn.example.test/tower-480.webp"
+      },
+      {
+       "w": 1440,
+       "url": "https://cdn.example.test/tower-1440.webp"
+      }
+     ]
+    }
+   }
+  },
+  "edit": true,
+  "path": "design",
+  "picture": null,
+  "html": "<div class=\"mzd\" data-mzd=\"design\"><i class=\"mzd__box\" aria-hidden=\"true\"></i></div>"
+ }
+]

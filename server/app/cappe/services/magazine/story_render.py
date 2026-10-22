@@ -25,7 +25,10 @@ import re
 from html import escape
 from typing import Optional
 
+from .design_render import design_html, layer_credits, page_style
+from .design_schema import ASPECTS
 from .figures import credit_html, figure_html, img_html
+from .fonts import font_stack
 from .richtext import render_md
 from .rt import RtError, normalize_rt, render_rt
 
@@ -100,11 +103,16 @@ def _photos(b: dict, assets: dict[str, dict], *, edit: bool = False) -> str:
         return _missing("Choose pictures", size="wide") if edit else ""
     layout = b.get("layout") or "pair"
 
+    designs = [it.get("design") for it in b.get("items") or []]
+
     def fig(i: int, a: Optional[dict], c: str, *, size: str, cls: str = "mz-fig", style: str = "") -> str:
         if a is None:
             return _missing(f"Choose picture {i + 1}", item=i)
         cap = field(f"items.{i}.caption", ph="Caption") if edit else None
-        html = figure_html(a, caption=c, size=size, cls=cls, style=style, cap_attrs=cap)
+        design = designs[i] if i < len(designs) else None
+        over = design_html(design, assets, edit=edit, path=f"items.{i}.design")
+        html = figure_html(a, caption=c, size=size, cls=cls, style=style, cap_attrs=cap,
+                           over=over if over or edit else None, credits=layer_credits(design, assets, skip=a.get("id")))
         return mark(html, f' data-mz-item="{i}"') if edit else html
 
     if layout in ("pair", "trio"):
@@ -139,22 +147,9 @@ def _crop_style(crop: Optional[dict]) -> str:
             f"left:{-100 * x / w:.3f}%;top:{-100 * y / h:.3f}%")
 
 
-def _overlay(o: dict, index: Optional[int] = None) -> str:
-    """Words set on a picture. `index`: the editor's, which prints an empty
-    one too, typed into and dragged."""
-    text = (o.get("text") or "").strip()
-    if not text and index is None:
-        return ""
-    cls = (f"mz-ov mz-ov--{escape(o.get('size') or 'm')} mz-ov--{escape(o.get('tone') or 'light')} "
-           f"mz-ov--{escape(o.get('align') or 'center')}" + (" mz-ov--box" if o.get("box") else ""))
-    words = escape(text).replace("\n", "<br>")
-    attrs = "" if index is None else field(f"overlays.{index}.text", ph="Words") + f' data-mz-drag="overlays.{index}"'
-    return f'<div class="{cls}" style="left:{int(o.get("x", 50))}%;top:{int(o.get("y", 50))}%"{attrs}>{words}</div>'
-
-
-def photo_html(b: dict, asset: Optional[dict], *, edit: bool = False) -> str:
-    """A photo block: its frame (border, shape, colour, crop) with any words
-    set on it, then its caption and credit. A crop or a circle/arch shape
+def photo_html(b: dict, asset: Optional[dict], *, edit: bool = False, assets: Optional[dict[str, dict]] = None) -> str:
+    """A photo block: its frame (border, shape, colour, crop) with its design
+    laid over it, then its caption and credits. A crop or a circle/arch shape
     changes the picture, so a CC BY credit says it was cropped."""
     size, shape = b.get("size") or "column", b.get("shape") or "rect"
     if not asset:
@@ -171,9 +166,10 @@ def photo_html(b: dict, asset: Optional[dict], *, edit: bool = False) -> str:
         ratio = ratio * crop["w"] / crop["h"]
     if shape == "circle":
         ratio = 1.0
-    overlays = "".join(_overlay(o, i if edit else None) for i, o in enumerate(b.get("overlays") or []))
+    over = design_html(b.get("design"), assets or {}, edit=edit)
     caption = (b.get("caption") or asset.get("caption") or "").strip()
-    credit = credit_html(asset, cropped=bool(crop) or shape in ("circle", "arch"))
+    credit = (credit_html(asset, cropped=bool(crop) or shape in ("circle", "arch"))
+              + layer_credits(b.get("design"), assets or {}, skip=asset.get("id")))
     figcaption = ""
     if caption or credit or edit:
         cap = (f'<span class="mz-cap"{field("caption", ph="Caption") if edit else ""}>{escape(caption)}</span>'
@@ -183,8 +179,34 @@ def photo_html(b: dict, asset: Optional[dict], *, edit: bool = False) -> str:
                     f"mz-filter--{b.get('filter') or 'none'}"])
     # `--mz-ar` lets a book page size the picture to fit its height.
     fig_style = f' style="--mz-ar:{ratio:.4f}"' if ratio else ""
-    return (f'<figure class="{escape(cls)}"{fig_style}><div class="mz-frame"{frame_style}>{img}{overlays}</div>'
+    return (f'<figure class="{escape(cls)}"{fig_style}><div class="mz-frame"{frame_style}>{img}{over}</div>'
             f"{figcaption}</figure>")
+
+
+def text_type_style(b: dict) -> str:
+    """A text block's own type, where the writer set it (else the page's)."""
+    parts = []
+    if b.get("font") and b["font"] != "body":
+        parts.append(f"font-family:{font_stack(b['font'])}")
+    if b.get("size") and b["size"] != 1:
+        parts.append(f"font-size:{format(float(b['size']), 'g')}em")
+    if b.get("color"):
+        parts.append(f"color:{'var(--mz-accent)' if b['color'] == 'accent' else b['color']}")
+    if b.get("leading"):
+        parts.append(f"line-height:{format(float(b['leading']), 'g')}")
+    return ";".join(parts)
+
+
+def page_html(b: dict, assets: dict[str, dict], *, edit: bool = False) -> str:
+    """A designed page: its artboard, sized as a page of the book, and the
+    credits of the pictures on it."""
+    design = b.get("design") or {}
+    aspect = ASPECTS.get(b.get("aspect") or "", 0.75)
+    credits = layer_credits(design, assets)
+    credit = f'<p class="mz-page__credit">{credits}</p>' if credits else ""
+    art = (f'<div class="mz-page__art" style="{escape(page_style(design, aspect), quote=True)}">'
+           f'{design_html(design, assets, edit=edit)}</div>')
+    return f'<section class="mz-page">{art}{credit}</section>'
 
 
 def render_block(b: dict, assets: dict[str, dict], *, first_text: bool = False, edit: bool = False) -> str:
@@ -199,9 +221,14 @@ def render_block(b: dict, assets: dict[str, dict], *, first_text: bool = False, 
         if b.get("columns") in (2, 3):
             cls.append("mz-text--cols" if b["columns"] == 2 else "mz-text--cols mz-text--cols3")
         attrs = field("md", rich=True, ph="Write here") if edit else ""
+        style = text_type_style(b)
+        if style:
+            attrs = f' style="{escape(style, quote=True)}"' + attrs
         return f'<div class="{escape(" ".join(cls))}"{attrs}>{html}</div>'
     if kind == "photo":
-        return photo_html(b, assets.get(b.get("asset_id") or ""), edit=edit)
+        return photo_html(b, assets.get(b.get("asset_id") or ""), edit=edit, assets=assets)
+    if kind == "page":
+        return page_html(b, assets, edit=edit)
     if kind == "photos":
         return _photos(b, assets, edit=edit)
     if kind == "quote":
@@ -248,7 +275,7 @@ def render_blocks(blocks: list[dict], assets: dict[str, dict], *, dropcap: bool 
 
 
 def cover_html(post: dict, cover: Optional[dict], asset: Optional[dict], *, byline_html: str,
-               edit: bool = False) -> str:
+               edit: bool = False, assets: Optional[dict[str, dict]] = None) -> str:
     """The story's opening spread: the cover picture with the kicker, headline
     and dek over it (`overlay`), below it (`stacked`) or beside it (`split`).
     In the editor the words are typed into here, and the cover block (the
@@ -282,8 +309,15 @@ def cover_html(post: dict, cover: Optional[dict], asset: Optional[dict], *, byli
     # fills what the words leave), so the focal point always applies.
     img = img_html(asset, size="full" if style == "overlay" else ("half" if style == "split" else "wide"),
                    eager=True, cls="mz-cover__img", style=position)
-    credit = credit_html(asset, cropped=True)
+    design = (cover or {}).get("design")
+    credit = credit_html(asset, cropped=True) + layer_credits(design, assets or {}, skip=asset.get("id"))
     focal_attr = (f' data-mz-focal="{int(focal.get("x", 50))},{int(focal.get("y", 50))}"' if edit else "")
+    # The darkening behind an overlay's words, over the picture and under
+    # its design; the design sits on the whole picture, however it is cut.
+    scrim = '<div class="mz-cover__scrim"></div>' if style == "overlay" else ""
+    ratio = asset["width"] / asset["height"] if asset.get("width") and asset.get("height") else 1.5
+    over = design_html(design, assets or {}, edit=edit and bool(cover),
+                       picture=(ratio, int(focal.get("x", 50)) / 100, int(focal.get("y", 50)) / 100))
     return (f'<header class="mz-cover mz-cover--{escape(style)} mz-tone--{escape(tone)}"{block_attr}>'
-            f'<div class="mz-cover__media"{focal_attr}>{img}</div>{words_html()}'
+            f'<div class="mz-cover__media"{focal_attr}>{img}{scrim}{over}</div>{words_html()}'
             f'<p class="mz-cover__credit">{credit}</p></header>')

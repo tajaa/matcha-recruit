@@ -40,11 +40,11 @@ def test_blocks_are_reshaped_and_unknown_keys_dropped():
         {"type": "paywall"},
     ]})
     blocks = out["blocks"]
-    assert blocks[0] == {"type": "cover", "asset_id": A, "style": "overlay", "tone": "dark", "focal": {"x": 100, "y": 0}}
+    assert blocks[0] == {"type": "cover", "asset_id": A, "style": "overlay", "tone": "dark", "focal": {"x": 100, "y": 0}, "design": None}
     assert blocks[1] == {"type": "text", "md": "Hello", "rt": DOC_HELLO, "dropcap": True, "columns": 1,
-                         "variant": "body", "align": "left"}
+                         "variant": "body", "align": "left", "font": "body", "size": 1, "color": "", "leading": 0}
     assert blocks[2]["asset_id"] is None and len(blocks[2]["caption"]) == 500 and blocks[2]["size"] == "column"
-    assert blocks[3]["items"] == [{"asset_id": B, "caption": "c"}]
+    assert blocks[3]["items"] == [{"asset_id": B, "caption": "c", "design": None}]
     assert blocks[4]["style"] == "big"
     assert blocks[5] == {"type": "sidebar", "title": "T", "md": "m", "rt": _doc("m")}
     assert blocks[6]["items"] == [{"q": "Why?", "a_md": "Because.", "a_rt": _doc("Because.")}]
@@ -122,7 +122,7 @@ def test_the_limits_an_owner_is_told_about():
     with pytest.raises(story_schema.StoryError, match="at most 40"):
         story_schema.normalize_story({"blocks": [{"type": "qa", "items": [{}] * 41}]})
     with pytest.raises(story_schema.StoryError, match="too long"):
-        story_schema.normalize_story({"blocks": [{"type": "text", "md": "x" * 20_000}] * 16})
+        story_schema.normalize_story({"blocks": [{"type": "text", "md": "x" * 20_000}] * 30})
 
 
 @pytest.mark.parametrize("layout", list(story_schema.LAYOUTS))

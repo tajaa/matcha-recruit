@@ -3,7 +3,7 @@ import type { RtDoc } from '../canvas/rt'
 
 export const BLOCK_LABELS: Record<StoryBlock['type'], string> = {
   cover: 'Cover', text: 'Text', photo: 'Photo', photos: 'Photo group', quote: 'Pull quote',
-  sidebar: 'Sidebar', qa: 'Q & A', divider: 'Divider', paywall: 'Paywall',
+  sidebar: 'Sidebar', qa: 'Q & A', divider: 'Divider', paywall: 'Paywall', page: 'Designed page',
 }
 
 /** A fresh block of `type`, with empty slots. */
@@ -11,13 +11,14 @@ export function newBlock(type: StoryBlock['type']): StoryBlock {
   switch (type) {
     case 'cover': return { type, asset_id: null, style: 'stacked', tone: 'light', focal: { x: 50, y: 50 } }
     case 'text': return { type, md: '', dropcap: false, columns: 1, variant: 'body', align: 'left' }
-    case 'photo': return { type, asset_id: null, caption: '', size: 'column', border: 'none', shape: 'rect', filter: 'none', crop: null, overlays: [] }
+    case 'photo': return { type, asset_id: null, caption: '', size: 'column', border: 'none', shape: 'rect', filter: 'none', crop: null, design: null }
     case 'photos': return { type, layout: 'pair', items: [{ asset_id: null, caption: '' }, { asset_id: null, caption: '' }] }
     case 'quote': return { type, text: '', attribution: '', style: 'big' }
     case 'sidebar': return { type, title: '', md: '' }
     case 'qa': return { type, items: [{ q: '', a_md: '' }] }
     case 'divider': return { type }
     case 'paywall': return { type }
+    case 'page': return { type, aspect: '3:4', design: { layers: [], background: { kind: 'solid', color: '#ffffff', angle: 180, stops: [] } } }
   }
 }
 

@@ -18,6 +18,7 @@ from __future__ import annotations
 from html import escape
 from typing import Optional
 
+from .design_schema import design_words
 from .figures import credit_text, share_image
 from .pages import story_blocks, story_path
 from .richtext import md_to_text, render_md
@@ -57,7 +58,7 @@ def _block(b: dict, assets: dict[str, dict]) -> str:
         return _text(b.get("md") or "")
     if kind == "photo":
         # Email can't lay words over a picture, so they go under it.
-        words = " · ".join(o["text"] for o in b.get("overlays") or [] if (o.get("text") or "").strip())
+        words = " · ".join(design_words(b.get("design")))
         caption = " — ".join(p for p in (words, b.get("caption") or "") if p)
         return _picture(assets.get(b.get("asset_id") or ""), caption=caption)
     if kind == "photos":

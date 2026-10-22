@@ -1,12 +1,11 @@
 import type { FrameTarget } from '../canvas/bridge'
 import { clamp, onPlace, place, post, state, ui } from './state'
-import { blockOf, storyOf } from './targets'
 
-/** Grips over what can be dragged on the page: a selected cover element
- *  (move, widen) and the words on a photo (move), as `mz-move` in percent of
- *  their box; and the dot that sets what a cover picture keeps in view
- *  (`mz-focal`). The page moves as you drag; the editor outside is told
- *  once, when you let go. */
+/** Grips over what can be dragged on the page: a selected element of an
+ *  issue's cover (move, widen), as `mz-move` in percent of the cover; and the
+ *  dot that sets what a cover picture keeps in view (`mz-focal`). The page
+ *  moves as you drag; the editor outside is told once, when you let go.
+ *  Designs have handles of their own (layers.ts). */
 
 const grip = ui('span', 'mze-grip')
 grip.title = 'Drag to move'
@@ -18,13 +17,10 @@ dot.title = 'Drag to choose what the picture keeps in view'
 type Movable = { el: HTMLElement; box: Element | null; centred: boolean }
 
 function movable(): Movable | null {
-  const { selected, selectedEl, overlay } = state
+  const { selected, selectedEl } = state
   if (!selectedEl) return null
   if (selected.kind === 'cover' && selected.el !== 'photo') {
     return { el: selectedEl as HTMLElement, box: selectedEl.closest('[data-mz-art]'), centred: false }
-  }
-  if (overlay && selectedEl.contains(overlay) && document.contains(overlay)) {
-    return { el: overlay as HTMLElement, box: overlay.closest('.mz-frame'), centred: true }
   }
   return null
 }
@@ -78,10 +74,7 @@ const begin = (m: Movable): Start => {
   return { x: parseFloat(s.left) || 0, y: parseFloat(s.top) || 0, w: parseFloat(s.width) || 0, box: m.box!.getBoundingClientRect() }
 }
 
-function moveTarget(m: Movable): FrameTarget | Record<string, unknown> {
-  if (state.selected.kind === 'cover') return state.selected
-  return { kind: 'overlay', story: storyOf(m.el), block: blockOf(m.el), overlay: m.el.getAttribute('data-mz-drag') }
-}
+const moveTarget = (): FrameTarget => state.selected
 
 export function startHandles() {
   let start: Start | null = null
@@ -99,7 +92,7 @@ export function startHandles() {
     if (m && start) {
       // Words on a photo are placed in whole percents (story_schema).
       const round = m.centred ? Math.round : r1
-      post({ type: 'mz-move', target: moveTarget(m), x: round(parseFloat(m.el.style.left)), y: round(parseFloat(m.el.style.top)) })
+      post({ type: 'mz-move', target: moveTarget(), x: round(parseFloat(m.el.style.left)), y: round(parseFloat(m.el.style.top)) })
     }
     start = null
   }, place)
@@ -111,7 +104,7 @@ export function startHandles() {
     place()
   }, () => {
     const m = movable()
-    if (m && start) post({ type: 'mz-move', target: moveTarget(m), x: start.x, y: start.y, w: r1(parseFloat(m.el.style.width)) })
+    if (m && start) post({ type: 'mz-move', target: moveTarget(), x: start.x, y: start.y, w: r1(parseFloat(m.el.style.width)) })
     start = null
   }, place)
   let focal: { x: number; y: number; r: DOMRect } | null = null

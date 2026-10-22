@@ -14,6 +14,7 @@ from app.cappe.routes import issues as issues_mod  # noqa: E402
 from app.cappe.services.magazine import issue_pages, pages  # noqa: E402
 from app.cappe.services.magazine.issue_schema import normalize_contents, normalize_cover  # noqa: E402
 from app.cappe.services.magazine.story_render import render_block, render_blocks  # noqa: E402
+from app.cappe.services.magazine.design_schema import normalize_design  # noqa: E402
 from tests.cappe.test_cappe_magazine_issues import BASE, _client, _owner, limits, paid_row  # noqa: E402,F401
 from tests.cappe.test_cappe_magazine_routes import (  # noqa: E402
     ASSET,
@@ -35,17 +36,21 @@ A = {"a1": {"id": "a1", "url": "https://cdn.example.test/a.jpg", "width": 1200, 
 SITE_D = {"name": "Bloom", "slug": "bloom", "theme_config": {}, "meta_config": {}}
 MAG = {"name": "Salt & Light", "masthead_style": "classic", "paid_enabled": True, "price_cents": 500}
 
+# Words laid on a picture or page: a design's text layer.
+_WORDS = normalize_design({"layers": [{
+    "kind": "text", "id": "cap", "x": 10, "y": 10, "w": 60, "h": 12,
+    "rt": {"type": "doc", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "One"}]}]}}]})
 EVERY_BLOCK = {
     "text": {"type": "text", "md": "Words."},
-    "photo": {"type": "photo", "asset_id": "a1", "caption": "Dawn", "size": "column",
-              "overlays": [{"x": 50, "y": 50, "text": "One"}, {"x": 20, "y": 80, "text": ""}]},
-    "photos": {"type": "photos", "layout": "pair", "items": [{"asset_id": "a1", "caption": "One"},
+    "photo": {"type": "photo", "asset_id": "a1", "caption": "Dawn", "size": "column", "design": _WORDS},
+    "photos": {"type": "photos", "layout": "pair", "items": [{"asset_id": "a1", "caption": "One", "design": _WORDS},
                                                               {"asset_id": None, "caption": ""}]},
     "quote": {"type": "quote", "text": "", "attribution": ""},
     "sidebar": {"type": "sidebar", "title": "", "md": ""},
     "qa": {"type": "qa", "items": [{"q": "Why?", "a_md": "Because."}, {"q": "", "a_md": ""}]},
     "divider": {"type": "divider"},
     "paywall": {"type": "paywall"},
+    "page": {"type": "page", "aspect": "3:4", "design": _WORDS},
 }
 
 
@@ -61,9 +66,17 @@ def allowlist() -> dict[str, set[str]]:
             for m in re.finditer(r"^\s+(\w+): \[([^\]]*)\],$", body, re.M)}
 
 
+def design_fields(html: str) -> set[str]:
+    """The words of layers the page marks (`design.<id>`, a group picture's
+    `items.<n>.design.<id>`)."""
+    return {f for f in re.findall(r'data-mz-f="([^"]+)"', html) if re.search(r"(^|\.)design\.", f)}
+
+
 def marked(html: str) -> set[str]:
-    """Every field the page marks, with item indexes as `#`."""
-    return {re.sub(r"\.\d+\.", ".#.", f) for f in re.findall(r'data-mz-f="([^"]+)"', html)}
+    """Every block field the page marks, with item indexes as `#` (a layer's
+    words are checked on their own: design_fields)."""
+    return {re.sub(r"\.\d+\.", ".#.", f) for f in re.findall(r'data-mz-f="([^"]+)"', html)} - {
+        re.sub(r"\.\d+\.", ".#.", f) for f in design_fields(html)}
 
 
 def story(**over):
@@ -92,13 +105,19 @@ def render_issue(edit: bool) -> str:
 def test_every_block_marks_exactly_the_fields_the_editor_takes():
     allowed = allowlist()
     assert set(allowed) == {"cover", *EVERY_BLOCK}
+    src = FIELDS_TS.read_text(encoding="utf-8")
+    design_re = re.search(r"export const DESIGN_FIELD = /(.+)/$", src, re.M).group(1)
+    layers = {"photo": {"design.cap"}, "photos": {"items.0.design.cap"}, "page": {"design.cap"}}
     for kind, block in EVERY_BLOCK.items():
         html = render_block(block, A, edit=True)
         assert marked(html) == allowed[kind], kind
         rich = set(re.findall(r'data-mz-f="([^"]+)" data-mz-k="rich"', html))
-        assert {re.sub(r"\.\d+\.", ".#.", f) for f in rich} <= {"md", "items.#.a_md"}, kind
+        assert {re.sub(r"\.\d+\.", ".#.", f) for f in rich - design_fields(html)} <= {"md", "items.#.a_md"}, kind
+        # A layer's words: rich, and a path the editor's DESIGN_FIELD takes.
+        assert design_fields(html) == layers.get(kind, set()), kind
+        assert all(re.fullmatch(design_re, f) for f in design_fields(html)), kind
+        assert design_fields(html) <= rich, kind
     assert allowed["cover"] == set()  # the cover's words are the story's own
-    src = FIELDS_TS.read_text(encoding="utf-8")
     story_fields = set(re.findall(r"'(@\w+)'", _ts_list(src, "STORY_FIELDS").split("\n")[0]))
     assert marked(render_story(True)) >= story_fields == {"@title", "@kicker", "@excerpt", "@byline"}
 
