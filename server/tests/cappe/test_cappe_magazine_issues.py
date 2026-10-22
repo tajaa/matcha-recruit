@@ -94,7 +94,7 @@ def test_an_issue_is_one_book_and_its_paid_part_is_never_cached(monkeypatch, cac
     assert res.status_code == 200 and 'data-mz-issue' in html and 'id="mz-s-harbour-at-dawn"' in html
     assert '<a class="mzc__link" href="#mz-s-harbour-at-dawn">' in html and "Features" in html
     assert "Free opening." in html and 'data-mz-paid="night-market" hidden' in html
-    cached = cache[f"cappe:render:{SITE}:__mag__:issue:3"]
+    cached = cache[f"cappe:render:{SITE}:__mag__:business:issue:3"]
     assert SENTINEL not in html and SENTINEL not in cached
 
 

@@ -191,10 +191,18 @@ def test_alt_text_on_an_archive_picture_is_editable(monkeypatch):
         "SELECT id, kind": _asset(kind="stock"),
         "UPDATE cappe_assets": _asset(kind="stock", alt="Fishing boats at dawn"),
     })
+    cleared = []
+
+    async def invalidate(site_id):
+        cleared.append(site_id)
+
+    monkeypatch.setattr(uploads, "invalidate_site_render_cache", invalidate)
     with _client(monkeypatch, conn) as client:
         res = client.patch(f"/sites/{SITE_ID}/assets/{ASSET_ID}", json={"alt": "Fishing boats at dawn"})
     assert res.status_code == 200, res.text
     assert res.json()["alt"] == "Fishing boats at dawn"
+    # Story pages print the alt text and credit: their cached copies go.
+    assert cleared == [SITE_ID]
 
 
 def test_the_credit_of_an_archive_picture_is_not_editable(monkeypatch):

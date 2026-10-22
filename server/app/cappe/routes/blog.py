@@ -225,8 +225,10 @@ async def update_post(
                     if "content" in sent:
                         content = body.content
                     elif current["format"] != "blocks":
-                        # A plain post becoming a story keeps its words as the first text.
-                        content = {"blocks": [{"type": "text", "md": current["body"] or "", "dropcap": True}]}
+                        # A plain post becoming a story keeps its words (as sent with
+                        # the change, else as stored) as the first text.
+                        words = body.body if "body" in sent else current["body"]
+                        content = {"blocks": [{"type": "text", "md": words or "", "dropcap": True}]}
                     else:
                         content = current["content"] or None
                     cover_id = values.get("cover_asset_id", current["cover_asset_id"])
