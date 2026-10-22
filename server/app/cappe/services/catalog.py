@@ -8,8 +8,25 @@ checkout then refuses to charge is the exact bug this module exists to prevent.
 
 from __future__ import annotations
 
+from typing import Any
+
 from ..models.cappe import CappeAddon, CappePlan, CappePlanPrice
 from .entitlements import decode_features
+
+# Besides their own plan, writers are offered these (a free start, and the
+# step up to selling).
+WRITER_ALSO = frozenset({"free", "business"})
+
+
+def plan_offered(code: str, features: dict[str, Any] | None, account_type: str | None) -> bool:
+    """Whether a kind of account is offered a plan. A plan made for one
+    audience (`features.audience`, e.g. the Writer plan) is offered only to
+    that kind of account; a writer sees their plan plus Free and Business.
+    Lists and checkout both ask this, so a plan can't be bought around it."""
+    audience = (features or {}).get("audience")
+    if account_type == "writer":
+        return audience == "writer" or code in WRITER_ALSO
+    return not audience
 
 
 def _prices_for(rows, code: str) -> list[CappePlanPrice]:

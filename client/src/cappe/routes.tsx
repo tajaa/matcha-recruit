@@ -49,6 +49,10 @@ const Social = lazy(() => import('./pages/site/Social'))
 const Stories = lazy(() => import('./magazine/stories/Stories'))
 const StoryEditor = lazy(() => import('./magazine/editor/StoryEditor'))
 const MagazineSettings = lazy(() => import('./magazine/settings/MagazineSettings'))
+const Issues = lazy(() => import('./magazine/issues/Issues'))
+const WritersLanding = lazy(() => import('./magazine/writers/WritersLanding'))
+const WriterHome = lazy(() => import('./magazine/writers/WriterHome'))
+const MagazineOnboarding = lazy(() => import('./magazine/onboarding/MagazineOnboarding'))
 const ReaderView = lazy(() => import('./magazine/reader/ReaderView'))
 
 // The Blog page became the magazine's Stories (cappemag02); old links land there.
@@ -84,6 +88,10 @@ export default function CappeRoutes() {
         <Route path="creators/brands/signup" element={<CappeSignup brandOnly />} />
         <Route path="creators/directory" element={<CreatorDirectory />} />
         <Route path="creators/:handle" element={<CreatorPublicProfile />} />
+        {/* Gummfit Magazines: a writer's own way in. */}
+        <Route path="magazines/start" element={<WritersLanding />} />
+        <Route path="magazines/signup" element={<CappeSignup writerOnly />} />
+        <Route path="magazines/login" element={<CappeLogin writerOnly />} />
         <Route path="website-setup" element={<CappeSignup />} />
         {/* The address people type. */}
         <Route path="signup" element={<CappeSignup />} />
@@ -122,6 +130,9 @@ export default function CappeRoutes() {
           <Route path="sites/:siteId/magazine" element={<MagazineSettings />} />
           <Route path="sites/:siteId/magazine/view" element={<ReaderView />} />
           <Route path="sites/:siteId/library" element={<Library />} />
+          <Route path="sites/:siteId/issues" element={<Issues />} />
+          <Route path="writer" element={<RequireAccountType type="writer"><WriterHome /></RequireAccountType>} />
+          <Route path="writer/new" element={<RequireAccountType type="writer"><MagazineOnboarding /></RequireAccountType>} />
           {/* Creator marketplace: creator self-service + brand-side collabs.
               Each group is wrapped in RequireAccountType — CappeLayout above
               only proves a session exists, not that it is the right KIND of

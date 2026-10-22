@@ -365,6 +365,7 @@ class EmailService(
         attachments: Optional[list[dict]] = None,
         from_name: Optional[str] = None,
         reply_to: Optional[str] = None,
+        extra_headers: Optional[dict[str, str]] = None,
     ) -> bool:
         """Public send wrapper: Gmail first, MailerSend on Gmail failure.
 
@@ -372,8 +373,10 @@ class EmailService(
         backends carry `attachments` (Gmail via MIME, MailerSend via its
         `attachments` array) and `reply_to` (a Reply-To header; MailerSend's
         `reply_to` — for products that send on someone else's behalf, so a
-        reply reaches them, not us); `extra_headers` like List-Unsubscribe
-        still require Gmail, so use `send_email` directly when you need those.
+        reply reaches them, not us). `extra_headers` (List-Unsubscribe and
+        List-Unsubscribe-Post for bulk mail) go out on the Gmail path only:
+        a MailerSend fallback sends without them, so the email body must
+        carry its own unsubscribe link as well.
 
         Same body as the legacy `_send_with_fallback` — kept under both
         names so existing internal callers in `email/auth.py` etc. keep
@@ -388,6 +391,7 @@ class EmailService(
             attachments=attachments,
             from_name=from_name,
             reply_to=reply_to,
+            extra_headers=extra_headers,
         )
 
     async def _send_with_fallback(
@@ -400,6 +404,7 @@ class EmailService(
         attachments: Optional[list[dict]] = None,
         from_name: Optional[str] = None,
         reply_to: Optional[str] = None,
+        extra_headers: Optional[dict[str, str]] = None,
     ) -> bool:
         """Send via Gmail first, fall back to MailerSend if Gmail fails."""
         # Reserved-domain guard must be transport-independent: the Gmail path
@@ -412,11 +417,12 @@ class EmailService(
         gmail_token = self._load_token()
         if gmail_token and gmail_token.get("refresh_token"):
             reply = clean_reply_to(reply_to)
+            headers = {**(extra_headers or {}), **({"Reply-To": reply} if reply else {})}
             sent = await self.send_email(
                 to_email=to_email, to_name=to_name, subject=subject,
                 html_content=html_content, text_content=text_content,
                 attachments=attachments, from_name=from_name,
-                **({"extra_headers": {"Reply-To": reply}} if reply else {}),
+                **({"extra_headers": headers} if headers else {}),
             )
             if sent:
                 return True

@@ -18,7 +18,7 @@ export type CappeShopperSubscription = {
 // Cappe is a separate product from matcha; these types are independent of the
 // matcha MeResponse / dashboard types.
 
-export type CappeAccountType = 'business' | 'personal' | 'creator'
+export type CappeAccountType = 'business' | 'personal' | 'creator' | 'writer'
 
 export type CappeAccount = {
   id: string
@@ -1081,10 +1081,24 @@ export type CappePost = {
 // ── Magazine stories (services/magazine/story_schema.py) ─────────────────────
 export type StoryLayout = 'standard' | 'cover_story' | 'photo_essay' | 'interview' | 'dispatch' | 'lookbook'
 
+export type TextVariant = 'body' | 'lede' | 'small' | 'statement'
+export type TextAlign = 'left' | 'center' | 'right' | 'justify'
+export type PhotoBorder = 'none' | 'thin' | 'thick' | 'mat'
+export type PhotoShape = 'rect' | 'rounded' | 'circle' | 'arch'
+export type PhotoFilter = 'none' | 'bw' | 'sepia'
+/** The part of a photo kept, in percent of its width and height. */
+export type PhotoCrop = { x: number; y: number; w: number; h: number }
+/** Words set on a photo, centred on (x, y) in percent of the shown picture. */
+export type PhotoOverlay = {
+  x: number; y: number; text: string; size: 's' | 'm' | 'l' | 'xl'; tone: 'light' | 'dark'; box: boolean
+  align: 'center' | 'left' | 'right'
+}
+
 export type StoryBlock =
   | { type: 'cover'; asset_id: string | null; style: 'overlay' | 'stacked' | 'split'; tone: 'light' | 'dark'; focal: { x: number; y: number } }
-  | { type: 'text'; md: string; dropcap: boolean; columns: 1 | 2 }
-  | { type: 'photo'; asset_id: string | null; caption: string; size: 'column' | 'wide' | 'full' }
+  | { type: 'text'; md: string; dropcap: boolean; columns: 1 | 2 | 3; variant?: TextVariant; align?: TextAlign }
+  | { type: 'photo'; asset_id: string | null; caption: string; size: 'column' | 'wide' | 'full'
+      border?: PhotoBorder; shape?: PhotoShape; filter?: PhotoFilter; crop?: PhotoCrop | null; overlays?: PhotoOverlay[] }
   | { type: 'photos'; layout: 'pair' | 'trio' | 'grid' | 'mosaic'; items: { asset_id: string | null; caption: string }[] }
   | { type: 'quote'; text: string; attribution: string; style: 'big' | 'side' }
   | { type: 'sidebar'; title: string; md: string }
@@ -1677,6 +1691,30 @@ export type CappeStockImports = {
   imports: CappeStockImport[]
   /** Pictures the account may still import today (only on a new import). */
   remaining_today?: number | null
+}
+
+export type MastheadStyle = 'classic' | 'literary' | 'modern' | 'elegant' | 'display'
+
+/** What a new magazine can be (GET /magazine/options). */
+export type CappeMagazineOptions = {
+  topics: { key: string; label: string }[]
+  mastheads: { key: MastheadStyle; heading: string; body: string }[]
+}
+
+export type CappeHandleCheck = { handle: string; available: boolean; reason: string | null }
+
+/** A story sent to a magazine's followers (cappemag04). */
+export type CappeIssue = {
+  id: string
+  story_id: string | null
+  story_title: string | null
+  subject: string
+  status: 'draft' | 'scheduled' | 'sending' | 'sent' | 'cancelled'
+  include_body: boolean
+  recipient_count: number
+  failed_count: number
+  sent_at: string | null
+  created_at: string
 }
 
 export type IllustrationAspect = '16:9' | '3:2' | '4:3' | '1:1' | '3:4' | '2:3' | '9:16'

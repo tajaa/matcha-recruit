@@ -18,6 +18,7 @@ from .blog import router as blog_router
 from .magazine import router as magazine_router
 from .library import router as library_router
 from .magazine_ai import router as magazine_ai_router
+from .magazine_issues import router as magazine_issues_router
 from .bookings import router as bookings_router
 from .clients import router as clients_router
 from .collab import router as collab_router
@@ -115,6 +116,7 @@ cappe_router.include_router(blog_router)
 cappe_router.include_router(magazine_router)
 cappe_router.include_router(library_router)
 cappe_router.include_router(magazine_ai_router)
+cappe_router.include_router(magazine_issues_router)
 cappe_router.include_router(uploads_router)
 # Social growth: connected accounts, scheduled posts, the AI reply inbox.
 cappe_router.include_router(social_router)

@@ -30,10 +30,20 @@ Website-builder frontend for the consumer brand **Gummfit**, host-routed on gumm
   a refusal, `code === 'real_person'`). `editor/AssistPanel.tsx` is the editor's Assist (draft,
   headlines, captions, tighten, archive searches): it sends the editor's unsaved story, shows each
   proposal, and changes nothing until the writer applies it.
+  Writers (`account_type='writer'`): `writers/WritersLanding.tsx` at `/cappe/magazines/start`,
+  `CappeSignup writerOnly` / `CappeLogin writerOnly` at `/cappe/magazines/signup|login`,
+  `writers/WriterHome.tsx` (`/cappe/writer`: their stories, or `onboarding/MagazineOnboarding.tsx`
+  at `/cappe/writer/new`), `issues/Issues.tsx` (`sites/:siteId/issues`). `CappeSidebar` gives a
+  writer the magazine's nav (Stories, Library, Followers = the Subscribers page, Issues, settings).
+  Where an account lands after auth is one function: `utils/postAuthHome.ts`.
   `stories/Stories.tsx` (the wall of covers at `sites/:siteId/stories`; `/blog` redirects here),
   `editor/StoryEditor.tsx` + `editor/BlockEditor.tsx` (blocks, a library picker, a live preview
   iframe fed by `POST /stories/preview`), `settings/MagazineSettings.tsx`. `storyBlocks.ts` mirrors
   the server's block/layout lists and a server test keeps them equal.
+  A story page in one of our frames always goes through `reader/BookFrame.tsx` (preview, "View as a
+  reader"): the frames are `sandbox="allow-same-origin"` with no scripts, and Safari runs nothing we
+  attach inside them, so the arrows, page count and keys are outside and `reader/book.ts` drives the
+  pages (see the Cappe server CLAUDE.md, magazines). Don't add listeners to a frame's document.
 
 ## Backend pairing
 

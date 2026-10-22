@@ -29,7 +29,10 @@ from .story_render import cover_html, render_blocks, split_at_paywall
 from .story_schema import cover_block
 from .topics import topic_label
 
-_CSS = (Path(__file__).resolve().parent.parent / "render" / "assets" / "magazine.css").read_text(encoding="utf-8")
+_ASSETS = Path(__file__).resolve().parent.parent / "render" / "assets"
+_CSS = (_ASSETS / "magazine.css").read_text(encoding="utf-8")
+_FOLLOW_JS = (_ASSETS / "follow.js").read_text(encoding="utf-8")
+_BOOK_JS = (_ASSETS / "book.js").read_text(encoding="utf-8")
 
 PAGE_SIZE = 12
 MAX_PAGE = 50
@@ -126,6 +129,20 @@ def _pager(base: str, page: int, has_more: bool) -> str:
     return f'<nav class="mz-pager">{"".join(links)}</nav>' if links else ""
 
 
+def follow_html(mag: dict) -> str:
+    """The reader's "follow by email" box (double opt-in, `routes/public/
+    magazine.py`). Off when the owner turned follows off."""
+    if not mag.get("follow_enabled", True):
+        return ""
+    name = escape(mag.get("name") or "")
+    return (f'<section class="mz-follow" id="mz-follow"><h2 class="mz-follow__title">Follow {name}</h2>'
+            "<p>New stories by email. Leave any time.</p>"
+            '<form class="mz-follow__form"><label class="mz-sr" for="mz-follow-email">Your email</label>'
+            '<input id="mz-follow-email" type="email" required autocomplete="email" placeholder="you@example.com">'
+            '<button type="submit">Follow</button></form>'
+            f'<p class="mz-follow__msg" data-mz-msg role="status"></p></section><script>{_FOLLOW_JS}</script>')
+
+
 def _page(site: dict, nav: list[dict], mag: dict, body: str, *, origin: str, seo: dict, extra_head: str = "") -> str:
     return render_site_html(
         site, {"title": seo.get("title") or mag.get("name"), "slug": "__magazine", "content": {}}, nav,
@@ -144,7 +161,7 @@ def render_front(site: dict, nav: list[dict], mag: dict, *, lead: Optional[dict]
         about = f'<section class="mz-about mz-measure">{render_md(mag["about"])}</section>'
     empty = '<p class="mz-empty">The first stories are on their way.</p>' if not (lead_html or posts) else ""
     body = (_masthead(mag) + _topics_nav(topics) + lead_html + _grid(posts, covers) + empty
-            + _pager(front_path(mag), page, has_more) + about)
+            + _pager(front_path(mag), page, has_more) + about + follow_html(mag))
     url = f"{origin}{front_path(mag)}" + (f"?page={page}" if page > 1 else "")
     lead_img = share_image(covers.get(_key(lead))) if lead else None
     return _page(site, nav, mag, body, origin=origin, seo={
@@ -212,13 +229,12 @@ def render_story(site: dict, nav: list[dict], mag: dict, post: dict, assets: dic
         cards = "".join(card_html(p, more_covers.get(_key(p))) for p in more)
         more_html = (f'<section class="mz-more"><h2 class="mz-more__title">More from {escape(mag.get("name") or "")}'
                      f'</h2><div class="mz-grid">{cards}</div></section>')
-    body = (
-        _masthead(mag, small=True)
-        + f'<article class="mz-story mz-layout-{escape(post.get("layout") or "standard")}">'
+    article = (
+        f'<article class="mz-story mz-layout-{escape(post.get("layout") or "standard")}">'
         + cover_html(post, cover, cover_asset, byline_html=_meta(post))
         + f'<div class="mz-story__body">{render_blocks(free, assets)}</div>{paywall}{topic_link}</article>'
-        + more_html
     )
+    body = _masthead(mag, small=True) + book_html(article) + follow_html(mag) + more_html
     url = f"{origin}{story_path(post['slug'])}"
     image = share_image(cover_asset)
     extra = article_ld(post, mag, url=url, image=image)
@@ -231,6 +247,30 @@ def render_story(site: dict, nav: list[dict], mag: dict, post: dict, assets: dic
         "title": f"{post.get('title')} — {mag.get('name')}", "description": post.get("excerpt") or "",
         "image": image, "type": "article", "url": url,
     })
+
+
+def book_html(article: str) -> str:
+    """The story as pages turned left and right: a matte cover, then glossy
+    pages, lying on a dark mat. The words flow from page to page in columns of
+    the page's height (a two-page spread from 960 px, one page on a phone);
+    `render/assets/book.js` turns them with the arrows, the keys or a swipe,
+    counts the pages and marks the spread showing (`data-mz-at`), which takes
+    the gloss off the cover. Without it the pages still scroll sideways.
+    `.mz-gloss` is the light on the paper: it stays put while pages move.
+    `.mz-end` is placed by the script so the pages end on a whole spread (a
+    browser never counts the space after the last column, so the last spread
+    could not be turned to)."""
+    return (
+        '<div class="mz-reader" data-mz-book>'
+        '<button type="button" class="mz-turn mz-turn--prev" data-mz-prev aria-label="Previous page" hidden>&#8249;</button>'
+        '<div class="mz-spread">'
+        '<div class="mz-book" tabindex="0" role="region" aria-label="The story. Use the left and right arrow keys to turn pages.">'
+        f'<div class="mz-pages">{article}<i class="mz-end" aria-hidden="true"></i></div></div>'
+        '<div class="mz-gloss" aria-hidden="true"></div></div>'
+        '<button type="button" class="mz-turn mz-turn--next" data-mz-next aria-label="Next page" hidden>&#8250;</button>'
+        '<p class="mz-folio" data-mz-folio aria-live="polite"></p>'
+        f"</div><script>{_BOOK_JS}</script>"
+    )
 
 
 def _cdata(html: str) -> str:

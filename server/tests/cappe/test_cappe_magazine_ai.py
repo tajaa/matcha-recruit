@@ -313,7 +313,7 @@ def test_gather_reads_the_story_and_its_pictures():
     assert m.pictures == []  # headlines don't need the pictures
     unsaved = {"blocks": [{"type": "text", "md": "A new first line."}]}
     m = run(assist.gather(QueryConn(), SITE_ID, POST, action="tighten", block=0, content=unsaved, title="New"))
-    assert m.content == {"blocks": [{"type": "text", "md": "A new first line.", "dropcap": False, "columns": 1}]}
+    assert m.content == {"blocks": [{"type": "text", "md": "A new first line.", "dropcap": False, "columns": 1, "variant": "body", "align": "left"}]}
     assert m.title == "New"
 
 

@@ -317,6 +317,37 @@ What is built so far:
 - **A paid story's words are never in the server-rendered page, the cache, the feed or the public
   JSON** (`story_render.split_at_paywall`; `routes/public/blog.py` nulls `body`/`content`). Writing
   `access='paid'` is refused until reader subscriptions ship (PR 6).
+- **Text and photos carry their design in the block** (`story_schema`): text has `variant`
+  (body/lede/small/statement), `align`, `columns` 1–3; a photo has `border`, `shape`
+  (rect/rounded/circle/arch), `filter` (none/bw/sepia), `crop` ({x,y,w,h} percent, at least 5%, a whole
+  picture is `null`) and up to 8 `overlays` (words centred on an x/y point, size, tone, box, align).
+  `story_render.photo_html` draws a crop by scaling the picture inside a frame of the crop's aspect, and a
+  crop, circle or arch adds "(cropped)" to a CC BY/BY-SA credit. Overlay words are escaped, count as story
+  text, and go under the picture in an issue email (email can't lay them over it). A circle ignores the crop.
+- **A story page is a book turned left and right** (`pages.book_html`, `render/assets/book.js`, the book
+  section of `magazine.css`): the article flows through CSS columns of the page's height inside a
+  horizontally scrolling `.mz-book` (one page on a phone, a two-page spread from 960 px). **A matte cover and
+  glossy pages**: the first spread (the cover sheet) gets a grain and softer photos (`.mz-pages::before`,
+  which scrolls away with it); later spreads are bright coated paper with a sheen (`.mz-gloss`, fixed over
+  the spread, off while `data-mz-at="0"`), a gutter shadow and stacked page edges (`.mz-spread`). A spread
+  is the book's width: the script turns by `clientWidth` (arrows, ←/→/Page keys; a swipe past `FLICK` of a
+  spread turns, short of it springs back). **Browsers never count the space after the last column**, so the
+  script measures the story's column pieces (`getClientRects`, never by changing layout) and places
+  `.mz-end` to end the pages on a whole spread; without it the last page could not be reached. The cover is
+  a flex column of one page's height (the photo fills what the words leave, so every cover is cropped and
+  credited so). In the book, text runs in one column (nested columns break across pages in Safari) and pull
+  quotes are capped, smaller past `story_render.LONG_QUOTE` characters. Each figure carries `--mz-ar` so a
+  picture fits the page height. The front, topic pages, the feed and issue emails are not paged.
+- **Our script-less frames turn the pages from outside** (`client/src/cappe/magazine/reader/BookFrame.tsx`
+  over `book.ts`: the editor preview, "View as a reader", a reader's dashboard). **Safari never calls a
+  listener the parent adds inside a `sandbox="allow-same-origin"` frame without `allow-scripts`**, so
+  nothing listens in the frame: the arrows, page count and keys are the parent's, `book.ts` polls the
+  pages' scroll (`POLL_MS`) to settle swipes, and a link in the page is rewritten to `about:blank#mz-link=…`
+  so following it fires the frame's `load`, which the parent reads (`followedLink`) and puts the page back.
+- **The story editor keeps one undoable document** (`editor/history.ts`: headline fields + blocks; edits
+  within 1 s fold into one step, structural edits are their own), ⌘Z/⇧⌘Z/⌘S, insert-anywhere, duplicate,
+  drag to reorder, a Markdown toolbar (`editor/MarkdownField.tsx`, `editor/markdown.ts`) and the shared
+  `useUnsavedGuard`.
 - **Rich text is constrained Markdown** (`richtext.render_md`: `<` escaped before Markdown, then our
   own `html.parser` allowlist of p/em/strong/a/h2/h3/lists/blockquote — not bleach, which several
   test modules stub; h1→h2; links http(s)/mailto with `rel="nofollow ugc noopener"`). Credits come
@@ -378,6 +409,35 @@ What is built so far:
   proposed draft goes through `normalize_story`, and a picture id the model wasn't given is dropped
   (`_scrub`). 5 a day without the `magazine` feature, 60 with; a request the writer has to fix (422)
   spends none.
+- **Writers are an account type** (`account_type='writer'`, `cappemag04`): sign up at
+  `/cappe/magazines/signup`, then `POST /magazine/sites` makes their one magazine-only site
+  (`source_type='magazine'`, `front_at_root`, a draft About page) at EXACTLY the handle chosen
+  (`services/magazine/writers.py`: 3–30 lowercase letters/digits/single hyphens, not a
+  `RESERVED_SUBDOMAINS` label; taken is 409, never a "-2"), under the same account lock and site limit
+  as any site. Business accounts get a magazine by turning it on for their site instead (403 here).
+- **The Writer plan is offered only to writers** (`catalog.plan_offered`: `features.audience='writer'`
+  keeps it off everyone else's lists and checkout; a writer sees Writer, Free and Business). $9/month,
+  `can_sell=false`, one site, `magazine`. Its Stripe Price needs `server/scripts/seed_cappe_plans.py`
+  after the migration; until then a writer checkout is 503. `GET /public/pricing?for=writer` is the
+  magazines landing page's lineup.
+- **A magazine site publishes with a published story on a plan with `magazine`**
+  (`readiness._magazine_readiness`; the publish route answers a missing plan with 402
+  `plan_required` naming the Writer plan first). It is never sent for business-listing inference.
+- **Following is double opt-in** (`POST /public/sites/{slug}/follow`, `routes/public/magazine.py`): a
+  `pending_confirmation` row with `source='follow'`, confirmed by the existing confirmation worker and
+  page (worded as the reader's own ask). It never touches a `subscribed` or `bounced` row, the answer is
+  always the same 202, and an address gets at most three confirmation emails a day per magazine.
+- **An issue is a campaign** (`cappe_campaigns.kind='issue'`, `routes/magazine_issues.py`): a published
+  story emailed to followers from our template (`services/magazine/issue_email.py`: tables and inline
+  styles, the 1200 px JPEG for pictures, credits from the library row, "AI illustration" for AI). A paid
+  story only ever sends its opening. A story goes out once. Newsletters and issues share one send budget
+  (`services/campaigns.py`: `SENDS_PER_DAY` and `send_cap_problem`'s 5,000 recipients a day). The send
+  worker gives each reader their own links: a page on the magazine's address
+  (`GET /unsubscribe/{token}` in `routes/render.py` changes nothing; its button POSTs) and the RFC 8058
+  one-click address in `List-Unsubscribe` + `List-Unsubscribe-Post`, sent in the magazine's name with
+  the writer as Reply-To. Those headers go out on the Gmail path only
+  (`EmailService.send_email_with_fallback(extra_headers=)`); MailerSend drops them, so the body always
+  carries the link too. Unsubscribing works whatever the site's status.
 
 ## Social growth (2026-10, `services/social/`, migrations `cappesocial01`–`03`)
 

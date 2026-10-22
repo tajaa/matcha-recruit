@@ -61,11 +61,11 @@ type CappeTotals = {
 }
 
 type CappeListResponse = { accounts: CappeAccount[]; totals: CappeTotals }
-type PlanFilter = 'all' | 'free' | 'creator' | 'business' | 'hosting' | 'pro'
+type PlanFilter = 'all' | 'free' | 'creator' | 'writer' | 'business' | 'hosting' | 'pro'
 type View = 'websites' | 'brands' | 'creators' | 'grants'
 
 const PLAN_LABEL: Record<Exclude<PlanFilter, 'all'>, string> = {
-  free: 'Free', creator: 'Creator', business: 'Business', hosting: 'Hosting', pro: 'Pro',
+  free: 'Free', creator: 'Creator', writer: 'Writer', business: 'Business', hosting: 'Hosting', pro: 'Pro',
 }
 
 const PLAN_BADGE_CLASS: Record<string, string> = {
@@ -396,7 +396,7 @@ export default function Cappe() {
             <Input label="" placeholder="Search email, name or site…" value={search} onChange={(event) => setSearch(event.target.value)} className="max-w-xs" />
             <AdminTabBar className="ml-auto">
               <span className="mr-2 text-[10px] uppercase tracking-wider text-zinc-500">Plan</span>
-              {(['all', 'free', 'creator', 'business', 'hosting', 'pro'] as const).map((item) => (
+              {(['all', 'free', 'creator', 'writer', 'business', 'hosting', 'pro'] as const).map((item) => (
                 <AdminTab key={item} onClick={() => setPlan(item)}  active={plan === item}>
                   {item === 'all' ? 'All' : PLAN_LABEL[item]}
                 </AdminTab>
@@ -414,7 +414,7 @@ export default function Cappe() {
                     <Fragment key={account.id}>
                       <tr className="cursor-pointer text-zinc-300 hover:bg-zinc-900/40" onClick={() => account.site_count > 0 && toggle(account.id)}>
                         <td ><div className="flex items-center gap-2">{account.site_count > 0 ? isOpen ? <ChevronDown className="h-4 w-4 shrink-0 text-zinc-500" /> : <ChevronRight className="h-4 w-4 shrink-0 text-zinc-500" /> : <span className="h-4 w-4 shrink-0" />}<div><p className="font-medium text-zinc-100">{account.name || account.email}</p>{account.name && <p className="text-xs text-zinc-500">{account.email}</p>}</div></div></td>
-                        <td ><span className={`inline-block rounded border px-1.5 py-0.5 text-[10px] ${account.account_type === 'personal' ? 'border-sky-500/40 bg-sky-500/10 text-sky-300' : 'border-amber-500/40 bg-amber-500/10 text-amber-300'}`}>{account.account_type === 'personal' ? 'Solo' : 'Business'}</span></td>
+                        <td ><span className={`inline-block rounded border px-1.5 py-0.5 text-[10px] ${account.account_type === 'personal' ? 'border-sky-500/40 bg-sky-500/10 text-sky-300' : account.account_type === 'writer' ? 'border-violet-500/40 bg-violet-500/10 text-violet-300' : 'border-amber-500/40 bg-amber-500/10 text-amber-300'}`}>{account.account_type === 'personal' ? 'Solo' : account.account_type === 'writer' ? 'Writer' : 'Business'}</span></td>
                         <td ><PlanCell account={account} /></td><td ><StatusBadge status={account.status} /></td>
                         <td className="text-right tabular-nums">{account.site_count}{account.published_count > 0 && <span className="text-xs text-emerald-400"> · {account.published_count} live</span>}</td>
                         <td className="text-right tabular-nums">{account.order_count}</td><td className="text-right tabular-nums">{account.revenue_cents > 0 ? money(account.revenue_cents) : '—'}</td><td className="text-zinc-400">{fmtDate(account.created_at)}</td>

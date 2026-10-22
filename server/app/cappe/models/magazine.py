@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Any, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 
 MastheadStyle = Literal["classic", "literary", "modern", "elegant", "display"]
 
@@ -169,6 +169,52 @@ class CappeStoryAssist(BaseModel):
     draft: Optional[dict[str, Any]] = None
 
 
+# A writer's handle is their magazine's address: <handle>.gummfit.com.
+HANDLE_PATTERN = r"^[a-z0-9](?:[a-z0-9-]{1,28}[a-z0-9])$"
+
+
+class CappeHandleCheck(BaseModel):
+    handle: str
+    available: bool
+    reason: Optional[str] = None
+
+
+class CappeMagazineSiteCreate(BaseModel):
+    """A writer's magazine: a magazine-only site at <handle>.gummfit.com."""
+    name: str = Field(min_length=1, max_length=120)
+    handle: str = Field(min_length=3, max_length=30)
+    tagline: Optional[str] = Field(default=None, max_length=200)
+    topics: list[str] = Field(default_factory=list, max_length=3)
+    masthead_style: MastheadStyle = "classic"
+    accent: Optional[str] = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
+
+
+class CappeFollowRequest(BaseModel):
+    """A reader following a magazine by email (double opt-in)."""
+    email: EmailStr
+    name: Optional[str] = Field(default=None, max_length=255)
+
+
+class CappeIssueCreate(BaseModel):
+    """Send a published story to the magazine's followers. `include_body`:
+    the whole story (free stories only) instead of its opening."""
+    subject: Optional[str] = Field(default=None, max_length=200)
+    include_body: bool = False
+
+
+class CappeIssue(BaseModel):
+    id: UUID
+    story_id: Optional[UUID] = None
+    story_title: Optional[str] = None
+    subject: str
+    status: str
+    include_body: bool = False
+    recipient_count: int = 0
+    failed_count: int = 0
+    sent_at: Optional[datetime] = None
+    created_at: datetime
+
+
 __all__ = [
     "MastheadStyle",
     "CappeMagazine",
@@ -189,4 +235,10 @@ __all__ = [
     "CappeIllustrateRequest",
     "CappeStoryAssistRequest",
     "CappeStoryAssist",
+    "HANDLE_PATTERN",
+    "CappeHandleCheck",
+    "CappeMagazineSiteCreate",
+    "CappeFollowRequest",
+    "CappeIssueCreate",
+    "CappeIssue",
 ]

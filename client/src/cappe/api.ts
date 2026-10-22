@@ -352,8 +352,8 @@ export function fetchCappeTemplateCategories() {
 // --- Plan pricing (public) ----------------------------------------------------
 // The landing page quotes live prices from the same catalog checkout charges.
 
-export function fetchCappePricing() {
-  return cappePublicGet<CappePublicPricing>('/public/pricing')
+export function fetchCappePricing(forAudience?: 'writer') {
+  return cappePublicGet<CappePublicPricing>(`/public/pricing${forAudience ? `?for=${forAudience}` : ''}`)
 }
 
 // --- Creator marketplace directory (public) -----------------------------------

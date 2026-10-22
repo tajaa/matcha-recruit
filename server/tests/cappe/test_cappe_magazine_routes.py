@@ -404,7 +404,7 @@ def test_a_plain_post_becomes_a_story_keeping_its_words(monkeypatch, invalidated
         res = client.put(f"/sites/{SITE}/posts/{POST}", json={"format": "blocks"})
     assert res.status_code == 200, res.text
     content = json.loads(conn.args_for("UPDATE cappe_posts")[conn.sql_for("fetchrow")[-1].index("content") and 1])
-    assert content["blocks"][0] == {"type": "text", "md": "Old *words*.", "dropcap": True, "columns": 1}
+    assert content["blocks"][0] == {"type": "text", "md": "Old *words*.", "dropcap": True, "columns": 1, "variant": "body", "align": "left"}
     with _blog_client(monkeypatch, _owner_conn(fetchrow={"FOR UPDATE": story_row()})) as client:
         assert client.put(f"/sites/{SITE}/posts/{POST}", json={"format": "markdown"}).status_code == 422
 

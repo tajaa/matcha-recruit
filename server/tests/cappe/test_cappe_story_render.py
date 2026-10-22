@@ -143,7 +143,8 @@ def test_the_cover_spread_styles():
     assert "mz-cover--overlay mz-tone--dark" in overlay and "object-position:30% 70%" in overlay
     assert "Jo / CC BY 2.0 (cropped)" in overlay and 'fetchpriority="high"' in overlay
     stacked = story_render.cover_html(p, {"style": "stacked"}, a, byline_html="")
-    assert "(cropped)" not in stacked and "object-position" not in stacked
+    # In the book every cover is cut to fit its page, so a stacked one is cropped too.
+    assert "Jo / CC BY 2.0 (cropped)" in stacked and "object-position:50% 50%" in stacked
     assert '<p class="mz-kicker">Dispatch</p>' in stacked and "<h1 class=\"mz-headline\">The harbour at dawn</h1>" in stacked
     assert "mz-cover--plain" in story_render.cover_html(p, None, None, byline_html="")
 
@@ -172,6 +173,48 @@ def test_a_story_page_has_the_magazines_fonts_article_tags_and_structured_data()
     assert "Photo: Ana Ruiz" in html and "<strong>boats</strong>" in html
     assert 'href="/stories/two"' in html and "More from Salt &amp; Light" in html
     assert "4 min read" in html and "By Ana Ruiz" in html
+
+
+def test_a_story_reads_as_pages_turned_left_and_right():
+    p = post(content={"blocks": [{"type": "text", "md": "Words."}]})
+    html = pages.render_story(SITE, NAV, MAG, p, {}, more=[post(slug="two", title="Two")], more_covers={}, origin="https://b.test")
+    reader = html[html.index('<div class="mz-reader" data-mz-book>'):]
+    book = reader[:reader.index("</script>")]
+    # The article sits in the pages; the arrows, the page count and the script
+    # that turns them come with it. "More from" stays below the book.
+    assert book.index('data-mz-prev') < book.index('<div class="mz-book" tabindex="0" role="region"') \
+        < book.index('<div class="mz-pages"><article class="mz-story') < book.index("data-mz-next") < book.index("data-mz-folio")
+    assert "Words." in book and "ArrowRight" in book and "More from" not in book
+    assert 'aria-label="Previous page" hidden' in book and 'aria-label="Next page" hidden' in book
+    # The book's look ships in the page's stylesheet.
+    assert ".mz-pages{" in html and "column-fill:auto" in html
+    # A matte cover and glossy pages: the light lies over the spread, outside
+    # the pages that move; the pages end on a marker the script places on a
+    # whole spread, and the script marks the spread showing.
+    assert '<div class="mz-spread"><div class="mz-book"' in book
+    assert '<i class="mz-end" aria-hidden="true"></i></div></div><div class="mz-gloss" aria-hidden="true"></div></div>' in book
+    assert '.mz-reader[data-mz-at="0"] .mz-gloss{opacity:0}' in html and ".mz-pages::before{" in html
+    assert "data-mz-at" in book and "getClientRects" in book and "end.style.left" in book
+
+
+def test_a_long_pull_quote_is_set_to_fit_a_page():
+    short = story_render.render_block({"type": "quote", "text": "The work had its own clock."}, {})
+    long = story_render.render_block({"type": "quote", "text": "x" * (story_render.LONG_QUOTE + 1)}, {})
+    assert 'class="mz-pull mz-pull--big"' in short and "mz-pull--long" in long
+
+
+def test_a_picture_tells_the_page_its_shape():
+    a = asset(width=2000, height=1000)
+    html = story_render.photo_html({"type": "photo", "asset_id": str(a["id"]), "size": "column"}, a)
+    assert 'style="--mz-ar:2.0000"' in html
+    cropped = story_render.photo_html({"type": "photo", "asset_id": str(a["id"]), "size": "column",
+                                      "crop": {"x": 0, "y": 0, "w": 50, "h": 100}}, a)
+    assert 'style="--mz-ar:1.0000"' in cropped
+    circle = story_render.photo_html({"type": "photo", "asset_id": str(a["id"]), "size": "column", "shape": "circle"}, a)
+    assert 'style="--mz-ar:1.0000"' in circle
+    # Without its size the picture has no ratio to give; the page falls back.
+    unsized = story_render.photo_html({"type": "photo", "asset_id": str(a["id"]), "size": "column"}, asset(width=None, height=None))
+    assert "--mz-ar" not in unsized and "<img" in unsized
 
 
 def test_a_dispatch_is_a_news_article_and_a_paid_story_hides_its_paid_part():

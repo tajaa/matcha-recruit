@@ -170,7 +170,7 @@ def test_confirmation_worker_claims_each_row_before_sending(monkeypatch):
     ])
     sent = []
 
-    async def _send(email, name, site_name, url):
+    async def _send(email, name, site_name, url, **kw):
         sent.append((email, url))
         return True
 
@@ -194,7 +194,7 @@ def test_failed_confirmation_releases_its_claim_for_retry(monkeypatch, outcome):
         None,
     ])
 
-    async def _send(email, name, site_name, url):
+    async def _send(email, name, site_name, url, **kw):
         if outcome == "raises":
             raise RuntimeError("provider down")
         return False
@@ -277,7 +277,10 @@ def test_confirm_page_renders_a_post_form_when_asked():
 def test_daily_recipient_cap_charges_in_flight_campaigns():
     """recipient_count is 0 until the worker finalizes a campaign, so three
     back-to-back sends (3 x 5k) all cleared a 5k cap."""
-    src = inspect.getsource(news_mod.send_campaign)
+    from app.cappe.services import campaigns as campaigns_mod
+
+    assert "send_cap_problem(conn, account.id, site_id)" in inspect.getsource(news_mod.send_campaign)
+    src = inspect.getsource(campaigns_mod.send_cap_problem)  # shared with magazine issues
     assert "c.status = 'sending'" in src
     assert "sub.status = 'subscribed'" in src
 

@@ -5,10 +5,20 @@ import Stories from './stories/Stories'
 import StoryEditor from './editor/StoryEditor'
 import MagazineSettings from './settings/MagazineSettings'
 import ReaderView from './reader/ReaderView'
+import { LINK_PREFIX } from './reader/book'
 import { assetIdsIn, moveBlock, newBlock } from './editor/blocks'
 import type { CappeAsset, CappeMagazine, CappePost, CappeStoryOptions, StoryBlock } from '../types'
 
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn(), postHtml: vi.fn(), upload: vi.fn(), patch: vi.fn() }))
+const followed = vi.hoisted(() => ({ value: null as string | null }))
+vi.mock('./reader/book', async (importOriginal) => {
+  const real = await importOriginal<typeof import('./reader/book')>()
+  return { ...real, followedLink: (w: Window | null | undefined) => {
+    const v = followed.value
+    followed.value = null
+    return v ?? real.followedLink(w)
+  } }
+})
 vi.mock('../api', () => ({ cappeApi: api, cappeApiBase: '/api/cappe' }))
 
 const ASSET: CappeAsset = {
@@ -290,7 +300,10 @@ describe('ReaderView', () => {
     // jsdom doesn't load srcDoc, so the page's link is written into the frame here.
     frame.contentDocument!.body.innerHTML = '<a href="/stories/low-tide">Low tide</a>'
     fireEvent.load(frame)
-    fireEvent.click(frame.contentDocument!.querySelector('a')!)
+    expect(frame.contentDocument!.querySelector('a')!.getAttribute('href')).toBe(`${LINK_PREFIX}%2Fstories%2Flow-tide`)
+    // Following it leaves the frame on that blank page; jsdom can't, so say so.
+    followed.value = '/stories/low-tide'
+    fireEvent.load(frame)
     await waitFor(() => expect(api.postHtml).toHaveBeenLastCalledWith('/sites/s-1/magazine/view', { slug: 'low-tide' }))
   })
 })

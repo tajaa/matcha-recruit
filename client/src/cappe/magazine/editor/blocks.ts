@@ -1,4 +1,4 @@
-import type { StoryBlock } from '../../types'
+import type { PhotoCrop, StoryBlock } from '../../types'
 
 export const BLOCK_LABELS: Record<StoryBlock['type'], string> = {
   cover: 'Cover', text: 'Text', photo: 'Photo', photos: 'Photo group', quote: 'Pull quote',
@@ -9,8 +9,8 @@ export const BLOCK_LABELS: Record<StoryBlock['type'], string> = {
 export function newBlock(type: StoryBlock['type']): StoryBlock {
   switch (type) {
     case 'cover': return { type, asset_id: null, style: 'stacked', tone: 'light', focal: { x: 50, y: 50 } }
-    case 'text': return { type, md: '', dropcap: false, columns: 1 }
-    case 'photo': return { type, asset_id: null, caption: '', size: 'column' }
+    case 'text': return { type, md: '', dropcap: false, columns: 1, variant: 'body', align: 'left' }
+    case 'photo': return { type, asset_id: null, caption: '', size: 'column', border: 'none', shape: 'rect', filter: 'none', crop: null, overlays: [] }
     case 'photos': return { type, layout: 'pair', items: [{ asset_id: null, caption: '' }, { asset_id: null, caption: '' }] }
     case 'quote': return { type, text: '', attribution: '', style: 'big' }
     case 'sidebar': return { type, title: '', md: '' }
@@ -40,6 +40,25 @@ export function moveBlock(blocks: StoryBlock[], from: number, to: number): Story
   return next
 }
 
+/** `block` added at `at`. A cover only ever goes first (and there is only
+ *  one); nothing else goes in front of a cover. */
+export function insertBlock(blocks: StoryBlock[], at: number, block: StoryBlock): StoryBlock[] {
+  if (block.type === 'cover') return blocks[0]?.type === 'cover' ? blocks : [block, ...blocks]
+  if (block.type === 'paywall' && blocks.some((b) => b.type === 'paywall')) return blocks
+  const i = Math.max(blocks[0]?.type === 'cover' ? 1 : 0, Math.min(blocks.length, at))
+  return [...blocks.slice(0, i), block, ...blocks.slice(i)]
+}
+
+/** A copy of block `index` right after it. The cover and the paywall are one
+ *  of a kind, so they aren't copied. */
+export function duplicateBlock(blocks: StoryBlock[], index: number): StoryBlock[] {
+  const b = blocks[index]
+  if (!b || !canDuplicate(b)) return blocks
+  return [...blocks.slice(0, index + 1), structuredClone(b), ...blocks.slice(index + 1)]
+}
+
+export const canDuplicate = (b: StoryBlock) => b.type !== 'cover' && b.type !== 'paywall'
+
 /** The blocks with `caption` under every use of the picture `assetId`. */
 export function withCaption(blocks: StoryBlock[], assetId: string, caption: string): StoryBlock[] {
   return blocks.map((b) => {
@@ -60,4 +79,12 @@ export function withText(blocks: StoryBlock[], index: number, md: string): Story
 export function textPreview(md: string, words = 8): string {
   const plain = md.replace(/[*_`#>[\]()]/g, '').split(/\s+/).filter(Boolean)
   return plain.slice(0, words).join(' ') + (plain.length > words ? '…' : '')
+}
+
+/** The crop between two dragged points (percent), or null when it's under 5%
+ *  either way — the server's smallest crop (story_schema.MIN_CROP). */
+export function cropBetween(a: { x: number; y: number }, b: { x: number; y: number }): PhotoCrop | null {
+  const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y)
+  const w = Math.abs(a.x - b.x), h = Math.abs(a.y - b.y)
+  return w < 5 || h < 5 ? null : { x, y, w, h }
 }

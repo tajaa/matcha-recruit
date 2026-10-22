@@ -19,6 +19,7 @@ from . import (
     creators,
     directory,
     forms,
+    magazine,
     messages,
     newsletter,
     pricing,
@@ -55,3 +56,4 @@ router.include_router(blog.router)
 # and the comments/messages webhook (HMAC-verified, handed to the worker).
 router.include_router(social_meta.router)
 router.include_router(stock.router)
+router.include_router(magazine.router)

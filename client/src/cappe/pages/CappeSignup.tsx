@@ -4,11 +4,11 @@ import { Loader2, Store, User, Sparkles, MailCheck, Gift } from 'lucide-react'
 import { CappeApiError, cappePublicGet, cappePublicPost, setCappeTokens } from '../api'
 import { invalidateCappeMeCache } from '../hooks/useCappeMe'
 import { creatorPaths } from '../creators/creatorPaths'
+import { writerPaths } from '../magazine/writers/writerPaths'
+import { postAuthHome } from '../utils/postAuthHome'
 import ResendVerification from '../components/ResendVerification'
 import { billingStartPath } from './CappeBilling/paths'
 import type { CappeAccountType, CappeSignupGrantInfo, CappeSignupResponse } from '../types'
-
-const postAuthHome = (t?: string) => (t === 'creator' ? creatorPaths.home : '/cappe/sites')
 
 const ACCOUNT_TYPES: {
   value: CappeAccountType
@@ -37,11 +37,15 @@ const ACCOUNT_TYPES: {
 ]
 
 // Cappe account signup — the functional entry at /cappe/website-setup.
-export default function CappeSignup({ creatorOnly = false, brandOnly = false }: { creatorOnly?: boolean; brandOnly?: boolean }) {
+export default function CappeSignup({ creatorOnly = false, brandOnly = false, writerOnly = false }: {
+  creatorOnly?: boolean; brandOnly?: boolean
+  /** Gummfit Magazines: a writer account, whose next step is naming their magazine. */
+  writerOnly?: boolean
+}) {
   const navigate = useNavigate()
   const [params] = useSearchParams()
   const [accountType, setAccountType] = useState<CappeAccountType>(
-    creatorOnly || params.get('type') === 'creator' ? 'creator' : 'business',
+    writerOnly ? 'writer' : creatorOnly || params.get('type') === 'creator' ? 'creator' : 'business',
   )
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
@@ -61,7 +65,8 @@ export default function CappeSignup({ creatorOnly = false, brandOnly = false }: 
   // a passing reason), and the server decides: a promised plan is never
   // dropped because the page was quick or the network slow.
   const [grantDead, setGrantDead] = useState<string | null>(null)
-  const plan = !grantToken && !creatorOnly && !brandOnly && /^[a-z0-9_]{1,40}$/.test(params.get('plan') ?? '') ? params.get('plan') : null
+  // A writer names their magazine first and picks a plan when it goes live.
+  const plan = !grantToken && !creatorOnly && !brandOnly && !writerOnly && /^[a-z0-9_]{1,40}$/.test(params.get('plan') ?? '') ? params.get('plan') : null
   const interval = params.get('interval') === 'year' ? 'year' : 'month'
 
   useEffect(() => {
@@ -102,6 +107,7 @@ export default function CappeSignup({ creatorOnly = false, brandOnly = false }: 
         navigate(
           creatorOnly ? creatorPaths.home
             : brandOnly ? creatorPaths.brandHome
+            : writerOnly ? writerPaths.home
               : res.intended_plan && res.account?.account_type !== 'creator'
                 ? billingStartPath(res.intended_plan, res.intended_interval)
                 : postAuthHome(res.account?.account_type),
@@ -149,7 +155,7 @@ export default function CappeSignup({ creatorOnly = false, brandOnly = false }: 
               Wrong address? Go back and fix it
             </button>
           </div>
-          <Link to={creatorOnly ? creatorPaths.login : brandOnly ? creatorPaths.brandLogin : '/cappe/login'} className="mt-6 inline-block text-sm font-medium text-lime-400 hover:text-lime-300">
+          <Link to={creatorOnly ? creatorPaths.login : brandOnly ? creatorPaths.brandLogin : writerOnly ? writerPaths.login : '/cappe/login'} className="mt-6 inline-block text-sm font-medium text-lime-400 hover:text-lime-300">
             Back to sign in
           </Link>
         </div>
@@ -165,15 +171,15 @@ export default function CappeSignup({ creatorOnly = false, brandOnly = false }: 
             G
           </span>
           <h1 className="text-2xl font-semibold tracking-tight text-zinc-50">
-            Create your {creatorOnly ? 'Gummfit Creators' : brandOnly ? 'brand collab' : 'Gummfit'} account
+            Create your {creatorOnly ? 'Gummfit Creators' : brandOnly ? 'brand collab' : writerOnly ? 'Gummfit Magazines' : 'Gummfit'} account
           </h1>
           <p className="mt-1 text-sm text-zinc-400">
-            {creatorOnly ? 'Build your creator profile and connect with brands.' : brandOnly ? 'Find Gummfit Creators and manage collaborations.' : 'Build and launch your website in minutes.'}
+            {creatorOnly ? 'Build your creator profile and connect with brands.' : brandOnly ? 'Find Gummfit Creators and manage collaborations.' : writerOnly ? 'Publish your own photo magazine, at your own address.' : 'Build and launch your website in minutes.'}
           </p>
         </div>
 
         <form onSubmit={onSubmit} className="space-y-4 rounded-2xl border border-zinc-800 bg-zinc-900 p-6 shadow-xl shadow-black/40">
-          {!creatorOnly && !brandOnly && <div>
+          {!creatorOnly && !brandOnly && !writerOnly && <div>
             <label className="mb-2 block text-sm font-medium text-zinc-300">I'm building a site for…</label>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
               {ACCOUNT_TYPES.map(({ value, icon: Icon, title, blurb }) => {

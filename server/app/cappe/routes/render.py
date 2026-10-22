@@ -857,6 +857,67 @@ _ORDER_PAGE_HEADERS = {
 }
 
 
+def _unsubscribe_page(heading: str, message: str, *, status_code: int = 200,
+                      action: str | None = None) -> HTMLResponse:
+    """A plain page for a link clicked out of an email: no theme, no script."""
+    form = (f'<form method="post" action="{escape(action, quote=True)}"><button type="submit" '
+            'style="margin-top:1rem;padding:.75rem 1.5rem;border:0;border-radius:.5rem;background:#111;'
+            'color:#fff;font:600 16px system-ui,sans-serif;cursor:pointer">Stop these emails</button></form>'
+            if action else "")
+    return HTMLResponse(
+        '<!doctype html><html lang="en"><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        f"<title>{escape(heading)}</title></head>"
+        '<body style="margin:0;min-height:100vh;display:grid;place-items:center;background:#fafaf9;'
+        'color:#1c1917;font:16px system-ui,sans-serif"><main style="max-width:32rem;padding:2rem;text-align:center">'
+        f'<h1>{escape(heading)}</h1><p style="color:#57534e;line-height:1.6">{escape(message)}</p>{form}</main>'
+        "</body></html>",
+        status_code=status_code, headers=_ORDER_PAGE_HEADERS,
+    )
+
+
+async def _subscriber_for(request: Request, token: str):
+    async with get_connection() as conn:
+        site = await _resolve_site_any_status(conn, request.headers.get("host"))
+        if site is None or len(token) > 64:
+            return site, None
+        state = await conn.fetchval(
+            "SELECT status FROM cappe_subscribers WHERE site_id = $1 AND unsubscribe_token = $2", site["id"], token,
+        )
+    return site, state
+
+
+@router.get("/unsubscribe/{token}", response_class=HTMLResponse)
+async def unsubscribe_page(token: str, request: Request):
+    """The unsubscribe link in a magazine issue. **Changes nothing**: mail
+    scanners open every link in a message, so leaving is the button's POST.
+    Works whatever the site's status (cappemag04)."""
+    await check_rate_limit(client_ip(request), "cappe_pub_read", 120, 60)
+    site, state = await _subscriber_for(request, token)
+    if site is None or state is None:
+        return _unsubscribe_page("Link not found", "This unsubscribe link isn't valid any more.", status_code=404)
+    if state == "unsubscribed":
+        return _unsubscribe_page("You're unsubscribed", f"You won't get more email from {site['name']}.")
+    return _unsubscribe_page(f"Stop emails from {site['name']}?",
+                             "You'll stop getting its stories by email. You can follow again any time.",
+                             action=request.url.path)
+
+
+@router.post("/unsubscribe/{token}", response_class=HTMLResponse)
+async def unsubscribe(token: str, request: Request):
+    await check_rate_limit(client_ip(request), "cappe_pub_read", 120, 60)
+    site, state = await _subscriber_for(request, token)
+    if site is None or state is None:
+        return _unsubscribe_page("Link not found", "This unsubscribe link isn't valid any more.", status_code=404)
+    async with get_connection() as conn:
+        await conn.execute(
+            "UPDATE cappe_subscribers SET status = 'unsubscribed', unsubscribed_at = NOW(), updated_at = NOW() "
+            "WHERE site_id = $1 AND unsubscribe_token = $2 AND status <> 'unsubscribed'",
+            site["id"], token,
+        )
+    return _unsubscribe_page("You're unsubscribed", f"You won't get more email from {site['name']}.")
+
+
 @router.get("/order/{token}", response_class=HTMLResponse)
 async def order_page(token: str, request: Request):
     """The buyer's order page on the store's own host — see

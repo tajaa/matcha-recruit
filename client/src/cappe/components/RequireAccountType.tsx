@@ -3,6 +3,7 @@ import { Navigate } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { useCappeMe } from '../hooks/useCappeMe'
 import { creatorPaths } from '../creators/creatorPaths'
+import { writerPaths } from '../magazine/writers/writerPaths'
 
 /** Route guard for the creator-marketplace dashboards.
  *
@@ -15,7 +16,7 @@ import { creatorPaths } from '../creators/creatorPaths'
  *  An account that is neither (`personal`) goes to the site list, which has
  *  no account-type guard, so no redirect here can loop. */
 export default function RequireAccountType({ type, children }: {
-  type: 'creator' | 'business'
+  type: 'creator' | 'business' | 'writer'
   children: ReactNode
 }) {
   const { account, loading } = useCappeMe()
@@ -35,8 +36,10 @@ export default function RequireAccountType({ type, children }: {
 
   const home = account.account_type === 'creator'
     ? creatorPaths.home
-    : account.account_type === 'business'
-      ? creatorPaths.brandHome
-      : '/cappe/sites'
+    : account.account_type === 'writer'
+      ? writerPaths.home
+      : account.account_type === 'business'
+        ? creatorPaths.brandHome
+        : '/cappe/sites'
   return <Navigate replace to={home} />
 }

@@ -32,7 +32,7 @@ from ..services.directory import (
     normalize_tags,
     refresh_site_search,
 )
-from ..services.readiness import compute_readiness
+from ..services.readiness import compute_readiness, plan_has_magazine
 from ..services.render import render_site_html
 from ..services.site_templates import clone_structure, get_template, legacy_template_slug, template_theme
 from .render import invalidate_render_cache, tenant_security_headers
@@ -618,6 +618,13 @@ async def publish_site(
     """Mark a site (and its pages) published — gated on the launch checklist."""
     async with get_connection() as conn:
         site = await get_owned_site(conn, site_id, account.id)
+        magazine_site = site["source_type"] == "magazine"
+        if magazine_site and not await plan_has_magazine(conn, account.id):
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail={"code": "plan_required", "plan": "writer",
+                        "message": "Your magazine goes live on the Writer plan ($9 a month)."},
+            )
         # Publish gate: every REQUIRED checklist item must be done first.
         readiness = await compute_readiness(conn, site_id, site)
         if not readiness["ready"]:
@@ -651,7 +658,8 @@ async def publish_site(
         # the Gemini-backed listing inference goes to the background below.
         await refresh_site_search(conn, site_id)
     await invalidate_render_cache(site_id)
-    background.add_task(_infer_listing_after_publish, site_id)
+    if not magazine_site:  # a magazine isn't a business listing (the showcase is its own)
+        background.add_task(_infer_listing_after_publish, site_id)
     return site_row_to_dict(row)
 
 

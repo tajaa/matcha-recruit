@@ -65,6 +65,10 @@ class CappeCampaign(BaseModel):
     recipient_count: int
     created_at: datetime
     updated_at: datetime
+    # `issue`: a magazine story sent to its followers (cappemag04).
+    kind: str = "campaign"
+    story_id: Optional[UUID] = None
+    include_body: bool = False
 
 
 # ===========================================================================
