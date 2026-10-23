@@ -77,6 +77,9 @@ describe('design operations', () => {
     expect(findLayer(d, t.id)).toMatchObject({ font: 'Anton', weight: 400, opacity: 50 })
     expect(findLayer(d, 'a')).toMatchObject({ opacity: 50 })
     expect('font' in findLayer(d, 'a')!).toBe(false)
+    // A face with no italic sets the words upright (the server would anyway).
+    d = patchLayers(patchLayers(d, [t.id], { font: 'Playfair Display', italic: true }), [t.id], { font: 'Anton' })
+    expect(findLayer(d, t.id)).toMatchObject({ font: 'Anton', italic: false })
   })
 
   it('groups siblings where the topmost was, and ungroups them back with its look', () => {
@@ -111,6 +114,19 @@ describe('design operations', () => {
     const spaced = distribute({ layers: [shape('a', 0, 0, 10, 10), shape('b', 15, 0, 10, 10), shape('c', 90, 0, 10, 10)] }, ['a', 'b', 'c'], 'x')
     expect(findLayer(spaced, 'b')!.x).toBe(45)
     expect(distribute(d, ['a', 'b'], 'x')).toBe(d)
+  })
+
+  it('goes by the height the page measured for words that grow with them', () => {
+    const t = { ...newText(null, 'heading'), id: 't', x: 0, y: 0, w: 50, h: 10, autosize: 'height' } as Layer
+    const d: Design = { layers: [t, shape('a', 0, 50, 10, 10)] }
+    const heights = { t: 25 }
+    expect(boxOf(t, heights).h).toBe(25)
+    expect(boxOf(t).h).toBe(10)  // nothing measured yet: what it keeps
+    expect(boxOf({ ...t, autosize: 'none' } as Layer, heights).h).toBe(10)  // a fixed box is its own
+    expect(findLayer(align(d, ['t'], 'bottom', heights), 't')!.y).toBe(75)
+    expect(findLayer(align(d, ['t'], 'middle', heights), 't')!.y).toBe(37.5)
+    const g = group(d, ['t', 'a'], heights)
+    expect(findLayer(g.design, g.id!)).toMatchObject({ y: 0, h: 60 })
   })
 
   it('copies layers with new ids, nudged, above the originals', () => {

@@ -341,8 +341,9 @@ export default function IssueEditor() {
         if (msg.key === 'save') setSaveAsked((n) => n + 1)
         else if (msg.key === 'undo') doc.undo()
         else if (msg.key === 'redo') doc.redo()
-        // Not a story's cover: it is its header (see StoryEditor).
-        else if (t?.kind === 'block' && storyOf(current, t.story)?.blocks[t.block]
+        // Not a story's cover: it is its header (see StoryEditor). The other
+        // keys (copy, group, front…) are the story editor's, not deletes.
+        else if (msg.key === 'delete' && t?.kind === 'block' && storyOf(current, t.story)?.blocks[t.block]
           && storyOf(current, t.story)?.blocks[t.block].type !== 'cover') removeBlock(t.story, t.block)
         return
       }

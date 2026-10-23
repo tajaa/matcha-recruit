@@ -123,6 +123,15 @@ def test_the_limits_an_owner_is_told_about():
         norm(*[{"kind": "text", "rt": doc("x" * 1900)}] * 60)
 
 
+def test_a_list_sent_as_something_else_is_no_list():
+    # A dict or a number where a list goes is taken as none, never a 500.
+    assert design_schema.normalize_design({"layers": {}}) is None
+    assert design_schema.normalize_design({"layers": 5}) is None
+    assert norm({"kind": "group", "children": {"a": 1}}) is None
+    fill = norm({"kind": "shape", "shape": "rect", "fill": {"kind": "linear", "stops": 5}})["layers"][0]["fill"]
+    assert fill["stops"] == []
+
+
 def test_a_designed_page_always_has_its_background():
     page = design_schema.normalize_design(None, page=True)
     assert page == {"layers": [], "background": {"kind": "solid", "color": "#ffffff", "angle": 180, "stops": []}}
@@ -211,6 +220,14 @@ def test_the_page_draws_designs_with_their_credits_and_asks_for_their_faces():
     assert '<section class="mz-page"><div class="mz-page__art" style="--ar:0.8;background:#0e0e0e">' in html
     assert "family=Lora:ital,wght@0,400;0,700&amp;display=swap" in html and "family=Inter:" in html
     assert 'data-mzd' not in html and 'data-mz-f="' not in html  # nothing of the editor's for readers
+
+
+def test_a_picture_laid_on_itself_is_credited_once():
+    # The library row's id is a UUID (asyncpg), the design's a string.
+    from uuid import UUID
+    rows = {k: {**v, "id": UUID(k)} for k, v in ASSETS.items()}
+    blocks = _story({"type": "photo", "asset_id": A, "design": {"layers": [{**PIC, "asset_id": A}]}})["blocks"]
+    assert story_render.render_blocks(blocks, rows).count("Photo: Ana") == 1
 
 
 def test_the_editor_marks_each_layer_and_opens_its_words_exactly():

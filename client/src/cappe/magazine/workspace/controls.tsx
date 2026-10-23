@@ -86,9 +86,14 @@ export function NumberField({ label, short, value, onChange, min = -Infinity, ma
 }) {
   const [text, setText] = useState<string | null>(null)
   const clamp = (v: number) => Math.max(min, Math.min(max, v))
-  const commit = (raw: string) => {
-    const v = evalSum(raw)
-    if (v !== null) onChange(clamp(Number(fmt(v, places))))
+  // Only words typed are applied: a field left as it was changes nothing (no
+  // undo step, no new page).
+  const commit = (raw: string | null) => {
+    const v = raw === null ? null : evalSum(raw)
+    if (v !== null) {
+      const next = clamp(Number(fmt(v, places)))
+      if (mixed || blank || next !== value) onChange(next)
+    }
     setText(null)
   }
   const scrub = (e: React.PointerEvent) => {
@@ -108,9 +113,9 @@ export function NumberField({ label, short, value, onChange, min = -Infinity, ma
       </span>
       <input aria-label={label} value={text ?? (mixed || blank ? '' : fmt(value, places))} placeholder={mixed ? 'Mixed' : blank}
         onChange={(e) => setText(e.target.value)} onFocus={(e) => e.target.select()}
-        onBlur={(e) => commit(e.target.value)}
+        onBlur={() => commit(text)}
         onKeyDown={(e) => {
-          if (e.key === 'Enter') commit((e.target as HTMLInputElement).value)
+          if (e.key === 'Enter') commit(text)
           else if (e.key === 'Escape') { setText(null); (e.target as HTMLInputElement).blur() }
           else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
             e.preventDefault()
@@ -288,20 +293,31 @@ export function PaintField({ value, onChange, accent = '#10b981' }: { value: Pai
     if (kind === 'none' || kind === 'solid') onChange({ ...value, kind, stops: [] })
     else onChange({ ...value, kind, stops: value.stops.length >= 2 ? value.stops : [{ color: value.color, at: 0 }, { color: withAlpha(value.color === 'accent' ? '#000000' : value.color, 0), at: 100 }] })
   }
-  const setStopAt = (i: number, patch: Partial<Stop>) =>
-    onChange({ ...value, stops: value.stops.map((s, j) => (j === i ? { ...s, ...patch } : s)).sort((a, b) => a.at - b.at) })
+  /** The stops in order, the one changed still selected where it lands. */
+  const settle = (stops: Stop[], moved: Stop) => {
+    const sorted = [...stops].sort((a, b) => a.at - b.at)
+    onChange({ ...value, stops: sorted })
+    setStop(sorted.indexOf(moved))
+  }
+  const setStopAt = (i: number, patch: Partial<Stop>) => {
+    const moved = { ...value.stops[i], ...patch }
+    settle(value.stops.map((s, j) => (j === i ? moved : s)), moved)
+  }
   const drag = (i: number) => (e: React.PointerEvent) => {
     e.stopPropagation()
     setStop(i)
     const r = bar.current!.getBoundingClientRect(), el = e.currentTarget as HTMLElement
     el.setPointerCapture(e.pointerId)
+    // The stops as dragged so far: `value` is the fill from before the drag.
+    let stops = value.stops
     const move = (ev: PointerEvent) => {
       const at = Math.round(Math.max(0, Math.min(100, ((ev.clientX - r.left) / r.width) * 100)))
-      onChange({ ...value, stops: value.stops.map((s, j) => (j === i ? { ...s, at } : s)) })
+      stops = stops.map((s, j) => (j === i ? { ...s, at } : s))
+      onChange({ ...value, stops })
     }
     const up = () => {
       el.removeEventListener('pointermove', move); el.removeEventListener('pointerup', up)
-      onChange({ ...value, stops: [...value.stops].sort((a, b) => a.at - b.at) })
+      if (stops !== value.stops) settle(stops, stops[i])
     }
     el.addEventListener('pointermove', move)
     el.addEventListener('pointerup', up)

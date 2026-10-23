@@ -18,7 +18,7 @@ from __future__ import annotations
 from html import escape
 from typing import Optional
 
-from .design_schema import design_words
+from .design_schema import design_asset_ids, design_words
 from .figures import credit_text, share_image
 from .pages import story_blocks, story_path
 from .richtext import md_to_text, render_md
@@ -52,18 +52,32 @@ def _text(md: str) -> str:
     return f'<tr><td style="padding:16px 0 0;font:17px/1.65 {_FONT};color:#1c1917;">{html}</td></tr>'
 
 
+def _under(design: Optional[dict], caption: str = "") -> str:
+    """Email can't lay words over a picture, so they go under it, before its caption."""
+    return " — ".join(p for p in (" · ".join(design_words(design)), caption) if p)
+
+
+def _page(design: Optional[dict], assets: dict[str, dict]) -> str:
+    """A designed page: its pictures, its words under the first; words alone without one."""
+    pictures = [assets[i] for i in dict.fromkeys(design_asset_ids(design)) if i in assets]
+    if pictures:
+        return _picture(pictures[0], caption=_under(design)) + "".join(_picture(p) for p in pictures[1:])
+    words = "".join(f"{_P}{escape(w)}</p>" for w in design_words(design))
+    return f'<tr><td style="padding:16px 0 0;font:17px/1.65 {_FONT};color:#1c1917;">{words}</td></tr>' if words else ""
+
+
 def _block(b: dict, assets: dict[str, dict]) -> str:
     kind = b.get("type")
     if kind == "text":
         return _text(b.get("md") or "")
     if kind == "photo":
-        # Email can't lay words over a picture, so they go under it.
-        words = " · ".join(design_words(b.get("design")))
-        caption = " — ".join(p for p in (words, b.get("caption") or "") if p)
-        return _picture(assets.get(b.get("asset_id") or ""), caption=caption)
+        return _picture(assets.get(b.get("asset_id") or ""), caption=_under(b.get("design"), b.get("caption") or ""))
     if kind == "photos":
-        return "".join(_picture(assets.get(i.get("asset_id") or ""), caption=i.get("caption") or "")
+        return "".join(_picture(assets.get(i.get("asset_id") or ""),
+                                caption=_under(i.get("design"), i.get("caption") or ""))
                        for i in b.get("items") or [])
+    if kind == "page":
+        return _page(b.get("design"), assets)
     if kind == "quote" and b.get("text"):
         who = f'<br><span style="font:13px {_SANS};color:#78716c;">— {escape(b["attribution"])}</span>' \
             if b.get("attribution") else ""

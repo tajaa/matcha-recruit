@@ -8,6 +8,12 @@
    so a layer stays on the part of the picture it was put on. */
 .mz-frame,.mz-cover__media,.mz-page__art{container-type:inline-size}
 .mz-book .mz-cover__media{container-type:size}
+/* A cover's picture holds its design as a photo's frame does: placed on the
+   picture and cut to it (an overlay cover's is already). A stacked cover's
+   picture sits inside its padding off the book. */
+.mz-cover__media{position:relative;overflow:hidden}
+.mz-cover--stacked .mz-cover__media>.mzd{left:1.25rem;right:1.25rem}
+.mz-book .mz-cover--stacked .mz-cover__media>.mzd{left:0;right:0}
 .mzd{position:absolute;inset:0;--bw:1cqw;--bh:1%;--bx:0px;--by:0px;pointer-events:none;
   font-size:1rem;line-height:normal;text-align:left;hyphens:manual;letter-spacing:normal;text-transform:none}
 .mz-book .mz-cover__media>.mzd{--pw:max(100cqw,calc(100cqh * var(--ar)));--ph:max(100cqh,calc(100cqw / var(--ar)));

@@ -1,6 +1,9 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { newText } from './design/designOps'
 import type { Design } from './design/types'
 import { drawDesign, fontsHref, loadFonts } from './frame/layers'
+import { select } from './frame/selection'
+import { state } from './frame/state'
 
 /** What the editor on the page takes from a message: a design's layers drawn
  *  cleaned, and only Google Fonts stylesheets loaded. */
@@ -16,7 +19,11 @@ const base = {
   radius: [0, 0, 0, 0], shadows: [], blur: 0,
 } as const
 
-beforeAll(() => { document.body.innerHTML = PAGE })
+const sent: Record<string, unknown>[] = []
+beforeAll(() => {
+  document.body.innerHTML = PAGE
+  window.postMessage = ((m: Record<string, unknown>) => { sent.push(m) }) as typeof window.postMessage
+})
 afterAll(() => { document.body.innerHTML = ''; document.head.querySelectorAll('link').forEach((l) => l.remove()) })
 
 describe('a design drawn from a message', () => {
@@ -32,6 +39,46 @@ describe('a design drawn from a message', () => {
     expect(art.querySelector(':scope > .mzd__box')).not.toBeNull()
     expect(art.querySelector('[data-mzd-l="a"]')).not.toBeNull()
     expect(art.innerHTML).not.toContain('onerror')
+  })
+
+  it('lets go of selected layers a redraw took away, and says so', () => {
+    const art = document.querySelector<HTMLElement>('.mzd')!
+    select({ kind: 'layer', story: 'p1', block: 2, item: null, ids: ['a'] }, art.querySelector('[data-mzd-l="a"]'))
+    sent.length = 0
+    drawDesign({ story: 'p1', block: 2, item: null }, { layers: [] } as unknown as Design, {})
+    expect(state.selected).toEqual({ kind: 'block', story: 'p1', block: 2 })
+    expect(sent).toContainEqual({ type: 'mz-select', target: { kind: 'block', story: 'p1', block: 2 } })
+  })
+})
+
+describe('words that grow', () => {
+  it('tell the editor outside the height the page gives them', () => {
+    vi.useFakeTimers()
+    let seen: (() => void) | null = null
+    const observed: Element[] = []
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(cb: (entries: { target: Element }[]) => void) { seen = () => cb(observed.map((target) => ({ target }))) }
+      observe(el: Element) { observed.push(el) }
+      unobserve(el: Element) { observed.splice(observed.indexOf(el), 1) }
+    })
+    try {
+      const words = { ...newText(null, 'heading'), id: 'w1' }
+      drawDesign({ story: 'p1', block: 2, item: null }, { layers: [words] } as Design, {})
+      const el = document.querySelector<HTMLElement>('[data-mzd-l="w1"]')!
+      expect(observed).toEqual([el])
+      Object.defineProperty(el, 'offsetHeight', { value: 0.25 })  // the artboard measures 1px here
+      sent.length = 0
+      seen!()
+      vi.advanceTimersByTime(100)
+      expect(sent).toEqual([{ type: 'mz-heights', story: 'p1', block: 2, item: null, heights: { w1: 25 } }])
+      // Drawn again: the old box is let go of, the new one watched.
+      drawDesign({ story: 'p1', block: 2, item: null }, { layers: [{ ...words, x: 5 }] } as Design, {})
+      expect(observed).toEqual([document.querySelector('[data-mzd-l="w1"]')])
+      expect(observed[0]).not.toBe(el)
+    } finally {
+      vi.unstubAllGlobals()
+      vi.useRealTimers()
+    }
   })
 })
 

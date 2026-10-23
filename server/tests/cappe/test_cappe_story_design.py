@@ -103,3 +103,20 @@ def test_words_on_a_photo_are_story_text_and_go_under_it_in_email():
     assert story_text({"blocks": [p]}) == "Dawn\n\n6 a.m.\n\nThe bay."
     row = issue_email._block(p, {A: {**ASSET, "variants": {}}})
     assert "Dawn · 6 a.m. — The bay." in row
+
+
+def test_an_email_keeps_the_words_on_photo_groups_and_designed_pages():
+    def words(text, lid="t1"):
+        para = {"type": "paragraph", "content": [{"type": "text", "text": text}]}
+        return {"kind": "text", "id": lid, "rt": {"type": "doc", "content": [para]}}
+    blocks = story_schema.normalize_story({"blocks": [
+        {"type": "photos", "items": [{"asset_id": A, "caption": "Gulls.", "design": {"layers": [words("At sea")]}},
+                                     {"asset_id": A}]},
+        {"type": "page", "design": {"layers": [{"kind": "image", "id": "p1", "asset_id": A}, words("The end", "t2")]}},
+        {"type": "page", "design": {"layers": [words("Fin <3", "t3")]}},
+    ]})["blocks"]
+    assets = {A: {**ASSET, "variants": {}}}
+    group, pictured, plain = (issue_email._block(b, assets) for b in blocks)
+    assert "At sea — Gulls." in group
+    assert pictured.count("<img") == 1 and "The end" in pictured
+    assert "<img" not in plain and "Fin &lt;3" in plain

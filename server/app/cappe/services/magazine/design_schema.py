@@ -88,6 +88,11 @@ def _int(value: Any, lo: int, hi: int, default: int) -> int:
     return int(max(lo, min(hi, math.floor(n + 0.5))))
 
 
+def _list(value: Any) -> list:
+    """A list as sent, or none (a dict or a number where a list goes)."""
+    return value if isinstance(value, list) else []
+
+
 def _choice(value: Any, choices: tuple[str, ...]) -> str:
     return value if value in choices else choices[0]
 
@@ -122,7 +127,7 @@ def paint(raw: Any, default: Optional[dict] = None) -> dict:
     out = {"kind": kind, "color": colour(raw.get("color"), base["color"]),
            "angle": _int(raw.get("angle"), 0, 360, 180), "stops": []}
     if kind in ("linear", "radial"):
-        stops = [s for s in (raw.get("stops") or []) if isinstance(s, dict)][:MAX_STOPS]
+        stops = [s for s in _list(raw.get("stops")) if isinstance(s, dict)][:MAX_STOPS]
         out["stops"] = sorted(({"color": colour(s.get("color"), "#000000"), "at": _int(s.get("at"), 0, 100, 0)}
                                for s in stops), key=lambda s: s["at"])
         if len(out["stops"]) < 2:
@@ -216,7 +221,7 @@ def _layer(raw: Any, walk: _Walk, depth: int) -> list[dict]:
         return []
     kind = raw["kind"]
     if kind == "group" and depth > MAX_DEPTH:
-        return [x for child in (raw.get("children") or [])[:MAX_LAYERS] for x in _layer(child, walk, depth)]
+        return [x for child in _list(raw.get("children"))[:MAX_LAYERS] for x in _layer(child, walk, depth)]
     walk.count += 1
     if walk.count > MAX_LAYERS:
         raise DesignError(f"A design holds at most {MAX_LAYERS} layers.")
@@ -230,7 +235,7 @@ def _layer(raw: Any, walk: _Walk, depth: int) -> list[dict]:
         "link": _link(raw.get("link")),
     }
     if kind == "group":
-        children = [x for child in (raw.get("children") or [])[:MAX_LAYERS] for x in _layer(child, walk, depth + 1)]
+        children = [x for child in _list(raw.get("children"))[:MAX_LAYERS] for x in _layer(child, walk, depth + 1)]
         if not children:
             walk.count -= 1
             walk.ids.discard(out["id"])
@@ -262,7 +267,7 @@ def normalize_design(raw: Any, *, page: bool = False) -> Optional[dict]:
             return None
         raw = {}
     walk = _Walk()
-    layers = [x for item in (raw.get("layers") or [])[: MAX_LAYERS * 2] for x in _layer(item, walk, 1)]
+    layers = [x for item in _list(raw.get("layers"))[: MAX_LAYERS * 2] for x in _layer(item, walk, 1)]
     out: dict[str, Any] = {"layers": layers}
     if page:
         out["background"] = paint(raw.get("background"), {"kind": "solid", "color": "#ffffff", "angle": 180, "stops": []})

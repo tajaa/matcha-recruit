@@ -1,6 +1,6 @@
 import type { StoryBlock } from '../../types'
 import { emptyRt, type RtDoc } from '../canvas/rt'
-import { nearestWeight } from './fontStack'
+import { hasItalic, nearestWeight } from './fontStack'
 import type { Design, GroupLayer, ImageLayer, Layer, Paint, PaintedLayer, ShapeKind, ShapeLayer, TextLayer } from './types'
 import { MAX_LAYERS } from './types'
 
@@ -78,10 +78,15 @@ const siblingsOf = (d: Design, id: string): Layer[] => parentOf(d, id)?.children
 /** A box in artboard percent. */
 export type Box = { x: number; y: number; w: number; h: number }
 
+/** The heights the page measured for words that grow with them (by layer
+ *  id): such a layer's stored `h` is not what it shows. */
+export type Heights = Readonly<Record<string, number>>
+
 /** A layer's box; a group's is around its children. */
-export function boxOf(l: Layer): Box {
-  if (l.kind !== 'group') return { x: l.x, y: l.y, w: l.w, h: l.h }
-  return union(l.children.map(boxOf))
+export function boxOf(l: Layer, heights?: Heights): Box {
+  if (l.kind === 'group') return union(l.children.map((c) => boxOf(c, heights)))
+  const h = l.kind === 'text' && l.autosize === 'height' ? heights?.[l.id] ?? l.h : l.h
+  return { x: l.x, y: l.y, w: l.w, h }
 }
 
 export function union(boxes: Box[]): Box {
@@ -114,7 +119,11 @@ export function patchLayers(d: Design, ids: Iterable<string>, patch: LayerPatch)
     if (!keys.length) return l
     const next = { ...l } as Record<string, unknown>
     for (const k of keys) next[k] = (patch as Record<string, unknown>)[k]
-    if (next.kind === 'text') next.weight = nearestWeight(next.font as string, next.weight as number)
+    if (next.kind === 'text') {
+      next.weight = nearestWeight(next.font as string, next.weight as number)
+      // A face with no italic at that weight is set upright (as the server does).
+      if (next.italic && !hasItalic(next.font as string, next.weight as number)) next.italic = false
+    }
     return next as unknown as Layer
   })
 }
@@ -123,13 +132,13 @@ export function patchLayers(d: Design, ids: Iterable<string>, patch: LayerPatch)
  *  rounded as the server keeps them. A group moves by moving its children. */
 export type Geometry = { id: string; x?: number; y?: number; w?: number; h?: number; rot?: number; size?: number }
 
-export function setGeometry(d: Design, changes: Geometry[]): Design {
+export function setGeometry(d: Design, changes: Geometry[], heights?: Heights): Design {
   let next = d
   for (const c of changes) {
     const l = findLayer(next, c.id)
     if (!l) continue
     if (l.kind === 'group') {
-      const b = boxOf(l)
+      const b = boxOf(l, heights)
       const dx = c.x === undefined ? 0 : c.x - b.x, dy = c.y === undefined ? 0 : c.y - b.y
       const sx = c.w && b.w ? c.w / b.w : 1, sy = c.h && b.h ? c.h / b.h : 1
       next = mapLayers(next, [...walk(l.children)].filter((x) => x.kind !== 'group').map((x) => x.id), (x) => {
@@ -333,14 +342,14 @@ export function moveLayer(d: Design, id: string, target: string, where: 'above' 
 
 /** The layers (siblings, each kept in stacking order) put in a group where
  *  the topmost of them was. */
-export function group(d: Design, ids: string[]): { design: Design; id: string | null } {
+export function group(d: Design, ids: string[], heights?: Heights): { design: Design; id: string | null } {
   const picked = topLevel(d, ids)
   if (picked.length < 2) return { design: d, id: null }
   const parent = parentOf(d, picked[0].id)?.id ?? null
   if (picked.some((l) => (parentOf(d, l.id)?.id ?? null) !== parent)) return { design: d, id: null }
   const id = newId(d, 'g')
   const g: GroupLayer = {
-    id, kind: 'group', name: 'Group', ...boxOf({ kind: 'group', children: picked } as GroupLayer), rot: 0, flip_x: false, flip_y: false,
+    id, kind: 'group', name: 'Group', ...boxOf({ kind: 'group', children: picked } as GroupLayer, heights), rot: 0, flip_x: false, flip_y: false,
     opacity: 100, blend: 'normal', hidden: false, locked: false, link: '', children: picked,
   }
   const top = picked[picked.length - 1].id
@@ -365,12 +374,12 @@ export function ungroup(d: Design, id: string): { design: Design; ids: string[] 
 export type AlignHow = 'left' | 'center' | 'right' | 'top' | 'middle' | 'bottom'
 
 /** One layer aligned to the artboard; several to the box around them. */
-export function align(d: Design, ids: string[], how: AlignHow): Design {
+export function align(d: Design, ids: string[], how: AlignHow, heights?: Heights): Design {
   const picked = topLevel(d, ids)
   if (!picked.length) return d
-  const frame = picked.length === 1 ? { x: 0, y: 0, w: 100, h: 100 } : union(picked.map(boxOf))
+  const frame = picked.length === 1 ? { x: 0, y: 0, w: 100, h: 100 } : union(picked.map((l) => boxOf(l, heights)))
   return setGeometry(d, picked.map((l) => {
-    const b = boxOf(l)
+    const b = boxOf(l, heights)
     switch (how) {
       case 'left': return { id: l.id, x: frame.x }
       case 'center': return { id: l.id, x: frame.x + (frame.w - b.w) / 2 }
@@ -379,12 +388,12 @@ export function align(d: Design, ids: string[], how: AlignHow): Design {
       case 'middle': return { id: l.id, y: frame.y + (frame.h - b.h) / 2 }
       case 'bottom': return { id: l.id, y: frame.y + frame.h - b.h }
     }
-  }))
+  }), heights)
 }
 
 /** Three or more layers spaced evenly, across or down. */
-export function distribute(d: Design, ids: string[], axis: 'x' | 'y'): Design {
-  const picked = topLevel(d, ids).map((l) => ({ l, b: boxOf(l) }))
+export function distribute(d: Design, ids: string[], axis: 'x' | 'y', heights?: Heights): Design {
+  const picked = topLevel(d, ids).map((l) => ({ l, b: boxOf(l, heights) }))
   if (picked.length < 3) return d
   const pos = (b: Box) => (axis === 'x' ? b.x : b.y), size = (b: Box) => (axis === 'x' ? b.w : b.h)
   picked.sort((a, b) => pos(a.b) - pos(b.b))
@@ -396,5 +405,5 @@ export function distribute(d: Design, ids: string[], axis: 'x' | 'y'): Design {
     const g = { id: l.id, [axis]: at } as Geometry
     at += size(b) + gap
     return g
-  }))
+  }), heights)
 }
