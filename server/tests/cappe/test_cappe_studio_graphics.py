@@ -13,8 +13,10 @@ What each block pins:
     takes a colour; its fit and a pattern's tile are held to their limits;
   * search: every word must match, an exact name first, by group and sticker
     set; browsing gives each group's first graphics and counts;
+  * stretching: the "stretch" fit draws the file made to fill its box
+    (`preserveAspectRatio="none"` on its root only), from its own URL;
   * over HTTP: a file only by a manifest sha, checked against it, immutable
-    and sent with a CSP that runs nothing.
+    and sent with a CSP that runs nothing, as it is or stretched.
 
 Run from server/:  ./venv/bin/python -m pytest tests/cappe/test_cappe_studio_graphics.py -q
 """
@@ -26,6 +28,7 @@ from app.cappe.routes.public import graphics as route
 from app.cappe.services.magazine.studio import graphics as G
 from app.cappe.services.magazine.studio import graphics_own
 from app.cappe.services.magazine.studio import limits as L
+from app.cappe.services.magazine.studio import render as R
 from app.cappe.services.magazine.studio import schema as S
 from tests._helpers.routes import route_client
 
@@ -119,6 +122,19 @@ def test_a_graphic_on_a_page():
     assert (item["color"], item["fit"]) == (None, "contain")  # a colourful graphic keeps its colours
 
 
+def test_stretch_fills_the_box_out_of_the_graphics_shape():
+    out = G.stretched(f"<svg {SVG} preserveAspectRatio='xMinYMin slice' viewBox='0 0 200 20'>"
+                      f"<svg preserveAspectRatio=\"xMidYMid\" viewBox=\"0 0 1 1\"/></svg>".encode())
+    assert out == (f'<svg preserveAspectRatio="none" {SVG} viewBox=\'0 0 200 20\'>'
+                   f'<svg preserveAspectRatio="xMidYMid" viewBox="0 0 1 1"/></svg>').encode()  # the root's only
+    rule = BY_ID["gummfit/thick-thin"]["sha"]
+    for fit, url in [("stretch", f"/graphics/stretch/{rule}.svg"), ("contain", f"/graphics/{rule}.svg"),
+                     ("tile", f"/graphics/{rule}.svg")]:
+        html = R.item_html({"id": "g1", "kind": "graphic", "page": "p1", "x": 0, "y": 0, "w": 504, "h": 10, "rot": 0,
+                            "opacity": 100, "src": rule, "color": "#1a1a1a", "fit": fit, "tile": 24}, {}, {}, {}, {})
+        assert url in html, fit
+
+
 @pytest.mark.parametrize("src", ["0" * 64, None, "../../etc/passwd"])
 def test_only_the_banks_graphics(src):
     with pytest.raises(S.DocError):
@@ -186,10 +202,14 @@ def test_a_file_is_served_by_its_sha_with_nothing_to_run(files):
     assert "immutable" in res.headers["cache-control"] and "sandbox" in res.headers["content-security-policy"]
     assert res.headers["x-content-type-options"] == "nosniff"
     assert hashlib.sha256(res.content).hexdigest() == files["sha"]
+    res = _get(f"/public/graphics/stretch/{files['sha']}.svg")
+    assert res.status_code == 200 and res.content.startswith(b'<svg preserveAspectRatio="none" ')
+    assert res.headers["content-type"] == "image/svg+xml" and "sandbox" in res.headers["content-security-policy"]
 
 
 def test_unknown_unbuilt_or_changed_files_are_404(files, tmp_path):
     assert _get(f"/public/graphics/{'0' * 64}.svg").status_code == 404
+    assert _get(f"/public/graphics/stretch/{'0' * 64}.svg").status_code == 404
     other = BY_ID["gummfit/heart"]["sha"]
     assert _get(f"/public/graphics/{other}.svg").status_code == 404  # not built here, not in storage
     (tmp_path / f"{other}.svg").write_bytes(b"<svg/>")  # not the bytes its sha names

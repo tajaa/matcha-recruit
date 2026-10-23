@@ -657,7 +657,9 @@ normalized paragraphs itself; a thread with no valid composition prints its word
   `ui/add/`): a page item of kind `graphic` names a file by sha (`src`), like faces: 3,560 cleaned SVGs (Lucide icons
   ISC, Microsoft Fluent Emoji flat MIT, our own shapes/badges/dividers/patterns CC0) in the committed
   `graphics_manifest.json` + `graphics_licenses.txt`. Both renderers draw it as a `div` background (colourful) or a
-  CSS mask over its `color` (one-colour, `mono`), `fit` contain / stretch / tile (`tile` pt). The schema refuses a
+  CSS mask over its `color` (one-colour, `mono`), `fit` contain / stretch / tile (`tile` pt). Stretch draws
+  `/public/graphics/stretch/<sha>.svg`, the file with `preserveAspectRatio="none"` on its root (`graphics.stretched`):
+  CSS sizing alone never distorts an SVG with a viewBox, it centres it at its own shape. The schema refuses a
   `src` the manifest lacks, so **never take an entry out of the manifest**; the server forces `color` to null for a
   colourful one. The side panel browses (`/public/graphics/browse`) and searches (`/public/graphics/search`) rather
   than download the ~1 MB manifest. Files are served by sha with a no-script CSP from `CAPPE_GRAPHICS_DIR` or storage

@@ -230,7 +230,7 @@ function lineHtml(item: Extract<Item, { kind: 'line' }>): string {
 /** A bank graphic filling its box (render._graphic_html): its own shape,
  *  stretched, or tiled; a one-colour one is a mask over its colour. */
 function graphicHtml(item: GraphicItem): string {
-  const src = `url(${graphicUrl(item.src)})`
+  const src = `url(${graphicUrl(item.src, item.fit === 'stretch')})`
   const size = item.fit === 'contain' ? 'contain' : item.fit === 'stretch' ? '100% 100%' : `${u(item.tile)} auto`
   const place = `${item.fit === 'tile' ? '0 0' : 'center'}/${size} ${item.fit === 'tile' ? 'repeat' : 'no-repeat'}`
   let style = box(item)

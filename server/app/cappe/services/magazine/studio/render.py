@@ -252,8 +252,8 @@ def _graphic_html(item: dict) -> str:
     """A bank graphic filling its box: kept to its own shape (centred),
     stretched to the box, or tiled from the top-left. A one-colour one is a
     mask over its colour; a colourful one is drawn as it is."""
-    src = f"url({graphics.url(item['src'])})"
     fit = item["fit"]
+    src = f"url({graphics.url(item['src'], fit == 'stretch')})"
     size = "contain" if fit == "contain" else "100% 100%" if fit == "stretch" else f"{u(item['tile'])} auto"
     place = f"{'0 0' if fit == 'tile' else 'center'}/{size} {'repeat' if fit == 'tile' else 'no-repeat'}"
     style = _box(item)

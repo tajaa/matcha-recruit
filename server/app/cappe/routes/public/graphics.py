@@ -9,7 +9,9 @@ them and a reader's page draws them, as a mask or a background.
   * `GET /public/graphics/licenses.txt`: the sources' licences, kept with them;
   * `GET /public/graphics/{sha}.svg`: a file, by its sha256, only one in the
     committed manifest, checked against its sha and cached for a year. It is
-    sent with a CSP that runs nothing (the files are cleaned when built).
+    sent with a CSP that runs nothing (the files are cleaned when built);
+  * `GET /public/graphics/stretch/{sha}.svg`: the same file made to fill any
+    box out of its own shape, for the "stretch" fit (`graphics.stretched`).
 
 Files are read from `CAPPE_GRAPHICS_DIR` when it is set (a local build of
 `scripts/build_studio_graphics.py`), else from storage
@@ -84,11 +86,20 @@ async def graphics_licenses():
     return PlainTextResponse(text, headers=_LISTS)
 
 
-@router.get("/public/graphics/{sha}.svg")
-async def graphic_file(sha: str):
+async def _file(sha: str) -> bytes:
     if graphics.by_sha(sha) is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No such graphic")
     data = await graphic_bytes(sha)
     if data is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="This graphic hasn't been uploaded yet")
-    return Response(data, media_type="image/svg+xml", headers=_SVG_HEADERS)
+    return data
+
+
+@router.get("/public/graphics/{sha}.svg")
+async def graphic_file(sha: str):
+    return Response(await _file(sha), media_type="image/svg+xml", headers=_SVG_HEADERS)
+
+
+@router.get("/public/graphics/stretch/{sha}.svg")
+async def stretched_graphic_file(sha: str):
+    return Response(graphics.stretched(await _file(sha)), media_type="image/svg+xml", headers=_SVG_HEADERS)

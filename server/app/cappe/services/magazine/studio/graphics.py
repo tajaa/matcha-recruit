@@ -24,6 +24,7 @@ from typing import Optional
 
 MANIFEST = Path(__file__).resolve().parent / "graphics_manifest.json"
 GRAPHIC_URL = "/api/cappe/public/graphics/{sha}.svg"
+STRETCH_URL = "/api/cappe/public/graphics/stretch/{sha}.svg"
 GRAPHIC_KEY = "cappe/graphics/{sha}.svg"
 GROUPS = ("shapes", "lines", "badges", "icons", "stickers", "patterns")
 _SHA = re.compile(r"^[0-9a-f]{64}$")
@@ -48,8 +49,8 @@ def by_sha(sha: object) -> Optional[dict]:
     return _index().get(sha) if isinstance(sha, str) else None
 
 
-def url(sha: str) -> str:
-    return GRAPHIC_URL.format(sha=sha)
+def url(sha: str, stretch: bool = False) -> str:
+    return (STRETCH_URL if stretch else GRAPHIC_URL).format(sha=sha)
 
 
 # ── cleaning ─────────────────────────────────────────────────────────────────
@@ -145,6 +146,21 @@ def clean_svg(data: bytes) -> tuple[bytes, float, float]:
     for key in ("width", "height"):
         root.attrib.pop(key, None)
     return ET.tostring(root, encoding="unicode", short_empty_elements=True).encode(), vw, vh
+
+
+_ROOT = re.compile(rb"<svg\b[^>]*>")
+_ASPECT = re.compile(rb"""\s+preserveAspectRatio=("[^"]*"|'[^']*')""")
+
+
+def stretched(svg: bytes) -> bytes:
+    """A cleaned file drawn out of its own shape to fill its box (the
+    "stretch" fit). However CSS sizes it, a viewBox keeps its proportions,
+    centred in the box, unless its root says otherwise."""
+    m = _ROOT.search(svg)
+    if m is None:
+        return svg
+    tag = _ASPECT.sub(b"", m.group(0))
+    return svg[:m.start()] + tag[:4] + b' preserveAspectRatio="none"' + tag[4:] + svg[m.end():]
 
 
 # ── browsing ─────────────────────────────────────────────────────────────────

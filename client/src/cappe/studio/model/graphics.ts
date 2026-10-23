@@ -15,7 +15,10 @@ export type GraphicBrowse = {
 }
 export type GraphicSearch = { total: number; items: GraphicCard[] }
 
-export const graphicUrl = (sha: string) => `/api/cappe/public/graphics/${sha}.svg`
+/** A graphic's file; `stretch`, made to fill its box out of its own shape
+ *  (server graphics.stretched). */
+export const graphicUrl = (sha: string, stretch = false) =>
+  `/api/cappe/public/graphics/${stretch ? 'stretch/' : ''}${sha}.svg`
 
 const get = async <T>(path: string): Promise<T> => {
   const res = await fetch(`${cappeApiBase}/public/graphics/${path}`)
