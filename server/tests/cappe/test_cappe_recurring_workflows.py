@@ -601,6 +601,9 @@ async def test_subscription_webhooks_are_account_scoped_ordered_and_schedule_sid
         async def connected_invoice_payment_intent(self, account, invoice):
             return "pi_renewal"
 
+        async def connected_charge_fee(self, account, payment_intent):
+            return None
+
     monkeypatch.setattr(recurring, "sync_subscription", sync)
     monkeypatch.setattr(recurring, "record_invoice_order", record)
     monkeypatch.setattr(recurring, "get_cappe_stripe", lambda: _Stripe())
@@ -651,8 +654,10 @@ async def test_sync_cancel_resume_and_delete_paths(monkeypatch):
     await recurring.sync_subscription(conn, row, subscription, None)
     await recurring.sync_subscription(conn, row, subscription, SimpleNamespace())
     assert any("stripe_event_at=GREATEST" in query for query, _ in conn.calls)
+    # Postgres types an UPDATE's WHERE before its SET, so an uncast `$2 IS NOT NULL`
+    # is "could not determine data type of parameter $2" and every sync 500s.
     assert all(
-        "stripe_subscription_id IS NULL AND $2 IS NOT NULL" in query
+        "stripe_subscription_id IS NULL AND $2::varchar IS NOT NULL" in query
         for query, _ in conn.calls
         if "SET stripe_subscription_id=$2" in query
     )

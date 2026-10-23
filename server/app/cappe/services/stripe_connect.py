@@ -16,6 +16,7 @@ All Stripe calls run in a worker thread (`asyncio.to_thread`) — the SDK is syn
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from datetime import datetime
 from typing import Any, Optional
@@ -26,6 +27,43 @@ except ImportError:  # pragma: no cover - handled at runtime
     stripe = None
 
 from ...config import get_settings
+
+
+class StripeData(dict):
+    """A Stripe response as plain data: a dict, readable by key, ``.get`` or attribute.
+
+    stripe-python 16 (pinned >=8, what we run) no longer makes its objects dicts:
+    ``.get`` on one raises. Everything Cappe does with a response was written
+    against dicts (``obj.get("metadata")`` all the way down), so every call in
+    this module hands back this instead of the SDK object (``_call``)."""
+
+    def __getattr__(self, key: str):
+        try:
+            return self[key]
+        except KeyError:
+            raise AttributeError(key) from None
+
+
+def _plain(value: Any) -> Any:
+    to_dict = getattr(value, "to_dict", None)
+    if callable(to_dict) and not isinstance(value, dict):
+        value = to_dict()  # a StripeObject; recursive
+    if isinstance(value, dict):
+        return StripeData({k: _plain(v) for k, v in value.items()})
+    if isinstance(value, (list, tuple)):
+        return type(value)(_plain(v) for v in value)
+    return value
+
+
+async def _call(fn, *args, **kwargs):
+    """``asyncio.to_thread`` for a Stripe call, with its result made plain."""
+    return _plain(await asyncio.to_thread(fn, *args, **kwargs))
+
+
+def _verified_event(payload: bytes, signature: str, secret: str) -> StripeData:
+    """Check the signature, then return the signed payload, which is the event."""
+    stripe.Webhook.construct_event(payload, signature, secret)
+    return _plain(json.loads(payload))
 
 
 class CappeStripeError(Exception):
@@ -124,7 +162,7 @@ class CappeStripe:
             )
 
         try:
-            acct = await asyncio.to_thread(_create)
+            acct = await _call(_create)
             return acct["id"]
         except Exception as exc:  # noqa: BLE001
             raise CappeStripeError(f"Failed to create Stripe account: {exc}") from exc
@@ -142,7 +180,7 @@ class CappeStripe:
             )
 
         try:
-            return await asyncio.to_thread(_create)
+            return await _call(_create)
         except Exception as exc:  # noqa: BLE001
             raise CappeStripeError(f"Failed to create account link: {exc}") from exc
 
@@ -154,7 +192,7 @@ class CappeStripe:
             return stripe.Account.retrieve(account_id)
 
         try:
-            return await asyncio.to_thread(_get)
+            return await _call(_get)
         except Exception as exc:  # noqa: BLE001
             raise CappeStripeError(f"Failed to retrieve account: {exc}") from exc
 
@@ -246,7 +284,7 @@ class CappeStripe:
             )
 
         try:
-            return await asyncio.to_thread(_create)
+            return await _call(_create)
         except Exception as exc:  # noqa: BLE001
             raise CappeStripeError(f"Failed to create checkout session: {exc}") from exc
 
@@ -261,7 +299,7 @@ class CappeStripe:
                 return stripe.Customer.modify(customer_id, **values)
             return stripe.Customer.create(**values, idempotency_key=idempotency_key)
         try:
-            return (await asyncio.to_thread(save))["id"]
+            return (await _call(save))["id"]
         except Exception as exc:
             raise CappeStripeError("Could not prepare customer checkout") from exc
 
@@ -283,7 +321,7 @@ class CappeStripe:
                 stripe_account=account_id, idempotency_key=idempotency_key, **extra,
             )
         try:
-            return await asyncio.to_thread(create)
+            return await _call(create)
         except Exception as exc:
             raise CappeStripeError("Could not start subscription checkout") from exc
 
@@ -314,28 +352,48 @@ class CappeStripe:
             lister = getattr(stripe, "InvoicePayment", None)
             if lister is None:
                 return None
-            for pay in (lister.list(invoice=invoice_id, limit=10, stripe_account=account_id).get("data") or []):
+            for pay in (_plain(lister.list(invoice=invoice_id, limit=10, stripe_account=account_id)).get("data") or []):
                 intent = (pay.get("payment") or {}).get("payment_intent")
                 if pay.get("status") == "paid" and isinstance(intent, str):
                     return intent
             return None
 
         try:
-            return await asyncio.to_thread(_lookup)
+            return await _call(_lookup)
         except Exception:  # noqa: BLE001 — best-effort; the order still records
+            return None
+
+    async def connected_charge_fee(self, account_id: str, payment_intent: str) -> Optional[int]:
+        """The platform fee Stripe took on a connected PaymentIntent's charge.
+
+        Current API versions no longer put `application_fee_amount` on an
+        invoice; the charge still carries it. None when it can't be read: the
+        payment records either way."""
+        self._ensure_key()
+
+        def _fee():
+            pi = _plain(stripe.PaymentIntent.retrieve(payment_intent, expand=["latest_charge"],
+                                                      stripe_account=account_id))
+            charge = pi.get("latest_charge")
+            fee = charge.get("application_fee_amount") if isinstance(charge, dict) else None
+            return fee if isinstance(fee, int) else None
+
+        try:
+            return await _call(_fee)
+        except Exception:  # noqa: BLE001 — best-effort, like the payment intent itself
             return None
 
     async def retrieve_connected_subscription(self, account_id, subscription_id):
         self._ensure_key()
         try:
-            return await asyncio.to_thread(stripe.Subscription.retrieve, subscription_id, stripe_account=account_id)
+            return await _call(stripe.Subscription.retrieve, subscription_id, stripe_account=account_id)
         except Exception as exc:
             raise CappeStripeError("Could not retrieve subscription") from exc
 
     async def modify_connected_subscription(self, *, account_id, subscription_id, cancel_at_period_end):
         self._ensure_key()
         try:
-            return await asyncio.to_thread(stripe.Subscription.modify, subscription_id,
+            return await _call(stripe.Subscription.modify, subscription_id,
                                           stripe_account=account_id, cancel_at_period_end=cancel_at_period_end)
         except Exception as exc:
             raise CappeStripeError("Could not update subscription") from exc
@@ -343,7 +401,7 @@ class CappeStripe:
     async def cancel_connected_subscription(self, account_id, subscription_id):
         self._ensure_key()
         try:
-            return await asyncio.to_thread(stripe.Subscription.delete, subscription_id, stripe_account=account_id)
+            return await _call(stripe.Subscription.delete, subscription_id, stripe_account=account_id)
         except Exception as exc:
             raise CappeStripeError("Could not cancel subscription") from exc
 
@@ -356,7 +414,7 @@ class CappeStripe:
             return stripe.checkout.Session.retrieve(session_id, stripe_account=account_id)
 
         try:
-            return await asyncio.to_thread(_get)
+            return await _call(_get)
         except Exception as exc:  # noqa: BLE001
             raise CappeStripeError(f"Failed to retrieve checkout session: {exc}") from exc
 
@@ -374,15 +432,15 @@ class CappeStripe:
         self._ensure_key()
 
         def _expire():
-            sess = stripe.checkout.Session.retrieve(session_id, stripe_account=account_id)
+            sess = _plain(stripe.checkout.Session.retrieve(session_id, stripe_account=account_id))
             state = str(sess.get("status") or "")
             if state == "open":
-                sess = stripe.checkout.Session.expire(session_id, stripe_account=account_id)
+                sess = _plain(stripe.checkout.Session.expire(session_id, stripe_account=account_id))
                 state = str(sess.get("status") or "")
             return state
 
         try:
-            return await asyncio.to_thread(_expire)
+            return await _call(_expire)
         except Exception as exc:  # noqa: BLE001
             raise CappeStripeError(f"Failed to expire checkout session: {exc}") from exc
 
@@ -419,7 +477,7 @@ class CappeStripe:
             )
 
         try:
-            return await asyncio.to_thread(_refund)
+            return await _call(_refund)
         except Exception as exc:  # noqa: BLE001
             if getattr(exc, "code", None) == "charge_already_refunded":
                 # Refunded already — in the Stripe dashboard, or by an earlier
@@ -441,7 +499,7 @@ class CappeStripe:
             return balance, payouts
 
         try:
-            balance, payouts = await asyncio.to_thread(_read)
+            balance, payouts = await _call(_read)
         except Exception as exc:  # noqa: BLE001
             raise CappeStripeError(f"Failed to read the Stripe balance: {exc}") from exc
 
@@ -469,14 +527,14 @@ class CappeStripe:
         self._ensure_key()
 
         def _find():
-            page = stripe.Refund.list(payment_intent=payment_intent, limit=100, stripe_account=account_id)
+            page = _plain(stripe.Refund.list(payment_intent=payment_intent, limit=100, stripe_account=account_id))
             for refund in page.get("data") or []:
                 if (refund.get("metadata") or {}).get("cappe_refund_id") == cappe_refund_id:
                     return refund
             return None
 
         try:
-            return await asyncio.to_thread(_find)
+            return await _call(_find)
         except Exception as exc:  # noqa: BLE001
             raise CappeStripeError(f"Failed to look up refunds: {exc}") from exc
 
@@ -523,7 +581,7 @@ class CappeStripe:
             )
 
         try:
-            return await asyncio.to_thread(_create)
+            return await _call(_create)
         except Exception as exc:  # noqa: BLE001
             raise CappeStripeError(f"Failed to create checkout session: {exc}") from exc
 
@@ -533,22 +591,22 @@ class CappeStripe:
         self._ensure_key()
 
         def _expire():
-            sess = stripe.checkout.Session.retrieve(session_id)
+            sess = _plain(stripe.checkout.Session.retrieve(session_id))
             state = str(sess.get("status") or "")
             if state == "open":
-                sess = stripe.checkout.Session.expire(session_id)
+                sess = _plain(stripe.checkout.Session.expire(session_id))
                 state = str(sess.get("status") or "")
             return state
 
         try:
-            return await asyncio.to_thread(_expire)
+            return await _call(_expire)
         except Exception as exc:  # noqa: BLE001
             raise CappeStripeError(f"Failed to expire checkout session: {exc}") from exc
 
     async def retrieve_platform_checkout_session(self, session_id: str):
         self._ensure_key()
         try:
-            return await asyncio.to_thread(stripe.checkout.Session.retrieve, session_id)
+            return await _call(stripe.checkout.Session.retrieve, session_id)
         except Exception as exc:  # noqa: BLE001
             raise CappeStripeError(f"Failed to retrieve checkout session: {exc}") from exc
 
@@ -563,7 +621,7 @@ class CappeStripe:
         """
         self._ensure_key()
         try:
-            pi = await asyncio.to_thread(stripe.PaymentIntent.retrieve, payment_intent)
+            pi = await _call(stripe.PaymentIntent.retrieve, payment_intent)
         except Exception as exc:  # noqa: BLE001
             raise CappeStripeError(f"Failed to retrieve payment intent: {exc}") from exc
         pm = pi.get("payment_method")
@@ -576,7 +634,7 @@ class CappeStripe:
         the same physical card yields the same value across customers."""
         self._ensure_key()
         try:
-            pm = await asyncio.to_thread(stripe.PaymentMethod.retrieve, payment_method_id)
+            pm = await _call(stripe.PaymentMethod.retrieve, payment_method_id)
         except Exception as exc:  # noqa: BLE001
             raise CappeStripeError(f"Failed to retrieve payment method: {exc}") from exc
         fingerprint = (pm.get("card") or {}).get("fingerprint")
@@ -592,7 +650,7 @@ class CappeStripe:
             return stripe.PaymentMethod.list(customer=customer_id, type="card", limit=1)
 
         try:
-            listed = await asyncio.to_thread(_list)
+            listed = await _call(_list)
         except Exception as exc:  # noqa: BLE001
             raise CappeStripeError(f"Failed to list payment methods: {exc}") from exc
         data = listed.get("data") or []
@@ -627,7 +685,7 @@ class CappeStripe:
             )
 
         try:
-            return await asyncio.to_thread(_charge)
+            return await _call(_charge)
         except Exception as exc:  # noqa: BLE001
             if _is_card_error(exc):
                 raise CappeStripeCardError(
@@ -646,7 +704,7 @@ class CappeStripe:
             return stripe.Refund.create(payment_intent=payment_intent, **kwargs)
 
         try:
-            return await asyncio.to_thread(_refund)
+            return await _call(_refund)
         except Exception as exc:  # noqa: BLE001
             if getattr(exc, "code", None) == "charge_already_refunded":
                 return {"id": None, "already_refunded": True}  # see refund_connected_charge
@@ -668,12 +726,12 @@ class CappeStripe:
             intents: list[str] = []
             lister = getattr(stripe, "InvoicePayment", None)
             if lister is not None:
-                for pay in (lister.list(invoice=invoice_id, limit=10).get("data") or []):
+                for pay in (_plain(lister.list(invoice=invoice_id, limit=10)).get("data") or []):
                     intent = (pay.get("payment") or {}).get("payment_intent")
                     if pay.get("status") == "paid" and isinstance(intent, str):
                         intents.append(intent)
             if not intents:
-                legacy = stripe.Invoice.retrieve(invoice_id).get("payment_intent")
+                legacy = _plain(stripe.Invoice.retrieve(invoice_id)).get("payment_intent")
                 if isinstance(legacy, str):
                     intents.append(legacy)
             return [
@@ -682,7 +740,7 @@ class CappeStripe:
             ]
 
         try:
-            return await asyncio.to_thread(_refund_all)
+            return await _call(_refund_all)
         except Exception as exc:  # noqa: BLE001
             raise CappeStripeError(f"Failed to refund invoice: {exc}") from exc
 
@@ -695,10 +753,10 @@ class CappeStripe:
             raise CappeStripeError("Cappe platform webhook secret is not configured")
 
         def _construct():
-            return stripe.Webhook.construct_event(payload, signature, secret)
+            return _verified_event(payload, signature, secret)
 
         try:
-            return await asyncio.to_thread(_construct)
+            return await _call(_construct)
         except Exception as exc:  # noqa: BLE001
             raise CappeStripeError(f"Invalid Stripe webhook: {exc}") from exc
 
@@ -710,10 +768,10 @@ class CappeStripe:
             raise CappeStripeError("Cappe Stripe webhook secret is not configured")
 
         def _construct():
-            return stripe.Webhook.construct_event(payload, signature, secret)
+            return _verified_event(payload, signature, secret)
 
         try:
-            return await asyncio.to_thread(_construct)
+            return await _call(_construct)
         except Exception as exc:  # noqa: BLE001
             raise CappeStripeError(f"Invalid Stripe webhook: {exc}") from exc
 
@@ -730,7 +788,7 @@ class CappeStripe:
             )
 
         try:
-            return (await asyncio.to_thread(_create))["id"]
+            return (await _call(_create))["id"]
         except Exception as exc:  # noqa: BLE001
             raise CappeStripeError(f"Failed to create Stripe product: {exc}") from exc
 
@@ -766,7 +824,7 @@ class CappeStripe:
             return stripe.Price.create(**kwargs)
 
         try:
-            return (await asyncio.to_thread(_create))["id"]
+            return (await _call(_create))["id"]
         except Exception as exc:  # noqa: BLE001
             raise CappeStripeError(f"Failed to create Stripe price: {exc}") from exc
 
@@ -779,7 +837,7 @@ class CappeStripe:
             return stripe.Price.modify(price_id, active=False)
 
         try:
-            await asyncio.to_thread(_archive)
+            await _call(_archive)
         except Exception as exc:  # noqa: BLE001
             raise CappeStripeError(f"Failed to archive price: {exc}") from exc
 
@@ -795,7 +853,7 @@ class CappeStripe:
             )
 
         try:
-            return (await asyncio.to_thread(_create))["id"]
+            return (await _call(_create))["id"]
         except Exception as exc:  # noqa: BLE001
             raise CappeStripeError(f"Failed to create Stripe customer: {exc}") from exc
 
@@ -857,7 +915,7 @@ class CappeStripe:
             )
 
         try:
-            return await asyncio.to_thread(_create)
+            return await _call(_create)
         except Exception as exc:  # noqa: BLE001
             raise CappeStripeError(f"Failed to create subscription checkout: {exc}") from exc
 
@@ -873,7 +931,7 @@ class CappeStripe:
             )
 
         try:
-            return await asyncio.to_thread(_get)
+            return await _call(_get)
         except Exception as exc:  # noqa: BLE001
             raise CappeStripeError(f"Failed to retrieve subscription: {exc}") from exc
 
@@ -905,7 +963,7 @@ class CappeStripe:
             return stripe.Subscription.modify(subscription_id, **kwargs)
 
         try:
-            return await asyncio.to_thread(_modify)
+            return await _call(_modify)
         except Exception as exc:  # noqa: BLE001
             raise CappeStripeError(f"Failed to change subscription price: {exc}") from exc
 
@@ -930,7 +988,7 @@ class CappeStripe:
             )
 
         try:
-            return await asyncio.to_thread(_create)
+            return await _call(_create)
         except Exception as exc:  # noqa: BLE001
             raise CappeStripeError(f"Failed to add subscription item: {exc}") from exc
 
@@ -957,7 +1015,7 @@ class CappeStripe:
             )
 
         try:
-            return await asyncio.to_thread(_modify)
+            return await _call(_modify)
         except Exception as exc:  # noqa: BLE001
             raise CappeStripeError(f"Failed to set item quantity: {exc}") from exc
 
@@ -970,7 +1028,7 @@ class CappeStripe:
             )
 
         try:
-            return await asyncio.to_thread(_delete)
+            return await _call(_delete)
         except Exception as exc:  # noqa: BLE001
             raise CappeStripeError(f"Failed to remove subscription item: {exc}") from exc
 
@@ -986,7 +1044,7 @@ class CappeStripe:
             return stripe.Subscription.delete(subscription_id)
 
         try:
-            return await asyncio.to_thread(_cancel)
+            return await _call(_cancel)
         except Exception as exc:  # noqa: BLE001
             raise CappeStripeError(f"Failed to cancel subscription: {exc}") from exc
 
@@ -1002,7 +1060,7 @@ class CappeStripe:
             )
 
         try:
-            return await asyncio.to_thread(_create)
+            return await _call(_create)
         except Exception as exc:  # noqa: BLE001
             raise CappeStripeError(f"Failed to create portal session: {exc}") from exc
 
@@ -1025,7 +1083,7 @@ class CappeStripe:
             )
 
         try:
-            return (await asyncio.to_thread(_create))["id"]
+            return (await _call(_create))["id"]
         except Exception as exc:  # noqa: BLE001
             raise CappeStripeError(f"Failed to set up the customer portal: {exc}") from exc
 
@@ -1042,7 +1100,7 @@ class CappeStripe:
             return stripe.billing_portal.Session.create(**kwargs)
 
         try:
-            return await asyncio.to_thread(_create)
+            return await _call(_create)
         except Exception as exc:  # noqa: BLE001
             raise CappeStripeError(f"Failed to open the customer portal: {exc}") from exc
 

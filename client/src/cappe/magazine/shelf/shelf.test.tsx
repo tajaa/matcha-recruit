@@ -336,6 +336,24 @@ describe('reading a story', () => {
     await waitFor(() => expect(api.get).toHaveBeenLastCalledWith('/reader/magazines/salt/stories/high-tide'))
   })
 
+  it('opens a Studio story’s Text view here, and its pages again', async () => {
+    api.get.mockResolvedValue({ html: '<p>page</p>', paid: false, has_access: true, title: 'Low tide' })
+    mount('/cappe/reader/m/salt/low-tide', '/cappe/reader/m/:slug/:story', <ShelfStory />)
+    const frame = await screen.findByTitle('Low tide') as HTMLIFrameElement
+    frame.contentDocument!.body.innerHTML = '<a href="/stories/low-tide/text">Text view</a>'
+    fireEvent.load(frame)
+    expect(frame.contentDocument!.querySelector('a')!.getAttribute('href')).toBe(`${LINK_PREFIX}%2Fstories%2Flow-tide%2Ftext`)
+    followed.value = '/stories/low-tide/text'
+    fireEvent.load(frame)
+    await waitFor(() => expect(api.get).toHaveBeenLastCalledWith('/reader/magazines/salt/stories/low-tide?view=text'))
+    const text = await screen.findByTitle('Low tide') as HTMLIFrameElement
+    text.contentDocument!.body.innerHTML = '<a href="/stories/low-tide">See it as designed</a>'
+    fireEvent.load(text)
+    followed.value = '/stories/low-tide'
+    fireEvent.load(text)
+    await waitFor(() => expect(api.get).toHaveBeenLastCalledWith('/reader/magazines/salt/stories/low-tide'))
+  })
+
   it('says when it can’t', async () => {
     api.get.mockRejectedValue(new Error('Story not found'))
     mount('/cappe/reader/m/salt/nope', '/cappe/reader/m/:slug/:story', <ShelfStory />)

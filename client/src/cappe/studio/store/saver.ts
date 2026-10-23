@@ -9,6 +9,8 @@ import type { Store } from './store'
 
 const AUTOSAVE_MS = 1500
 
+export type SaveOptions = { keep?: boolean; publish?: boolean; strict?: boolean }
+
 export class Saver {
   private pending: Promise<void> | null = null
   private timer = 0
@@ -33,19 +35,23 @@ export class Saver {
     this.store.onDocChange = null
   }
 
-  /** Whether leaving now would lose changes. */
+  /** Whether leaving now would lose changes (a story saved elsewhere since
+   *  keeps this one's changes only here). */
   unsaved(): boolean {
     const st = this.store.get().save.state
-    return st === 'dirty' || st === 'saving' || st === 'error'
+    return st === 'dirty' || st === 'saving' || st === 'error' || st === 'conflict'
   }
 
-  async save({ keep = false, publish = false }: { keep?: boolean; publish?: boolean } = {}): Promise<void> {
+  /** Save now. An autosave fails quietly (the bar says so); one asked for
+   *  `strict` — before publishing or leaving — throws when the story isn't saved. */
+  async save({ keep = false, publish = false, strict = false }: SaveOptions = {}): Promise<void> {
+    strict ||= publish
     window.clearTimeout(this.timer)
     while (this.pending) await this.pending
     const { store } = this
     const s = store.get()
     if (s.save.state === 'conflict') {
-      if (publish) throw new Error('This story was saved somewhere else. Reload it first.')
+      if (strict) throw new Error('This story was saved somewhere else. Reload it first.')
       return
     }
     if (s.save.state === 'saved' && !keep && !publish) return
@@ -60,7 +66,7 @@ export class Saver {
       store.set((x) => ({ save: { ...x.save, state: stale ? 'conflict' : 'error', message: err instanceof Error ? err.message : null } }))
     }).finally(() => { this.pending = null })
     await this.pending
-    if (failure && publish) throw failure
+    if (failure && strict) throw failure
     if (store.get().save.state === 'dirty') this.schedule()
   }
 }

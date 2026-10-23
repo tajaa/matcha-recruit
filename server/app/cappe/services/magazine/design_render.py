@@ -23,7 +23,7 @@ click), and a probe (`.mzd__box`) marks the artboard's edges.
 from __future__ import annotations
 
 from html import escape
-from typing import Optional
+from typing import Any, Optional
 
 from .design_schema import design_asset_ids, num
 from .figures import credit_html, img_html
@@ -214,10 +214,10 @@ def page_style(design: Optional[dict], aspect: float) -> str:
     return ";".join(parts)
 
 
-def layer_credits(design: Optional[dict], assets: dict[str, dict], *, skip: Optional[str] = None) -> str:
+def layer_credits(design: Optional[dict], assets: dict[str, dict], *, skip: Any = None) -> str:
     """The credit of each picture a design lays down (each once; `skip` is
-    the picture under it, credited already)."""
-    out, seen = [], {skip} if skip else set()
+    the picture under it, credited already: a library row's id, a UUID)."""
+    out, seen = [], {str(skip)} if skip else set()
     for asset_id in design_asset_ids(design):
         asset = assets.get(asset_id)
         if asset_id in seen or not asset:

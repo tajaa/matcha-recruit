@@ -118,7 +118,7 @@ async def plan_has_magazine(conn, account_id) -> bool:
 
 async def _magazine_readiness(conn, site_id, site_row) -> dict:
     facts = await conn.fetchrow(
-        """SELECT EXISTS (SELECT 1 FROM cappe_posts WHERE site_id = $1 AND format = 'blocks'
+        """SELECT EXISTS (SELECT 1 FROM cappe_posts WHERE site_id = $1 AND format IN ('blocks', 'pages')
                             AND status = 'published' AND hidden_at IS NULL AND word_count > 0) AS has_story,
                   (SELECT COALESCE(about, '') <> '' OR COALESCE(tagline, '') <> ''
                      FROM cappe_magazines WHERE site_id = $1) AS has_about""",

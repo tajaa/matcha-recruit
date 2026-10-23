@@ -53,6 +53,17 @@ type Listener = () => void
 const HISTORY = 200
 const COALESCE_MS = 1200
 
+/** The state kept to its document: the page in view one it has, and nothing
+ *  selected or typed into that is gone (a page deleted, an undo). */
+function within(s: State): State {
+  const ids = new Set(s.doc.items.map((i) => i.id))
+  const threads = new Set(s.doc.threads.map((t) => t.id))
+  const page = Math.max(0, Math.min(s.page, s.doc.pages.length - 1))
+  const selection = s.selection.every((id) => ids.has(id)) ? s.selection : s.selection.filter((id) => ids.has(id))
+  const editing = s.editing && !threads.has(s.editing.thread) ? null : s.editing
+  return page === s.page && selection === s.selection && editing === s.editing ? s : { ...s, page, selection, editing }
+}
+
 export class Store {
   private state: State
   private listeners = new Set<Listener>()
@@ -103,7 +114,7 @@ export class Store {
     this.lastKey = key
     this.lastAt = now
     this.future = []
-    this.state = { ...this.state, ...extra, doc, overset, save: { ...this.state.save, state: 'dirty' } }
+    this.state = within({ ...this.state, ...extra, doc, overset, save: { ...this.state.save, state: 'dirty' } })
     this.emit()
     this.onDocChange?.(doc)
   }
@@ -113,12 +124,16 @@ export class Store {
     this.lastKey = null
   }
 
-  /** Compose again (a face finished loading). */
+  /** Compose again (a face finished loading). Lines that changed are saved
+   *  (no undo step): readers get the lines set in the real face. */
   recompose(): void {
     const { doc, overset } = composeDoc(this.state.doc, this.measure, true)
     if (doc === this.state.doc && overset.size === this.state.overset.size) return
-    this.state = { ...this.state, doc, overset }
+    const lines = doc !== this.state.doc
+    const save = lines && this.state.save.state !== 'conflict' ? { ...this.state.save, state: 'dirty' as const } : this.state.save
+    this.state = { ...this.state, doc, overset, save }
     this.emit()
+    if (lines) this.onDocChange?.(doc)
   }
 
   canUndo = () => this.past.length > 0
@@ -140,16 +155,10 @@ export class Store {
 
   private restore(doc: Doc): void {
     this.lastKey = null
-    const ids = new Set(doc.items.map((i) => i.id))
-    const threads = new Set(doc.threads.map((t) => t.id))
     const composed = composeDoc(doc, this.measure)
-    this.state = {
-      ...this.state, doc: composed.doc, overset: composed.overset,
-      selection: this.state.selection.filter((id) => ids.has(id)),
-      editing: this.state.editing && threads.has(this.state.editing.thread) ? this.state.editing : null,
-      page: Math.min(this.state.page, doc.pages.length - 1),
-      save: { ...this.state.save, state: 'dirty' },
-    }
+    this.state = within({
+      ...this.state, doc: composed.doc, overset: composed.overset, save: { ...this.state.save, state: 'dirty' },
+    })
     this.emit()
     this.onDocChange?.(composed.doc)
   }

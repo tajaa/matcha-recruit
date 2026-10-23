@@ -3,7 +3,7 @@ import type { FrameKey, FrameTarget } from '../canvas/bridge'
 import { changeDesign, insertIndex, type StoryDoc } from '../canvas/storyDoc'
 import {
   addLayers, arrange, cloneLayers, designOf, designPath, duplicate, group, holdsDesign, newImage, newShape, newText, removeLayers,
-  topLevel, ungroup, walk, type ArtAt, type TextPreset,
+  topLevel, ungroup, walk, type ArtAt, type Heights, type TextPreset,
 } from '../design/designOps'
 import type { DesignAsset } from '../design/designRender'
 import { fontHref } from '../design/fontStack'
@@ -57,7 +57,8 @@ const layersOf = (doc: StoryDoc, t: Extract<FrameTarget, { kind: 'layer' }>) => 
 
 /** A key from the page (or the same command from a menu) done to what is
  *  selected. Null when it means nothing for that selection. */
-export function command(doc: StoryDoc, story: string, t: FrameTarget | null, key: FrameKey, clipboard: Clipboard): Did | null {
+export function command(doc: StoryDoc, story: string, t: FrameTarget | null, key: FrameKey, clipboard: Clipboard,
+  heights?: Heights): Did | null {
   if (t?.kind !== 'layer') {
     // A picture or page in hand takes what was copied.
     const art = artOf(doc, t)
@@ -89,7 +90,7 @@ export function command(doc: StoryDoc, story: string, t: FrameTarget | null, key
       return next ? { doc: next, select: layerTarget(story, art, r.ids) } : null
     }
     case 'group': {
-      const r = group(d, t.ids)
+      const r = group(d, t.ids, heights)
       if (!r.id) return null
       const next = change(() => r.design)
       return next ? { doc: next, select: layerTarget(story, art, [r.id]) } : null
