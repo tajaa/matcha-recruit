@@ -2,7 +2,7 @@ import { ArrowDownToLine, ArrowUpToLine, ChevronDown, ChevronUp, Eye, EyeOff, Im
 import { ColorField, IconBtn, NumberField, Row, Section, Seg, Slider } from '../../../magazine/workspace/controls'
 import { round } from '../../model/limits'
 import { arrange, patchItems, unlinkAfter, type Arrange } from '../../model/ops'
-import type { Fit, GraphicFit, Item, Stroke, VAlign } from '../../model/types'
+import type { Fit, GraphicFit, GraphicItem, Item, Stroke, VAlign } from '../../model/types'
 import { useStudio } from '../../store/store'
 import { useCtx } from '../context'
 import { LengthField, Labeled } from '../fields'
@@ -38,6 +38,7 @@ export function ObjectPanel() {
   const units = doc.units
   const kinds = new Set(items.map((i) => i.kind))
   const only = kinds.size === 1 ? one.kind : null
+  const inked = items.filter((i): i is GraphicItem => i.kind === 'graphic' && i.color !== null)
   return (
     <>
       <Section title={items.length > 1 ? `${items.length} selected` : KIND_LABEL[one.kind]} right={
@@ -125,9 +126,17 @@ export function ObjectPanel() {
 
       {only === 'graphic' && one.kind === 'graphic' && (
         <Section title="Look">
-          {one.color !== null
-            ? <ColorField label="Colour" value={one.color} onChange={(color) => color && set({ color })} />
-            : <p className="text-[11px] text-zinc-500">A colourful graphic keeps its own colours.</p>}
+          {/* Only the one-colour graphics take a colour: the server drops one on a colourful graphic,
+              so giving it one here would show a silhouette the reader never sees. */}
+          {inked.length > 0 && (
+            <ColorField label="Colour" value={inked[0].color ?? ''}
+              onChange={(color) => color && store.edit((d) => patchItems(d, inked.map((i) => i.id), { color }))} />
+          )}
+          {inked.length < items.length && (
+            <p className="text-[11px] text-zinc-500">
+              {inked.length ? 'The colourful graphics keep their own colours.' : 'A colourful graphic keeps its own colours.'}
+            </p>
+          )}
           <Seg label="In its box" value={one.fit} options={GRAPHIC_FITS} onChange={(fit) => set({ fit })} />
           {one.fit === 'tile' && (
             <LengthField label="Pattern size" short="▦" units={units} value={one.tile} min={2} max={720} onChange={(tile) => set({ tile })} />
