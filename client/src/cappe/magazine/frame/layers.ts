@@ -1,6 +1,8 @@
+import DOMPurify from 'dompurify'
 import type { FrameKey, FrameTarget, LayerChange } from '../canvas/bridge'
 import { layersHtml, type DesignAsset } from '../design/designRender'
-import type { Design } from '../design/types'
+import type { Design, Layer } from '../design/types'
+import { rememberRich } from './rich'
 import { select } from './selection'
 import { clamp, onPlace, place, post, state, ui } from './state'
 import { blockOf, storyOf } from './targets'
@@ -290,6 +292,44 @@ const send = (art: HTMLElement, changes: LayerChange[]) => {
   if (changes.length) post({ type: 'mz-layers', story: storyOf(art), block: blockOf(art), item: itemOfArt(art), changes })
 }
 
+// ── words that grow ──────────────────────────────────────────────────────────
+// A text layer that grows with its words keeps no height of its own: only
+// the page knows it. Each one is watched, and the editor outside told its
+// height (in percent of the artboard) whenever it changes, for aligning,
+// spacing and grouping by it.
+
+const AUTO = '.mzd__l--auto[data-mzd-l]'
+const grown = new Set<HTMLElement>()
+let growing: ResizeObserver | null = null
+let grownTimer: ReturnType<typeof setTimeout> | undefined
+
+function sendHeights() {
+  for (const art of grown) {
+    if (!art.isConnected) continue
+    const a = artRect(art), heights: Record<string, number> = {}
+    for (const el of art.querySelectorAll<HTMLElement>(AUTO)) {
+      heights[el.getAttribute('data-mzd-l')!] = Math.round((el.offsetHeight / a.height) * 1000) / 10
+    }
+    post({ type: 'mz-heights', story: storyOf(art), block: blockOf(art), item: itemOfArt(art), heights })
+  }
+  grown.clear()
+}
+
+/** Watch the growing words in `root` (a design drawn again: its old ones go). */
+function watchHeights(root: ParentNode, gone: Element[] = []) {
+  if (typeof ResizeObserver === 'undefined') return
+  growing ??= new ResizeObserver((entries) => {
+    for (const e of entries) {
+      const art = e.target.closest<HTMLElement>('.mzd[data-mzd]')
+      if (art) grown.add(art)
+    }
+    clearTimeout(grownTimer)
+    grownTimer = setTimeout(sendHeights, 80)
+  })
+  for (const el of gone) growing.unobserve(el)
+  for (const el of root.querySelectorAll(AUTO)) growing.observe(el)
+}
+
 /** Follow a pointer from `e` until it is let go. */
 function follow(e: PointerEvent, move: (dx: number, dy: number, ev: PointerEvent) => void, end: (moved: boolean) => void) {
   const x0 = e.clientX, y0 = e.clientY
@@ -389,7 +429,8 @@ function resizeOne(e: PointerEvent, art: HTMLElement, el: HTMLElement, h: Handle
     const x = ((cx - w / 2 - a.left) / a.width) * 100, y = ((cy - ht / 2 - a.top) / a.height) * 100
     const p: { x: number; y: number; w: number; h?: number } = { x, y, w: (w / a.width) * 100 }
     if (text && corner) setSize(el, Math.round(s.size * (w / b.width) * 10) / 10)
-    else if (!(text && s.auto && hy === 0)) p.h = (ht / a.height) * 100
+    // Words that grow keep no height (a side's top or bottom fixes one).
+    if (!(text && s.auto && (hy === 0 || corner))) p.h = (ht / a.height) * 100
     if (text && s.auto && hy !== 0 && !corner) el.classList.remove('mzd__l--auto')
     setPlace(el, p)
     drawBox(frame, { left: cx - w / 2, top: cy - ht / 2, width: w, height: ht }, s.rot)
@@ -399,7 +440,7 @@ function resizeOne(e: PointerEvent, art: HTMLElement, el: HTMLElement, h: Handle
     if (!moved) return
     const c: LayerChange = { id: el.getAttribute('data-mzd-l')!, x: num(el, '--x'), y: num(el, '--y'), w: num(el, '--w') }
     const h2 = num(el, '--h')
-    if (!Number.isNaN(h2) && !(text && s.auto && hy === 0) && !(text && corner)) c.h = h2
+    if (!Number.isNaN(h2) && !(text && s.auto && (hy === 0 || corner))) c.h = h2
     if (text && corner) c.size = parseFloat(/calc\(([\d.]+) \*/.exec(el.querySelector<HTMLElement>(':scope > .mzd__t')!.style.fontSize)?.[1] ?? String(s.size))
     if (text && s.auto && hy !== 0 && !corner) c.autosize = 'none'
     send(art, [c])
@@ -500,8 +541,10 @@ export function drawDesign(t: { story: string; block: number; item: number | nul
   if (!art) return
   const html = layersHtml(design, assets, { edit: true, path: art.getAttribute('data-mzd') || 'design' })
   const typing = state.editing && art.contains(state.editing) ? state.editing.closest<HTMLElement>('[data-mzd-l]') : null
+  // The design came by message from the editor outside; layersHtml escapes
+  // what it writes, and the markup is cleaned again before the page holds it.
   const fresh = document.createElement('div')
-  fresh.innerHTML = html
+  fresh.append(DOMPurify.sanitize(html, { RETURN_DOM_FRAGMENT: true }))
   if (typing) {
     const id = typing.getAttribute('data-mzd-l')!
     const next = fresh.querySelector<HTMLElement>(`[data-mzd-l="${esc(id)}"]`)
@@ -514,22 +557,51 @@ export function drawDesign(t: { story: string; block: number; item: number | nul
       next.replaceWith(typing)
     }
   }
+  // Its words open as drawn now, not as the page first printed them.
+  const story = art.closest('[data-mz-s]')
+  const path = art.getAttribute('data-mzd') || 'design'
+  const remember = (layers: Layer[]) => {
+    for (const l of layers) {
+      if (l.kind === 'group') remember(l.children)
+      else if (l.kind === 'text' && story) rememberRich(story, `${blockOf(art)}|${path}.${l.id}`, l.rt)
+    }
+  }
+  remember(design.layers || [])
   const probe = art.querySelector(':scope > .mzd__box')
+  const old = Array.from(art.querySelectorAll(AUTO))
   art.replaceChildren(...(probe ? [probe] : []), ...Array.from(fresh.childNodes))
+  watchHeights(art, old)
   // Selected layers that went (deleted, ungrouped) are let go of.
   const sel = state.selected
   if (sel.kind === 'layer' && artFor(sel) === art) {
     const left = sel.ids.filter((id) => layerEl(art, id))
-    if (left.length !== sel.ids.length) select(left.length ? { ...sel, ids: left } : pictureTarget(art), left.length ? layerEl(art, left[0]) : art.parentElement)
-    else state.selectedEl = layerEl(art, sel.ids[0])
+    if (left.length !== sel.ids.length) {
+      const now = left.length ? { ...sel, ids: left } : pictureTarget(art)
+      select(now, left.length ? layerEl(art, left[0]) : art.parentElement)
+      // The editor outside lets go of them too (its panels show what is left).
+      post({ type: 'mz-select', target: now })
+    } else state.selectedEl = layerEl(art, sel.ids[0])
   }
   place()
 }
 
+const FONTS_CSS = 'https://fonts.googleapis.com/css2?'
+
+/** A Google Fonts stylesheet's address, rebuilt on its fixed origin; null
+ *  for anything else. */
+export function fontsHref(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null
+  let url: URL
+  try { url = new URL(raw) } catch { return null }
+  if (url.origin !== 'https://fonts.googleapis.com' || url.pathname !== '/css2' || !url.search) return null
+  return FONTS_CSS + url.search.slice(1)
+}
+
 /** Faces the editor picked: loaded into the page once. */
-export function loadFonts(hrefs: string[]) {
-  for (const href of hrefs) {
-    if (!/^https:\/\/fonts\.googleapis\.com\/css2\?/.test(href) || document.querySelector(`link[href="${esc(href)}"]`)) continue
+export function loadFonts(hrefs: unknown[]) {
+  for (const raw of hrefs) {
+    const href = fontsHref(raw)
+    if (!href || document.querySelector(`link[href="${esc(href)}"]`)) continue
     const link = document.createElement('link')
     link.rel = 'stylesheet'
     link.href = href
@@ -607,6 +679,7 @@ export function commandKey(e: KeyboardEvent): FrameKey | null {
 // ── wiring ───────────────────────────────────────────────────────────────────
 
 export function startLayers() {
+  watchHeights(document)
   // Pictures here are drawn on, never dragged out of the page (a drag on one
   // would end the gesture: the box that selects layers, a layer moved).
   document.addEventListener('dragstart', (e) => {
@@ -651,7 +724,8 @@ export function startLayers() {
     // layers selected) draws a box to select layers with.
     const host = t.closest('.mz-frame, .mz-cover__media, .mz-page__art')
     const art = host?.querySelector<HTMLElement>(':scope > .mzd[data-mzd]')
-    if (art && !t.closest('[data-mz-f], [data-mz-focal]') && inHand(art)) lasso(e, art)
+    // (A cover's picture carries its focal point; its dot is a handle of its own.)
+    if (art && !t.closest('[data-mz-f]') && inHand(art)) lasso(e, art)
   }, true)
 
   document.addEventListener('dblclick', (e) => {

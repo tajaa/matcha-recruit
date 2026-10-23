@@ -478,13 +478,19 @@ def test_deleting_drops_the_cache(monkeypatch, invalidated):
 
 
 def test_the_list_marks_hidden_stories(monkeypatch):
-    conn = _owner_conn(fetch={"FROM cappe_posts WHERE site_id = $1 ORDER BY": [story_row(hidden_at=NOW), story_row(id=uuid4())]})
+    old = json.dumps({"blocks": [{"type": "photo", "asset_id": str(ASSET),
+                                  "overlays": [{"x": 50, "y": 50, "text": "Dawn", "size": "l", "tone": "light"}]}]})
+    conn = _owner_conn(fetch={"FROM cappe_posts WHERE site_id = $1 ORDER BY": [
+        story_row(hidden_at=NOW), story_row(id=uuid4()), story_row(id=uuid4(), content=old)]})
     with _blog_client(monkeypatch, conn) as client:
         res = client.get(f"/sites/{SITE}/posts")
-    assert [p["hidden"] for p in res.json()] == [True, False]
+    assert [p["hidden"] for p in res.json()] == [True, False, False]
     assert "hidden_at" not in res.json()[0]
     # Words stay as stored in the list; one story opened for editing gets its documents.
     assert "rt" not in res.json()[0]["content"]["blocks"][1]
+    # An old photo's overlays come as its design, which the issue editor edits.
+    photo = res.json()[2]["content"]["blocks"][0]
+    assert "overlays" not in photo and photo["design"]["layers"][0]["kind"] == "text"
     conn = _owner_conn(fetchrow={"FROM cappe_posts WHERE id = $1": story_row()})
     with _blog_client(monkeypatch, conn) as client:
         one = client.get(f"/sites/{SITE}/posts/{POST}").json()

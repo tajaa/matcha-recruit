@@ -56,6 +56,7 @@ from ..services.magazine.story_schema import (
     normalize_story,
     referenced_asset_ids,
     starter_content,
+    with_designs,
 )
 from ..services.magazine.studio.schema import DocError, normalize_doc, starter_doc
 from ..services.magazine.topics import TOPICS, normalize_topic
@@ -71,11 +72,14 @@ EDIT_IN_STUDIO = "This story is made of pages. Change them in the Studio."
 def _out(row, *, documents: bool = True) -> dict[str, Any]:
     """A post for the owner. One story (`documents`) carries a document for
     every rich field, for the editor; the list doesn't, so it never converts
-    every old story's Markdown on each load."""
+    every old story's Markdown on each load. Both give an old photo's
+    overlays as its design (the issue editor edits stories from the list)."""
     d = post_row(row)
     d["hidden"] = d.pop("hidden_at", None) is not None
-    if documents and d.get("format") == "blocks":
-        d["content"] = with_documents(d["content"])
+    if d.get("format") == "blocks":
+        content = d["content"]
+        d["content"] = (with_documents(content) if documents
+                        else {**content, "blocks": with_designs(content.get("blocks") or [])})
     if not documents and d.get("format") == "pages":
         d["content"] = None  # a document of pages is the Studio's to open, not the list's
     return d
