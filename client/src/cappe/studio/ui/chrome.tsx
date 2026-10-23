@@ -107,7 +107,11 @@ export function ToolBar() {
     <div role="toolbar" aria-label="Tools" aria-orientation="vertical" className="flex w-11 shrink-0 flex-col items-center gap-1 border-r border-zinc-800 bg-zinc-900 py-2">
       {TOOLS.map((t) => (
         <button key={t.tool} type="button" title={`${t.label} (${t.key})`} aria-label={t.label} aria-pressed={tool === t.tool}
-          onClick={() => command(`tool-${t.tool}`).run(c)}
+          onClick={() => {
+            command(`tool-${t.tool}`).run(c)
+            // A picture is placed from the library; drawing an empty frame stays the tool's.
+            if (t.tool === 'frame') command('place').run(c)
+          }}
           className={`flex h-8 w-8 items-center justify-center rounded-md ${tool === t.tool ? 'bg-emerald-500/20 text-emerald-300' : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100'}`}>
           {t.icon}
         </button>
@@ -127,6 +131,7 @@ export function StatusBar() {
   const overset = useStudio(c.store, (s) => s.overset.size)
   const save = useStudio(c.store, (s) => s.save)
   const threading = useStudio(c.store, (s) => s.threading)
+  const tool = useStudio(c.store, (s) => s.tool)
   const pct = Math.round((zoom * 72 / 96) * 100)
   return (
     <div className="flex h-7 shrink-0 items-center gap-4 border-t border-zinc-800 bg-zinc-900 px-3 text-[11px] text-zinc-400">
@@ -140,10 +145,22 @@ export function StatusBar() {
       </label>
       <span>Page {page + 1} of {pages}</span>
       {threading && <span className="text-emerald-300">Click a text frame to flow the text into it (Esc to stop)</span>}
+      {!threading && TOOL_HINT[tool] && <span className="text-emerald-300">{TOOL_HINT[tool]} · Esc for the Selection tool</span>}
       {overset > 0 && <span className="text-red-300">{overset === 1 ? 'Some text doesn’t fit' : `${overset} texts don’t fit`}</span>}
       <span className="ml-auto" role="status">{SAVE_LABEL[save.state]}{save.message ? ` — ${save.message}` : ''}</span>
     </div>
   )
+}
+
+/** What a tool does, said in the status bar while it is in hand. */
+const TOOL_HINT: Partial<Record<Tool, string>> = {
+  text: 'Type: click a page for a text frame the width of the column, or drag one out; click a text frame to type in it',
+  frame: 'Picture frame: drag one out on a page, then choose its picture',
+  rect: 'Rectangle: click a page for a 2-inch square, or drag one out (Shift: a square)',
+  ellipse: 'Ellipse: click a page for a 2-inch circle, or drag one out (Shift: a circle)',
+  line: 'Line: drag on a page (Shift: at 45°), or click for a 2-inch line',
+  hand: 'Hand: drag to move around the pages (Space does this with any tool)',
+  zoom: 'Zoom: click to zoom in, Alt-click to zoom out',
 }
 
 const SAVE_LABEL = { saved: 'Saved', dirty: 'Unsaved changes', saving: 'Saving…', error: 'Couldn’t save', conflict: 'Saved elsewhere' }

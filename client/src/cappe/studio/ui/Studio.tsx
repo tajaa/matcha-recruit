@@ -128,7 +128,11 @@ function useKeys(c: StudioCtx) {
         return
       }
       if (s.dialog) return
-      if (e.key === 'Escape') { c.store.set({ selection: [], threading: null }); return }
+      if (e.key === 'Escape') {
+        // Esc puts a drawing tool down first, then lets go of the selection.
+        c.store.set(s.tool !== 'select' && !s.threading ? { tool: 'select' } : { selection: [], threading: null })
+        return
+      }
       const arrows: Record<string, [number, number]> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }
       if (arrows[e.key] && s.selection.length) {
         e.preventDefault()
