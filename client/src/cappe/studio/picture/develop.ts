@@ -98,8 +98,9 @@ export function developPixel(c: RGB, r: Recipe, uv: Pt, px: Pt): RGB {
   lin = [lin[0] * (1 + 0.25 * t + 0.05 * n), lin[1] * (1 - 0.18 * n), lin[2] * (1 - 0.25 * t + 0.05 * n)]
   const ev = 2 ** (r.exposure ?? 0)
   let d: RGB = lin.map((x) => toDisplay(Math.min(16, Math.max(0, x * ev)))) as RGB
-  // Tone, by how light the pixel is.
-  const L = luma(d)
+  // Tone, by how light the pixel is: exposure can carry it past white, but
+  // the tone curves are drawn over 0–1 (past it they turn round and darken).
+  const L = clamp01(luma(d))
   const sh = v('shadows'), hi = v('highlights'), wh = v('whites'), bl = v('blacks')
   const dl = 2 * sh * L * (1 - L) ** 2 + 2 * hi * L * L * (1 - L) + 0.25 * wh * L ** 3 + 0.15 * bl * (1 - L) ** 3
   d = d.map((x) => x + dl) as RGB
@@ -195,11 +196,13 @@ vec2 sourceUv(vec2 uv) {
 void main() {
   vec2 uv = vec2(gl_FragCoord.x / uOut.x, 1.0 - gl_FragCoord.y / uOut.y);
   vec2 st = clamp(sourceUv(uv), vec2(0.0), vec2(1.0));
-  vec3 c = texture(uSrc, st).rgb;
-  float alpha = 1.0;
+  vec4 src = texture(uSrc, st);
+  vec3 c = src.rgb;
+  // A transparent picture stays transparent; a cut-out cuts it further.
+  float alpha = src.a;
   if (uMaskOn > 0.5) {
-    alpha = textureLod(uMask, st, uFeather).r;
-    if (uInvert > 0.5) alpha = 1.0 - alpha;
+    float m = textureLod(uMask, st, uFeather).r;
+    alpha *= uInvert > 0.5 ? 1.0 - m : m;
   }
   if (uAdjust < 0.5) { outColor = vec4(c * alpha, alpha); return; }
 
@@ -214,7 +217,7 @@ void main() {
   lin = clamp(lin * exp2(uExposure), 0.0, 16.0);
   vec3 d = vec3(toDisplay(lin.r), toDisplay(lin.g), toDisplay(lin.b));
 
-  float L = luma(d);
+  float L = clamp(luma(d), 0.0, 1.0);
   float dl = 2.0 * uShadows * L * (1.0 - L) * (1.0 - L) + 2.0 * uHighlights * L * L * (1.0 - L)
            + 0.25 * uWhites * L * L * L + 0.15 * uBlacks * (1.0 - L) * (1.0 - L) * (1.0 - L);
   d += dl;
