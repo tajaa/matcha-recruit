@@ -225,6 +225,16 @@ async def get_post(site_id: UUID, post_id: UUID, account: CappeAccount = Depends
 
 
 _SIMPLE = ("title", "excerpt", "status", "kicker", "byline")
+
+
+def _changed(body: CappePostUpdate, current: dict, col: str) -> bool:
+    """Whether `col` was sent with a value other than the stored one."""
+    if col not in body.model_fields_set:
+        return False
+    sent, stored = getattr(body, col), current.get(col)
+    if col == "cover_asset_id":
+        return (str(sent) if sent else None) != (str(stored) if stored else None)
+    return sent != stored
 # The address a story is made with ("Untitled story" → untitled-story-3).
 _PLACEHOLDER_SLUG = re.compile(r"untitled(-story)?(-\d+)?")
 _NULLABLE = {"excerpt", "kicker", "byline", "topic", "cover_asset_id", "cover_image_url", "body"}
@@ -249,7 +259,10 @@ async def update_post(
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
             current = post_row(current)
             paged = current["format"] == "pages"
-            if paged and (sent & {"content", "cover_asset_id", "cover_image_url"}
+            # A paged story's layout is the Studio's: a change to it is refused
+            # here, but the same value sent back (the iOS app sends its cover
+            # with every save) is no change.
+            if paged and (any(_changed(body, current, col) for col in ("content", "cover_asset_id", "cover_image_url"))
                           or ("format" in sent and body.format != "pages")):
                 raise _unprocessable(EDIT_IN_STUDIO)
             if not paged and body.format == "pages":

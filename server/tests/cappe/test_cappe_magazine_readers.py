@@ -287,6 +287,19 @@ def test_a_free_story_is_whole_for_anyone(monkeypatch):
     assert body["paid"] is False and body["has_access"] is True and SENTINEL in body["html"]
 
 
+def test_a_paged_story_reads_as_pages_or_as_its_text_view(monkeypatch):
+    from app.cappe.services.magazine.studio import schema as S
+    doc = S.starter_doc()
+    doc["threads"][0]["paras"] = [{"runs": [{"t": "Pier at low water"}]}]
+    paged = {**POST, "access": "free", "format": "pages", "content": {"doc": S.normalize_doc(doc)}}
+    _conn, client = _mag_client(monkeypatch, post=paged, shopper=None, access=False)
+    with client as client:
+        pages_html = client.get("/reader/magazines/salt/stories/low-tide").json()["html"]
+        text_html = client.get("/reader/magazines/salt/stories/low-tide?view=text").json()["html"]
+    assert "data-lyt-strip" in pages_html
+    assert "data-lyt-strip" not in text_html and "Pier at low water" in text_html
+
+
 def test_a_missing_story_is_a_404(monkeypatch):
     _conn, client = _mag_client(monkeypatch, post=None)
     with client as client:

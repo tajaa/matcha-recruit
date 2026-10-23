@@ -25,7 +25,7 @@ magazine's own site appears here too.
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -97,9 +97,11 @@ async def magazine(slug: str, page: int = Query(default=1, ge=1, le=50),
 
 
 @router.get("/reader/magazines/{slug}/stories/{story_slug}")
-async def read_story(slug: str, story_slug: str, account: CappeAccount = Depends(require_cappe_account)):
-    """The story as its magazine prints it. Scripts don't run in the
-    dashboard's frame, so the paid part is put in here rather than fetched."""
+async def read_story(slug: str, story_slug: str, view: Optional[str] = None,
+                     account: CappeAccount = Depends(require_cappe_account)):
+    """The story as its magazine prints it (`view=text`: a paged story's
+    Text view, as `/stories/{slug}/text` on the site). Scripts don't run in
+    the dashboard's frame, so the paid part is put in here rather than fetched."""
     await check_rate_limit(str(account.id), "cappe_reader_story", 300, 3600)
     async with get_connection() as conn:
         email = await shelf.confirmed_email(conn, account.id)
@@ -118,7 +120,8 @@ async def read_story(slug: str, story_slug: str, account: CappeAccount = Depends
     shown = {**post, "access": "free"} if access else post
     html = mag_pages.render_story(_site_dict(site, magazine=mag), nav, mag, shown, assets, more=more,
                                   more_covers=more_covers, origin=site_public_origin(site) or "",
-                                  preview_blocks=preview_blocks(mag), currency=site.get("currency"))
+                                  preview_blocks=preview_blocks(mag), currency=site.get("currency"),
+                                  text_view=view == "text" and post.get("format") == "pages")
     return _private({"html": html, "paid": paid, "has_access": access or not paid, "title": post.get("title")})
 
 

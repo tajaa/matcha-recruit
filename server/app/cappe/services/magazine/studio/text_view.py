@@ -56,12 +56,18 @@ def _inline(p: dict, *, heading: bool = False) -> list[dict]:
     return out
 
 
+# The longest pull quote a quote block holds (story_schema._quote).
+QUOTE_MAX = 400
+
+
 def _node(p: dict) -> dict:
     role = p.get("role", PARA_DEFAULTS["role"])
     inline = _inline(p, heading=role in _HEADING)
     content = {"content": inline} if inline else {}
     if role in _HEADING:
         return {"type": "heading", "attrs": {"level": _HEADING[role]}, **content}
+    if role == "quote":  # one too long for a quote block
+        return {"type": "blockquote", "content": [{"type": "paragraph", **content}]}
     return {"type": "paragraph", **content}
 
 
@@ -76,7 +82,8 @@ def _text_block(nodes: list[dict]) -> dict:
 
 
 def _plain(node: dict) -> str:
-    return "".join(c.get("text", "") for c in node.get("content") or [] if c.get("type") == "text")
+    """A node's words (a quote's are inside its paragraph)."""
+    return "".join(c.get("text", "") if c.get("type") == "text" else _plain(c) for c in node.get("content") or [])
 
 
 def _slice(p: dict, start: int, end: Optional[int] = None) -> dict:
@@ -149,12 +156,14 @@ def text_blocks(doc: dict, paywall: Optional[int] = None) -> list[dict]:
         for item in on_page:
             if item["kind"] == "text":
                 for p in starts.get(item["id"], []):
-                    if p.get("role") == "quote":
+                    text = para_text(p).strip()
+                    # A pull quote longer than a quote block holds is read
+                    # as a paragraph, whole, never cut short.
+                    if p.get("role") == "quote" and len(text) <= QUOTE_MAX:
                         flush()
-                        text = para_text(p).strip()
                         if text and len(blocks) < MAX_BLOCKS - 2:
-                            blocks.append({"type": "quote", "text": text[:400], "attribution": "", "style": "big"})
-                    elif para_text(p).strip():
+                            blocks.append({"type": "quote", "text": text, "attribution": "", "style": "big"})
+                    elif text:
                         nodes.append(_node(p))
             elif item["kind"] == "image" and item.get("asset_id") and item is not cover:
                 if len(blocks) >= MAX_BLOCKS - 2:
