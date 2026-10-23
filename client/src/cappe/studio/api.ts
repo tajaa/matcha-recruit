@@ -14,6 +14,17 @@ export type Opened = { post: StudioPost; doc: Doc; draft: boolean; live: boolean
 export type Saved = { rev: number; draft: boolean; doc: Doc }
 export type Revision = { id: string; rev: number; kind: 'save' | 'publish' | 'restore' | 'convert'; title: string | null;
   created_at: string }
+/** A button under an answer: a guide section to open, or a command to run. */
+export type AskLink = { kind: 'guide' | 'command'; id: string }
+export type AskAnswer = { answer: string; links: AskLink[] }
+export type AskRequest = {
+  question: string
+  history: { q: string; a: string }[]
+  guide: { id: string; title: string; body: string; points: string[] }[]
+  commands: { id: string; label: string; keys: string; enabled: boolean }[]
+  page: string
+  picture: { media_type: 'image/jpeg'; data: string } | null
+}
 
 const base = (siteId: string, postId: string) => `/sites/${siteId}/studio/stories/${postId}`
 
@@ -46,6 +57,8 @@ export const studioApi = {
     form.append('recipe', JSON.stringify(recipe))
     return cappeApi.upload<CappeAsset>(`/sites/${siteId}/assets/${assetId}/edit`, form)
   },
+  /** Ask the Studio: an answer, saved nowhere (server studio/ask.py). */
+  ask: (siteId: string, postId: string, body: AskRequest) => cappeApi.post<AskAnswer>(`${base(siteId, postId)}/ask`, body),
   preview: (siteId: string, post: StudioPost, doc: Doc) => cappeApi.postHtml(`/sites/${siteId}/stories/preview`, {
     title: post.title, excerpt: post.excerpt, kicker: post.kicker, topic: post.topic, byline: post.byline,
     access: post.access, format: 'pages', content: { doc },

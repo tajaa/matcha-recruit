@@ -89,6 +89,7 @@ GUMMFIT_MERLIN_ROUTER = "gummfit.merlin_router"
 GUMMFIT_DIRECTORY = "gummfit.directory"
 GUMMFIT_BOOKING = "gummfit.booking"
 GUMMFIT_MAGAZINE = "gummfit.magazine"
+GUMMFIT_STUDIO = "gummfit.studio"
 GUMMFIT_SOCIAL = "gummfit.social"
 
 # ── Tell-Us ──
@@ -176,6 +177,10 @@ SURFACES: tuple[SurfaceDef, ...] = (
                "The story editor's Assist: drafts from the writer's pictures and notes, headlines, captions, "
                "tightening and archive search terms. Proposals only; nothing is saved without the writer. "
                "The real-person check on AI illustrations always runs on Claude Haiku.", _HAIKU),
+    SurfaceDef(GUMMFIT_STUDIO, GUMMFIT, "Studio design help",
+               "Ask the Studio: how to do something in Gummfit Studio and how to make a page look a "
+               "certain way, from the Studio's guide and the page in view. Answers only; nothing on the "
+               "page changes.", _HAIKU),
     SurfaceDef(GUMMFIT_SOCIAL, GUMMFIT, "Social replies and captions",
                "Drafts replies to Instagram and Facebook comments and messages, grounded on the "
                "store's catalog and the owner's notes, and writes caption options for a post.", _HAIKU),

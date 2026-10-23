@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Circle, CircleHelp, Hand, Image as ImageIcon, Minus, MousePointer2, Square, Type, X, ZoomIn } from 'lucide-react'
+import { Circle, CircleHelp, Hand, Image as ImageIcon, Minus, MousePointer2, Sparkles, Square, Type, X, ZoomIn } from 'lucide-react'
 import type { Panel, Tool } from '../store/store'
 import { useStudio } from '../store/store'
 import { command, zoomTo, type Command } from './commands'
@@ -13,7 +13,7 @@ const MENUS: { label: string; items: (string | '-')[] }[] = [
   { label: 'Object', items: ['arrange-front', 'arrange-forward', 'arrange-backward', 'arrange-back', '-', 'lock', 'hide', 'show-all', '-', 'place', 'edit-picture', 'cut-out'] },
   { label: 'View', items: ['zoom-in', 'zoom-out', 'fit-page', 'fit-spread', 'actual', '-', 'view-rulers', 'view-guides', 'view-margins', 'view-baseline', 'view-grid', 'view-snap'] },
 ]
-const HELP = { label: 'Help', items: ['guide', 'shortcuts'] }
+const HELP = { label: 'Help', items: ['ask', '-', 'guide', 'shortcuts'] }
 
 /** The menus: every command with the key that does it too. */
 export function MenuBar() {
@@ -64,7 +64,7 @@ export function MenuBar() {
 
 const PANELS: { key: Panel; label: string }[] = [
   { key: 'pages', label: 'Pages' }, { key: 'props', label: 'Object' }, { key: 'character', label: 'Character' },
-  { key: 'paragraph', label: 'Paragraph' }, { key: 'story', label: 'Story Editor' },
+  { key: 'paragraph', label: 'Paragraph' }, { key: 'story', label: 'Story Editor' }, { key: 'ask', label: 'Ask the Studio' },
 ]
 
 function WindowMenu() {
@@ -182,6 +182,10 @@ export function TopBar({ onPreview, onPublish }: { onPreview: () => void; onPubl
         <span className="text-[11px] text-zinc-500">{save.draft ? 'Changes not live yet' : 'Live'}</span>
       )}
       <div className="ml-auto flex items-center gap-2">
+        <button type="button" onClick={() => command('ask').run(c)} title="Ask how to do something, or how to get a look"
+          className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white">
+          <Sparkles className="h-3.5 w-3.5 text-emerald-400" />Ask
+        </button>
         <button type="button" onClick={() => c.store.set({ guide: 'start' })} aria-label="How the Studio works" title="How the Studio works"
           className="rounded-md p-1 text-zinc-400 hover:bg-zinc-800 hover:text-white"><CircleHelp className="h-4 w-4" /></button>
         <button type="button" onClick={onPreview} className="rounded-md border border-zinc-700 px-3 py-1 text-xs text-zinc-200 hover:border-zinc-500">Preview</button>

@@ -15,19 +15,25 @@ library won't delete one while it is on a page.
 Each update of the live story, each restore and each save the owner asks to
 keep (`keep: true`) is kept as a revision to go back to (the last
 `KEEP_REVISIONS`).
+
+`POST …/ask` answers a question about the Studio or the page being designed
+(`services/magazine/studio/ask.py`). It saves nothing.
 """
 import json
-from typing import Any, Optional
+from typing import Annotated, Any, Literal, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
+from ...core.services.redis_cache import check_rate_limit
 from ...database import get_connection
 from ..dependencies import require_cappe_account
 from ..models.cappe import CappeAccount
+from ..services.entitlements import resolve_entitlements
 from ..services.magazine.stories import POST_COLS, post_row, sync_post_assets
 from ..services.magazine.story_schema import referenced_asset_ids
+from ..services.magazine.studio import ask
 from ..services.magazine.studio.fonts import manifest
 from ..services.magazine.studio.limits import limits
 from ._shared import get_owned_site
@@ -51,6 +57,43 @@ class StudioSave(BaseModel):
 
 class StudioRestore(BaseModel):
     base_rev: int = Field(ge=0)
+
+
+_Id = Annotated[str, Field(max_length=40, pattern=r"^[a-z0-9-]+$")]
+_Point = Annotated[str, Field(max_length=600)]
+
+
+class StudioAskTurn(BaseModel):
+    q: str = Field(max_length=ask.MAX_QUESTION)
+    a: str = Field(max_length=ask.MAX_TURN)
+
+
+class StudioGuideSection(BaseModel):
+    id: _Id
+    title: str = Field(max_length=120)
+    body: str = Field("", max_length=1_000)
+    points: list[_Point] = Field(default_factory=list, max_length=16)
+
+
+class StudioCommand(BaseModel):
+    id: _Id
+    label: str = Field(max_length=80)
+    keys: str = Field("", max_length=16)
+    enabled: bool = True
+
+
+class StudioPicture(BaseModel):
+    media_type: Literal["image/jpeg", "image/png", "image/webp"]
+    data: str = Field(max_length=(ask.MAX_PICTURE_BYTES * 4) // 3 + 4)
+
+
+class StudioAsk(BaseModel):
+    question: str = Field(min_length=1, max_length=ask.MAX_QUESTION)
+    history: list[StudioAskTurn] = Field(default_factory=list, max_length=ask.MAX_HISTORY)
+    guide: list[StudioGuideSection] = Field(default_factory=list, max_length=40)
+    commands: list[StudioCommand] = Field(default_factory=list, max_length=150)
+    page: str = Field("", max_length=ask.MAX_PAGE_CHARS)
+    picture: Optional[StudioPicture] = None
 
 
 def _stale(rev: int) -> HTTPException:
@@ -222,3 +265,29 @@ async def restore_revision(site_id: UUID, post_id: UUID, revision_id: UUID, body
         await invalidate_render_cache(site_id)
     return saved
 
+
+@router.post("/sites/{site_id}/studio/stories/{post_id}/ask")
+async def ask_studio(site_id: UUID, post_id: UUID, body: StudioAsk,
+                     account: CappeAccount = Depends(require_cappe_account)):
+    """An answer to a question about the Studio or the page in view:
+    `{"answer": Markdown, "links": [{"kind": "guide" | "command", "id"}]}`.
+    Nothing is saved and nothing on the page changes."""
+    async with get_connection() as conn:
+        await get_owned_site(conn, site_id, account.id)
+        fmt = await conn.fetchval("SELECT format FROM cappe_posts WHERE id = $1 AND site_id = $2", post_id, site_id)
+        if fmt is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Story not found")
+        if fmt != "pages":
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=NOT_PAGES)
+        ent = await resolve_entitlements(account.plan, conn=conn)
+    try:
+        q = ask.question(body.model_dump())
+    except ask.AskInvalid as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    await check_rate_limit(str(account.id), "cappe_studio_ask", ask.daily_allowance(ent.features), 86_400)
+    try:
+        return await ask.answer(q)
+    except ask.AskUnavailable as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=ask.UNAVAILABLE) from exc
+    except ask.AskFailed as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=ask.FAILED) from exc
