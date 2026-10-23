@@ -1,3 +1,4 @@
+import DOMPurify from 'dompurify'
 import type { FrameKey, FrameTarget, LayerChange } from '../canvas/bridge'
 import { layersHtml, type DesignAsset } from '../design/designRender'
 import type { Design } from '../design/types'
@@ -500,8 +501,10 @@ export function drawDesign(t: { story: string; block: number; item: number | nul
   if (!art) return
   const html = layersHtml(design, assets, { edit: true, path: art.getAttribute('data-mzd') || 'design' })
   const typing = state.editing && art.contains(state.editing) ? state.editing.closest<HTMLElement>('[data-mzd-l]') : null
+  // The design came by message from the editor outside; layersHtml escapes
+  // what it writes, and the markup is cleaned again before the page holds it.
   const fresh = document.createElement('div')
-  fresh.innerHTML = html
+  fresh.append(DOMPurify.sanitize(html, { RETURN_DOM_FRAGMENT: true }))
   if (typing) {
     const id = typing.getAttribute('data-mzd-l')!
     const next = fresh.querySelector<HTMLElement>(`[data-mzd-l="${esc(id)}"]`)
@@ -526,10 +529,23 @@ export function drawDesign(t: { story: string; block: number; item: number | nul
   place()
 }
 
+const FONTS_CSS = 'https://fonts.googleapis.com/css2?'
+
+/** A Google Fonts stylesheet's address, rebuilt on its fixed origin; null
+ *  for anything else. */
+export function fontsHref(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null
+  let url: URL
+  try { url = new URL(raw) } catch { return null }
+  if (url.origin !== 'https://fonts.googleapis.com' || url.pathname !== '/css2' || !url.search) return null
+  return FONTS_CSS + url.search.slice(1)
+}
+
 /** Faces the editor picked: loaded into the page once. */
-export function loadFonts(hrefs: string[]) {
-  for (const href of hrefs) {
-    if (!/^https:\/\/fonts\.googleapis\.com\/css2\?/.test(href) || document.querySelector(`link[href="${esc(href)}"]`)) continue
+export function loadFonts(hrefs: unknown[]) {
+  for (const raw of hrefs) {
+    const href = fontsHref(raw)
+    if (!href || document.querySelector(`link[href="${esc(href)}"]`)) continue
     const link = document.createElement('link')
     link.rel = 'stylesheet'
     link.href = href
