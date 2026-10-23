@@ -178,10 +178,10 @@ def test_an_unconfirmed_account_sees_nothing(monkeypatch):
 # ── one magazine ─────────────────────────────────────────────────────────────
 
 def _mag_client(monkeypatch, *, site=SITE_ROW, mag=MAG, shopper=SHOPPER_ROW, held=None, open_=True,
-                posts=(POST,), post=POST, access=True):
+                posts=(POST,), post=POST, access=True, following=None):
     conn = Conn(fetchrow={"FROM cappe_accounts": CONFIRMED, "FROM cappe_sites": site,
                           "FROM cappe_shoppers": shopper},
-                fetch={"FROM cappe_pages": []})
+                fetch={"FROM cappe_pages": []}, fetchval={"FROM cappe_magazine_follows": following})
 
     async def live_mag(c, s):
         return mag
@@ -228,6 +228,10 @@ def test_a_magazine_shows_what_the_reader_holds_and_its_stories(monkeypatch):
     assert body["has_access"] is True and body["subscription"]["status"] == "active"
     assert body["taking_subscribers"] is True and body["price_cents"] == 500 and body["paid_pitch"] == "Every week."
     assert [s["slug"] for s in body["stories"]] == ["low-tide"] and body["has_more"] is False
+    assert body["following"] is False
+    _conn, client = _mag_client(monkeypatch, following=1)
+    with client as client:
+        assert client.get("/reader/magazines/salt").json()["following"] is True
 
 
 def test_a_reader_new_to_a_magazine_holds_nothing_there_yet(monkeypatch):

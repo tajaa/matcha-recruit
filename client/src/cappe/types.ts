@@ -1923,7 +1923,27 @@ export type CappeReaderMagazine = {
   stories: CappeReaderStoryCard[]
   has_more: boolean
   page: number
+  /** The account follows this magazine (dashboard only; no email). */
+  following: boolean
 }
+
+/** A magazine the account follows. `live` is false while it is down. */
+export type CappeFollowedMagazine = {
+  site_id: string
+  slug: string
+  name: string
+  tagline: string | null
+  accent: string | null
+  origin: string | null
+  live: boolean
+  followed_at: string
+}
+
+export type CappeFeedStory = CappeReaderStoryCard & {
+  magazine: { slug: string; name: string; accent: string | null }
+}
+
+export type CappeReaderFeed = { stories: CappeFeedStory[]; has_more: boolean; page: number }
 
 export type CappeReaderStory = { html: string; paid: boolean; has_access: boolean; title: string }
 

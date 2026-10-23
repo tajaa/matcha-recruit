@@ -19,12 +19,18 @@ export default function Subscribers() {
   const [error, setError] = useState<string | null>(null)
   const [form, setForm] = useState({ email: '', name: '' })
   const [adding, setAdding] = useState(false)
+  // Readers who follow from their Gummfit account: a count only (no email).
+  const [accountFollows, setAccountFollows] = useState<number | null>(null)
 
   useEffect(() => {
     cappeApi
       .get<CappeSubscriber[]>(`/sites/${siteId}/subscribers`)
       .then(setSubs)
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load subscribers'))
+    cappeApi
+      .get<{ accounts: number }>(`/sites/${siteId}/magazine/follows`)
+      .then((d) => setAccountFollows(d.accounts))
+      .catch(() => setAccountFollows(null))
   }, [siteId])
 
   async function add(e: React.FormEvent) {
@@ -60,6 +66,13 @@ export default function Subscribers() {
     <SurfaceShell title={writer ? 'Followers' : 'Subscribers'}
       subtitle={subs ? `${activeCount} active of ${subs.length}` : writer ? 'People who follow your magazine.' : 'Newsletter list.'}>
       {error && <p className="mb-4 text-sm text-red-400">{error}</p>}
+      {accountFollows !== null && (writer || accountFollows > 0) && (
+        <p className="mb-4 rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm text-zinc-300">
+          <span className="font-semibold text-zinc-100">{accountFollows}</span>{' '}
+          {accountFollows === 1 ? 'person follows' : 'people follow'} from their Gummfit account. They see your new
+          stories on their dashboard; the list below is who gets them by email.
+        </p>
+      )}
 
       <form onSubmit={add} className="mb-6 flex flex-wrap gap-2 rounded-2xl border border-zinc-800 bg-zinc-900 p-4 shadow-sm">
         <input

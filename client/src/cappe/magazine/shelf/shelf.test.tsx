@@ -2,15 +2,16 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import Shelf from './Shelf'
+import Feed from './Feed'
 import ShelfMagazine from './ShelfMagazine'
 import ShelfStory from './ShelfStory'
 import ReaderLayout from './ReaderLayout'
 import CappeLayout from '../../layout/CappeLayout'
 import { magazineSlugFrom, readerMagazinePath, readerNext, readerStoryPath } from './readerPaths'
 import { LINK_PREFIX } from '../reader/book'
-import type { CappeReaderMagazine, CappeReaderStoryCard, CappeShelfMagazine } from '../../types'
+import type { CappeFollowedMagazine, CappeReaderMagazine, CappeReaderStoryCard, CappeShelfMagazine } from '../../types'
 
-const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }))
+const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }))
 const token = vi.hoisted(() => ({ value: 'a' as string | null }))
 const me = vi.hoisted(() => ({ account: null as null | Record<string, unknown>, loading: false }))
 const followed = vi.hoisted(() => ({ value: null as string | null }))
@@ -45,8 +46,19 @@ const magazine = (over: Partial<CappeReaderMagazine> = {}): CappeReaderMagazine 
   site_id: 's-1', slug: 'salt', name: 'Salt & Light', tagline: 'Sea stories', accent: null,
   origin: 'https://salt.gummfit.test', price_cents: 500, currency: 'USD', paid_pitch: 'Every week.',
   taking_subscribers: true, has_access: false, subscription: null, comp: null, stories: [story()], has_more: false,
-  page: 1, ...over,
+  page: 1, following: false, ...over,
 })
+
+const followedMag = (over: Partial<CappeFollowedMagazine> = {}): CappeFollowedMagazine => ({
+  site_id: 's-3', slug: 'kelp', name: 'Kelp', tagline: 'Under water', accent: null,
+  origin: 'https://kelp.gummfit.test', live: true, followed_at: '2026-10-21T09:00:00Z', ...over,
+})
+
+/** The shelf asks for what the reader holds and for what they follow. */
+function shelfApi(mags: CappeShelfMagazine[], follows: CappeFollowedMagazine[] = []) {
+  api.get.mockImplementation((path: string) =>
+    Promise.resolve(path === '/reader/following' ? { magazines: follows } : { magazines: mags }))
+}
 
 function Where() {
   const loc = useLocation()
@@ -110,8 +122,8 @@ describe('the shell', () => {
 
 describe('the shelf', () => {
   it('lists each magazine with what the reader holds and its latest story', async () => {
-    api.get.mockResolvedValue({ magazines: [held(), held({ site_id: 's-2', slug: 'ink', name: 'Ink', subscription: null,
-      comp: { expires_at: null }, live: false, latest: null })] })
+    shelfApi([held(), held({ site_id: 's-2', slug: 'ink', name: 'Ink', subscription: null,
+      comp: { expires_at: null }, live: false, latest: null })])
     mount('/cappe/reader', '/cappe/reader', <Shelf />)
     expect(await screen.findByRole('link', { name: 'Salt & Light' })).toHaveAttribute('href', readerMagazinePath('salt'))
     expect(screen.getByText(/^Renews/)).toBeInTheDocument()
@@ -122,7 +134,7 @@ describe('the shelf', () => {
 
   it('cancels a subscription to a magazine that is down from the shelf itself', async () => {
     // Its page 404s while it is down; the reader can still stop paying.
-    api.get.mockResolvedValue({ magazines: [held({ live: false, latest: null })] })
+    shelfApi([held({ live: false, latest: null })])
     api.post.mockResolvedValue({ status: 'active', cancel_at_period_end: true })
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
     mount('/cappe/reader', '/cappe/reader', <Shelf />)
@@ -135,7 +147,7 @@ describe('the shelf', () => {
   })
 
   it('opens another magazine by its address', async () => {
-    api.get.mockResolvedValue({ magazines: [] })
+    shelfApi([])
     mount('/cappe/reader', '/cappe/reader', <Shelf />)
     expect(await screen.findByText(/No magazines yet/)).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('Open a magazine'), { target: { value: '!!' } })
@@ -144,6 +156,79 @@ describe('the shelf', () => {
     fireEvent.change(screen.getByLabelText('Open a magazine'), { target: { value: 'ink.gummfit.com' } })
     fireEvent.click(screen.getByRole('button', { name: 'Open' }))
     expect(screen.getByText('at /cappe/reader/m/ink')).toBeInTheDocument()
+  })
+})
+
+describe('following', () => {
+  it('lists the magazines followed and unfollows one', async () => {
+    shelfApi([], [followedMag(), followedMag({ site_id: 's-4', slug: 'gone', name: 'Gone', live: false })])
+    api.delete.mockResolvedValue({ following: false })
+    mount('/cappe/reader', '/cappe/reader', <Shelf />)
+    expect(await screen.findByRole('link', { name: 'Kelp' })).toHaveAttribute('href', readerMagazinePath('kelp'))
+    // A magazine that is down can't be opened, only unfollowed.
+    expect(screen.queryByRole('link', { name: 'Gone' })).not.toBeInTheDocument()
+    expect(screen.queryByText(/No magazines yet/)).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Their new stories/ })).toHaveAttribute('href', '/cappe/reader/feed')
+    fireEvent.click(screen.getAllByRole('button', { name: 'Unfollow' })[0])
+    await waitFor(() => expect(api.delete).toHaveBeenCalledWith('/reader/magazines/kelp/follow'))
+    await waitFor(() => expect(screen.queryByRole('link', { name: 'Kelp' })).not.toBeInTheDocument())
+  })
+
+  it('follows and unfollows from the magazine’s page', async () => {
+    api.get.mockResolvedValueOnce(magazine()).mockResolvedValue(magazine({ following: true }))
+    api.put.mockResolvedValue({ following: true })
+    mount('/cappe/reader/m/salt', '/cappe/reader/m/:slug', <ShelfMagazine />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Follow' }))
+    await waitFor(() => expect(api.put).toHaveBeenCalledWith('/reader/magazines/salt/follow'))
+    const following = await screen.findByRole('button', { name: 'Following' })
+    expect(following).toHaveAttribute('aria-pressed', 'true')
+    api.get.mockResolvedValue(magazine({ following: false }))
+    api.delete.mockResolvedValue({ following: false })
+    fireEvent.click(following)
+    await waitFor(() => expect(api.delete).toHaveBeenCalledWith('/reader/magazines/salt/follow'))
+    expect(await screen.findByRole('button', { name: 'Follow' })).toBeInTheDocument()
+  })
+
+  it('follows once on arrival from the magazine’s link, then forgets the request', async () => {
+    api.get.mockResolvedValueOnce(magazine()).mockResolvedValue(magazine({ following: true }))
+    api.put.mockResolvedValue({ following: true })
+    render(
+      <MemoryRouter initialEntries={['/cappe/reader/m/salt?follow=1']}>
+        <Routes><Route path="/cappe/reader/m/:slug" element={<><ShelfMagazine /><Where /></>} /></Routes>
+      </MemoryRouter>,
+    )
+    expect(await screen.findByRole('button', { name: 'Following' })).toBeInTheDocument()
+    expect(api.put).toHaveBeenCalledTimes(1)
+    expect(screen.getByText('at /cappe/reader/m/salt')).toBeInTheDocument()
+  })
+
+  it('does nothing on arrival when already following', async () => {
+    api.get.mockResolvedValue(magazine({ following: true }))
+    mount('/cappe/reader/m/salt?follow=1', '/cappe/reader/m/:slug', <ShelfMagazine />)
+    expect(await screen.findByRole('button', { name: 'Following' })).toBeInTheDocument()
+    expect(api.put).not.toHaveBeenCalled()
+  })
+
+  it('shows the feed with each story’s magazine, and more on request', async () => {
+    const item = (slug: string, mag = 'kelp') => ({ ...story({ slug, title: slug, access: 'free' }),
+      magazine: { slug: mag, name: mag === 'kelp' ? 'Kelp' : 'Ink', accent: null } })
+    api.get.mockResolvedValueOnce({ stories: [item('alpha'), item('bravo', 'ink')], has_more: true, page: 1 })
+      .mockResolvedValueOnce({ stories: [item('bravo', 'ink'), item('charlie')], has_more: false, page: 2 })
+    mount('/cappe/reader/feed', '/cappe/reader/feed', <Feed />)
+    expect(await screen.findByRole('link', { name: /alpha/ })).toHaveAttribute('href', '/cappe/reader/m/kelp/alpha')
+    expect(screen.getByRole('link', { name: 'Ink' })).toHaveAttribute('href', readerMagazinePath('ink'))
+    fireEvent.click(screen.getByRole('button', { name: 'More stories' }))
+    expect(await screen.findByRole('link', { name: /charlie/ })).toBeInTheDocument()
+    expect(api.get).toHaveBeenLastCalledWith('/reader/feed?page=2')
+    // A story already listed (the pages shifted) isn't shown twice.
+    expect(screen.getAllByRole('link', { name: /bravo/ })).toHaveLength(1)
+    expect(screen.queryByRole('button', { name: 'More stories' })).not.toBeInTheDocument()
+  })
+
+  it('says how to fill an empty feed', async () => {
+    api.get.mockResolvedValue({ stories: [], has_more: false, page: 1 })
+    mount('/cappe/reader/feed', '/cappe/reader/feed', <Feed />)
+    expect(await screen.findByText(/press Follow/)).toBeInTheDocument()
   })
 })
 
@@ -222,9 +307,11 @@ describe('reading a story', () => {
     doc.head.innerHTML = '<link rel="canonical" href="https://salt.gummfit.test/stories/low-tide" />'
     doc.body.innerHTML = '<section><div data-mz-actions><noscript>Turn on JavaScript</noscript></div>'
       + '<p data-mz-alt>Read with a Gummfit reader account?</p></section>'
+      + '<section id="mz-follow"><form></form><p data-mz-alt>Have a Gummfit account?</p></section>'
       + '<a href="/topics/coast">Coast</a><a href="https://example.com/x">elsewhere</a><a href="/stories/high-tide">Next</a>'
     fireEvent.load(frame)
     expect(doc.querySelector('[data-mz-alt]')).toBeNull()
+    expect(doc.getElementById('mz-follow')).toBeNull()
     const href = (text: string) => Array.from(doc.querySelectorAll('a')).find((a) => a.textContent === text)!
     // Its own pages open on the magazine's site, the web in a new tab, and
     // a story or the paywall's button come back here.

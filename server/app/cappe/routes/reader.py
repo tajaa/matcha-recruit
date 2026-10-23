@@ -18,6 +18,10 @@ magazine's own site appears here too.
     gummfit.com becomes the magazine's dashboard page.
   * `POST /reader/subscriptions/{id}/cancel|resume` — stop at the period's
     end, or keep it.
+  * `PUT|DELETE /reader/magazines/{slug}/follow` — follow a magazine from the
+    account, or stop (`services/magazine/follows.py`; no email is sent).
+  * `GET  /reader/following` and `GET /reader/feed` — the magazines followed,
+    and their newest stories.
 """
 from __future__ import annotations
 
@@ -36,6 +40,7 @@ from ..services import recurring
 from ..services.common import site_public_origin, url_within_origins
 from ..services.email import app_origin, dashboard_url
 from ..services.magazine import billing as mag_billing
+from ..services.magazine import follows
 from ..services.magazine import pages as mag_pages
 from ..services.magazine import reader as mag_reader
 from ..services.magazine import shelf
@@ -80,13 +85,14 @@ async def magazine(slug: str, page: int = Query(default=1, ge=1, le=50),
         open_ = await _taking_subscribers(conn, site)
         posts = await mag_reader.live_stories(conn, site["id"], limit=PAGE_SIZE + 1, offset=(page - 1) * PAGE_SIZE)
         found = await mag_reader.covers(conn, site["id"], posts[:PAGE_SIZE])
+        following = await follows.is_following(conn, account.id, site["id"])
     return _private({
         "site_id": site["id"], "slug": slug, "name": mag.get("name") or site["name"], "tagline": mag.get("tagline"),
         "accent": mag.get("accent"), "origin": site_public_origin(site),
         "price_cents": mag.get("price_cents") if open_ else None, "currency": (site.get("currency") or "USD").upper(),
         "paid_pitch": mag.get("paid_pitch") if open_ else None, "taking_subscribers": open_, **held,
         "stories": [shelf.story_card(p, found.get(str(p["id"]))) for p in posts[:PAGE_SIZE]],
-        "has_more": len(posts) > PAGE_SIZE, "page": page,
+        "has_more": len(posts) > PAGE_SIZE, "page": page, "following": following,
     })
 
 
@@ -158,3 +164,36 @@ async def resume(subscription_id: UUID, account: CappeAccount = Depends(require_
     """Keep a subscription that was set to stop."""
     await check_rate_limit(str(account.id), "cappe_reader_sub_change", 30, 3600)
     return await _change(subscription_id, account, False)
+
+
+@router.get("/reader/following")
+async def following(account: CappeAccount = Depends(require_cappe_account)):
+    async with get_connection() as conn:
+        return _private({"magazines": await follows.following(conn, account.id)})
+
+
+@router.get("/reader/feed")
+async def feed(page: int = Query(default=1, ge=1, le=follows.FEED_MAX_PAGE),
+               account: CappeAccount = Depends(require_cappe_account)):
+    async with get_connection() as conn:
+        return _private(await follows.feed(conn, account.id, page=page))
+
+
+@router.put("/reader/magazines/{slug}/follow")
+async def follow(slug: str, account: CappeAccount = Depends(require_cappe_account)):
+    await check_rate_limit(str(account.id), "cappe_reader_follow", 120, 3600)
+    async with get_connection() as conn:
+        site, _mag = await shelf.published_magazine(conn, slug)
+        await follows.follow(conn, account.id, site)
+    return _private({"following": True})
+
+
+@router.delete("/reader/magazines/{slug}/follow")
+async def unfollow(slug: str, account: CappeAccount = Depends(require_cappe_account)):
+    """Works on a magazine that is down too, so it can leave the list."""
+    await check_rate_limit(str(account.id), "cappe_reader_follow", 120, 3600)
+    async with get_connection() as conn:
+        site_id = await conn.fetchval("SELECT id FROM cappe_sites WHERE slug = $1", slug)
+        if site_id:
+            await follows.unfollow(conn, account.id, site_id)
+    return _private({"following": False})

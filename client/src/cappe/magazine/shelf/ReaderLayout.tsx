@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { cappeApi, clearCappeTokens, getCappeToken } from '../../api'
 import { invalidateCappeMeCache, useCappeMe } from '../../hooks/useCappeMe'
@@ -41,6 +41,10 @@ export default function ReaderLayout() {
           <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-lime-300 to-lime-500 text-sm font-bold text-zinc-950">G</span>
           My magazines
         </Link>
+        <nav aria-label="Reader" className="ml-4 flex items-center gap-4 text-sm">
+          <NavLink to={readerPaths.home} end className={({ isActive }) => (isActive ? 'text-zinc-50' : 'text-zinc-400 hover:text-zinc-100')}>Magazines</NavLink>
+          <NavLink to={readerPaths.feed} className={({ isActive }) => (isActive ? 'text-zinc-50' : 'text-zinc-400 hover:text-zinc-100')}>Feed</NavLink>
+        </nav>
         <span className="ml-auto hidden truncate text-xs text-zinc-500 sm:inline">{account.email}</span>
         <button type="button" onClick={signOut} className="text-sm text-zinc-400 hover:text-zinc-100">Sign out</button>
       </header>

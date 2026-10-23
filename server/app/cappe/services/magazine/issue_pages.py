@@ -93,7 +93,7 @@ def render_issue(site: dict, nav: list[dict], mag: dict, issue: dict, stories: l
     title = f"{mag.get('name') or ''}, {issue_label(issue)}"
     body = (_masthead(mag, small=True) + f'<h1 class="mz-sr">{escape(title)}</h1>' + book
             + (paywall_script() if paid else "")
-            + '<p class="mz-issue__all"><a href="/issues">All issues</a></p>' + follow_html(mag))
+            + '<p class="mz-issue__all"><a href="/issues">All issues</a></p>' + follow_html(mag, site.get("slug")))
     url = f"{origin}{issue_path(issue['number'])}"
     image = share_image(_cover_asset(issue, assets))
     titles = [s.get("title") for s in stories if s.get("title")]

@@ -41,6 +41,7 @@ from ..services.entitlements import resolve_entitlements
 from ..services.magazine import pages as mag_pages, reader as mag_reader
 from ..services.magazine import writers
 from ..services.magazine.billing import fee_bps
+from ..services.magazine.follows import follower_count
 from ..services.magazine.magazines import MASTHEADS, get_magazine, preview_blocks, save_magazine
 from ..services.magazine.stories import POST_COLS, post_row
 from ..services.magazine.topics import TOPICS, normalize_topic
@@ -144,6 +145,15 @@ class CappeReaderView(BaseModel):
     for the magazine's front."""
     story_id: Optional[UUID] = None
     slug: Optional[str] = Field(default=None, max_length=160)
+
+
+@router.get("/sites/{site_id}/magazine/follows")
+async def magazine_follows(site_id: UUID, account: CappeAccount = Depends(require_cappe_account)):
+    """How many Gummfit accounts follow the magazine. A count only: an account
+    follow carries no consent to share who the reader is."""
+    async with get_connection() as conn:
+        await get_owned_site(conn, site_id, account.id)
+        return {"accounts": await follower_count(conn, site_id)}
 
 
 @router.post("/sites/{site_id}/magazine/view", response_class=HTMLResponse)
