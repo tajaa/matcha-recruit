@@ -27,7 +27,8 @@ AI_CREDIT = "AI illustration"
 COLUMNS = (
     "id, kind, url, prompt, aspect, image_size, created_at, source, source_url, title, creator, "
     "creator_url, license, license_version, license_url, provider_label, credit_line, alt, caption, "
-    "width, height, bytes, mime, variants, ai_generated, rights_attested_at, moderation, updated_at"
+    "width, height, bytes, mime, variants, ai_generated, rights_attested_at, moderation, updated_at, "
+    "parent_asset_id, recipe, adapted"
 )
 
 # What the owner may edit on any asset, and what only on their own uploads.
@@ -45,6 +46,11 @@ def row(r) -> dict[str, Any]:
             d["variants"] = {}
     elif variants is None:
         d["variants"] = {}
+    if isinstance(d.get("recipe"), str):  # an edited picture's (cappemag10)
+        try:
+            d["recipe"] = json.loads(d["recipe"])
+        except ValueError:
+            d["recipe"] = None
     return d
 
 

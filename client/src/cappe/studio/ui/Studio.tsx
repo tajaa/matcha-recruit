@@ -8,7 +8,7 @@ import { studioApi } from '../api'
 import { MenuBar, StatusBar, ToolBar, TopBar } from './chrome'
 import { commandForKey } from './commands'
 import { StudioContext, useCtx, type StudioCtx } from './context'
-import { LibraryDialog, RevisionsDialog, StoryDialog } from './dialogs'
+import { LibraryDialog, PictureDialog, RevisionsDialog, StoryDialog } from './dialogs'
 import { ObjectPanel } from './panels/ObjectPanel'
 import { PagesPanel } from './panels/PagesPanel'
 import { StoryPanel } from './panels/StoryPanel'
@@ -84,6 +84,7 @@ function Shell() {
       {dialog === 'library' && <LibraryDialog />}
       {dialog === 'story' && <StoryDialog />}
       {dialog === 'revisions' && <RevisionsDialog />}
+      {(dialog === 'picture' || dialog === 'cutout') && <PictureDialog cutout={dialog === 'cutout'} />}
       {preview !== null && <Preview html={preview} onClose={() => setPreview(null)} />}
     </div>
   )

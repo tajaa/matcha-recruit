@@ -14,7 +14,7 @@ class CappeAsset(BaseModel):
     always "AI illustration". `variants` holds the responsive sizes a library
     upload is stored with (`{"webp": [{"w", "url"}], "share": {"w", "url"}}`)."""
     id: UUID
-    kind: Literal["generated", "upload", "stock"]
+    kind: Literal["generated", "upload", "stock", "edit"]
     url: str
     prompt: Optional[str] = None
     aspect: Optional[str] = None
@@ -41,6 +41,12 @@ class CappeAsset(BaseModel):
     rights_attested_at: Optional[datetime] = None
     moderation: str = "unchecked"
     updated_at: Optional[datetime] = None
+    # An edited picture (kind `edit`, cappemag10): the picture its pixels came
+    # from, what was done (services/magazine/studio/recipe.py), and whether the
+    # pixels differ from the source's (its credit then says "(adapted)").
+    parent_asset_id: Optional[UUID] = None
+    recipe: Optional[dict] = None
+    adapted: bool = False
 
 
 class CappeAssetPatch(BaseModel):

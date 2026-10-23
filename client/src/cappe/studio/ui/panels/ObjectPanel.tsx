@@ -1,4 +1,4 @@
-import { ArrowDownToLine, ArrowUpToLine, ChevronDown, ChevronUp, Eye, EyeOff, Image as ImageIcon, Link2Off, Lock, Unlock } from 'lucide-react'
+import { ArrowDownToLine, ArrowUpToLine, ChevronDown, ChevronUp, Eye, EyeOff, Image as ImageIcon, Link2Off, Lock, Scissors, SlidersHorizontal, Unlock } from 'lucide-react'
 import { ColorField, IconBtn, NumberField, Row, Section, Seg, Slider } from '../../../magazine/workspace/controls'
 import { round } from '../../model/limits'
 import { arrange, patchItems, unlinkAfter, type Arrange } from '../../model/ops'
@@ -92,6 +92,18 @@ export function ObjectPanel() {
             className="flex w-full items-center justify-center gap-2 rounded-md border border-zinc-700 py-1.5 text-xs text-zinc-200 hover:border-emerald-500">
             <ImageIcon className="h-3.5 w-3.5" />{one.asset_id ? 'Replace picture…' : 'Choose a picture…'}
           </button>
+          {one.asset_id && (
+            <Row>
+              <button type="button" onClick={() => store.set({ dialog: 'picture' })}
+                className="flex items-center justify-center gap-1.5 rounded-md bg-emerald-600 py-1.5 text-xs font-medium text-white hover:bg-emerald-500">
+                <SlidersHorizontal className="h-3.5 w-3.5" />Edit picture…
+              </button>
+              <button type="button" onClick={() => store.set({ dialog: 'cutout' })}
+                className="flex items-center justify-center gap-1.5 rounded-md border border-zinc-700 py-1.5 text-xs text-zinc-200 hover:border-emerald-500">
+                <Scissors className="h-3.5 w-3.5" />Cut out…
+              </button>
+            </Row>
+          )}
           {one.asset_id && assets[one.asset_id] && (
             <p className="truncate text-[11px] text-zinc-500" title={assets[one.asset_id].credit_line ?? ''}>
               {assets[one.asset_id].ai_generated ? 'AI illustration' : assets[one.asset_id].credit_line || 'No credit'}

@@ -1,8 +1,9 @@
 // The Studio's server calls (server/app/cappe/routes/studio.py, blog.py).
 
-import { cappeApi } from '../api'
+import { cappeApi, cappeApiBase, cappeStreamHeaders } from '../api'
 import type { CappeAsset } from '../types'
 import type { Asset, Doc } from './model/types'
+import type { Recipe } from './picture/recipe'
 
 export type StudioPost = {
   id: string; site_id: string; title: string; slug: string; excerpt: string | null; kicker: string | null
@@ -32,6 +33,19 @@ export const studioApi = {
   updatePost: (siteId: string, postId: string, patch: Partial<StudioPost>) =>
     cappeApi.put<StudioPost>(`/sites/${siteId}/posts/${postId}`, patch),
   assets: (siteId: string) => cappeApi.get<{ assets: CappeAsset[] }>(`/sites/${siteId}/assets`),
+  /** A library picture's own file, from our origin (the Picture Editor reads its pixels). */
+  pixels: async (siteId: string, assetId: string): Promise<Blob> => {
+    const res = await fetch(`${cappeApiBase}/sites/${siteId}/assets/${assetId}/pixels`, { headers: await cappeStreamHeaders() })
+    if (!res.ok) throw new Error(res.status === 404 ? 'That picture isn’t in the library any more.' : `Couldn’t open the picture (${res.status}).`)
+    return res.blob()
+  },
+  /** What the Picture Editor made of a picture, as a new library picture. */
+  saveEdit: (siteId: string, assetId: string, file: Blob, recipe: Recipe) => {
+    const form = new FormData()
+    form.append('file', file, file.type === 'image/png' ? 'edited.png' : 'edited.jpg')
+    form.append('recipe', JSON.stringify(recipe))
+    return cappeApi.upload<CappeAsset>(`/sites/${siteId}/assets/${assetId}/edit`, form)
+  },
   preview: (siteId: string, post: StudioPost, doc: Doc) => cappeApi.postHtml(`/sites/${siteId}/stories/preview`, {
     title: post.title, excerpt: post.excerpt, kicker: post.kicker, topic: post.topic, byline: post.byline,
     access: post.access, format: 'pages', content: { doc },
@@ -41,4 +55,5 @@ export const studioApi = {
 /** A library row as the page renderer needs it. */
 export const toAsset = (a: CappeAsset): Asset => ({ id: a.id, url: a.url, alt: a.alt, credit_line: a.credit_line,
   license: a.license, ai_generated: a.ai_generated, source_url: a.source_url, width: a.width, height: a.height,
-  variants: a.variants as Asset['variants'] })
+  variants: a.variants as Asset['variants'], kind: a.kind, parent: a.parent_asset_id ?? null,
+  recipe: (a.recipe as Recipe | null) ?? null })

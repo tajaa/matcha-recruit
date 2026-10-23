@@ -40,7 +40,8 @@ export type State = {
   save: { rev: number; state: SaveState; message: string | null; draft: boolean; live: boolean }
   /** A thread port clicked: the next text frame clicked joins this thread. */
   threading: { thread: string | null; frame: string } | null
-  dialog: null | 'library' | 'story' | 'revisions' | 'preview'
+  /** `picture`: the Picture Editor on the picture frame selected; `cutout`: it, open at the cut-out. */
+  dialog: null | 'library' | 'story' | 'revisions' | 'preview' | 'picture' | 'cutout'
   /** While dragging: the lines an edge snapped to, and the marquee (pasteboard pt). */
   snaps: { x: number[]; y: number[] } | null
   marquee: { x: number; y: number; w: number; h: number } | null

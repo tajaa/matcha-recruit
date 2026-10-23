@@ -1,0 +1,582 @@
+[
+ {
+  "name": "not a recipe",
+  "raw": "nope",
+  "clean": {}
+ },
+ {
+  "name": "as it was",
+  "raw": {},
+  "clean": {}
+ },
+ {
+  "name": "sliders clamped, rounded, defaults dropped",
+  "raw": {
+   "exposure": 1.23456,
+   "contrast": 250,
+   "highlights": -40.6,
+   "shadows": 0,
+   "whites": "12",
+   "blacks": true,
+   "temp": null,
+   "tint": -101,
+   "vibrance": 33.4,
+   "saturation": -0.4,
+   "clarity": 10,
+   "sharpen": -5,
+   "vignette": -30,
+   "grain": 140,
+   "fade": 12.5,
+   "sh_hue": 400,
+   "sh_amt": 20,
+   "hi_hue": 30,
+   "hi_amt": 0
+  },
+  "clean": {
+   "exposure": 1.23,
+   "contrast": 100,
+   "highlights": -41,
+   "tint": -100,
+   "vibrance": 33,
+   "clarity": 10,
+   "vignette": -30,
+   "grain": 100,
+   "fade": 13,
+   "sh_hue": 360,
+   "sh_amt": 20,
+   "hi_hue": 30
+  }
+ },
+ {
+  "name": "a look, black and white, unknown keys",
+  "raw": {
+   "look": "noir",
+   "bw": true,
+   "hdr": 50,
+   "lut": "x"
+  },
+  "clean": {
+   "look": "noir",
+   "bw": true
+  }
+ },
+ {
+  "name": "an unknown look, a truthy bw",
+  "raw": {
+   "look": "acid",
+   "bw": "yes"
+  },
+  "clean": {}
+ },
+ {
+  "name": "a crop",
+  "raw": {
+   "crop": {
+    "x": 0.1,
+    "y": 0.2,
+    "w": 0.5,
+    "h": 0.6,
+    "angle": 3.14159,
+    "turn": 90,
+    "flip_h": true
+   }
+  },
+  "clean": {
+   "crop": {
+    "x": 0.1,
+    "y": 0.2,
+    "w": 0.5,
+    "h": 0.6,
+    "angle": 3.14,
+    "turn": 90,
+    "flip_h": true,
+    "flip_v": false
+   }
+  }
+ },
+ {
+  "name": "a crop off the picture is moved back on",
+  "raw": {
+   "crop": {
+    "x": 0.9,
+    "y": 0.95,
+    "w": 0.5,
+    "h": 0.3
+   }
+  },
+  "clean": {
+   "crop": {
+    "x": 0.5,
+    "y": 0.7,
+    "w": 0.5,
+    "h": 0.3,
+    "angle": 0,
+    "turn": 0,
+    "flip_h": false,
+    "flip_v": false
+   }
+  }
+ },
+ {
+  "name": "a crop too small, turned too far, a bad turn",
+  "raw": {
+   "crop": {
+    "w": 0.001,
+    "h": 2,
+    "angle": -80,
+    "turn": 45
+   }
+  },
+  "clean": {
+   "crop": {
+    "x": 0,
+    "y": 0,
+    "w": 0.02,
+    "h": 1,
+    "angle": -45,
+    "turn": 0,
+    "flip_h": false,
+    "flip_v": false
+   }
+  }
+ },
+ {
+  "name": "the whole picture is no crop",
+  "raw": {
+   "crop": {
+    "x": 0,
+    "y": 0,
+    "w": 1,
+    "h": 1,
+    "angle": 0,
+    "turn": 0
+   }
+  },
+  "clean": {}
+ },
+ {
+  "name": "a flip alone is a crop",
+  "raw": {
+   "crop": {
+    "flip_v": true
+   }
+  },
+  "clean": {
+   "crop": {
+    "x": 0,
+    "y": 0,
+    "w": 1,
+    "h": 1,
+    "angle": 0,
+    "turn": 0,
+    "flip_h": false,
+    "flip_v": true
+   }
+  }
+ },
+ {
+  "name": "a cut-out",
+  "raw": {
+   "cutout": {
+    "points": [
+     {
+      "x": 0.48,
+      "y": 0.42,
+      "keep": true
+     },
+     {
+      "x": 0.2,
+      "y": 0.9,
+      "keep": false
+     },
+     {
+      "x": "a",
+      "y": 0.1
+     },
+     {
+      "x": 1.5,
+      "y": -1
+     },
+     "nope"
+    ],
+    "feather": 140,
+    "invert": true
+   }
+  },
+  "clean": {
+   "cutout": {
+    "points": [
+     {
+      "x": 0.48,
+      "y": 0.42,
+      "keep": true
+     },
+     {
+      "x": 0.2,
+      "y": 0.9,
+      "keep": false
+     },
+     {
+      "x": 1,
+      "y": 0,
+      "keep": true
+     }
+    ],
+    "feather": 100,
+    "invert": true
+   }
+  }
+ },
+ {
+  "name": "a cut-out with nothing kept is none",
+  "raw": {
+   "cutout": {
+    "points": [
+     {
+      "x": 0.5,
+      "y": 0.5,
+      "keep": false
+     }
+    ]
+   }
+  },
+  "clean": {}
+ },
+ {
+  "name": "too many points",
+  "raw": {
+   "cutout": {
+    "points": [
+     {
+      "x": 0.0,
+      "y": 0.5
+     },
+     {
+      "x": 0.025,
+      "y": 0.5
+     },
+     {
+      "x": 0.05,
+      "y": 0.5
+     },
+     {
+      "x": 0.075,
+      "y": 0.5
+     },
+     {
+      "x": 0.1,
+      "y": 0.5
+     },
+     {
+      "x": 0.125,
+      "y": 0.5
+     },
+     {
+      "x": 0.15,
+      "y": 0.5
+     },
+     {
+      "x": 0.175,
+      "y": 0.5
+     },
+     {
+      "x": 0.2,
+      "y": 0.5
+     },
+     {
+      "x": 0.225,
+      "y": 0.5
+     },
+     {
+      "x": 0.25,
+      "y": 0.5
+     },
+     {
+      "x": 0.275,
+      "y": 0.5
+     },
+     {
+      "x": 0.3,
+      "y": 0.5
+     },
+     {
+      "x": 0.325,
+      "y": 0.5
+     },
+     {
+      "x": 0.35,
+      "y": 0.5
+     },
+     {
+      "x": 0.375,
+      "y": 0.5
+     },
+     {
+      "x": 0.4,
+      "y": 0.5
+     },
+     {
+      "x": 0.425,
+      "y": 0.5
+     },
+     {
+      "x": 0.45,
+      "y": 0.5
+     },
+     {
+      "x": 0.475,
+      "y": 0.5
+     },
+     {
+      "x": 0.5,
+      "y": 0.5
+     },
+     {
+      "x": 0.525,
+      "y": 0.5
+     },
+     {
+      "x": 0.55,
+      "y": 0.5
+     },
+     {
+      "x": 0.575,
+      "y": 0.5
+     },
+     {
+      "x": 0.6,
+      "y": 0.5
+     },
+     {
+      "x": 0.625,
+      "y": 0.5
+     },
+     {
+      "x": 0.65,
+      "y": 0.5
+     },
+     {
+      "x": 0.675,
+      "y": 0.5
+     },
+     {
+      "x": 0.7,
+      "y": 0.5
+     },
+     {
+      "x": 0.725,
+      "y": 0.5
+     },
+     {
+      "x": 0.75,
+      "y": 0.5
+     },
+     {
+      "x": 0.775,
+      "y": 0.5
+     },
+     {
+      "x": 0.8,
+      "y": 0.5
+     },
+     {
+      "x": 0.825,
+      "y": 0.5
+     },
+     {
+      "x": 0.85,
+      "y": 0.5
+     },
+     {
+      "x": 0.875,
+      "y": 0.5
+     },
+     {
+      "x": 0.9,
+      "y": 0.5
+     },
+     {
+      "x": 0.925,
+      "y": 0.5
+     },
+     {
+      "x": 0.95,
+      "y": 0.5
+     },
+     {
+      "x": 0.975,
+      "y": 0.5
+     }
+    ]
+   }
+  },
+  "clean": {
+   "cutout": {
+    "points": [
+     {
+      "x": 0,
+      "y": 0.5,
+      "keep": true
+     },
+     {
+      "x": 0.025,
+      "y": 0.5,
+      "keep": true
+     },
+     {
+      "x": 0.05,
+      "y": 0.5,
+      "keep": true
+     },
+     {
+      "x": 0.075,
+      "y": 0.5,
+      "keep": true
+     },
+     {
+      "x": 0.1,
+      "y": 0.5,
+      "keep": true
+     },
+     {
+      "x": 0.125,
+      "y": 0.5,
+      "keep": true
+     },
+     {
+      "x": 0.15,
+      "y": 0.5,
+      "keep": true
+     },
+     {
+      "x": 0.175,
+      "y": 0.5,
+      "keep": true
+     },
+     {
+      "x": 0.2,
+      "y": 0.5,
+      "keep": true
+     },
+     {
+      "x": 0.225,
+      "y": 0.5,
+      "keep": true
+     },
+     {
+      "x": 0.25,
+      "y": 0.5,
+      "keep": true
+     },
+     {
+      "x": 0.275,
+      "y": 0.5,
+      "keep": true
+     },
+     {
+      "x": 0.3,
+      "y": 0.5,
+      "keep": true
+     },
+     {
+      "x": 0.325,
+      "y": 0.5,
+      "keep": true
+     },
+     {
+      "x": 0.35,
+      "y": 0.5,
+      "keep": true
+     },
+     {
+      "x": 0.375,
+      "y": 0.5,
+      "keep": true
+     },
+     {
+      "x": 0.4,
+      "y": 0.5,
+      "keep": true
+     },
+     {
+      "x": 0.425,
+      "y": 0.5,
+      "keep": true
+     },
+     {
+      "x": 0.45,
+      "y": 0.5,
+      "keep": true
+     },
+     {
+      "x": 0.475,
+      "y": 0.5,
+      "keep": true
+     },
+     {
+      "x": 0.5,
+      "y": 0.5,
+      "keep": true
+     },
+     {
+      "x": 0.525,
+      "y": 0.5,
+      "keep": true
+     },
+     {
+      "x": 0.55,
+      "y": 0.5,
+      "keep": true
+     },
+     {
+      "x": 0.575,
+      "y": 0.5,
+      "keep": true
+     },
+     {
+      "x": 0.6,
+      "y": 0.5,
+      "keep": true
+     },
+     {
+      "x": 0.625,
+      "y": 0.5,
+      "keep": true
+     },
+     {
+      "x": 0.65,
+      "y": 0.5,
+      "keep": true
+     },
+     {
+      "x": 0.675,
+      "y": 0.5,
+      "keep": true
+     },
+     {
+      "x": 0.7,
+      "y": 0.5,
+      "keep": true
+     },
+     {
+      "x": 0.725,
+      "y": 0.5,
+      "keep": true
+     },
+     {
+      "x": 0.75,
+      "y": 0.5,
+      "keep": true
+     },
+     {
+      "x": 0.775,
+      "y": 0.5,
+      "keep": true
+     }
+    ],
+    "feather": 0,
+    "invert": false
+   }
+  }
+ }
+]

@@ -12,6 +12,7 @@ const KINDS: { key: '' | CappeAssetKind; label: string }[] = [
   { key: 'upload', label: 'Uploads' },
   { key: 'stock', label: 'Archive' },
   { key: 'generated', label: 'AI' },
+  { key: 'edit', label: 'Edited' },
 ]
 
 /**

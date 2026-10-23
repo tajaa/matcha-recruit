@@ -389,7 +389,8 @@ export function usePointer(scroller: RefObject<HTMLDivElement | null>, board: Re
     if (s.tool !== 'select' && s.tool !== 'text') return
     const hit = hitItem(s.doc, layRef.current, toPt(e))
     if (hit?.kind === 'text' && !hit.locked) startTyping(hit.id, e)
-    else if (hit?.kind === 'image' && !hit.locked) store.set({ selection: [hit.id], dialog: 'library' })
+    // A picture opens in the Picture Editor; an empty frame, the library.
+    else if (hit?.kind === 'image' && !hit.locked) store.set({ selection: [hit.id], dialog: hit.asset_id ? 'picture' : 'library' })
   }
 
   return { down, double, zoomAt }

@@ -18,6 +18,9 @@ export type Command = {
 }
 
 const selected = (s: State) => s.selection.length > 0 && !s.editing
+/** One picture frame with a picture in it, selected. */
+const pictureSelected = (s: State) => !s.editing && s.selection.length === 1
+  && s.doc.items.some((i) => i.id === s.selection[0] && i.kind === 'image' && !!i.asset_id)
 /** Zoom to `z`, keeping what is in the middle of the view there. */
 export function zoomTo(c: StudioCtx, z: number): void {
   const next = Math.max(0.05, Math.min(64, z))
@@ -145,6 +148,8 @@ export const COMMANDS: Command[] = [
       store.edit((d) => patchItems(d, d.items.filter((i) => i.page === page && i.hidden).map((i) => i.id), { hidden: false }))
     } },
   { id: 'place', label: 'Place a picture…', keys: '⌘P', run: ({ store }) => store.set({ dialog: 'library' }) },
+  { id: 'edit-picture', label: 'Edit picture…', keys: '⇧⌘E', enabled: pictureSelected, run: ({ store }) => store.set({ dialog: 'picture' }) },
+  { id: 'cut-out', label: 'Cut out the subject…', enabled: pictureSelected, run: ({ store }) => store.set({ dialog: 'cutout' }) },
   // View
   { id: 'zoom-in', label: 'Zoom in', keys: '⌘=', run: (c) => zoomTo(c, c.store.get().view.zoom * 1.25) },
   { id: 'zoom-out', label: 'Zoom out', keys: '⌘-', run: (c) => zoomTo(c, c.store.get().view.zoom / 1.25) },
