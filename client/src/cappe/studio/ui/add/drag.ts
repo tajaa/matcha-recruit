@@ -56,6 +56,14 @@ export async function importStock(siteId: string, postId: string, r: CappeStockR
   throw new Error('That picture is taking a while. It will be in Your pictures when it’s ready.')
 }
 
+/** Put what was dropped where it landed; one that fails (an archive picture
+ *  refused, the page gone) says why in the Studio's bar, since the tab it
+ *  came from may not be open any more. */
+export function dropOn(c: StudioCtx, what: Dragged, at: At): Promise<void> {
+  return dropInto(c, what, at).catch((err) =>
+    c.store.set({ notice: err instanceof Error && err.message ? err.message : 'Couldn’t add that to the page.' }))
+}
+
 /** Put what was dropped where it landed. */
 export async function dropInto(c: StudioCtx, what: Dragged, at: At): Promise<void> {
   switch (what.kind) {

@@ -11,7 +11,7 @@ import type { State, Store } from '../../store/store'
 import { COMMANDS } from '../commands'
 import type { StudioCtx } from '../context'
 import { GUIDE, MORE_KEYS } from '../guideContent'
-import { describeStudio } from './describe'
+import { clip, describeStudio } from './describe'
 
 export const MAX_QUESTION = 1_000
 const HISTORY = 6
@@ -99,10 +99,10 @@ export class Conversation {
   }
 
   async ask(c: StudioCtx, question: string, picture: Picture | null = null): Promise<void> {
-    const q = question.trim().slice(0, MAX_QUESTION)
+    const q = clip(question.trim(), MAX_QUESTION)
     if (!q || this.state.busy) return
     const history = this.state.turns.filter((t) => t.a).slice(-HISTORY)
-      .map((t) => ({ q: t.q, a: (t.a ?? '').slice(0, TURN_CHARS) }))
+      .map((t) => ({ q: t.q, a: clip(t.a ?? '', TURN_CHARS) }))
     const id = this.next++
     this.set({ busy: true, turns: [...this.state.turns, { id, q, picture, a: null, links: [], error: null }] })
     const s = c.store.get()

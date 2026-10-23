@@ -51,6 +51,10 @@ export type State = {
   /** While dragging: the lines an edge snapped to, and the marquee (pasteboard pt). */
   snaps: { x: number[]; y: number[] } | null
   marquee: { x: number; y: number; w: number; h: number } | null
+  /** Something that went wrong out of sight of where it was asked for (a
+   *  drop that failed, a page gone before a picture landed): shown in the
+   *  Studio's bar until dismissed. */
+  notice?: string | null
 }
 
 type Listener = () => void

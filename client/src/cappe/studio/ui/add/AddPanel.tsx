@@ -225,7 +225,8 @@ function TextTab() {
 
   const tile = (s: TextStyle, children: ReactNode, cls: string, paper = false) => (
     <button key={s.id} type="button" draggable onDragStart={(e) => startDrag(e, { kind: 'text', style: s })} onDragEnd={endDrag}
-      onClick={() => void addText(c, s)} aria-label={s.label.startsWith('Add') ? s.label : `Add ${s.label.toLowerCase()} text`}
+      onClick={() => void addText(c, s).catch((err) =>
+        c.store.set({ notice: err instanceof Error && err.message ? err.message : 'Couldn’t add that text.' }))} aria-label={s.label.startsWith('Add') ? s.label : `Add ${s.label.toLowerCase()} text`}
       className={`w-full rounded-md border text-left hover:border-emerald-500 ${paper ? 'border-zinc-700 bg-stone-100 text-zinc-900' : 'border-zinc-800 bg-zinc-950/60 text-zinc-100'} ${cls}`}>
       {children}
     </button>
