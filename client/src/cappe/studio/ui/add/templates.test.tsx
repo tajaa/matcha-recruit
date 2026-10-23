@@ -5,7 +5,7 @@ import bank from '../../../../../../server/app/cappe/services/magazine/studio/gr
 import { compose, type Measure } from '../../compose/compose'
 import { Shaper } from '../../compose/shaper'
 import { FaceBook, type Manifest } from '../../fonts/faces'
-import { LIMITS } from '../../model/limits'
+import { LIMITS, docProblem } from '../../model/limits'
 import { addItem } from '../../model/ops'
 import type { Doc, TextItem } from '../../model/types'
 import { DEFAULT_VIEW, Store, type State } from '../../store/store'
@@ -106,6 +106,23 @@ describe('the templates', () => {
   })
 })
 
+describe('what a story can hold', () => {
+  it('names the first limit a document is past, as the server would', () => {
+    const d = starter()
+    expect(docProblem(d)).toBeNull()
+    expect(docProblem({ ...d, pages: Array.from({ length: LIMITS.MAX_PAGES + 1 }, (_, k) => ({ id: `p${k}` })) })).toMatch(/256 pages/)
+    const rect = addItem(d, 'rect', 'p1', { x: 0, y: 0, w: 1, h: 1 }).doc.items[2]
+    expect(docProblem({ ...d, items: Array.from({ length: LIMITS.MAX_ITEMS + 1 }, (_, k) => ({ ...rect, id: `r${k}`, page: `p${k % 20}` })) })).toMatch(/6000 frames/)
+    expect(docProblem({ ...d, items: Array.from({ length: LIMITS.MAX_ITEMS_PER_PAGE + 1 }, (_, k) => ({ ...rect, id: `r${k}` })) })).toMatch(/A page holds/)
+    const text = (t: string, paras = 1) => ({ ...d, threads: [{ ...d.threads[0], paras: Array.from({ length: paras }, () => ({ runs: [{ t }] })) }] })
+    expect(docProblem(text('', LIMITS.MAX_PARAS + 1))).toMatch(/too many paragraphs/)
+    expect(docProblem(text('x'.repeat(LIMITS.MAX_THREAD_CHARS + 1)))).toMatch(/story is too long/)
+    const many = { ...d, threads: Array.from({ length: 4 }, (_, k) => ({ id: `s${k}`, frames: [], paras: [{ runs: [{ t: 'x'.repeat(LIMITS.MAX_THREAD_CHARS) }] }] })) }
+    expect(docProblem(many)).toMatch(/too much text/)
+    expect(docProblem({ ...d, paper: 'x'.repeat(LIMITS.MAX_DOC_BYTES) })).toMatch(/too big to save/)
+  })
+})
+
 describe('using a template', () => {
   it('lays out a blank page, leaving the story’s thread on the next page alone', async () => {
     const { store, ctx } = studio()
@@ -141,6 +158,83 @@ describe('using a template', () => {
     const locked = starter()
     ;(locked.items[0] as TextItem).locked = true
     expect(blankPage(locked, 0)).toBe(false)
+  })
+
+  const quote = () => TEMPLATES.find((t) => t.id === 'quote')!
+  /** A story `n` pages long with a shape on page `at` (index). */
+  const long = (n: number, at: number): Doc => {
+    const d = { ...starter(), pages: Array.from({ length: n }, (_, k) => ({ id: `p${k + 1}` })) }
+    return addItem(d, 'rect', `p${at + 1}`, { x: 0, y: 0, w: 10, h: 10 }).doc
+  }
+
+  it('refuses, changing nothing, when the story has no room for another page', async () => {
+    for (const at of [1, LIMITS.MAX_PAGES - 1]) {
+      const d = long(LIMITS.MAX_PAGES, at)
+      const { store, ctx } = studio(d, at)
+      const before = store.get().doc
+      await expect(applyTemplate(ctx, quote())).resolves.toBeNull()
+      expect(store.get().doc).toBe(before)
+      expect(store.get().notice).toMatch(/at most 256 pages/)
+      expect(store.canUndo()).toBe(false)
+    }
+  })
+
+  it('refuses, changing nothing, a template that would take the story past what it can save', async () => {
+    const d = addItem(starter(), 'rect', 'p1', { x: 0, y: 0, w: 10, h: 10 }).doc
+    d.threads = Array.from({ length: LIMITS.MAX_THREADS }, (_, k) => ({ id: `s${k + 1}`, frames: [`x${k}`], paras: [{ runs: [{ t: 'Words' }] }] }))
+    d.items = [...d.items.filter((i) => i.kind !== 'text'), ...d.threads.map((_, k) => ({ ...starter().items[0], id: `x${k}` }))]
+    const { store, ctx } = studio(d)
+    await expect(applyTemplate(ctx, quote())).resolves.toBeNull()
+    expect(store.get().doc.threads).toHaveLength(LIMITS.MAX_THREADS)
+    expect(store.get().doc.pages).toHaveLength(2)
+    expect(store.get().notice).toBe('The template wasn’t added: A story holds at most 200 separate texts.')
+  })
+
+  it('goes where it was clicked while its faces load, and one at a time', async () => {
+    const d = addItem(starter(), 'rect', 'p1', { x: 0, y: 0, w: 10, h: 10 }).doc
+    const { store, ctx } = studio(d)
+    let loaded!: () => void
+    const faces = new Promise<void>((res) => { loaded = res })
+    ctx.fonts.ensure = vi.fn(() => faces)
+    const first = applyTemplate(ctx, quote())
+    store.set({ page: 1 })  // the writer turns the page meanwhile
+    await expect(applyTemplate(ctx, TEMPLATES.find((t) => t.id === 'contents')!)).resolves.toBeNull()
+    loaded()
+    await expect(first).resolves.toBe(1)
+    const after = store.get().doc
+    expect(after.pages.map((p) => p.id)).toEqual(['p1', after.pages[1].id, 'p2'])
+    expect(after.items.filter((i) => i.page === after.pages[1].id).map((i) => i.name)).toEqual(['Colour', 'Quote mark', 'Quote'])
+    expect(after.items.some((i) => i.name === 'List')).toBe(false)
+  })
+
+  it('says so when the page it was for is deleted while its faces load', async () => {
+    const { store, ctx } = studio(starter(), 1)
+    let loaded!: () => void
+    const faces = new Promise<void>((res) => { loaded = res })
+    ctx.fonts.ensure = vi.fn(() => faces)
+    const using = applyTemplate(ctx, quote())
+    store.edit((d) => ({ ...d, pages: [d.pages[0]], items: d.items.filter((i) => i.page !== 'p2'), threads: [{ ...d.threads[0], frames: ['t1'] }] }))
+    const before = store.get().doc
+    loaded()
+    await expect(using).resolves.toBeNull()
+    expect(store.get().doc).toBe(before)
+    expect(store.get().notice).toBe('The page that template was for has been deleted.')
+  })
+
+  it('shows which template is being set up, and takes no other until it is', async () => {
+    const { store, ctx } = studio()
+    let loaded!: () => void
+    const faces = new Promise<void>((res) => { loaded = res })
+    ctx.fonts.ensure = vi.fn(() => faces)
+    render(<StudioContext.Provider value={ctx}><TemplatesTab /></StudioContext.Provider>)
+    const quoteButton = screen.getByRole('button', { name: 'Use the big quote template' })
+    fireEvent.click(quoteButton)
+    expect(quoteButton).toHaveAttribute('aria-busy', 'true')
+    expect(screen.getByText('Setting it up…')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Use the contents template' })).toBeDisabled()
+    loaded()
+    await waitFor(() => expect(quoteButton).not.toBeDisabled())
+    expect(store.get().doc.items.some((i) => i.name === 'Quote')).toBe(true)
   })
 
   it('shows each template drawn small, and uses one with a click', async () => {
