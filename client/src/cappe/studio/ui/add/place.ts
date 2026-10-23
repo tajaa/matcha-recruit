@@ -13,23 +13,33 @@ import type { CappeAsset } from '../../../types'
 import type { StudioCtx } from '../context'
 import { facesOf, type Box, type ElementSpec, type TextStyle } from './catalog'
 
-/** Where something lands: a page, a point on it (page points), and what was
- *  under the point when dropped. */
-export type At = { page: number; x: number; y: number; hit: Item | null; dropped: boolean }
+/** Where something lands: a page (its index then, and its id: a text style's
+ *  faces or an archive picture take a moment, and pages can move or go
+ *  meanwhile), a point on it (page points), and what was under it when dropped. */
+export type At = { page: number; pageId: string; x: number; y: number; hit: Item | null; dropped: boolean }
 
 /** Where a drop at (clientX, clientY) lands; with none, the middle of the
  *  page in view. */
 export function landing(c: StudioCtx, drop?: { clientX: number; clientY: number }): At {
   const s = c.store.get()
   const board = drop ? c.board() : null
-  if (!drop || !board) return { page: s.page, x: s.doc.size.w / 2, y: s.doc.size.h / 2, hit: null, dropped: false }
+  const id = (page: number) => s.doc.pages[page]?.id ?? ''
+  if (!drop || !board) return { page: s.page, pageId: id(s.page), x: s.doc.size.w / 2, y: s.doc.size.h / 2, hit: null, dropped: false }
   const r = board.getBoundingClientRect()
   const zoom = s.view.zoom
   const p = { x: (drop.clientX - r.left) / zoom, y: (drop.clientY - r.top) / zoom }
   const lay = layout(s.doc)
   const page = pageAt(s.doc, lay, p)
   const o = lay.origin[page]
-  return { page, x: p.x - o.x, y: p.y - o.y, hit: hitItem(s.doc, lay, p), dropped: true }
+  return { page, pageId: id(page), x: p.x - o.x, y: p.y - o.y, hit: hitItem(s.doc, lay, p), dropped: true }
+}
+
+/** Where `at`'s page is now; it may have moved, or gone, while what lands on
+ *  it was on its way. */
+function pageNow(doc: Doc, at: At): number {
+  const i = doc.pages.findIndex((p) => p.id === at.pageId)
+  if (i < 0) throw new Error('The page it was going on isn’t there any more.')
+  return i
 }
 
 /** The page's text area: inside its margins (its inside margin on the spine side). */
@@ -87,7 +97,8 @@ export async function addText(c: StudioCtx, style: TextStyle, at: At = landing(c
   const faces = facesOf(style, CHAR_DEFAULTS).map(([f, w, i]) => book.face(f, w, i)).filter((f) => !!f)
   await Promise.all(faces.map((f) => c.fonts.ensure(f!).catch(() => {})))
   const doc = c.store.get().doc
-  const area = textArea(doc, at.page)
+  const page = pageNow(doc, at)
+  const area = textArea(doc, page)
   const w = style.width === 'content' ? area.w : style.width === 'half' ? Math.min(area.w, Math.max(area.w / 2, 216)) : Math.min(area.w, 180)
   // Clicked in, a frame as wide as the text area lines up with its margins.
   const place = (box: { x: number; y: number; w: number; h: number }) =>
@@ -95,7 +106,7 @@ export async function addText(c: StudioCtx, style: TextStyle, at: At = landing(c
   const key = `add:${Date.now()}`
   let id = ''
   c.store.edit((d) => {
-    const r = addItem(d, 'text', d.pages[at.page].id, place(centred(d, at, { w, h: area.h })))
+    const r = addItem(d, 'text', at.pageId, place(centred(d, at, { w, h: area.h })))
     id = r.id
     const thread = newId('s', allIds(r.doc))
     return { ...r.doc, threads: [...r.doc.threads, { id: thread, frames: [id], paras: paras(style) }] }
@@ -112,7 +123,7 @@ export async function addText(c: StudioCtx, style: TextStyle, at: At = landing(c
     c.store.edit((d) => patchItems(d, [id], { x: box.x, y: box.y, h }), { key })
   }
   c.store.seal()
-  select(c, id, at.page)
+  select(c, id, page)
   return id
 }
 
@@ -141,9 +152,9 @@ export function addPicture(c: StudioCtx, asset: CappeAsset, at: At = landing(c))
   let h = w / ratio
   if (h > s.doc.size.h * 0.6) { h = s.doc.size.h * 0.6; w = h * ratio }
   let id = ''
-  const page = Math.min(at.page, s.doc.pages.length - 1)
+  const page = pageNow(s.doc, at)
   c.store.edit((d) => {
-    const r = addItem(d, 'image', d.pages[page].id, centred(d, at, { w, h }))
+    const r = addItem(d, 'image', at.pageId, centred(d, at, { w, h }))
     id = r.id
     return patchItems(r.doc, [id], { asset_id: asset.id })
   }, { key: `add:${Date.now()}` })

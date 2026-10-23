@@ -113,7 +113,7 @@ describe('what Ask the Studio sends about the page', () => {
     d = { ...d, threads: [{ id: 's1', frames: [a, b], paras: [{ runs: [
       { t: 'BEFORE BEFORE BEFORE ', font: 'Bodoni Moda', size: 10 }, { t: 'VISIBLE VISIBLE', font: 'Inter', size: 10 }] }] }] }
     const store = new Store({
-      doc: d, selection: [], editing: null, page: 2, tool: 'select', view: { ...DEFAULT_VIEW }, panels: [],
+      doc: d, selection: [], editing: null, page: 2, tool: 'select', view: { ...DEFAULT_VIEW }, panels: [], drawer: null,
       overset: new Set(), dialog: null, guide: null, threading: null, snaps: null, marquee: null, assets: {},
       save: { rev: 1, state: 'saved', message: null, draft: false, live: false },
     } as State, mono)
