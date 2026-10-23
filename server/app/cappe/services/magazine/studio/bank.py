@@ -218,16 +218,17 @@ async def get_item(conn, item_id: UUID) -> Optional[dict]:
 
 async def add_photo(conn, *, url: str, variants: dict, width: int, height: int, size_bytes: int, mime: str,
                     name: str, tags: list[str], collection: Optional[str], creator: Optional[str],
-                    credit_line: str, license: str, source_url: Optional[str], email: str) -> dict:
+                    credit_line: str, license: str, source_url: Optional[str], email: str,
+                    sort_order: int = 0) -> dict:
     created = await conn.fetchrow(
         f"""
         INSERT INTO cappe_studio_bank (kind, name, tags, collection, url, variants, width, height, bytes, mime,
-                                       creator, credit_line, license, source_url, created_by_email)
-        VALUES ('photo', $1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+                                       creator, credit_line, license, source_url, created_by_email, sort_order)
+        VALUES ('photo', $1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
         RETURNING {COLUMNS}
         """,
         name, tags, collection, url, json.dumps(variants), width, height, size_bytes, mime, creator, credit_line,
-        license, source_url, email,
+        license, source_url, email, sort_order,
     )
     return row(created)
 

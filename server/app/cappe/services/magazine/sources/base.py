@@ -61,6 +61,7 @@ class StockResult:
     height: Optional[int] = None
     mature: bool = False
     credit_line: str = field(default="")
+    tags: list[str] = field(default_factory=list)  # the archive's own, when it gives them (Openverse)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

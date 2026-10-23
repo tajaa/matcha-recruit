@@ -404,7 +404,11 @@ What is built so far:
   source (`&max=`); a NASA item's `href` is a manifest, and `~large` is often missing (`best_file`).
   Keys are optional: `OPENVERSE_CLIENT_ID`/`OPENVERSE_CLIENT_SECRET` (else anonymous and throttled),
   `SMITHSONIAN_API_KEY` (else `DEMO_KEY`). Searches are cached an hour for everyone (archive data is
-  public); resolves a day.
+  public); resolves a day. **Free photos** (`sources/stock.py`, source `stock`, first in the Studio's
+  Photos tab and the Library) is Openverse narrowed to its CC0 stock collections (StockSnap.io, the
+  WordPress Photo Directory, Nappy: ~86,000 modern photos, counted 2026-10-22) and can be browsed with
+  no words (`BROWSE`). Its results are Openverse's (`source: openverse`), so imports, credits and the
+  `cappe_asset_imports`/`cappe_assets` CHECKs never see `stock`.
 - **An import re-checks the license before it downloads** (`services/magazine/imports.py`, worker
   `workers/tasks/cappe_media_import.py`, on demand, no scheduled task). The route queues
   `cappe_asset_imports` rows; the worker claims one at a time (`FOR UPDATE SKIP LOCKED`), resolves it
@@ -680,7 +684,12 @@ normalized paragraphs itself; a thread with no valid composition prints its word
   `clean_svg`'d and stored by sha at `cappe/graphics/<sha>.svg`, served by the same public route; the two save paths
   in `blog.py` pass `bank.doc_graphics` to `normalize_doc`, which is how a page may name a sha the manifest lacks.
   So **a graphic is hidden, never deleted** (pages name it); deleting a photo is safe (library rows never delete
-  files). `/public/graphics/picks` is cached 5 minutes.
+  files). `/public/graphics/picks` is cached 5 minutes. **The photo library is seeded** by
+  `scripts/seed_studio_bank_photos.py`: CC0 photos from Openverse's stock collections (`sources/stock.py`),
+  one collection per topic, copied to `cappe/bank/` with sizes and credits (CC0 lets us re-offer them;
+  Unsplash's and Pexels' licences don't). The Photos tab opens on the library with no archive call, and
+  only falls back to browsing free photos live when it is empty. **Ops:** run it `--dry-run`, then for real,
+  per environment (it uploads to that environment's bucket).
 - **Ask the Studio** (`studio/ask.py`, `POST …/studio/stories/{id}/ask`; client `ui/ask/`, `ui/panels/AskPanel.tsx`):
   one Claude Messages call per question (surface `gummfit.studio`, Haiku by default), no tools, nothing saved,
   nothing on the page changed. **The Studio sends the guide (`ui/guideContent.ts`) and the commands

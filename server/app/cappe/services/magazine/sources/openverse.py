@@ -29,10 +29,13 @@ NAME = "openverse"
 LABEL = "Openverse"
 API = "https://api.openverse.org/v1"
 _TOKEN_KEY = "cappe:stock:openverse:token"
-_PROVIDERS = {"flickr": "Flickr", "wikimedia": "Wikimedia Commons"}
+_PROVIDERS = {"flickr": "Flickr", "wikimedia": "Wikimedia Commons", "stocksnap": "StockSnap.io",
+              "wordpress": "WordPress Photo Directory", "nappy": "Nappy"}
 # Anonymous requests may not page past 240 results (HTTP 401 beyond it,
 # checked 2026-10-21); a registered app goes deeper.
 ANON_PAGES = 240 // PAGE_SIZE
+# An uncached search took 10–38 s on 2026-10-22, so 20 s timed out real ones.
+TIMEOUT = 40
 _ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 
 
@@ -59,6 +62,8 @@ def normalize(item: dict[str, Any]) -> Optional[StockResult]:
         width=item.get("width") if isinstance(item.get("width"), int) else None,
         height=item.get("height") if isinstance(item.get("height"), int) else None,
         mature=bool(item.get("mature")),
+        tags=[clean(t.get("name"), 40) for t in (item.get("tags") or [])[:12]
+              if isinstance(t, dict) and clean(t.get("name"), 40)],
     )
     result.credit_line = credit_line(result)
     return result
@@ -96,7 +101,7 @@ async def _get(path: str, params: Optional[dict[str, Any]] = None,
     # httpx to its fixed host; image URLs inside the response still go through
     # the guarded fetcher when they are downloaded.
     try:
-        async with httpx.AsyncClient(timeout=20) as client:
+        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
             res = await client.get(f"{API}{path}", params=params, headers=headers or await _headers())
     except httpx.HTTPError as exc:
         raise SourceError(type(exc).__name__) from exc
@@ -110,14 +115,20 @@ async def _get(path: str, params: Optional[dict[str, Any]] = None,
         raise SourceError("not JSON") from exc
 
 
-async def search(query: str, page: int) -> list[StockResult]:
+async def search(query: str, page: int, *, collections: tuple[str, ...] = (),
+                 licenses: tuple[str, ...] = ()) -> list[StockResult]:
+    """One page for `query` (none: Openverse's own order), narrowed to
+    `collections` (Openverse source names) and `licenses` when given."""
     headers = await _headers()
     if page >= ANON_PAGES and "Authorization" not in headers:
         return []
-    data = await _get("/images/", {
-        "q": query, "page": page + 1, "page_size": PAGE_SIZE, "license": ",".join(sorted(ALLOWED_LICENSES)),
-        "mature": "false",
-    }, headers)
+    params = {"page": page + 1, "page_size": PAGE_SIZE, "mature": "false",
+              "license": ",".join(sorted(set(licenses) & ALLOWED_LICENSES if licenses else ALLOWED_LICENSES))}
+    if query:
+        params["q"] = query
+    if collections:
+        params["source"] = ",".join(collections)
+    data = await _get("/images/", params, headers)
     items = (data or {}).get("results") or []
     return [r for r in (normalize(i) for i in items if isinstance(i, dict)) if r]
 

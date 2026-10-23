@@ -3,7 +3,7 @@ import { Check, ExternalLink, Loader2, Search, Wand2 } from 'lucide-react'
 import { cappeApi, cappeApiBase } from '../../api'
 import { ui } from '../../components/ui'
 import type {
-  CappeAsset, CappeStockImport, CappeStockImports, CappeStockResult, CappeStockSearch, CappeStockSource,
+  CappeAsset, CappeStockImport, CappeStockImports, CappeStockResult, CappeStockSearch, CappeStockSearchSource,
   CappeStoryOptions,
 } from '../../types'
 import { STOCK_SOURCES, importOpen, licenseLabel, stockKey } from './assets'
@@ -28,10 +28,10 @@ export default function StockSearch({ siteId, postId, onImported, initial, pollM
   postId?: string
   onImported: (asset: CappeAsset) => void
   /** A search to run as soon as it opens (the editor's suggested searches). */
-  initial?: { source: CappeStockSource; query: string }
+  initial?: { source: CappeStockSearchSource; query: string }
   pollMs?: number
 }) {
-  const [source, setSource] = useState<CappeStockSource>(initial?.source || 'openverse')
+  const [source, setSource] = useState<CappeStockSearchSource>(initial?.source || 'stock')
   const [query, setQuery] = useState(initial?.query || '')
   const [last, setLast] = useState<CappeStockSearch | null>(null)
   const [results, setResults] = useState<CappeStockResult[]>([])
@@ -55,7 +55,7 @@ export default function StockSearch({ siteId, postId, onImported, initial, pollM
       .catch(() => setTopics([]))
   }, [siteId])
 
-  const search = useCallback(async (src: CappeStockSource, q: string, page: number) => {
+  const search = useCallback(async (src: CappeStockSearchSource, q: string, page: number) => {
     if (!q) return
     const gen = ++generation.current
     setSearching(true)
@@ -86,7 +86,7 @@ export default function StockSearch({ siteId, postId, onImported, initial, pollM
     void search(source, query.trim(), 0)
   }
 
-  const pickSource = (src: CappeStockSource) => {
+  const pickSource = (src: CappeStockSearchSource) => {
     setSource(src)
     if (query.trim()) void search(src, query.trim(), 0)
   }

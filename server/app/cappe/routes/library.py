@@ -67,13 +67,15 @@ async def _imported(conn, site_id: UUID, keys: list[tuple[str, str]]) -> set[tup
 @router.get("/sites/{site_id}/library/search", response_model=CappeStockSearch)
 async def search_stock(
     site_id: UUID,
-    source: str = Query(..., pattern="^(openverse|smithsonian|met|nasa)$"),
-    q: str = Query(..., min_length=1, max_length=sources.MAX_QUERY),
+    source: str = Query(..., pattern="^(stock|openverse|smithsonian|met|nasa)$"),
+    q: str = Query("", max_length=sources.MAX_QUERY),
     page: int = Query(0, ge=0, le=sources.MAX_PAGE),
     account: CappeAccount = Depends(require_cappe_account),
 ):
     """One page of an archive's pictures for `q`, already filtered to licenses
-    a magazine can publish."""
+    a magazine can publish. No `q` lists free photos to browse (`stock`)."""
+    if not q.strip() and not sources.browsable(source):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Type what to search for.")
     await check_rate_limit(str(account.id), "cappe_stock_search", SEARCH_PER_HOUR, 3600)
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
