@@ -8,7 +8,10 @@ import { cleanRt, type RtDoc } from './rt'
  *  block or field is checked again where the edit is applied (storyDoc). */
 
 export type FrameTarget =
-  | { kind: 'block'; story: string; block: number }
+  // `item`: one picture of a photo group.
+  | { kind: 'block'; story: string; block: number; item?: number }
+  // Layers of the design on a block's picture (or its item's), or on a page.
+  | { kind: 'layer'; story: string; block: number; item: number | null; ids: string[] }
   | { kind: 'story'; story: string }
   | { kind: 'cover'; el: CoverEl }
   | { kind: 'contents' }
@@ -20,7 +23,14 @@ export type CoverEl = 'photo' | 'masthead' | 'issue_line' | `line:${number}`
 /** What the page is shown on: two pages as on a computer, or a phone. */
 export type Device = 'spread' | 'phone'
 
-export type MoveTarget = { kind: 'cover'; el: CoverEl } | { kind: 'overlay'; story: string; block: number; overlay: number }
+export type MoveTarget = { kind: 'cover'; el: CoverEl }
+
+/** A layer moved, sized or turned on the page: its new box (artboard
+ *  percent), its turn, and a text layer's type size when it was scaled. */
+export type LayerChange = { id: string; x?: number; y?: number; w?: number; h?: number; rot?: number; size?: number; autosize?: 'none' }
+
+export type FrameKey = 'undo' | 'redo' | 'save' | 'delete' | 'copy' | 'cut' | 'paste' | 'duplicate' | 'group' | 'ungroup'
+  | 'front' | 'forward' | 'backward' | 'back'
 
 export type FrameMessage =
   | { type: 'mz-ready' }
@@ -34,7 +44,10 @@ export type FrameMessage =
   | { type: 'mz-pick'; story: string; block: number; item: number | null }
   | { type: 'mz-move'; target: MoveTarget; x: number; y: number; w: number | null }
   | { type: 'mz-focal'; target: FrameTarget; x: number; y: number }
-  | { type: 'mz-key'; key: 'undo' | 'redo' | 'save' | 'delete' }
+  | { type: 'mz-key'; key: FrameKey }
+  | { type: 'mz-layers'; story: string; block: number; item: number | null; changes: LayerChange[] }
+  /** The heights the page measured for a design's words that grow (`autosize: 'height'`). */
+  | { type: 'mz-heights'; story: string; block: number; item: number | null; heights: Record<string, number> }
 
 /** The longest plain words the page may send (a field's own limit is applied
  *  where the edit lands: storyDoc), and the largest rich document, as JSON:
@@ -45,12 +58,39 @@ export const MAX_VALUE = 20_000
 export const MAX_DOC_JSON = 2_000_000
 const MAX_BLOCK = 119
 const INSERTABLE = new Set<StoryBlock['type']>(['text', 'photo', 'photos', 'quote', 'sidebar', 'qa', 'divider'])
-const KEYS = new Set(['undo', 'redo', 'save', 'delete'])
-const FIELD = /^(@(title|kicker|excerpt|byline)|[a-z_]+(\.\d{1,3}\.[a-z_]+)?|issue:(lines\.\d{1,2}\.(text|sub)|issue_line\.text|contents\.heading|(line|section):[0-9a-f-]{36}))$/
+const KEYS = new Set<string>(['undo', 'redo', 'save', 'delete', 'copy', 'cut', 'paste', 'duplicate', 'group', 'ungroup', 'front',
+  'forward', 'backward', 'back'])
+const FIELD = /^(@(title|kicker|excerpt|byline)|[a-z_]+(\.\d{1,3}\.[a-z_]+)?|(items\.\d{1,2}\.)?design\.[a-z0-9]{1,12}|issue:(lines\.\d{1,2}\.(text|sub)|issue_line\.text|contents\.heading|(line|section):[0-9a-f-]{36}))$/
+const LAYER_ID = /^[a-z0-9]{1,12}$/
+const MAX_CHANGES = 200
 
 const obj = (v: unknown): Record<string, unknown> | null => (v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : null)
 const int = (v: unknown, lo: number, hi: number): number | null => (Number.isInteger(v) && (v as number) >= lo && (v as number) <= hi ? v as number : null)
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? Math.max(0, Math.min(100, v)) : null)
+const between = (v: unknown, lo: number, hi: number): number | null => (typeof v === 'number' && Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : null)
+
+function layerIds(v: unknown): string[] | null {
+  if (!Array.isArray(v) || !v.length || v.length > MAX_CHANGES) return null
+  return v.every((id) => typeof id === 'string' && LAYER_ID.test(id)) ? [...new Set(v as string[])] : null
+}
+
+/** A layer's change, its numbers held to what the server keeps (it clamps them again). */
+function layerChange(v: unknown): LayerChange | null {
+  const c = obj(v)
+  if (!c || typeof c.id !== 'string' || !LAYER_ID.test(c.id)) return null
+  const out: LayerChange = { id: c.id }
+  const take = (k: 'x' | 'y' | 'w' | 'h' | 'rot' | 'size', lo: number, hi: number) => {
+    if (c[k] === undefined) return true
+    const n = between(c[k], lo, hi)
+    if (n === null) return false
+    out[k] = n
+    return true
+  }
+  if (!(take('x', -100, 200) && take('y', -100, 200) && take('w', 0.5, 400) && take('h', 0.5, 400) && take('rot', -180, 180)
+    && take('size', 0.5, 60))) return null
+  if (c.autosize === 'none') out.autosize = 'none'
+  return out
+}
 
 /** The context a message is read in: the stories on the page. */
 export type BridgeContext = { stories: ReadonlySet<string> }
@@ -74,7 +114,15 @@ export function readTarget(v: unknown, ctx: BridgeContext): FrameTarget | null {
     case 'story': { const s = story(t.story, ctx); return s ? { kind: 'story', story: s } : null }
     case 'block': {
       const s = story(t.story, ctx), b = int(t.block, 0, MAX_BLOCK)
-      return s && b !== null ? { kind: 'block', story: s, block: b } : null
+      if (!s || b === null) return null
+      if (t.item === undefined || t.item === null) return { kind: 'block', story: s, block: b }
+      const item = int(t.item, 0, 11)
+      return item === null ? null : { kind: 'block', story: s, block: b, item }
+    }
+    case 'layer': {
+      const s = story(t.story, ctx), b = int(t.block, 0, MAX_BLOCK), ids = layerIds(t.ids)
+      const item = t.item === null ? null : int(t.item, 0, 11)
+      return s && b !== null && ids && (item !== null || t.item === null) ? { kind: 'layer', story: s, block: b, item, ids } : null
     }
     default: return null
   }
@@ -123,20 +171,37 @@ export function readMessage(data: unknown, ctx: BridgeContext): FrameMessage | n
     case 'mz-move': {
       const x = num(d.x), y = num(d.y), w = d.w === undefined || d.w === null ? null : num(d.w)
       if (x === null || y === null || (w === null && d.w !== undefined && d.w !== null)) return null
-      const t = obj(d.target)
-      if (t?.kind === 'overlay') {
-        const s = story(t.story, ctx), b = int(t.block, 0, MAX_BLOCK)
-        const m = typeof t.overlay === 'string' ? /^overlays\.(\d)$/.exec(t.overlay) : null
-        return s && b !== null && m ? { type: 'mz-move', target: { kind: 'overlay', story: s, block: b, overlay: Number(m[1]) }, x, y, w } : null
-      }
-      const target = readTarget(t, ctx)
+      const target = readTarget(d.target, ctx)
       return target?.kind === 'cover' && target.el !== 'photo' ? { type: 'mz-move', target, x, y, w } : null
     }
     case 'mz-focal': {
       const target = readTarget(d.target, ctx), x = num(d.x), y = num(d.y)
       return target && x !== null && y !== null ? { type: 'mz-focal', target, x, y } : null
     }
-    case 'mz-key': return typeof d.key === 'string' && KEYS.has(d.key) ? { type: 'mz-key', key: d.key as 'undo' | 'redo' | 'save' | 'delete' } : null
+    case 'mz-key': return typeof d.key === 'string' && KEYS.has(d.key) ? { type: 'mz-key', key: d.key as FrameKey } : null
+    case 'mz-layers': {
+      const s = story(d.story, ctx), b = int(d.block, 0, MAX_BLOCK)
+      const item = d.item === null ? null : int(d.item, 0, 11)
+      if (!s || b === null || (item === null && d.item !== null) || !Array.isArray(d.changes) || d.changes.length > MAX_CHANGES) return null
+      const changes = d.changes.map(layerChange)
+      return changes.every((c): c is LayerChange => c !== null) && changes.length
+        ? { type: 'mz-layers', story: s, block: b, item, changes } : null
+    }
+    case 'mz-heights': {
+      const s = story(d.story, ctx), b = int(d.block, 0, MAX_BLOCK)
+      const item = d.item === null ? null : int(d.item, 0, 11)
+      const given = obj(d.heights)
+      if (!s || b === null || (item === null && d.item !== null) || !given) return null
+      const entries = Object.entries(given)
+      if (entries.length > MAX_CHANGES) return null
+      const heights: Record<string, number> = {}
+      for (const [id, v] of entries) {
+        const h = between(v, 0.5, 400)
+        if (!LAYER_ID.test(id) || h === null) return null
+        heights[id] = h
+      }
+      return { type: 'mz-heights', story: s, block: b, item, heights }
+    }
     default: return null
   }
 }

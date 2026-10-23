@@ -16,9 +16,10 @@ from typing import Any, Iterable, Optional
 from uuid import UUID
 
 from ..cappe_assets import COLUMNS as ASSET_COLUMNS, row as asset_row
+from .design_schema import design_words
 from .richtext import md_to_text
 from .rt import md_to_rt
-from .story_schema import StoryError, count_words, referenced_asset_ids
+from .story_schema import StoryError, count_words, referenced_asset_ids, with_designs
 
 POST_COLS = (
     "id, site_id, title, slug, excerpt, body, cover_image_url, status, published_at, created_at, updated_at, "
@@ -33,7 +34,7 @@ def with_documents(content: dict) -> dict:
     """`content` with every rich field's document filled in, for the owner's
     editor: a story stored before documents has Markdown only."""
     blocks = []
-    for b in content.get("blocks") or []:
+    for b in with_designs(content.get("blocks") or []):
         if not isinstance(b, dict):
             continue
         if b.get("type") in ("text", "sidebar") and not isinstance(b.get("rt"), dict):
@@ -73,11 +74,15 @@ def story_text(content: dict) -> str:
         elif kind == "qa":
             for item in b.get("items") or []:
                 parts.append("\n".join(filter(None, [item.get("q"), md_to_text(item.get("a_md"))])))
-        elif kind == "photo":
-            # Words set on the picture are part of the story too.
-            parts += [o["text"] for o in b.get("overlays") or [] if (o.get("text") or "").strip()]
-            if b.get("caption"):
+        elif kind in ("photo", "page", "cover"):
+            # Words set on a picture or a designed page are part of the story
+            # too, read before the picture's caption.
+            parts += design_words(b.get("design"))
+            if kind == "photo" and b.get("caption"):
                 parts.append(b["caption"])
+        elif kind == "photos":
+            for item in b.get("items") or []:
+                parts += design_words(item.get("design") if isinstance(item, dict) else None)
     return "\n\n".join(p for p in parts if p.strip())
 
 

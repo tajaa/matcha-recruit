@@ -18,6 +18,7 @@ from __future__ import annotations
 from html import escape
 from typing import Optional
 
+from .design_schema import design_asset_ids, design_words
 from .figures import credit_text, share_image
 from .pages import story_blocks, story_path
 from .richtext import md_to_text, render_md
@@ -51,18 +52,41 @@ def _text(md: str) -> str:
     return f'<tr><td style="padding:16px 0 0;font:17px/1.65 {_FONT};color:#1c1917;">{html}</td></tr>'
 
 
+def _under(design: Optional[dict], caption: str = "") -> str:
+    """Email can't lay words over a picture, so they go under it, before its caption."""
+    return " — ".join(p for p in (" · ".join(design_words(design)), caption) if p)
+
+
+def _page(design: Optional[dict], assets: dict[str, dict]) -> str:
+    """A designed page: its pictures, its words under the first; words alone without one."""
+    pictures = [assets[i] for i in dict.fromkeys(design_asset_ids(design)) if i in assets]
+    if pictures:
+        return _picture(pictures[0], caption=_under(design)) + "".join(_picture(p) for p in pictures[1:])
+    words = "".join(f"{_P}{escape(w)}</p>" for w in design_words(design))
+    return f'<tr><td style="padding:16px 0 0;font:17px/1.65 {_FONT};color:#1c1917;">{words}</td></tr>' if words else ""
+
+
+def _design_words(b: dict) -> list[str]:
+    """The words laid on a block's pictures or page, for the plain-text email."""
+    if b.get("type") in ("photo", "page"):
+        return design_words(b.get("design"))
+    if b.get("type") == "photos":
+        return [w for i in b.get("items") or [] if isinstance(i, dict) for w in design_words(i.get("design"))]
+    return []
+
+
 def _block(b: dict, assets: dict[str, dict]) -> str:
     kind = b.get("type")
     if kind == "text":
         return _text(b.get("md") or "")
     if kind == "photo":
-        # Email can't lay words over a picture, so they go under it.
-        words = " · ".join(o["text"] for o in b.get("overlays") or [] if (o.get("text") or "").strip())
-        caption = " — ".join(p for p in (words, b.get("caption") or "") if p)
-        return _picture(assets.get(b.get("asset_id") or ""), caption=caption)
+        return _picture(assets.get(b.get("asset_id") or ""), caption=_under(b.get("design"), b.get("caption") or ""))
     if kind == "photos":
-        return "".join(_picture(assets.get(i.get("asset_id") or ""), caption=i.get("caption") or "")
+        return "".join(_picture(assets.get(i.get("asset_id") or ""),
+                                caption=_under(i.get("design"), i.get("caption") or ""))
                        for i in b.get("items") or [])
+    if kind == "page":
+        return _page(b.get("design"), assets)
     if kind == "quote" and b.get("text"):
         who = f'<br><span style="font:13px {_SANS};color:#78716c;">— {escape(b["attribution"])}</span>' \
             if b.get("attribution") else ""
@@ -116,7 +140,7 @@ def build_issue(*, site_name: str, mag: dict, post: dict, assets: dict[str, dict
         f'<tr><td style="padding:0 0 20px;border-bottom:1px solid #e7e5e4;text-align:center;">'
         f'<a href="{escape(origin, quote=True)}" style="font:700 26px {_FONT};color:#1c1917;text-decoration:none;">'
         f'{escape(name)}</a></td></tr>',
-        _picture(cover_asset, width=560),
+        _picture(cover_asset, caption=_under((cover or {}).get("design")), width=560),
         (f'<tr><td style="padding:20px 0 0;font:600 12px {_SANS};letter-spacing:.08em;text-transform:uppercase;'
          f'color:{escape(accent, quote=True)};">{escape(kicker)}</td></tr>' if kicker else ""),
         f'<tr><td style="padding:8px 0 0;"><a href="{escape(url, quote=True)}" style="font:700 30px/1.2 {_FONT};'
@@ -142,9 +166,14 @@ def build_issue(*, site_name: str, mag: dict, post: dict, assets: dict[str, dict
     text_parts = [name, "", post.get("title") or ""]
     if post.get("excerpt"):
         text_parts += ["", post["excerpt"]]
+    cover_words = design_words((cover or {}).get("design"))
+    if cover_words:
+        text_parts += ["", " · ".join(cover_words)]
     for b in body_blocks:
         if b.get("type") == "text":
             text_parts += ["", md_to_text(b.get("md"))]
+        elif _design_words(b):
+            text_parts += ["", " · ".join(_design_words(b))]
     text_parts += ["", f"Read the whole story: {url}", "", f"Unsubscribe: {UNSUBSCRIBE}"]
     return (subject or post.get("title") or name)[:200], html, "\n".join(text_parts)
 

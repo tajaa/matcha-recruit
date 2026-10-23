@@ -1,0 +1,54 @@
+/* Designs: words, shapes and pictures laid over a picture or a page
+   (services/magazine/design_render.py). A layer's place is numbers (--x, --y,
+   --w, --h: percent of its artboard) turned into a position here through the
+   artboard's units: --bw and --bh (1% of its width and height), offset by
+   --bx/--by. A picture's frame and a designed page are containers, so 1cqw
+   is 1% of their width. A cover in the book is cut to fit its page: its
+   units are the whole picture's (the cut worked out as object-fit does it),
+   so a layer stays on the part of the picture it was put on. */
+.mz-frame,.mz-cover__media,.mz-page__art{container-type:inline-size}
+.mz-book .mz-cover__media{container-type:size}
+/* A cover's picture holds its design as a photo's frame does: placed on the
+   picture and cut to it (an overlay cover's is already). A stacked cover's
+   picture sits inside its padding off the book. */
+.mz-cover__media{position:relative;overflow:hidden}
+.mz-cover--stacked .mz-cover__media>.mzd{left:1.25rem;right:1.25rem}
+.mz-book .mz-cover--stacked .mz-cover__media>.mzd{left:0;right:0}
+.mzd{position:absolute;inset:0;--bw:1cqw;--bh:1%;--bx:0px;--by:0px;pointer-events:none;
+  font-size:1rem;line-height:normal;text-align:left;hyphens:manual;letter-spacing:normal;text-transform:none}
+.mz-book .mz-cover__media>.mzd{--pw:max(100cqw,calc(100cqh * var(--ar)));--ph:max(100cqh,calc(100cqw / var(--ar)));
+  --bw:calc(var(--pw) / 100);--bh:calc(var(--ph) / 100);--bx:calc((100cqw - var(--pw)) * var(--fx));--by:calc((100cqh - var(--ph)) * var(--fy))}
+.mzd__l{position:absolute;box-sizing:border-box;left:calc(var(--bx) + var(--x) * var(--bw));top:calc(var(--by) + var(--y) * var(--bh));
+  width:calc(var(--w) * var(--bw));height:calc(var(--h) * var(--bh));pointer-events:auto;margin:0}
+.mzd__g{position:absolute;inset:0;pointer-events:none}
+.mzd__l--auto{height:auto}
+.mzd__l--vm,.mzd__l--vb{display:flex;flex-direction:column;justify-content:center}
+.mzd__l--vb{justify-content:flex-end}
+.mzd__l--image{overflow:hidden}
+.mzd img.mzd__img{display:block;width:100%;height:100%;max-width:none;max-height:none;margin:0;filter:none}
+.mzd__l--line{display:flex;align-items:center}
+.mzd__line{display:block;width:100%;height:0}
+.mzd__t{overflow-wrap:break-word}
+.mzd__t>*,.mzd__t blockquote>*,.mzd__t li>*{margin:0}
+.mzd__t h2{font-size:1.4em;line-height:1.1}
+.mzd__t h3{font-size:1.15em;line-height:1.15}
+.mzd__t blockquote{margin:0;padding-left:.8em;border-left:.12em solid currentColor}
+.mzd__t ul,.mzd__t ol{margin:0;padding-left:1.25em}
+.mzd__t a{color:inherit}
+a.mzd__l{display:block;color:inherit;text-decoration:none}
+.mzd__box{position:absolute;left:var(--bx);top:var(--by);width:calc(100 * var(--bw));height:calc(100 * var(--bh));
+  pointer-events:none;visibility:hidden}
+/* A designed page: an artboard of its own shape, the size of a page in the
+   book (fitted to it, centred), the width of the story elsewhere. */
+.mz-page{max-width:var(--mz-wide);margin:2.5rem auto;padding:0 1.25rem}
+.mz-page__art{position:relative;overflow:hidden;width:100%;aspect-ratio:var(--ar);background:#fff}
+.mz-page__credit{margin:.45rem 0 0;font-size:.68rem;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);text-align:right}
+.mz-book .mz-page{display:flex;flex-direction:column;align-items:center;justify-content:center;break-before:column;break-after:column;
+  break-inside:avoid;height:var(--mz-col-h);max-width:none;margin:0;padding:0}
+.mz-book .mz-page__art{width:min(100%,calc((var(--mz-col-h) - 1.6rem) * var(--ar)))}
+.mz-book .mz-page__credit{width:min(100%,calc((var(--mz-col-h) - 1.6rem) * var(--ar)))}
+/* A picture in a group keeps its own shape in a frame of its own, never
+   taller than its share of the page. */
+.mz-photos .mz-frame{position:relative;overflow:hidden;line-height:0}
+.mz-book .mz-photos .mz-frame{aspect-ratio:var(--mz-ar,1.5);width:min(100%,calc(var(--mz-col-h) * .42 * var(--mz-ar,1.5)));margin:0 auto}
+.mz-book .mz-photos .mz-frame>img{width:100%;height:100%;max-height:none;object-fit:cover}

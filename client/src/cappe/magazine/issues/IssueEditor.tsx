@@ -342,8 +342,9 @@ export default function IssueEditor() {
         if (msg.key === 'save') setSaveAsked((n) => n + 1)
         else if (msg.key === 'undo') doc.undo()
         else if (msg.key === 'redo') doc.redo()
-        // Not a story's cover: it is its header (see StoryEditor).
-        else if (t?.kind === 'block' && storyOf(current, t.story)?.blocks[t.block]
+        // Not a story's cover: it is its header (see StoryEditor). The other
+        // keys (copy, group, front…) are the story editor's, not deletes.
+        else if (msg.key === 'delete' && t?.kind === 'block' && storyOf(current, t.story)?.blocks[t.block]
           && storyOf(current, t.story)?.blocks[t.block].type !== 'cover') removeBlock(t.story, t.block)
         return
       }
@@ -387,8 +388,7 @@ export default function IssueEditor() {
         break
     }
     // The rest is about one story's words or blocks.
-    const id = 'story' in msg ? msg.story : msg.type === 'mz-move' && msg.target.kind === 'overlay' ? msg.target.story
-      : msg.type === 'mz-focal' && msg.target.kind === 'block' ? msg.target.story : null
+    const id = 'story' in msg ? msg.story : msg.type === 'mz-focal' && msg.target.kind === 'block' ? msg.target.story : null
     const s = id ? storyOf(current, id) : null
     const r = s && id ? storyFromMessage(s, msg) : null
     if (!r || !id) return
@@ -468,7 +468,7 @@ export default function IssueEditor() {
         return (
           <div>
             <p className="truncate border-b border-zinc-800 px-4 pt-3 text-[11px] text-zinc-500">In “{s.fields.title || 'a story'}”</p>
-            <BlockPanel block={b} index={t.block} count={s.blocks.length} assets={assets}
+            <BlockPanel block={b} index={t.block} count={s.blocks.length} minIndex={s.blocks[0]?.type === 'cover' ? 1 : 0} assets={assets}
               onChange={(nb) => setBlocks((bs) => bs.map((x, j) => (j === t.block ? nb : x)))}
               onMove={(dlt) => {
                 const next = moveBlock(s.blocks, t.block, t.block + dlt)

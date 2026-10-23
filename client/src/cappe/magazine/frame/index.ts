@@ -1,5 +1,8 @@
 import type { FrameTarget } from '../canvas/bridge'
+import type { DesignAsset } from '../design/designRender'
+import type { Design } from '../design/types'
 import { startHandles } from './handles'
+import { drawDesign, loadFonts, setZoom, startLayers } from './layers'
 import { startPlus } from './plus'
 import { select } from './selection'
 import { book, place, post, state } from './state'
@@ -25,15 +28,17 @@ if (reader) {
   startTyping()
   startPlus()
   startHandles()
+  startLayers()
 
   document.addEventListener('click', (e) => {
     const t = e.target
     if (!(t instanceof Element) || t.closest('.mze-ui')) return
+    // Layers are selected as the pointer goes down (layers.ts).
+    if (t.closest('[data-mzd-l]:not([data-mzd-lock])')) { if (t.closest('a, label')) e.preventDefault(); return }
     // Links, contents entries and cover lines don't take you anywhere here.
     if (t.closest('a, label')) { e.preventDefault(); e.stopPropagation() }
     if (t.closest('.mz-turn')) return
     const target = targetOf(t)
-    state.overlay = t.closest('[data-mz-drag]')
     select(target, elFor(target))
     post({ type: 'mz-select', target })
     const pick = t.closest('[data-mz-pick]')
@@ -56,7 +61,10 @@ if (reader) {
   addEventListener('scroll', place, { passive: true })
 
   addEventListener('message', (e) => {
-    const d = e.data as { type?: unknown; target?: FrameTarget; spread?: unknown } | null
+    const d = e.data as {
+      type?: unknown; target?: FrameTarget; spread?: unknown; story?: string; block?: number; item?: number | null
+      design?: Design; assets?: Record<string, DesignAsset>; fonts?: string[]; scale?: number
+    } | null
     if (e.source !== parent || !d || typeof d.type !== 'string') return
     if (d.type === 'mz-goto') {
       // Once the page's own type has loaded (or a moment has passed): the
@@ -79,6 +87,14 @@ if (reader) {
     } else if (d.type === 'mz-select' && d.target) {
       const to = elFor(d.target)
       select(d.target, to, to ? 'smooth' : null)
+    } else if (d.type === 'mz-design' && typeof d.story === 'string' && typeof d.block === 'number' && d.design) {
+      // The editor changed a design: draw it at once (the server's page follows).
+      if (Array.isArray(d.fonts)) loadFonts(d.fonts)
+      drawDesign({ story: d.story, block: d.block, item: typeof d.item === 'number' ? d.item : null }, d.design, d.assets || {})
+    } else if (d.type === 'mz-fonts' && Array.isArray(d.fonts)) {
+      loadFonts(d.fonts)
+    } else if (d.type === 'mz-zoom' && typeof d.scale === 'number') {
+      setZoom(d.scale)
     }
   })
 

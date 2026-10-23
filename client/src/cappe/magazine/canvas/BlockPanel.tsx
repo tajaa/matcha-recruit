@@ -21,11 +21,14 @@ export function PanelHead({ title, onClose, children }: { title: string; onClose
 
 /** The block selected on the page: move, copy or delete it, and its pictures
  *  and look (its words are typed on the page). */
-export default function BlockPanel({ block, index, count, assets, onChange, onMove, onDuplicate, onRemove, onPickAsset, onClose }: {
+export default function BlockPanel({ block, index, count, minIndex = 0, assets, accent, onChange, onMove, onDuplicate, onRemove, onPickAsset, onClose }: {
   block: StoryBlock
   index: number
   count: number
+  /** The highest place a block can move to: 1 under a cover. */
+  minIndex?: number
   assets: Map<string, CappeAsset>
+  accent?: string
   onChange: (block: StoryBlock) => void
   onMove: (delta: -1 | 1) => void
   onDuplicate: () => void
@@ -37,7 +40,7 @@ export default function BlockPanel({ block, index, count, assets, onChange, onMo
   return (
     <div>
       <PanelHead title={BLOCK_LABELS[block.type]} onClose={onClose}>
-        <button type="button" className={ICON} aria-label="Move up" disabled={cover || index === 0}
+        <button type="button" className={ICON} aria-label="Move up" disabled={cover || index <= minIndex}
           onClick={() => onMove(-1)}><ArrowUp className="h-4 w-4" /></button>
         <button type="button" className={ICON} aria-label="Move down" disabled={cover || index >= count - 1}
           onClick={() => onMove(1)}><ArrowDown className="h-4 w-4" /></button>
@@ -48,9 +51,7 @@ export default function BlockPanel({ block, index, count, assets, onChange, onMo
           <Trash2 className="h-4 w-4" />
         </button>
       </PanelHead>
-      <div className="p-4">
-        <BlockOptions block={block} assets={assets} onChange={onChange} onPickAsset={onPickAsset} words={false} />
-      </div>
+      <BlockOptions block={block} assets={assets} accent={accent} onChange={onChange} onPickAsset={onPickAsset} />
     </div>
   )
 }

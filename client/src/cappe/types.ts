@@ -1,4 +1,5 @@
 import type { RtDoc } from './magazine/canvas/rt'
+import type { Design, PageAspect } from './magazine/design/types'
 
 // Cappe (website builder) — shared API response types.
 export type CappeShopperSubscription = {
@@ -1090,25 +1091,27 @@ export type PhotoShape = 'rect' | 'rounded' | 'circle' | 'arch'
 export type PhotoFilter = 'none' | 'bw' | 'sepia'
 /** The part of a photo kept, in percent of its width and height. */
 export type PhotoCrop = { x: number; y: number; w: number; h: number }
-/** Words set on a photo, centred on (x, y) in percent of the shown picture. */
-export type PhotoOverlay = {
-  x: number; y: number; text: string; size: 's' | 'm' | 'l' | 'xl'; tone: 'light' | 'dark'; box: boolean
-  align: 'center' | 'left' | 'right'
-}
 
 export type StoryBlock =
-  | { type: 'cover'; asset_id: string | null; style: 'overlay' | 'stacked' | 'split'; tone: 'light' | 'dark'; focal: { x: number; y: number } }
+  // A picture's design (words, shapes, pictures laid over it): magazine/design/.
+  | { type: 'cover'; asset_id: string | null; style: 'overlay' | 'stacked' | 'split'; tone: 'light' | 'dark'; focal: { x: number; y: number }
+      design?: Design | null }
   // Rich text is a document (`rt`, what the editor types) and its Markdown
   // (`md`, kept beside it for emails, feeds and the app): magazine/canvas/rt.ts.
-  | { type: 'text'; md: string; rt?: RtDoc; dropcap: boolean; columns: 1 | 2 | 3; variant?: TextVariant; align?: TextAlign }
+  // A text block's own type: a face ('body' is the magazine's), a size (times
+  // the story's), a colour ('' the page's ink), the space between lines (0 the page's).
+  | { type: 'text'; md: string; rt?: RtDoc; dropcap: boolean; columns: 1 | 2 | 3; variant?: TextVariant; align?: TextAlign
+      font?: string; size?: number; color?: string; leading?: number }
   | { type: 'photo'; asset_id: string | null; caption: string; size: 'column' | 'wide' | 'full'
-      border?: PhotoBorder; shape?: PhotoShape; filter?: PhotoFilter; crop?: PhotoCrop | null; overlays?: PhotoOverlay[] }
-  | { type: 'photos'; layout: 'pair' | 'trio' | 'grid' | 'mosaic'; items: { asset_id: string | null; caption: string }[] }
+      border?: PhotoBorder; shape?: PhotoShape; filter?: PhotoFilter; crop?: PhotoCrop | null; design?: Design | null }
+  | { type: 'photos'; layout: 'pair' | 'trio' | 'grid' | 'mosaic'; items: { asset_id: string | null; caption: string; design?: Design | null }[] }
   | { type: 'quote'; text: string; attribution: string; style: 'big' | 'side' }
   | { type: 'sidebar'; title: string; md: string; rt?: RtDoc }
   | { type: 'qa'; items: { q: string; a_md: string; a_rt?: RtDoc }[] }
   | { type: 'divider' }
   | { type: 'paywall' }
+  // A page laid out freely: an artboard of its own shape, a page of the book.
+  | { type: 'page'; aspect: PageAspect; design: Design }
 
 export type StoryContent = { blocks: StoryBlock[] }
 

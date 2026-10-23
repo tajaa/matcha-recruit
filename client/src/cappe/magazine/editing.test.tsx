@@ -1,12 +1,12 @@
-import { createEvent, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import StoryEditor from './editor/StoryEditor'
-import RichField from './editor/RichField'
 import { duplicateBlock, insertBlock, newBlock } from './editor/blocks'
 import { HISTORY_LIMIT, MERGE_MS, historyReducer, type History } from './editor/history'
 import { withText } from './editor/blocks'
 import type { RtDoc } from './canvas/rt'
+import type { FrameMessage } from './canvas/bridge'
 import type { CappePost, CappeStoryOptions, StoryBlock } from '../types'
 
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn(), postHtml: vi.fn(), upload: vi.fn(), patch: vi.fn() }))
@@ -38,7 +38,7 @@ function mountEditor() {
     return Promise.reject(new Error(`unexpected GET ${path}`))
   })
   return render(
-    <MemoryRouter initialEntries={['/cappe/sites/s-1/stories/p-1?view=outline']}>
+    <MemoryRouter initialEntries={['/cappe/sites/s-1/stories/p-1']}>
       <Routes>
         <Route path="/cappe/sites/:siteId/stories/:postId" element={<StoryEditor />} />
         <Route path="/cappe/sites/:siteId/stories" element={<p>stories list</p>} />
@@ -47,7 +47,31 @@ function mountEditor() {
   )
 }
 
-const kinds = () => screen.getAllByRole('region').map((s) => s.getAttribute('aria-label'))
+const PAGE = '<!doctype html><p>preview</p>'
+const send = (source: Window, data: unknown) => act(() => { window.dispatchEvent(new MessageEvent('message', { data, source })) })
+
+/** The story's pages, shown, as the frame would show them: what the page says. */
+async function onPage() {
+  const frame = await waitFor(() => {
+    const f = document.querySelector(`iframe[srcdoc="${PAGE}"]`) as HTMLIFrameElement | null
+    if (!f) throw new Error('not yet')
+    return f
+  })
+  const win = frame.contentWindow!
+  send(win, { type: 'mz-ready' })
+  send(win, { type: 'mz-shown' })
+  return (m: FrameMessage | Record<string, unknown>) => send(win, m)
+}
+
+/** The headline typed on the page. */
+const typeHeadline = (say: Awaited<ReturnType<typeof onPage>>, value: string) =>
+  say({ type: 'mz-edit', story: 'preview', block: -1, field: '@title', value, rich: false })
+const headline = () => screen.getByRole('heading', { level: 1 })
+
+/** The story's blocks, in order, as the layers panel lists them. */
+const kinds = () => Array.from(screen.getByRole('tree', { name: 'The story’s layers' }).querySelectorAll(':scope > li > div'))
+  .map((row) => row.textContent)
+const rows = () => Array.from(screen.getByRole('tree', { name: 'The story’s layers' }).querySelectorAll<HTMLElement>(':scope > li > div'))
 
 beforeEach(() => {
   api.postHtml.mockResolvedValue('<!doctype html><p>preview</p>')
@@ -120,48 +144,6 @@ describe('insertBlock and duplicateBlock', () => {
   })
 })
 
-/** The field's editor, as Tiptap hangs it on its element. */
-const editorIn = (label: string) => (screen.getByRole('textbox', { name: label }) as HTMLElement & { editor: import('@tiptap/core').Editor }).editor
-
-describe('RichField', () => {
-  it('formats the selected words from the bar, reporting the document and its Markdown', () => {
-    const onChange = vi.fn()
-    render(<RichField value={para('a cat sat')} onChange={onChange} label="Text" max={20_000} />)
-    expect(screen.getByRole('textbox', { name: 'Text' })).toHaveTextContent('a cat sat')
-    editorIn('Text').commands.setTextSelection({ from: 3, to: 6 })
-    fireEvent.click(screen.getByRole('button', { name: 'Bold (⌘B)' }))
-    expect(onChange).toHaveBeenLastCalledWith({
-      md: 'a **cat** sat',
-      rt: { type: 'doc', content: [{ type: 'paragraph', content: [
-        { type: 'text', text: 'a ' }, { type: 'text', text: 'cat', marks: [{ type: 'bold' }] }, { type: 'text', text: ' sat' }] }] },
-    })
-    expect(screen.getByRole('button', { name: 'Bold (⌘B)' })).toHaveAttribute('aria-pressed', 'true')
-    fireEvent.click(screen.getByRole('button', { name: 'Numbered list' }))
-    expect(onChange.mock.lastCall![0].md).toBe('1. a **cat** sat')
-  })
-
-  it('links the selected words from the bar', () => {
-    const onChange = vi.fn()
-    render(<RichField value={para('see this')} onChange={onChange} label="Text" max={20_000} />)
-    editorIn('Text').commands.setTextSelection({ from: 5, to: 9 })
-    fireEvent.click(screen.getByRole('button', { name: 'Link' }))
-    const address = screen.getByLabelText('Link address')
-    fireEvent.change(address, { target: { value: 'example.com/a' } })
-    fireEvent.keyDown(address, { key: 'Enter' })
-    expect(onChange.mock.lastCall![0].md).toBe('see [this](https://example.com/a)')
-    expect(screen.queryByLabelText('Link address')).not.toBeInTheDocument()
-  })
-
-  it('shows a change made elsewhere (undo, Assist) without reporting it back', () => {
-    const onChange = vi.fn()
-    const { rerender } = render(<RichField value={para('one')} onChange={onChange} label="Text" max={20_000} />)
-    rerender(<RichField value={para('two', ['italic'])} onChange={onChange} label="Text" max={20_000} />)
-    expect(screen.getByRole('textbox', { name: 'Text' })).toHaveTextContent('two')
-    expect(screen.getByRole('textbox', { name: 'Text' }).querySelector('em')).not.toBeNull()
-    expect(onChange).not.toHaveBeenCalled()
-  })
-})
-
 describe('withText', () => {
   it("takes tighten's passage with its document, or lets the server make one", () => {
     const bs = [newBlock('cover'), text('old')]
@@ -174,69 +156,63 @@ describe('withText', () => {
 describe('StoryEditor — editing', () => {
   it('undoes and redoes typing from the buttons and the keyboard', async () => {
     mountEditor()
-    const headline = await screen.findByLabelText('Headline')
+    const say = await onPage()
     expect(screen.getByRole('button', { name: 'Undo' })).toBeDisabled()
-    fireEvent.change(headline, { target: { value: 'Dawn' } })
+    typeHeadline(say, 'Dawn')
+    expect(headline()).toHaveTextContent('Dawn')
     expect(screen.getByText('Unsaved')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Undo' }))
-    expect(headline).toHaveValue('The harbour at dawn')
+    expect(headline()).toHaveTextContent('The harbour at dawn')
     expect(screen.queryByText('Unsaved')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Redo' }))
-    expect(headline).toHaveValue('Dawn')
+    expect(headline()).toHaveTextContent('Dawn')
     fireEvent.keyDown(window, { key: 'z', metaKey: true })
-    expect(headline).toHaveValue('The harbour at dawn')
+    expect(headline()).toHaveTextContent('The harbour at dawn')
     fireEvent.keyDown(window, { key: 'z', metaKey: true, shiftKey: true })
-    expect(headline).toHaveValue('Dawn')
+    expect(headline()).toHaveTextContent('Dawn')
     fireEvent.keyDown(window, { key: 'z', ctrlKey: true })
     fireEvent.keyDown(window, { key: 'y', ctrlKey: true })
-    expect(headline).toHaveValue('Dawn')
+    expect(headline()).toHaveTextContent('Dawn')
   })
 
-  it('undoes rich text with the story history only, and saves what is shown', async () => {
+  it('undoes words typed on the page from the page’s own keys, and saves what is shown', async () => {
     api.put.mockImplementation((_path: string, body: Partial<CappePost>) => Promise.resolve(post(body)))
     mountEditor()
-    await screen.findByLabelText('Headline')
-    const field = screen.getByRole('textbox', { name: 'Text' }) as HTMLElement & { editor: import('@tiptap/core').Editor }
-    field.editor.chain().setTextSelection(field.editor.state.doc.content.size - 1).insertContent(' More.').run()
-    await waitFor(() => expect(field).toHaveTextContent('First words. More.'))
-    // A while later (past the history's merge window), ⌘Z in the field: one
-    // undo (the story's), not the field's and then the story's.
-    const now = Date.now.bind(Date)
-    vi.spyOn(Date, 'now').mockImplementation(() => now() + 5_000)
-    // (Ctrl: jsdom isn't a Mac, so that is the field editor's own undo key here.)
-    fireEvent.keyDown(field, { key: 'z', ctrlKey: true })
-    await waitFor(() => expect(field).toHaveTextContent(/^First words\.$/))
-    expect(screen.queryByText('Unsaved')).not.toBeInTheDocument()
-    fireEvent.keyDown(field, { key: 'z', ctrlKey: true, shiftKey: true })
-    await waitFor(() => expect(field).toHaveTextContent('First words. More.'))
+    const say = await onPage()
+    say({ type: 'mz-edit', story: 'preview', block: 1, field: 'md', value: para('First words. More.'), rich: true })
+    expect(await screen.findByText('Unsaved')).toBeInTheDocument()
+    say({ type: 'mz-key', key: 'undo' })
+    await waitFor(() => expect(screen.queryByText('Unsaved')).not.toBeInTheDocument())
+    say({ type: 'mz-key', key: 'redo' })
+    expect(await screen.findByText('Unsaved')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(api.put).toHaveBeenCalled())
     const block = (api.put.mock.calls[0][1] as { content: { blocks: StoryBlock[] } }).content.blocks[1]
-    expect(block).toMatchObject({ md: 'First words. More.' })
+    expect(block).toMatchObject({ md: 'First words. More.', rt: para('First words. More.') })
   })
 
   it('leaves ⌘Z to Assist’s own fields', async () => {
     mountEditor()
-    const headline = await screen.findByLabelText('Headline')
-    fireEvent.change(headline, { target: { value: 'Dawn' } })
+    const say = await onPage()
+    typeHeadline(say, 'Dawn')
     fireEvent.click(screen.getByRole('button', { name: /Assist/ }))
     fireEvent.click(screen.getByRole('tab', { name: 'Draft' }))
     const notes = screen.getByLabelText('Your notes')
     const ev = createEvent.keyDown(notes, { key: 'z', metaKey: true })
     fireEvent(notes, ev)
     expect(ev.defaultPrevented).toBe(false)  // the browser undoes the notes
-    expect(headline).toHaveValue('Dawn')  // the story is untouched
-    fireEvent.keyDown(headline, { key: 'z', metaKey: true })
-    expect(headline).toHaveValue('The harbour at dawn')
+    expect(headline()).toHaveTextContent('Dawn')  // the story is untouched
+    fireEvent.keyDown(document.body, { key: 'z', metaKey: true })
+    expect(headline()).toHaveTextContent('The harbour at dawn')
   })
 
   it('saves with ⌘S only when there is something to save', async () => {
     api.put.mockResolvedValue(post({ title: 'Dawn' }))
     mountEditor()
-    const headline = await screen.findByLabelText('Headline')
+    const say = await onPage()
     fireEvent.keyDown(window, { key: 's', metaKey: true })
     expect(api.put).not.toHaveBeenCalled()
-    fireEvent.change(headline, { target: { value: 'Dawn' } })
+    typeHeadline(say, 'Dawn')
     const ev = createEvent.keyDown(window, { key: 's', metaKey: true })
     fireEvent(window, ev)
     expect(ev.defaultPrevented).toBe(true)
@@ -245,56 +221,63 @@ describe('StoryEditor — editing', () => {
     expect(await screen.findByText('Saved')).toBeInTheDocument()
   })
 
-  it('inserts a block between two, duplicates one, and undoes each as a step', async () => {
+  it('adds a block after the one selected, duplicates one, and undoes each as a step', async () => {
     mountEditor()
-    await screen.findByLabelText('Headline')
-    // The "+" before the text block (the cover has none in front of it).
-    fireEvent.click(screen.getByRole('button', { name: 'Insert a block here' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Divider' }))
-    expect(kinds()).toEqual(['Cover block', 'Divider block', 'Text block'])
-    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+    const say = await onPage()
+    expect(kinds()).toEqual(['Cover', 'First words.'])
+    // The cover selected: a divider from Elements goes right after it.
+    say({ type: 'mz-select', target: { kind: 'block', story: 'preview', block: 0 } })
+    fireEvent.click(screen.getByRole('button', { name: 'Elements' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add divider to the story' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Layers' }))
+    expect(kinds()).toEqual(['Cover', 'Divider', 'First words.'])
+    expect(await screen.findByRole('heading', { name: 'Divider' })).toBeInTheDocument()
 
-    expect(screen.getAllByRole('button', { name: 'Duplicate block' })).toHaveLength(2)  // never the cover
-    fireEvent.click(screen.getAllByRole('button', { name: 'Duplicate block' })[1])
-    expect(kinds()).toEqual(['Cover block', 'Divider block', 'Text block', 'Text block'])
-    expect(screen.getAllByRole('textbox', { name: 'Text' }).filter((f) => f.textContent === 'First words.')).toHaveLength(2)
+    // The text block, picked in the layers panel, copied from its panel.
+    fireEvent.click(rows()[2])
+    fireEvent.click(await screen.findByRole('button', { name: 'Duplicate block' }))
+    expect(kinds()).toEqual(['Cover', 'Divider', 'First words.', 'First words.'])
 
     fireEvent.click(screen.getByRole('button', { name: 'Undo' }))
-    expect(kinds()).toEqual(['Cover block', 'Divider block', 'Text block'])
+    expect(kinds()).toEqual(['Cover', 'Divider', 'First words.'])
     fireEvent.click(screen.getByRole('button', { name: 'Undo' }))
-    expect(kinds()).toEqual(['Cover block', 'Text block'])
+    expect(kinds()).toEqual(['Cover', 'First words.'])
+    // The cover is never copied.
+    fireEvent.click(rows()[0])
+    expect(await screen.findByRole('heading', { name: 'Cover' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Duplicate block' })).toBeNull()
   })
 
-  it('moves a block by dragging its grip onto another, never above the cover', async () => {
+  it('moves a block by dragging it in the layers panel, never above the cover', async () => {
     mountEditor()
-    await screen.findByLabelText('Headline')
-    fireEvent.click(screen.getByRole('button', { name: /Add a block/ }))
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Pull quote' }))
-    expect(kinds()).toEqual(['Cover block', 'Text block', 'Pull quote block'])
+    await onPage()
+    fireEvent.click(screen.getByRole('button', { name: 'Text' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add pull quote to the story' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Layers' }))
+    expect(kinds()).toEqual(['Cover', 'First words.', 'Pull quote'])
 
-    const dataTransfer = { setData: vi.fn(), setDragImage: vi.fn(), effectAllowed: '', dropEffect: '' }
-    const grips = screen.getAllByTitle('Drag to move')
-    expect(grips).toHaveLength(2)  // the cover has none
-    const cards = document.querySelectorAll('[data-block]')
-    fireEvent.dragStart(grips[1], { dataTransfer })
-    expect(dataTransfer.setDragImage).toHaveBeenCalledWith(cards[2], 24, 24)
+    const dataTransfer = { setData: vi.fn(), effectAllowed: '', dropEffect: '' }
+    const [cover, words, quote] = rows()
+    expect(cover).toHaveAttribute('draggable', 'false')
+    fireEvent.dragStart(quote, { dataTransfer })
     // The cover refuses the drop: its dragover isn't cancelled.
-    const overCover = createEvent.dragOver(cards[0], { dataTransfer })
-    fireEvent(cards[0], overCover)
+    const overCover = createEvent.dragOver(cover, { dataTransfer })
+    fireEvent(cover, overCover)
     expect(overCover.defaultPrevented).toBe(false)
-    fireEvent.dragOver(cards[1], { dataTransfer })
-    expect(cards[1]).toHaveClass('ring-2')
-    fireEvent.drop(cards[1], { dataTransfer })
-    expect(kinds()).toEqual(['Cover block', 'Pull quote block', 'Text block'])
-    expect(document.querySelector('.ring-2')).toBeNull()
+    fireEvent.dragOver(words, { dataTransfer })
+    expect(words).toHaveClass('ring-1')
+    fireEvent.drop(words, { dataTransfer })
+    expect(kinds()).toEqual(['Cover', 'Pull quote', 'First words.'])
+    // The block moved stays selected.
+    expect(within(screen.getByRole('complementary', { name: 'Selected' })).getByRole('heading', { name: 'Pull quote' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Undo' }))
-    expect(kinds()).toEqual(['Cover block', 'Text block', 'Pull quote block'])
+    expect(kinds()).toEqual(['Cover', 'First words.', 'Pull quote'])
   })
 
   it('asks before leaving with unsaved changes', async () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     mountEditor()
-    fireEvent.change(await screen.findByLabelText('Headline'), { target: { value: 'Dawn' } })
+    typeHeadline(await onPage(), 'Dawn')
     fireEvent.click(screen.getByRole('link', { name: /Stories/ }))
     expect(confirm).toHaveBeenCalled()
     expect(screen.queryByText('stories list')).not.toBeInTheDocument()

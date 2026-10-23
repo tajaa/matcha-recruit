@@ -20,8 +20,6 @@ export const state = {
   selectedEl: null as Element | null,
   /** The field being typed into. */
   editing: null as HTMLElement | null,
-  /** The words on a photo last clicked, which the grip moves. */
-  overlay: null as Element | null,
   /** The block under the pointer. */
   hovered: null as Element | null,
 }

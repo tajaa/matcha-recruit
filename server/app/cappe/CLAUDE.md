@@ -334,11 +334,36 @@ What is built so far:
 - **Text and photos carry their design in the block** (`story_schema`): text has `variant`
   (body/lede/small/statement), `align`, `columns` 1–3 (read for old stories but offered nowhere: a book
   page is already a column, `.mz-book .mz-text--cols` is one column); a photo has `border`, `shape`
-  (rect/rounded/circle/arch), `filter` (none/bw/sepia), `crop` ({x,y,w,h} percent, at least 5%, a whole
-  picture is `null`) and up to 8 `overlays` (words centred on an x/y point, size, tone, box, align).
-  `story_render.photo_html` draws a crop by scaling the picture inside a frame of the crop's aspect, and a
-  crop, circle or arch adds "(cropped)" to a CC BY/BY-SA credit. Overlay words are escaped, count as story
-  text, and go under the picture in an issue email (email can't lay them over it). A circle ignores the crop.
+  (rect/rounded/circle/arch), `filter` (none/bw/sepia) and `crop` ({x,y,w,h} percent, at least 5%, a whole
+  picture is `null`). `story_render.photo_html` draws a crop by scaling the picture inside a frame of the
+  crop's aspect, and a crop, circle or arch adds "(cropped)" to a CC BY/BY-SA credit. A circle ignores the
+  crop. A text block also has its own type: `font` ("body" = the magazine's), `size` (0.6–3 × the story's),
+  `color` ("" = the page's ink) and `leading` (0 = the page's, else 0.9–3).
+- **Every picture is a design, and so is a designed page** (`services/magazine/design_schema.py` →
+  `design_render.py` + `render/assets/design.css`, 2026-10-22). The cover, a photo and each photo-group
+  picture take an optional `design`; the `page` block (`aspect` 3:4/4:5/2:3/1:1) is one. A design is
+  `{layers, background}`: text (an `rt` document, face, size, weight, colour, alignment, leading,
+  tracking, case, padding, autosize), image (a library `asset_id` only, fit, focal, zoom, filter), shape
+  (rect/ellipse/line) and group (≤4 deep) layers, each placed in percent of its artboard with rotation,
+  flips, opacity, 16 blends, hide/lock, a link, fills (solid/linear/radial, ≤8 stops), strokes, per-corner
+  radius, ≤4 shadows and blur. `normalize_design` clamps everything, drops unknown keys, regenerates bad or
+  duplicate ids (`l{n}`) and holds a design to 200 layers / 80 KB; text is ≤2,000 characters a layer, and
+  colours are `#rrggbb[aa]` or `accent`. Positions are numbers (`--x/--y/--w/--h`) that design.css turns
+  into a place through the artboard's units (`--bw/--bh`), so a design is the same on a spread, a phone
+  and a snapshot; the cover's design is anchored to the picture's own box inside the cropped cover.
+  Pictures laid on a design are checked like any block picture (the site's own library, 422 otherwise)
+  and **each one's credit is printed** (`layer_credits`, from the asset row). Layer words count as story
+  text (`design_words`), go under the picture in an issue email, and are edited on the page as rich fields
+  `design.<id>` / `items.<n>.design.<id>` (`rich_registry`). The client draws designs too
+  (`magazine/design/designRender.ts`); `tests/cappe/fixtures/magazine_design_cases.json` holds both to the
+  same bytes (each case's `html` is `design_html`'s output: when the renderer changes on purpose, rewrite the
+  cases from it, then make the TS match).
+- **Legacy photo `overlays` become text layers on read** (`design_schema.overlays_to_layers`, called by
+  `normalize_story` and `with_designs`), so stored overlays keep rendering and are never written again.
+- **Fonts are an allowlist of 95 Google faces** (`services/magazine/fonts.py`, mirrored by the client's
+  generated `design/fonts.ts`), each with the weights and italics it ships. A page's font link asks only
+  for what its designs and text blocks use (`story_fonts` → `fonts_links`: one `<link>` per face, always
+  with regular 400; issue pages too). "heading"/"body" are the magazine's own pair (`var(--mz-h)`/`--mz-b`).
 - **A story page is a book turned left and right** (`pages.book_html`, `render/assets/book.js`, the book
   section of `magazine.css`): the article flows through CSS columns of the page's height inside a
   horizontally scrolling `.mz-book` (one page on a phone, a two-page spread from 960 px). **A matte cover and
@@ -359,10 +384,9 @@ What is built so far:
   nothing listens in the frame: the arrows, page count and keys are the parent's, `book.ts` polls the
   pages' scroll (`POLL_MS`) to settle swipes, and a link in the page is rewritten to `about:blank#mz-link=…`
   so following it fires the frame's `load`, which the parent reads (`followedLink`) and puts the page back.
-- **The story editor keeps one undoable document** (`editor/history.ts`: headline fields + blocks; edits
-  within 1 s fold into one step, structural edits are their own), ⌘Z/⇧⌘Z/⌘S, insert-anywhere, duplicate,
-  drag to reorder, rich text with a formatting bar (`editor/RichField.tsx`, Tiptap) and the shared
-  `useUnsavedGuard`.
+- **The story editor is one design workspace with one undoable document** (`editor/StoryEditor.tsx`,
+  `editor/history.ts`: headline fields + blocks; edits within 1 s fold into one step, structural edits are
+  their own), ⌘Z/⇧⌘Z/⌘S and the shared `useUnsavedGuard`. See the client's CLAUDE.md for its layout.
 - **Markdown (stories stored before documents, emails, feeds) is constrained** (`richtext.render_md`: `<` escaped before Markdown, then our
   own `html.parser` allowlist of p/em/strong/a/h2/h3/lists/blockquote — not bleach, which several
   test modules stub; h1→h2; links http(s)/mailto with `rel="nofollow ugc noopener"`). Credits come

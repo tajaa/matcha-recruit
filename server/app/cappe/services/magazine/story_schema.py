@@ -19,10 +19,12 @@ import re
 from typing import Any, Optional
 from uuid import UUID
 
+from .design_schema import ASPECTS, DesignError, colour, design_asset_ids, normalize_design, num, overlays_to_layers
+from .fonts import font_name
 from .rt import RtError, md_to_rt, normalize_rt, rt_to_md
 
 MAX_BLOCKS = 120
-MAX_CONTENT_BYTES = 600_000  # a story's words are kept twice: the document and its Markdown
+MAX_CONTENT_BYTES = 1_000_000  # a story's words are kept twice (the document and its Markdown), and its designs
 MAX_PHOTOS = 12
 MAX_QA = 40
 
@@ -41,7 +43,7 @@ PHOTO_SIZES = ("column", "wide", "full")
 PHOTOS_LAYOUTS = ("pair", "trio", "grid", "mosaic")
 QUOTE_STYLES = ("big", "side")
 
-STORY_BLOCKS = ("cover", "text", "photo", "photos", "quote", "sidebar", "qa", "divider", "paywall")
+STORY_BLOCKS = ("cover", "text", "photo", "photos", "quote", "sidebar", "qa", "divider", "paywall", "page")
 
 # How a text block reads: its type size, alignment and columns. The first of
 # each list is the default.
@@ -91,6 +93,13 @@ def _pct(value: Any, default: int = 50) -> int:
         return default
 
 
+def _design(value: Any, *, page: bool = False) -> Optional[dict]:
+    try:
+        return normalize_design(value, page=page)
+    except DesignError as exc:
+        raise StoryError(str(exc)) from exc
+
+
 def _cover(b: dict) -> dict:
     focal = b.get("focal") if isinstance(b.get("focal"), dict) else {}
     return {
@@ -99,6 +108,7 @@ def _cover(b: dict) -> dict:
         "style": _choice(b.get("style"), COVER_STYLES),
         "tone": _choice(b.get("tone"), TONES),
         "focal": {"x": _pct(focal.get("x")), "y": _pct(focal.get("y"))},
+        "design": _design(b.get("design")),
     }
 
 
@@ -129,6 +139,13 @@ def _text(b: dict) -> dict:
         "columns": b.get("columns") if b.get("columns") in (2, 3) else 1,
         "variant": _choice(b.get("variant"), TEXT_VARIANTS),
         "align": _choice(b.get("align"), ALIGNS),
+        # Its type, when the writer sets it: a face ("body" is the magazine's),
+        # a size (times the story's), a colour ("" the page's ink) and the
+        # space between lines (0 the page's).
+        "font": font_name(b.get("font"), "body"),
+        "size": num(b.get("size"), 0.6, 3, 1, places=2),
+        "color": colour(b.get("color"), ""),
+        "leading": 0 if not b.get("leading") else num(b.get("leading"), 0.9, 3, 1.6, places=2),
     }
 
 
@@ -158,6 +175,11 @@ def _overlays(value: Any) -> list[dict]:
 
 
 def _photo(b: dict) -> dict:
+    design = b.get("design")
+    # Words set on a photo before designs (`overlays`) open as its design's
+    # text layers, which replace them.
+    if not isinstance(design, dict) and b.get("overlays"):
+        design = {"layers": overlays_to_layers(_overlays(b.get("overlays")))}
     return {
         "type": "photo",
         "asset_id": _asset_id(b.get("asset_id")),
@@ -167,7 +189,7 @@ def _photo(b: dict) -> dict:
         "shape": _choice(b.get("shape"), SHAPES),
         "filter": _choice(b.get("filter"), FILTERS),
         "crop": _crop(b.get("crop")),
-        "overlays": _overlays(b.get("overlays")),
+        "design": _design(design),
     }
 
 
@@ -179,7 +201,8 @@ def _photos(b: dict) -> dict:
         "type": "photos",
         "layout": _choice(b.get("layout"), PHOTOS_LAYOUTS),
         "items": [
-            {"asset_id": _asset_id(i.get("asset_id")), "caption": _str(i.get("caption"), 300)}
+            {"asset_id": _asset_id(i.get("asset_id")), "caption": _str(i.get("caption"), 300),
+             "design": _design(i.get("design"))}
             for i in items if isinstance(i, dict)
         ],
     }
@@ -214,11 +237,19 @@ def _qa(b: dict) -> dict:
     }
 
 
+def _page(b: dict) -> dict:
+    """A designed page: an artboard of its own (a page of the book), its
+    background and its layers."""
+    return {"type": "page", "aspect": b.get("aspect") if b.get("aspect") in ASPECTS else "3:4",
+            "design": _design(b.get("design"), page=True)}
+
+
 _SHAPERS = {
     "cover": _cover, "text": _text, "photo": _photo, "photos": _photos, "quote": _quote,
     "sidebar": _sidebar, "qa": _qa,
     "divider": lambda _b: {"type": "divider"},
     "paywall": lambda _b: {"type": "paywall"},
+    "page": _page,
 }
 assert set(_SHAPERS) == set(STORY_BLOCKS)
 
@@ -249,6 +280,23 @@ def normalize_story(content: Any) -> dict:
     return out
 
 
+def with_designs(blocks: list[dict]) -> list[dict]:
+    """Stored blocks with any photo saved before designs (words in `overlays`)
+    given those words as its design's text layers, as a save would: for
+    reading a story without saving it (its page, the owner's editor, an
+    email)."""
+    out = []
+    for b in blocks:
+        if isinstance(b, dict) and b.get("type") == "photo" and b.get("overlays") and not b.get("design"):
+            try:
+                design = normalize_design({"layers": overlays_to_layers(_overlays(b["overlays"]))})
+            except (DesignError, StoryError):
+                design = None
+            b = {**{k: v for k, v in b.items() if k != "overlays"}, "design": design}
+        out.append(b)
+    return out
+
+
 def normalize_layout(value: Any) -> str:
     return value if value in LAYOUTS else "standard"
 
@@ -261,9 +309,12 @@ def referenced_asset_ids(content: dict, cover_asset_id: Any = None) -> set[str]:
     for b in content.get("blocks") or []:
         if b.get("asset_id"):
             ids.add(b["asset_id"])
+        ids.update(design_asset_ids(b.get("design")))
         for item in b.get("items") or []:
             if isinstance(item, dict) and item.get("asset_id"):
                 ids.add(item["asset_id"])
+            if isinstance(item, dict):
+                ids.update(design_asset_ids(item.get("design")))
     return ids
 
 

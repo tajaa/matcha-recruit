@@ -1,8 +1,12 @@
 import type { CappePost, StoryBlock, StoryContent } from '../../types'
 import { insertBlock, newBlock } from '../editor/blocks'
-import type { FrameMessage } from './bridge'
-import { FIELD_MAX, SIDEBAR_MD_MAX, blockHasField, clip, fieldShape, isRichField, isStoryField, type StoryField } from './fields'
-import { richPatch, type RtDoc } from './rt'
+import { designOf, holdsDesign, mapLayers, setGeometry, withDesign } from '../design/designOps'
+import type { Design } from '../design/types'
+import type { FrameMessage, LayerChange } from './bridge'
+import {
+  FIELD_MAX, SIDEBAR_MD_MAX, blockHasField, clip, designField, fieldShape, isRichField, isStoryField, type StoryField,
+} from './fields'
+import { cleanRt, richPatch, type RtDoc } from './rt'
 
 /** A story's header and settings. */
 export type StoryFields = {
@@ -87,6 +91,8 @@ export function applyEdit(doc: StoryDoc, block: number, field: string, value: st
     return doc.fields[key] === words ? doc : { ...doc, fields: { ...doc.fields, [key]: words } }
   }
   const b = doc.blocks[block]
+  const layer = designField(field)
+  if (layer) return rich ? editLayerWords(doc, block, layer.item, layer.id, value) : null
   if (!b || !blockHasField(b.type, field) || rich !== isRichField(field)) return null
   const shape = fieldShape(field).shape
   const max = b.type === 'sidebar' && shape === 'md' ? SIDEBAR_MD_MAX : FIELD_MAX[shape]
@@ -106,12 +112,41 @@ export function applyEdit(doc: StoryDoc, block: number, field: string, value: st
 
 const pct = (n: number) => Math.round(Math.max(0, Math.min(100, n)))
 
-/** Words on a photo moved to (x, y), percent of the picture. */
-export function moveOverlay(doc: StoryDoc, block: number, overlay: number, x: number, y: number): StoryDoc | null {
+/** The story with the design at `block` (its picture `item`) rewritten by
+ *  `fn`. Null when that block holds no design or `fn` leaves it as it was. */
+export function changeDesign(doc: StoryDoc, block: number, item: number | null, fn: (d: Design) => Design | null): StoryDoc | null {
   const b = doc.blocks[block]
-  if (!b || b.type !== 'photo' || !b.overlays?.[overlay]) return null
-  const overlays = b.overlays.map((o, i) => (i === overlay ? { ...o, x: pct(x), y: pct(y) } : o))
-  return { ...doc, blocks: doc.blocks.map((x2, i) => (i === block ? { ...b, overlays } : x2)) }
+  if (!holdsDesign(b, item)) return null
+  const before = designOf(b, item) ?? { layers: [] }
+  const after = fn(before)
+  if (!after || after === before) return null
+  return { ...doc, blocks: doc.blocks.map((x, i) => (i === block ? withDesign(b, item, after) : x)) }
+}
+
+/** Words typed into a design's text layer. */
+function editLayerWords(doc: StoryDoc, block: number, item: number | null, id: string, value: RtDoc): StoryDoc | null {
+  const rt = cleanRt(value, FIELD_MAX.design)
+  if (!rt) return null
+  let found = false, changed = false
+  const next = changeDesign(doc, block, item, (d) => mapLayers(d, [id], (l) => {
+    if (l.kind !== 'text') return l
+    found = true
+    if (JSON.stringify(l.rt) === JSON.stringify(rt)) return l
+    changed = true
+    return { ...l, rt }
+  }))
+  // The same words again (a field left as it was) leave the story as it is.
+  return found ? (changed && next) || doc : null
+}
+
+/** Layers moved, sized or turned on the page. */
+export function moveLayers(doc: StoryDoc, block: number, item: number | null, changes: LayerChange[]): StoryDoc | null {
+  return changeDesign(doc, block, item, (d) => {
+    let next = setGeometry(d, changes)
+    const fixed = changes.filter((c) => c.autosize === 'none').map((c) => c.id)
+    if (fixed.length) next = mapLayers(next, fixed, (l) => (l.kind === 'text' ? { ...l, autosize: 'none' } : l))
+    return JSON.stringify(next) === JSON.stringify(d) ? d : next
+  })
 }
 
 /** The part of a cover picture it keeps in view. */
@@ -153,9 +188,8 @@ export function storyFromMessage(doc: StoryDoc, msg: FrameMessage): { doc: Story
       const blocks = insertBlock(doc.blocks, at, newBlock(msg.kind))
       return blocks === doc.blocks || doc.blocks.length >= 120 ? null : { doc: { ...doc, blocks }, step: true, select: at }
     }
-    case 'mz-move': {
-      if (msg.target.kind !== 'overlay') return null
-      const next = moveOverlay(doc, msg.target.block, msg.target.overlay, msg.x, msg.y)
+    case 'mz-layers': {
+      const next = moveLayers(doc, msg.block, msg.item, msg.changes)
       return next ? { doc: next, step: true } : null
     }
     case 'mz-focal': {

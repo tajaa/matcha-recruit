@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import Stories from './stories/Stories'
@@ -131,31 +131,56 @@ describe('Stories', () => {
   })
 })
 
+const PAGE = '<!doctype html><p>preview</p>'
+const send = (source: Window, data: unknown) => act(() => { window.dispatchEvent(new MessageEvent('message', { data, source })) })
+
+/** The story's pages, shown, as the frame would show them: what the page says. */
+async function onPage() {
+  const frame = await waitFor(() => {
+    const f = document.querySelector(`iframe[srcdoc="${PAGE}"]`) as HTMLIFrameElement | null
+    if (!f) throw new Error('not yet')
+    return f
+  })
+  const win = frame.contentWindow!
+  send(win, { type: 'mz-ready' })
+  send(win, { type: 'mz-shown' })
+  return (m: Record<string, unknown>) => send(win, m)
+}
+
+/** The story's blocks, in order, as the layers panel lists them. */
+const kinds = () => Array.from(screen.getByRole('tree', { name: 'The story’s layers' }).querySelectorAll(':scope > li > div'))
+  .map((row) => row.textContent)
+const inspector = () => within(screen.getByRole('complementary', { name: 'Selected' }))
+const openStory = () => mount('/cappe/sites/s-1/stories/p-1', <StoryEditor />, '/cappe/sites/:siteId/stories/:postId')
+
 describe('StoryEditor', () => {
   beforeEach(() => {
     answer({ '/posts/p-1': post(), '/stories/options': OPTIONS, '/assets': { assets: [ASSET] } })
   })
 
-  it('edits the blocks, previews, and saves the content with the cover', async () => {
+  it('edits on the page, sets the page again, and saves the content with the cover', async () => {
     api.put.mockResolvedValue(post({ title: 'Dawn', status: 'published' }))
-    mount('/cappe/sites/s-1/stories/p-1?view=outline', <StoryEditor />, '/cappe/sites/:siteId/stories/:postId')
-    expect(await screen.findByDisplayValue('The harbour at dawn')).toBeInTheDocument()
-    expect(screen.getByText('Photo: Ana Ruiz')).toBeInTheDocument()  // the cover slot shows its credit
+    openStory()
+    const say = await onPage()
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('The harbour at dawn')
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
+    // The cover selected: its picture and credit, and what can go on it.
+    say({ type: 'mz-select', target: { kind: 'block', story: 'preview', block: 0 } })
+    expect(await inspector().findByText('Photo: Ana Ruiz')).toBeInTheDocument()
+    expect(inspector().getByRole('button', { name: 'Add heading' })).toBeEnabled()
 
-    fireEvent.change(screen.getByLabelText('Headline'), { target: { value: 'Dawn' } })
-    const words = screen.getByRole('textbox', { name: 'Text' }) as HTMLElement & { editor: import('@tiptap/core').Editor }
-    expect(words).toHaveTextContent('The boats.')
-    words.editor.chain().selectAll().insertContent('New words.').run()
-    fireEvent.click(screen.getByRole('button', { name: /Add a block/ }))
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Pull quote' }))
-    expect(screen.getByLabelText('Pull quote block')).toBeInTheDocument()
-    expect(screen.queryByRole('menuitem', { name: 'Cover' })).not.toBeInTheDocument()  // there is one already
+    say({ type: 'mz-edit', story: 'preview', block: -1, field: '@title', value: 'Dawn', rich: false })
+    say({ type: 'mz-edit', story: 'preview', block: 1, field: 'md', rich: true,
+      value: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'New words.' }] }] } })
+    // Nothing in hand: a block goes at the end. A story has one cover.
+    say({ type: 'mz-select', target: { kind: 'none' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Text' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add pull quote to the story' }))
+    expect(await inspector().findByRole('heading', { name: 'Pull quote' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Elements' }))
+    expect(screen.queryByRole('button', { name: 'Add cover to the story' })).not.toBeInTheDocument()
 
-    await waitFor(() => expect(api.postHtml).toHaveBeenCalled(), { timeout: 2000 })
-    const previewBody = api.postHtml.mock.calls.at(-1)![1] as { title: string; content: { blocks: StoryBlock[] } }
-    expect(previewBody.title).toBe('Dawn')
-
+    await waitFor(() => expect(api.postHtml.mock.calls.at(-1)![1]).toMatchObject({ title: 'Dawn', edit: true }), { timeout: 2000 })
     fireEvent.click(screen.getByRole('button', { name: /Publish/ }))
     await waitFor(() => expect(api.put).toHaveBeenCalled())
     const sent = api.put.mock.calls[0][1] as Record<string, unknown>
@@ -168,20 +193,34 @@ describe('StoryEditor', () => {
     expect(await screen.findByText('published')).toBeInTheDocument()
   })
 
-  it('picks a picture from the library into a photo block', async () => {
+  it('picks a picture into a photo block, then lays one on it from the photos panel', async () => {
     api.put.mockResolvedValue(post())
-    mount('/cappe/sites/s-1/stories/p-1?view=outline', <StoryEditor />, '/cappe/sites/:siteId/stories/:postId')
-    await screen.findByDisplayValue('The harbour at dawn')
-    fireEvent.click(screen.getByRole('button', { name: /Add a block/ }))
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Photo' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Choose picture' }))
+    openStory()
+    await onPage()
+    fireEvent.click(screen.getByRole('button', { name: 'Elements' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add photo to the story' }))
+    // Words and shapes wait for its picture.
+    expect(await inspector().findByRole('heading', { name: 'Photo' })).toBeInTheDocument()
+    expect(inspector().getByRole('button', { name: 'Add heading' })).toBeDisabled()
+    fireEvent.click(inspector().getByRole('button', { name: 'Choose picture' }))
     const dialog = await screen.findByRole('dialog', { name: 'Choose a picture' })
     expect(dialog).toBeInTheDocument()
     // LibraryPanel lists the asset; opening it and choosing "Use this picture" fills the slot.
-    fireEvent.click(await screen.findByRole('button', { name: /Photo: Ana Ruiz/ }))
+    fireEvent.click(await within(dialog).findByRole('button', { name: /Photo: Ana Ruiz/ }))
     fireEvent.click(screen.getByRole('button', { name: 'Use this picture' }))
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Change picture' })).toBeInTheDocument()
+    expect(inspector().getByRole('button', { name: 'Change picture' })).toBeInTheDocument()
+
+    // The picture in hand: a picture from the panel is laid ON it, at its own shape.
+    fireEvent.click(screen.getByRole('button', { name: 'Photos' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Use Boats' }))
+    expect(await inspector().findByRole('textbox', { name: 'Layer name' })).toHaveValue('Boats')
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(api.put).toHaveBeenCalled())
+    const photo = (api.put.mock.calls[0][1] as { content: { blocks: StoryBlock[] } }).content.blocks[2] as Extract<StoryBlock, { type: 'photo' }>
+    expect(photo).toMatchObject({ type: 'photo', asset_id: 'a-1' })
+    // 40% of the photo's width; the same shape as the 16:10 picture on it.
+    expect(photo.design!.layers).toEqual([expect.objectContaining({ kind: 'image', asset_id: 'a-1', w: 40, h: 40 })])
   })
 
   it('applies an Assist headline and opens a suggested archive search', async () => {
@@ -190,13 +229,12 @@ describe('StoryEditor', () => {
     api.post.mockImplementation((_path: string, body: { action: string }) => Promise.resolve(body.action === 'headlines'
       ? { action: 'headlines', headlines: [{ title: 'Four a.m.', dek: 'Boats go out.', kicker: 'Dispatch' }] }
       : { action: 'search_terms', terms: [{ source: 'nasa', query: 'earth at night' }] }))
-    mount('/sites/s-1/stories/p-1?view=outline', <StoryEditor />, '/sites/:siteId/stories/:postId')
-    await screen.findByDisplayValue('The harbour at dawn')
+    mount('/sites/s-1/stories/p-1', <StoryEditor />, '/sites/:siteId/stories/:postId')
+    await onPage()
     fireEvent.click(screen.getByRole('button', { name: 'Assist' }))
     fireEvent.click(screen.getByRole('button', { name: 'Ask' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Use this' }))
-    expect(screen.getByLabelText('Headline')).toHaveValue('Four a.m.')
-    expect(screen.getByLabelText('Kicker')).toHaveValue('Dispatch')
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Four a.m.')
     expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled()
 
     fireEvent.click(screen.getByRole('tab', { name: 'Find pictures' }))
@@ -207,40 +245,44 @@ describe('StoryEditor', () => {
     expect(within(dialog).getByPlaceholderText(/Harbour at dawn/)).toHaveValue('earth at night')
   })
 
-  it('removes and reorders blocks', async () => {
-    mount('/cappe/sites/s-1/stories/p-1?view=outline', <StoryEditor />, '/cappe/sites/:siteId/stories/:postId')
-    await screen.findByDisplayValue('The harbour at dawn')
-    fireEvent.click(screen.getByRole('button', { name: /Add a block/ }))
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Divider' }))
-    const sections = () => screen.getAllByRole('region').map((s) => s.getAttribute('aria-label'))
-    expect(sections()).toEqual(['Cover block', 'Text block', 'Divider block'])
-    fireEvent.click(screen.getAllByRole('button', { name: 'Move up' })[2])
-    expect(sections()).toEqual(['Cover block', 'Divider block', 'Text block'])
-    fireEvent.click(screen.getAllByRole('button', { name: 'Remove block' })[1])
-    expect(sections()).toEqual(['Cover block', 'Text block'])
+  it('removes and reorders blocks from the panel of the one selected', async () => {
+    openStory()
+    await onPage()
+    fireEvent.click(screen.getByRole('button', { name: 'Elements' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add divider to the story' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Layers' }))
+    expect(kinds()).toEqual(['Cover', 'The boats.', 'Divider'])
+    fireEvent.click(inspector().getByRole('button', { name: 'Move up' }))
+    expect(kinds()).toEqual(['Cover', 'Divider', 'The boats.'])
+    // The cover stays first.
+    expect(inspector().getByRole('button', { name: 'Move up' })).toBeDisabled()
+    fireEvent.click(inspector().getByRole('button', { name: 'Remove block' }))
+    expect(kinds()).toEqual(['Cover', 'The boats.'])
+    expect(inspector().getByRole('heading', { name: 'The story' })).toBeInTheDocument()
   })
 
   it('offers to turn a plain post into a story', async () => {
     answer({ '/posts/p-1': post({ format: 'markdown', content: null, body: 'Old *words*.' }), '/stories/options': OPTIONS, '/assets': { assets: [] } })
     api.put.mockResolvedValue(post({ content: { blocks: [{ type: 'text', md: 'Old *words*.', dropcap: true, columns: 1, rt: { type: 'doc', content: [
       { type: 'paragraph', content: [{ type: 'text', text: 'Old ' }, { type: 'text', text: 'words', marks: [{ type: 'italic' }] }, { type: 'text', text: '.' }] }] } }] } }))
-    mount('/cappe/sites/s-1/stories/p-1?view=outline', <StoryEditor />, '/cappe/sites/:siteId/stories/:postId')
+    openStory()
     expect(await screen.findByText(/plain post written as Markdown/)).toBeInTheDocument()
     expect(api.postHtml).not.toHaveBeenCalled()
+    expect(screen.queryByRole('tree')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Turn into a story' }))
     await waitFor(() => expect(api.put).toHaveBeenCalledWith('/sites/s-1/posts/p-1', { format: 'blocks' }))
-    // The server keeps its words as a document; the editor opens it.
-    const words = await screen.findByRole('textbox', { name: 'Text' })
-    expect(words).toHaveTextContent('Old words.')
-    expect(words.querySelector('em')).toHaveTextContent('words')
+    // The server keeps its words as a document; the workspace opens on its pages.
+    await onPage()
+    expect(kinds()).toEqual(['Old words.'])
+    expect(api.postHtml).toHaveBeenCalledWith('/sites/s-1/stories/preview', expect.objectContaining({ edit: true }))
   })
 
   it('shows a save failure and deletes after confirming', async () => {
     api.put.mockRejectedValue(new Error('A picture in this story isn’t in your library any more.'))
     api.delete.mockResolvedValue(undefined)
     vi.spyOn(window, 'confirm').mockReturnValue(true)
-    mount('/cappe/sites/s-1/stories/p-1?view=outline', <StoryEditor />, '/cappe/sites/:siteId/stories/:postId')
-    await screen.findByDisplayValue('The harbour at dawn')
+    openStory()
+    await onPage()
     fireEvent.click(screen.getByRole('button', { name: /Publish/ }))
     expect(await screen.findByRole('alert')).toHaveTextContent('isn’t in your library')
     fireEvent.click(screen.getByRole('button', { name: /Delete story/ }))
@@ -250,10 +292,10 @@ describe('StoryEditor', () => {
 
   it('switching layout on an empty story fills in that layout’s blocks', async () => {
     answer({ '/posts/p-1': post({ content: { blocks: [newBlock('cover'), newBlock('text')] } }), '/stories/options': OPTIONS, '/assets': { assets: [] } })
-    mount('/cappe/sites/s-1/stories/p-1?view=outline', <StoryEditor />, '/cappe/sites/:siteId/stories/:postId')
-    await screen.findByDisplayValue('The harbour at dawn')
+    openStory()
+    await onPage()
     fireEvent.change(screen.getByLabelText('Layout'), { target: { value: 'photo_essay' } })
-    expect(screen.getAllByRole('region').map((s) => s.getAttribute('aria-label'))).toEqual(['Cover block', 'Photo block', 'Text block'])
+    expect(kinds()).toEqual(['Cover', 'Photo', 'Text'])
   })
 })
 

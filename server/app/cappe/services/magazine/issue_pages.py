@@ -22,9 +22,12 @@ from .pages import (
     follow_html,
     paywall_script,
     story_article_html,
+    story_blocks,
     story_cover,
+    story_fonts,
     story_path,
 )
+from .fonts import Uses, fonts_links
 
 
 def _cover_asset(issue: dict, assets: dict[str, dict]) -> Optional[dict]:
@@ -98,7 +101,10 @@ def render_issue(site: dict, nav: list[dict], mag: dict, issue: dict, stories: l
     image = share_image(_cover_asset(issue, assets))
     titles = [s.get("title") for s in stories if s.get("title")]
     description = ("In this issue: " + ", ".join(titles[:4])) if titles else (mag.get("tagline") or "")
-    extra = _issue_ld(mag, issue, stories, url=url, origin=origin, image=image)
+    uses: Uses = {}
+    for s in stories:
+        story_fonts(story_blocks(s), uses)
+    extra = fonts_links(uses) + _issue_ld(mag, issue, stories, url=url, origin=origin, image=image)
     extra += '<meta name="twitter:card" content="summary_large_image" />'
     return _page(site, nav, mag, body, origin=origin, extra_head=extra, issue_css=True, preview=edit, seo={
         "title": title, "description": description[:300], "image": image, "type": "website", "url": url,

@@ -1,10 +1,11 @@
 """How a story's text and photos are designed: type, alignment and columns for
-text; border, shape, colour, crop and words set on a photo.
+text; border, shape, colour and crop for a photo, and the words set on it.
 
 What each block pins:
 
   * the normalizer keeps only known choices, bounds a crop inside the picture
-    (a crop of the whole picture is none), and caps the words on a photo;
+    (a crop of the whole picture is none), and turns words set on a photo
+    before designs (`overlays`) into its design's text layers;
   * the page draws the crop by scaling the picture inside a frame of the crop's
     shape, escapes every word set on a picture, and says "(cropped)" in a
     CC BY credit when the picture was cut;
@@ -44,15 +45,23 @@ def test_a_photo_keeps_known_choices_and_a_crop_inside_the_picture():
     assert p["crop"] == {"x": 70, "y": 10, "w": 30, "h": 5}  # pulled inside, at least 5%
     odd = _photo(border="neon", shape="star", filter="vhs", crop={"x": 0, "y": 0, "w": 100, "h": 100})
     assert (odd["border"], odd["shape"], odd["filter"], odd["crop"]) == ("none", "rect", "none", None)
-    assert _photo(crop="half")["crop"] is None and _photo()["overlays"] == []
+    assert _photo(crop="half")["crop"] is None and _photo()["design"] is None and "overlays" not in _photo()
 
 
-def test_words_on_a_photo_are_bounded():
+def test_words_set_on_a_photo_before_designs_become_its_text_layers():
     p = _photo(overlays=[{"x": 120, "y": -3, "text": "  Dawn  ", "size": "xl", "tone": "dark", "box": 1, "align": "left"},
-                         {"text": "x" * 400, "size": "giant"}, "nope"])
-    assert p["overlays"][0] == {"x": 100, "y": 0, "text": "Dawn", "size": "xl", "tone": "dark", "box": True, "align": "left"}
-    assert len(p["overlays"][1]["text"]) == 300 and p["overlays"][1]["size"] == "m"
-    assert len(p["overlays"]) == 2
+                         {"text": "x" * 400, "size": "giant"}, "nope", {"text": "   "}])
+    dawn, long = p["design"]["layers"]
+    assert (dawn["kind"], dawn["name"], dawn["color"], dawn["align"], dawn["size"]) == ("text", "Dawn", "#111111", "left", 9)
+    assert dawn["fill"] == {"kind": "solid", "color": "#ffffffd9", "angle": 180, "stops": []} and dawn["shadows"] == []
+    assert dawn["x"] + dawn["w"] <= 100 and dawn["y"] == 0  # kept on the picture
+    assert dawn["rt"]["content"][0]["content"][0]["text"] == "Dawn"
+    assert len(long["rt"]["content"][0]["content"][0]["text"]) == 300 and long["size"] == 3.8
+    assert long["color"] == "#ffffff" and long["shadows"][0]["color"] == "#0000008c"  # light words, shadowed
+    assert "overlays" not in p
+    # A design sent with them wins: the overlays are what it replaced.
+    kept = _photo(design={"layers": []}, overlays=[{"text": "old"}])
+    assert kept["design"] is None
     with pytest.raises(story_schema.StoryError, match="at most 8"):
         _photo(overlays=[{"text": "x"}] * 9)
 
@@ -65,9 +74,8 @@ def test_the_page_draws_the_crop_and_the_words():
     assert 'class="mz-fig mz-fig--column mz-border--thick mz-shape--rect mz-filter--sepia"' in html
     assert 'style="aspect-ratio:100000/100000"' in html  # 2000×50% by 1000×100%
     assert "width:200.000%;height:100.000%;left:-50.000%;top:0.000%" in html
-    assert '<div class="mz-ov mz-ov--l mz-ov--light mz-ov--center mz-ov--box" style="left:30%;top:70%">' in html
-    assert "&lt;b&gt;Dawn&lt;/b&gt;<br>over the bay" in html and "<b>Dawn" not in html
-    assert html.count('class="mz-ov ') == 1  # an empty one draws nothing
+    assert html.count('class="mzd__l mzd__l--text') == 1  # an empty one draws nothing
+    assert "<p>&lt;b&gt;Dawn&lt;/b&gt;</p><p>over the bay</p>" in html and "<b>Dawn" not in html
     assert "CC BY 2.0 (cropped)" in html
 
 
@@ -95,3 +103,37 @@ def test_words_on_a_photo_are_story_text_and_go_under_it_in_email():
     assert story_text({"blocks": [p]}) == "Dawn\n\n6 a.m.\n\nThe bay."
     row = issue_email._block(p, {A: {**ASSET, "variants": {}}})
     assert "Dawn · 6 a.m. — The bay." in row
+
+
+def test_an_email_keeps_the_words_on_photo_groups_and_designed_pages():
+    def words(text, lid="t1"):
+        para = {"type": "paragraph", "content": [{"type": "text", "text": text}]}
+        return {"kind": "text", "id": lid, "rt": {"type": "doc", "content": [para]}}
+    blocks = story_schema.normalize_story({"blocks": [
+        {"type": "photos", "items": [{"asset_id": A, "caption": "Gulls.", "design": {"layers": [words("At sea")]}},
+                                     {"asset_id": A}]},
+        {"type": "page", "design": {"layers": [{"kind": "image", "id": "p1", "asset_id": A}, words("The end", "t2")]}},
+        {"type": "page", "design": {"layers": [words("Fin <3", "t3")]}},
+    ]})["blocks"]
+    assets = {A: {**ASSET, "variants": {}}}
+    group, pictured, plain = (issue_email._block(b, assets) for b in blocks)
+    assert "At sea — Gulls." in group
+    assert pictured.count("<img") == 1 and "The end" in pictured
+    assert "<img" not in plain and "Fin &lt;3" in plain
+
+
+def test_a_whole_story_email_carries_design_words_in_both_bodies():
+    def words(text, lid):
+        para = {"type": "paragraph", "content": [{"type": "text", "text": text}]}
+        return {"kind": "text", "id": lid, "rt": {"type": "doc", "content": [para]}}
+    content = story_schema.normalize_story({"blocks": [
+        {"type": "cover", "asset_id": A, "design": {"layers": [words("On the cover", "c1")]}},
+        {"type": "text", "md": "Body words."},
+        {"type": "page", "design": {"layers": [words("Page words", "p1")]}},
+        {"type": "photos", "items": [{"asset_id": A, "design": {"layers": [words("Group words", "g1")]}}, {"asset_id": A}]},
+    ]})
+    post = {"slug": "s", "title": "S", "access": "free", "format": "blocks", "content": content}
+    _, html, text = issue_email.build_issue(site_name="Salt", mag={"name": "Salt"}, post=post,
+                                           assets={A: {**ASSET, "variants": {}}}, origin="https://x.test", include_body=True)
+    for w in ("On the cover", "Page words", "Group words", "Body words."):
+        assert w in html and w in text

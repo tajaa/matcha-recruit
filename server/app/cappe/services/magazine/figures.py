@@ -80,17 +80,24 @@ def img_html(asset: dict, *, size: str = "column", eager: bool = False, cls: str
 
 
 def figure_html(asset: Optional[dict], *, caption: str = "", size: str = "column", eager: bool = False,
-                cls: str = "mz-fig", style: str = "", cap_attrs: Optional[str] = None) -> str:
+                cls: str = "mz-fig", style: str = "", cap_attrs: Optional[str] = None,
+                over: Optional[str] = None, credits: str = "") -> str:
     """A picture with its caption and credit, or "" for an empty slot.
     `cap_attrs` (the story editor's markers) always prints the caption's
-    slot, empty or not, so it can be typed into."""
+    slot, empty or not, so it can be typed into. `over`: what is laid over
+    the picture (its design), in a frame of the picture's shape; `credits`:
+    the credits of the pictures in it, after the picture's own."""
     if not asset:
         return ""
     img = img_html(asset, size=size, eager=eager)
     if not img:
         return ""
+    if over is not None:
+        ratio = (f' style="--mz-ar:{asset["width"] / asset["height"]:.4f}"'
+                 if asset.get("width") and asset.get("height") else "")
+        img = f'<div class="mz-frame"{ratio}>{img}{over}</div>'
     caption = (caption or asset.get("caption") or "").strip()
-    credit = credit_html(asset)
+    credit = credit_html(asset) + credits
     figcaption = ""
     if caption or credit or cap_attrs is not None:
         cap = (f'<span class="mz-cap"{cap_attrs or ""}>{escape(caption)}</span>'
