@@ -497,7 +497,9 @@ What is built so far:
   a one-tap Follow on the reader dashboard and sends NO email: email followers stay `cappe_subscribers`
   (double opt-in, above), a separate list. It feeds the dashboard's Following list (a magazine that is
   down stays, `live` false, so it can be unfollowed) and Feed (`GET /reader/feed`: live followed
-  magazines' stories, newest first, one query; capped at `FOLLOW_LIMIT` follows). Which are live is
+  magazines' stories, newest first, one query; capped at `FOLLOW_LIMIT` follows, checked and inserted
+  under the account's advisory lock so concurrent follows can't pass it; the feed goes back
+  `FEED_MAX_PAGE` pages and its last says `has_more: false`, since the route refuses the next). Which are live is
   `magazines.live_magazines` — `live_magazine`'s rule for many sites, each owner plan resolved once;
   keep the two in step. The owner sees a count only (`GET /sites/{id}/magazine/follows`): an account
   follow carries no consent to share who. A magazine's own page can't see the dashboard's sign-in, so
