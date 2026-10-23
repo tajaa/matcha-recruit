@@ -32,6 +32,26 @@ describe('the Studio guide', () => {
     window.removeEventListener('keydown', behind)
   })
 
+  it('keeps focus inside while open and gives it back when it closes', () => {
+    const outside = document.createElement('button')
+    outside.textContent = 'Publish'
+    document.body.appendChild(outside)
+    outside.focus()
+    const { unmount } = render(<StudioGuide section="start" onClose={() => {}} />)
+    const dialog = screen.getByRole('dialog', { name: 'How the Studio works' })
+    // Tab and Shift-Tab go round the guide's own buttons, never out to the page.
+    for (let k = 0; k < 40; k++) {
+      fireEvent.keyDown(window, { key: 'Tab', shiftKey: k % 3 === 0 })
+      expect(dialog.contains(document.activeElement)).toBe(true)
+    }
+    // Focus put outside some other way comes back.
+    outside.focus()
+    expect(dialog.contains(document.activeElement)).toBe(true)
+    unmount()
+    expect(document.activeElement).toBe(outside)
+    outside.remove()
+  })
+
   it('lists every command that has a key, as the menus show it', () => {
     render(<StudioGuide section="keys" onClose={() => {}} />)
     for (const c of COMMANDS.filter((x) => x.keys)) {

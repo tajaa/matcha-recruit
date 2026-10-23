@@ -93,10 +93,14 @@ export default function PictureEditor({ siteId, asset, startIn = 'adjust', onDon
   const recipeNow = useRef(recipe)
   const shownMask = useRef<Mask | null>(null)
   const asking = useRef(new Set<string>())
+  // While Done's picture is saving, nothing changes the recipe: what is saved
+  // is what was shown when Done was pressed, and the editor closes with it.
+  const saving = useRef(false)
   useEffect(() => { recipeNow.current = recipe })
 
   /** Change the recipe; edits with the same `key` within a moment are one undo step. */
   const update = useCallback((next: Recipe, key: string | null = null) => {
+    if (saving.current) return
     const now = Date.now()
     const c = coalesce.current
     if (!(key && key === c.key && now - c.at < 800)) {
@@ -108,14 +112,14 @@ export default function PictureEditor({ siteId, asset, startIn = 'adjust', onDon
   }, [])
 
   const undo = useCallback(() => {
-    if (!past.length) return
+    if (!past.length || saving.current) return
     setFuture([recipe, ...future])
     setRecipe(past[past.length - 1])
     setPast(past.slice(0, -1))
     coalesce.current = { key: null, at: 0 }
   }, [past, future, recipe])
   const redo = useCallback(() => {
-    if (!future.length) return
+    if (!future.length || saving.current) return
     setPast([...past, recipe])
     setRecipe(future[0])
     setFuture(future.slice(1))
@@ -282,7 +286,12 @@ export default function PictureEditor({ siteId, asset, startIn = 'adjust', onDon
   const done = async () => {
     if (!src) return
     const clean = normalizeRecipe(recipe)
-    if (!Object.keys(clean).length) { onClose(); return }
+    if (!Object.keys(clean).length) {
+      // An edit put all the way back: its frame shows its source again.
+      if (src.id !== asset.id) await restoreSource(src.id)
+      else onClose()
+      return
+    }
     if (clean.cutout && !mask) {
       const failed = maskError?.key === cutKey || seg.state === 'error'
       setError(failed ? 'The cut-out didn’t work on those clicks: click again, or start the cut-out over.'
@@ -290,6 +299,7 @@ export default function PictureEditor({ siteId, asset, startIn = 'adjust', onDon
       return
     }
     setPhase('saving')
+    saving.current = true
     setError(null)
     let g: PictureGL | null = null
     try {
@@ -304,10 +314,26 @@ export default function PictureEditor({ siteId, asset, startIn = 'adjust', onDon
         out.toBlob((b) => (b ? resolve(b) : reject(new Error('Couldn’t draw the picture.'))), type, 0.92))
       onDone(await studioApi.saveEdit(siteId, src.id, blob, clean))
     } catch (e) {
+      saving.current = false
       setPhase('ready')
       setError(errorText(e, 'Couldn’t save the edited picture.'))
     } finally {
       g?.dispose()
+    }
+  }
+
+  const restoreSource = async (id: string) => {
+    setPhase('saving')
+    saving.current = true
+    setError(null)
+    try {
+      const source = (await studioApi.assets(siteId)).assets.find((a) => a.id === id)
+      if (!source) throw new Error('The original picture isn’t in your library any more.')
+      onDone(source)
+    } catch (e) {
+      saving.current = false
+      setPhase('ready')
+      setError(errorText(e, 'Couldn’t put the original picture back.'))
     }
   }
 
@@ -353,8 +379,17 @@ export default function PictureEditor({ siteId, asset, startIn = 'adjust', onDon
         if (handle.includes('w')) w = right - x
         if (handle.includes('n')) h = bottom - y
         if (ratio) {
-          h = clamp(w / ratio, CROP_MIN, handle.includes('n') ? bottom : 1 - y)
-          w = h * ratio
+          // The side dragged leads (a corner: whichever way it moved more);
+          // the other follows the shape, from the opposite side or corner.
+          const vertical = handle === 'n' || handle === 's'
+            || (handle.length === 2 && Math.abs(dy) * ratio > Math.abs(dx))
+          if (vertical) {
+            w = clamp(h * ratio, CROP_MIN, handle.includes('w') ? right : 1 - x)
+            h = w / ratio
+          } else {
+            h = clamp(w / ratio, CROP_MIN, handle.includes('n') ? bottom : 1 - y)
+            w = h * ratio
+          }
           if (handle.includes('w')) x = right - w
           if (handle.includes('n')) y = bottom - h
         }
@@ -409,8 +444,8 @@ export default function PictureEditor({ siteId, asset, startIn = 'adjust', onDon
         <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-emerald-300">Picture</span>
         <span className="min-w-0 truncate text-sm text-zinc-300">{asset.credit_line || asset.alt || 'Edit picture'}</span>
         <div className="ml-4 flex items-center gap-1">
-          <TopBtn title="Undo (⌘Z)" onClick={undo} disabled={!past.length}><Undo2 className="h-4 w-4" /></TopBtn>
-          <TopBtn title="Redo (⇧⌘Z)" onClick={redo} disabled={!future.length}><Redo2 className="h-4 w-4" /></TopBtn>
+          <TopBtn title="Undo (⌘Z)" onClick={undo} disabled={busy || !past.length}><Undo2 className="h-4 w-4" /></TopBtn>
+          <TopBtn title="Redo (⇧⌘Z)" onClick={redo} disabled={busy || !future.length}><Redo2 className="h-4 w-4" /></TopBtn>
           <button type="button" title="Hold to see the picture as it was (or hold \)" disabled={busy}
             onPointerDown={() => setBefore(true)} onPointerUp={() => setBefore(false)} onPointerLeave={() => setBefore(false)}
             className={`ml-1 rounded-md border px-2.5 py-1 text-xs ${before ? 'border-emerald-500 text-emerald-300' : 'border-zinc-700 text-zinc-300 hover:border-zinc-500'}`}>
@@ -482,7 +517,7 @@ export default function PictureEditor({ siteId, asset, startIn = 'adjust', onDon
               </button>
             ))}
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto">
+          <fieldset disabled={busy} className="min-h-0 min-w-0 flex-1 overflow-y-auto">
             {mode === 'adjust' && (
               <>
                 {GROUPS.map((g) => (
@@ -533,7 +568,7 @@ export default function PictureEditor({ siteId, asset, startIn = 'adjust', onDon
                 onInvert={(v) => setCut({ invert: v })} onClear={clearCut}
                 onRetry={() => { if (src) { setSeg({ state: 'off', done: 0, total: 0, message: null }); void startCutout(src) } }} />
             )}
-          </div>
+          </fieldset>
         </aside>
       </div>
     </div>

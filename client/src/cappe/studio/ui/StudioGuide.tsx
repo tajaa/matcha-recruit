@@ -3,9 +3,11 @@ import { ArrowLeft, ArrowRight, X } from 'lucide-react'
 import { COMMANDS } from './commands'
 import { GUIDE, MORE_KEYS } from './guideContent'
 
+const FOCUSABLE = 'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+
 /** How the Studio works, a section at a time, with the contents down the
  *  side. While it's open it keeps the keyboard: nothing behind it (the
- *  Studio, the Picture Editor) acts on a key. */
+ *  Studio, the Picture Editor) acts on a key, and Tab never leaves it. */
 export default function StudioGuide({ section, onClose }: { section: string; onClose: () => void }) {
   const [at, setAt] = useState(() => Math.max(0, GUIDE.findIndex((s) => s.id === section)))
   const page = GUIDE[at]
@@ -13,11 +15,33 @@ export default function StudioGuide({ section, onClose }: { section: string; onC
   const last = at === GUIDE.length - 1
   const box = useRef<HTMLDivElement>(null)
 
-  useEffect(() => { box.current?.focus() }, [])
+  // Focus starts in the guide, stays in it (Tab goes round its own buttons),
+  // and goes back where it was when the guide closes.
+  useEffect(() => {
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    box.current?.focus()
+    const keepIn = (e: FocusEvent) => {
+      if (box.current && e.target instanceof Node && !box.current.contains(e.target)) box.current.focus()
+    }
+    document.addEventListener('focusin', keepIn)
+    return () => {
+      document.removeEventListener('focusin', keepIn)
+      if (opener?.isConnected) opener.focus()
+    }
+  }, [])
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
-      if (e.key === 'Tab') return
       e.stopPropagation()
+      if (e.key === 'Tab') {
+        const inside = Array.from(box.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? [])
+        const now = document.activeElement
+        const i = inside.findIndex((el) => el === now)
+        e.preventDefault()
+        if (!inside.length) { box.current?.focus(); return }
+        const next = i < 0 ? (e.shiftKey ? inside.length - 1 : 0) : (i + (e.shiftKey ? -1 : 1) + inside.length) % inside.length
+        inside[next].focus()
+        return
+      }
       if (e.key === 'Escape') { e.preventDefault(); onClose() }
       else if (e.key === 'ArrowRight') setAt((k) => Math.min(GUIDE.length - 1, k + 1))
       else if (e.key === 'ArrowLeft') setAt((k) => Math.max(0, k - 1))
