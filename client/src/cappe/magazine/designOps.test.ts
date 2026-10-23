@@ -94,6 +94,21 @@ describe('design operations', () => {
     expect(group(d, ['a']).id).toBeNull()  // one layer is no group
   })
 
+  it('nests groups only as deep as the server keeps them', () => {
+    // Four groups deep, each holding the next and a shape beside it.
+    let inner: Layer = shape('leaf')
+    for (let i = 4; i >= 1; i--) inner = { ...shape(`g${i}`), kind: 'group', children: [inner, shape(`s${i}`)] } as unknown as Layer
+    const d: Design = { layers: [inner, shape('top')] }
+    expect(group(d, ['leaf', 's4']).id).toBeNull()  // a fifth group
+    expect(group(d, ['g1', 'top']).id).toBeNull()  // the four put one deeper
+    expect(group(d, ['s1', 'g2']).id).toBeNull()
+    expect(group({ layers: [shape('a'), shape('b')] }, ['a', 'b']).id).not.toBeNull()
+    // Moving a group in beside the deepest layer would nest it too far.
+    const two: Design = { layers: [inner, { ...shape('gx'), kind: 'group', children: [shape('x1'), shape('x2')] } as unknown as Layer] }
+    expect(moveLayer(two, 'gx', 'leaf', 'above')).toBe(two)
+    expect(ids(moveLayer(two, 'x1', 'leaf', 'above'))).toEqual(['g1', 'gx'])  // a shape fits anywhere
+  })
+
   it('stacks layers forward, back, to the front and to the back', () => {
     const d: Design = { layers: [shape('a'), shape('b'), shape('c')] }
     expect(ids(arrange(d, ['a'], 'forward'))).toEqual(['b', 'a', 'c'])

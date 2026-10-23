@@ -116,6 +116,27 @@ def test_groups_nest_four_deep_and_an_empty_one_is_dropped():
     assert norm({"kind": "group", "children": [{"kind": "image"}]}) is None
 
 
+def test_a_group_too_deep_hands_its_look_to_its_children():
+    deep = {"kind": "group", "id": "g4", "hidden": True, "opacity": 50, "blend": "multiply",
+            "children": [{"kind": "text", "id": "w", "rt": doc("Secret"), "opacity": 80}]}
+    for i in range(4):
+        deep = {"kind": "group", "id": f"g{i}", "children": [deep]}
+    design = norm(deep)
+    leaf = design["layers"][0]
+    while leaf["kind"] == "group":
+        leaf = leaf["children"][0]
+    assert leaf["id"] == "w" and leaf["hidden"] is True and leaf["opacity"] == 40 and leaf["blend"] == "multiply"
+    assert "Secret" not in design_render.design_html(design, {})
+
+
+def test_words_in_a_hidden_group_are_not_the_story_s():
+    shown = {**TEXT, "id": "a", "rt": doc("Shown")}
+    group = {"kind": "group", "id": "g", "hidden": True, "children": [{**TEXT, "id": "b", "rt": doc("Hidden words")}]}
+    design = norm(shown, group)
+    assert design_schema.design_words(design) == ["Shown"]
+    assert "Hidden words" not in design_render.design_html(design, {})
+
+
 def test_the_limits_an_owner_is_told_about():
     with pytest.raises(design_schema.DesignError, match="at most 200"):
         norm(*[{"kind": "shape"}] * 201)

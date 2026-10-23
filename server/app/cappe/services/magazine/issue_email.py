@@ -66,6 +66,15 @@ def _page(design: Optional[dict], assets: dict[str, dict]) -> str:
     return f'<tr><td style="padding:16px 0 0;font:17px/1.65 {_FONT};color:#1c1917;">{words}</td></tr>' if words else ""
 
 
+def _design_words(b: dict) -> list[str]:
+    """The words laid on a block's pictures or page, for the plain-text email."""
+    if b.get("type") in ("photo", "page"):
+        return design_words(b.get("design"))
+    if b.get("type") == "photos":
+        return [w for i in b.get("items") or [] if isinstance(i, dict) for w in design_words(i.get("design"))]
+    return []
+
+
 def _block(b: dict, assets: dict[str, dict]) -> str:
     kind = b.get("type")
     if kind == "text":
@@ -131,7 +140,7 @@ def build_issue(*, site_name: str, mag: dict, post: dict, assets: dict[str, dict
         f'<tr><td style="padding:0 0 20px;border-bottom:1px solid #e7e5e4;text-align:center;">'
         f'<a href="{escape(origin, quote=True)}" style="font:700 26px {_FONT};color:#1c1917;text-decoration:none;">'
         f'{escape(name)}</a></td></tr>',
-        _picture(cover_asset, width=560),
+        _picture(cover_asset, caption=_under((cover or {}).get("design")), width=560),
         (f'<tr><td style="padding:20px 0 0;font:600 12px {_SANS};letter-spacing:.08em;text-transform:uppercase;'
          f'color:{escape(accent, quote=True)};">{escape(kicker)}</td></tr>' if kicker else ""),
         f'<tr><td style="padding:8px 0 0;"><a href="{escape(url, quote=True)}" style="font:700 30px/1.2 {_FONT};'
@@ -157,9 +166,14 @@ def build_issue(*, site_name: str, mag: dict, post: dict, assets: dict[str, dict
     text_parts = [name, "", post.get("title") or ""]
     if post.get("excerpt"):
         text_parts += ["", post["excerpt"]]
+    cover_words = design_words((cover or {}).get("design"))
+    if cover_words:
+        text_parts += ["", " · ".join(cover_words)]
     for b in body_blocks:
         if b.get("type") == "text":
             text_parts += ["", md_to_text(b.get("md"))]
+        elif _design_words(b):
+            text_parts += ["", " · ".join(_design_words(b))]
     text_parts += ["", f"Read the whole story: {url}", "", f"Unsubscribe: {UNSUBSCRIBE}"]
     return (subject or post.get("title") or name)[:200], html, "\n".join(text_parts)
 

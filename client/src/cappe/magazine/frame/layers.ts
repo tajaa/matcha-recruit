@@ -1,7 +1,8 @@
 import DOMPurify from 'dompurify'
 import type { FrameKey, FrameTarget, LayerChange } from '../canvas/bridge'
 import { layersHtml, type DesignAsset } from '../design/designRender'
-import type { Design } from '../design/types'
+import type { Design, Layer } from '../design/types'
+import { rememberRich } from './rich'
 import { select } from './selection'
 import { clamp, onPlace, place, post, state, ui } from './state'
 import { blockOf, storyOf } from './targets'
@@ -556,6 +557,16 @@ export function drawDesign(t: { story: string; block: number; item: number | nul
       next.replaceWith(typing)
     }
   }
+  // Its words open as drawn now, not as the page first printed them.
+  const story = art.closest('[data-mz-s]')
+  const path = art.getAttribute('data-mzd') || 'design'
+  const remember = (layers: Layer[]) => {
+    for (const l of layers) {
+      if (l.kind === 'group') remember(l.children)
+      else if (l.kind === 'text' && story) rememberRich(story, `${blockOf(art)}|${path}.${l.id}`, l.rt)
+    }
+  }
+  remember(design.layers || [])
   const probe = art.querySelector(':scope > .mzd__box')
   const old = Array.from(art.querySelectorAll(AUTO))
   art.replaceChildren(...(probe ? [probe] : []), ...Array.from(fresh.childNodes))

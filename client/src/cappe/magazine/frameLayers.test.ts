@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { newText } from './design/designOps'
 import type { Design } from './design/types'
 import { drawDesign, fontsHref, loadFonts } from './frame/layers'
+import { editorOf, makeRich } from './frame/rich'
 import { select } from './frame/selection'
 import { state } from './frame/state'
 
@@ -10,6 +11,7 @@ import { state } from './frame/state'
 
 const PAGE = `
 <article class="mz-story" data-mz-s="p1">
+  <script type="application/json" data-mz-rt>{"2|design.w9":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Original words"}]}]}}</script>
   <figure class="mz-photo" data-mz-b="2"><div class="mzd" data-mzd="design"><i class="mzd__box"></i></div></figure>
 </article>`
 
@@ -39,6 +41,15 @@ describe('a design drawn from a message', () => {
     expect(art.querySelector(':scope > .mzd__box')).not.toBeNull()
     expect(art.querySelector('[data-mzd-l="a"]')).not.toBeNull()
     expect(art.innerHTML).not.toContain('onerror')
+  })
+
+  it('opens words drawn again as drawn, not as the page first printed them', () => {
+    const rt = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Changed words' }] }] }
+    const words = { ...newText(null, 'body'), id: 'w9', rt }
+    drawDesign({ story: 'p1', block: 2, item: null }, { layers: [{ ...newText(null, 'body'), id: 'g1', kind: 'group', children: [words] }] } as unknown as Design, {})
+    const f = document.querySelector<HTMLElement>('[data-mz-f="design.w9"]')!
+    makeRich(f, () => {}, () => {})
+    expect(editorOf(f)!.getText()).toBe('Changed words')
   })
 
   it('lets go of selected layers a redraw took away, and says so', () => {

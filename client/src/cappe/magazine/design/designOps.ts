@@ -2,7 +2,7 @@ import type { StoryBlock } from '../../types'
 import { emptyRt, type RtDoc } from '../canvas/rt'
 import { hasItalic, nearestWeight } from './fontStack'
 import type { Design, GroupLayer, ImageLayer, Layer, Paint, PaintedLayer, ShapeKind, ShapeLayer, TextLayer } from './types'
-import { MAX_LAYERS } from './types'
+import { MAX_DEPTH, MAX_LAYERS } from './types'
 
 /** Everything the editor does to a design, as functions from one design to
  *  the next: the workspace's panels, the page's handles and keys all go
@@ -74,6 +74,16 @@ export function parentOf(d: Design, id: string): GroupLayer | null {
 }
 
 const siblingsOf = (d: Design, id: string): Layer[] => parentOf(d, id)?.children ?? d.layers
+
+/** How deep a layer sits: 1 at the top, 2 inside one group… */
+function levelOf(d: Design, id: string): number {
+  let n = 1
+  for (let p = parentOf(d, id); p; p = parentOf(d, p.id)) n++
+  return n
+}
+
+/** The groups a layer holds, nested: a shape 0, a group of shapes 1. */
+const groupDepth = (l: Layer): number => (l.kind === 'group' ? 1 + Math.max(0, ...l.children.map(groupDepth)) : 0)
 
 /** A box in artboard percent. */
 export type Box = { x: number; y: number; w: number; h: number }
@@ -331,6 +341,8 @@ export function moveLayer(d: Design, id: string, target: string, where: 'above' 
   if (!l || id === target || (l.kind === 'group' && findLayer({ layers: l.children }, target))) return d
   const without = removeLayers(d, [id])
   if (!findLayer(without, target)) return d
+  // Groups nest only so deep (the server would flatten one deeper).
+  if (levelOf(without, target) + groupDepth(l) - 1 > MAX_DEPTH) return d
   return insertInto(without, target, (list) => {
     const i = list.findIndex((x) => x.id === target)
     const at = where === 'above' ? i + 1 : i
@@ -347,6 +359,8 @@ export function group(d: Design, ids: string[], heights?: Heights): { design: De
   if (picked.length < 2) return { design: d, id: null }
   const parent = parentOf(d, picked[0].id)?.id ?? null
   if (picked.some((l) => (parentOf(d, l.id)?.id ?? null) !== parent)) return { design: d, id: null }
+  // The new group would put a group inside it past the depth the server keeps.
+  if (levelOf(d, picked[0].id) + Math.max(...picked.map(groupDepth)) > MAX_DEPTH) return { design: d, id: null }
   const id = newId(d, 'g')
   const g: GroupLayer = {
     id, kind: 'group', name: 'Group', ...boxOf({ kind: 'group', children: picked } as GroupLayer, heights), rot: 0, flip_x: false, flip_y: false,

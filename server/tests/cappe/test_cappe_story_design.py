@@ -120,3 +120,20 @@ def test_an_email_keeps_the_words_on_photo_groups_and_designed_pages():
     assert "At sea — Gulls." in group
     assert pictured.count("<img") == 1 and "The end" in pictured
     assert "<img" not in plain and "Fin &lt;3" in plain
+
+
+def test_a_whole_story_email_carries_design_words_in_both_bodies():
+    def words(text, lid):
+        para = {"type": "paragraph", "content": [{"type": "text", "text": text}]}
+        return {"kind": "text", "id": lid, "rt": {"type": "doc", "content": [para]}}
+    content = story_schema.normalize_story({"blocks": [
+        {"type": "cover", "asset_id": A, "design": {"layers": [words("On the cover", "c1")]}},
+        {"type": "text", "md": "Body words."},
+        {"type": "page", "design": {"layers": [words("Page words", "p1")]}},
+        {"type": "photos", "items": [{"asset_id": A, "design": {"layers": [words("Group words", "g1")]}}, {"asset_id": A}]},
+    ]})
+    post = {"slug": "s", "title": "S", "access": "free", "format": "blocks", "content": content}
+    _, html, text = issue_email.build_issue(site_name="Salt", mag={"name": "Salt"}, post=post,
+                                           assets={A: {**ASSET, "variants": {}}}, origin="https://x.test", include_body=True)
+    for w in ("On the cover", "Page words", "Group words", "Body words."):
+        assert w in html and w in text
