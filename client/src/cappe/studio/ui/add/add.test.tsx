@@ -12,7 +12,8 @@ import { DEFAULT_VIEW, Store, type State } from '../../store/store'
 import { StudioContext, type StudioCtx } from '../context'
 import AddPanel from './AddPanel'
 import { ELEMENTS, TEXT_COMBOS, TEXT_STYLES, facesOf } from './catalog'
-import { graphicsApi, type GraphicBrowse, type GraphicCard } from '../../model/graphics'
+import { graphicsApi, matchPicks, type GraphicBrowse, type GraphicCard } from '../../model/graphics'
+import type { BankPhoto } from './bank'
 import { ObjectPanel } from '../panels/ObjectPanel'
 import { describeStudio } from '../ask/describe'
 import { dropInto, importStock } from './drag'
@@ -194,9 +195,12 @@ describe('the side panel', () => {
   it('finds free photos and adds one with a click', async () => {
     const { store, ctx } = studio(doc(), { drawer: 'photos' })
     const moon = { source: 'nasa', source_id: 'm1', title: 'The Moon', credit_line: 'NASA', license: 'pdm', license_version: '', thumb: '/t', imported: false }
-    vi.spyOn(cappeApi, 'get').mockResolvedValue({ source: 'nasa', query: 'the moon', page: 0, results: [moon], has_more: false })
+    vi.spyOn(cappeApi, 'get').mockImplementation(async (path: string) => (path.includes('/library/bank')
+      ? { total: 0, items: [], collections: [] }
+      : { source: 'nasa', query: 'the moon', page: 0, results: [moon], has_more: false }) as never)
     vi.spyOn(cappeApi, 'post').mockResolvedValue({ imports: [{ id: 'j1', status: 'ready', asset: asset({ id: 'moon' }) }] })
     show(ctx)
+    expect(await screen.findByText('No Gummfit photos yet. Try the archives.')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('tab', { name: 'NASA' }))
     fireEvent.click(screen.getByRole('button', { name: 'the moon' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Add The Moon' }))
@@ -257,10 +261,12 @@ describe('graphics from the bank', () => {
       { group: 'icons', count: 1890, items: icons },
     ] }
     vi.spyOn(graphicsApi, 'browse').mockResolvedValue(browse)
+    vi.spyOn(graphicsApi, 'picks').mockResolvedValue([])
     const search = vi.spyOn(graphicsApi, 'search').mockResolvedValue({ total: 1, items: [card({ sha: 'd'.repeat(64), name: 'Coffee' })] })
     const { store, ctx } = studio()
     render(<StudioContext.Provider value={ctx}><AddPanel /></StudioContext.Provider>)
     fireEvent.click(await screen.findByRole('button', { name: 'Add Star' }))
+    expect(screen.queryByText('From Gummfit')).not.toBeInTheDocument()
     expect(only(store)).toMatchObject({ kind: 'graphic', name: 'Star', fit: 'stretch' })
     expect(screen.getAllByRole('button', { name: /^Add Icon / })).toHaveLength(15)
     fireEvent.click(screen.getByRole('button', { name: 'See all 1,890' }))
@@ -270,5 +276,59 @@ describe('graphics from the bank', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Add Coffee' }))
     expect(search).toHaveBeenLastCalledWith('coffee', undefined, undefined, 0, 60)
     expect(only(store)).toMatchObject({ name: 'Coffee' })
+  })
+})
+
+const photo = (over: Partial<BankPhoto> = {}): BankPhoto => ({ id: 'b1', name: 'Harbour at dawn', url: 'https://cdn.example.test/b.jpg',
+  variants: null as never, width: 1600, height: 1000, credit_line: 'Ana Ruiz / Gummfit', collection: 'Coast', ...over })
+
+describe('Gummfit’s picks and photos', () => {
+  const show = (ctx: StudioCtx) => render(<StudioContext.Provider value={ctx}><AddPanel /></StudioContext.Provider>)
+
+  it('finds a pick by every word, in its name, tags or collection', () => {
+    const picks = [card({ name: 'Wave', tags: ['sea', 'water'], collection: 'Coast' }), card({ sha: 'b'.repeat(64), name: 'Sun' })]
+    expect(matchPicks(picks, 'sea coast').map((g) => g.name)).toEqual(['Wave'])
+    expect(matchPicks(picks, 'WAVE')).toHaveLength(1)
+    expect(matchPicks(picks, 'sea sun')).toHaveLength(0)
+  })
+
+  it('shows Gummfit’s graphics first in Elements, finds them, and adds one', async () => {
+    vi.spyOn(graphicsApi, 'browse').mockResolvedValue({ version: 'v', sets: [], groups: [] })
+    vi.spyOn(graphicsApi, 'search').mockResolvedValue({ total: 0, items: [] })
+    const wave = card({ sha: 'e'.repeat(64), name: 'Wave', group: 'lines', fit: 'stretch', w: 200, h: 20, tags: ['sea'] })
+    vi.spyOn(graphicsApi, 'picks').mockResolvedValue([wave])
+    const { store, ctx } = studio()
+    render(<StudioContext.Provider value={ctx}><AddPanel /></StudioContext.Provider>)
+    fireEvent.click(await screen.findByRole('button', { name: 'Add Wave' }))
+    expect(screen.getByText('From Gummfit')).toBeInTheDocument()
+    expect(only(store)).toMatchObject({ kind: 'graphic', src: 'e'.repeat(64), fit: 'stretch', name: 'Wave' })
+    const box = screen.getByPlaceholderText(/Search shapes, icons/)
+    fireEvent.change(box, { target: { value: 'sea' } })
+    expect(screen.getByRole('button', { name: 'Add Wave' })).toBeInTheDocument()
+    fireEvent.change(box, { target: { value: 'mountain' } })
+    expect(screen.queryByRole('button', { name: 'Add Wave' })).not.toBeInTheDocument()
+  })
+
+  it('opens Photos on Gummfit’s photos, by collection, and places one with a click', async () => {
+    const { store, ctx } = studio(doc(), { drawer: 'photos' })
+    const get = vi.spyOn(cappeApi, 'get').mockResolvedValue({ total: 1, items: [photo()], collections: ['Coast'] })
+    const post = vi.spyOn(cappeApi, 'post').mockResolvedValue(asset({ id: 'bank1', kind: 'stock' }))
+    show(ctx)
+    const list = await screen.findByRole('list', { name: 'Gummfit photos' })
+    fireEvent.click(within(list).getByRole('button', { name: 'Add Harbour at dawn' }))
+    await waitFor(() => expect((only(store) as ImageItem | undefined)?.asset_id).toBe('bank1'))
+    expect(post).toHaveBeenCalledWith('/sites/s1/library/bank/b1')
+    fireEvent.click(screen.getByRole('tab', { name: 'Coast' }))
+    await waitFor(() => expect(get).toHaveBeenLastCalledWith('/sites/s1/library/bank?q=&offset=0&collection=Coast'))
+    fireEvent.change(screen.getByLabelText('Search free photos'), { target: { value: 'boats' } })
+    fireEvent.submit(screen.getByRole('search'))
+    await waitFor(() => expect(get).toHaveBeenLastCalledWith('/sites/s1/library/bank?q=boats&offset=0&collection=Coast'))
+  })
+
+  it('places a Gummfit photo dropped on the page', async () => {
+    const { store, ctx } = studio()
+    vi.spyOn(cappeApi, 'post').mockResolvedValue(asset({ id: 'bank1', kind: 'stock' }))
+    await dropInto(ctx, { kind: 'bank', photo: photo() }, landing(ctx))
+    expect(only(store)).toMatchObject({ kind: 'image', asset_id: 'bank1' })
   })
 })

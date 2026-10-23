@@ -31,6 +31,7 @@ from app.cappe.services.magazine.studio import limits as L
 from app.cappe.services.magazine.studio import render as R
 from app.cappe.services.magazine.studio import schema as S
 from tests._helpers.routes import route_client
+from tests.cappe.test_cappe_magazine_routes import Conn, Ctx
 
 SVG = 'xmlns="http://www.w3.org/2000/svg"'
 BY_ID = {g["id"]: g for g in G.manifest()["graphics"]}
@@ -184,6 +185,7 @@ class NoStorage:
 def files(monkeypatch, tmp_path):
     route._cache.clear()
     monkeypatch.setattr(route, "get_storage", lambda: NoStorage())
+    monkeypatch.setattr(route, "get_connection", lambda: Ctx(Conn(fetchval={"FROM cappe_studio_bank": None})))
     monkeypatch.setenv("CAPPE_GRAPHICS_DIR", str(tmp_path))
     star = BY_ID["gummfit/star"]
     clean, *_ = G.clean_svg(next(s for slug, *_, s, _ in graphics_own.all_graphics() if slug == "star").encode())

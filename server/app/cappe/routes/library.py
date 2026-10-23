@@ -1,5 +1,7 @@
 """The magazine Library's open imagery (cappemag03): search the archives,
-import what the owner picks, follow the imports, "stock a topic".
+import what the owner picks, follow the imports, "stock a topic". And the
+Gummfit-curated bank's photos (cappemag11, `studio/bank.py`): browsed here and
+placed straight into the library, with no import to wait for.
 
 Searching is a network call to the archive, made with no connection held;
 results are cached an hour for everyone (`services/magazine/sources`). An
@@ -19,6 +21,8 @@ from ...database import get_connection
 from ..dependencies import require_cappe_account
 from ..models.cappe import (
     CappeAccount,
+    CappeAsset,
+    CappeBankPhotos,
     CappeStockImportRequest,
     CappeStockImports,
     CappeStockSearch,
@@ -26,6 +30,7 @@ from ..models.cappe import (
 )
 from ..services.entitlements import resolve_entitlements
 from ..services.magazine import imports, sources
+from ..services.magazine.studio import bank
 from ..services.magazine.sources.thumbs import thumb_path
 from ..services.magazine.topics import TOPIC_QUERIES
 from ._shared import get_owned_site
@@ -174,3 +179,31 @@ async def stock_topic(site_id: UUID, body: CappeStockTopicRequest,
         raise HTTPException(status_code=status.HTTP_409_CONFLICT,
                             detail="Every picture we found for this topic is already in your library.")
     return await _queue(account, site_id, keys, body.post_id)
+
+
+@router.get("/sites/{site_id}/library/bank", response_model=CappeBankPhotos)
+async def bank_photos(
+    site_id: UUID,
+    q: str = Query("", max_length=sources.MAX_QUERY),
+    collection: Optional[str] = Query(None, max_length=bank.MAX_COLLECTION),
+    offset: int = Query(0, ge=0, le=10_000),
+    limit: int = Query(bank.PAGE_MAX, ge=1, le=bank.PAGE_MAX),
+    account: CappeAccount = Depends(require_cappe_account),
+):
+    """The Gummfit-curated bank's photos, every word of `q` matched."""
+    async with get_connection() as conn:
+        await get_owned_site(conn, site_id, account.id)
+        return await bank.photos(conn, q, collection, offset, limit)
+
+
+@router.post("/sites/{site_id}/library/bank/{item_id}", response_model=CappeAsset)
+async def place_bank_photo(site_id: UUID, item_id: UUID, account: CappeAccount = Depends(require_cappe_account)):
+    """A bank photo in the site's library (the same row each time), to put on
+    a page. Its files are the bank's: nothing is downloaded or copied."""
+    await check_rate_limit(str(account.id), "cappe_bank_place", SEARCH_PER_HOUR, 3600)
+    async with get_connection() as conn:
+        site = await get_owned_site(conn, site_id, account.id)
+        asset = await bank.place_photo(conn, account_id=account.id, site_id=site["id"], item_id=item_id)
+    if asset is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="That photo isn't in the bank any more.")
+    return CappeAsset(**asset)

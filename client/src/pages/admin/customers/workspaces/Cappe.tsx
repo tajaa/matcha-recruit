@@ -10,6 +10,7 @@ import { cappeSiteHost } from '../../../../cappe/host'
 import { Modal, useToast } from '../../../../components/ui'
 import CappeCreators from './CappeCreators'
 import CappeSignupGrants from './CappeSignupGrants'
+import CappeStudioBank from './CappeStudioBank'
 import type { CappePlanOption } from '../../../../types/cappeAdmin'
 
 type CappeSite = {
@@ -62,7 +63,7 @@ type CappeTotals = {
 
 type CappeListResponse = { accounts: CappeAccount[]; totals: CappeTotals }
 type PlanFilter = 'all' | 'free' | 'creator' | 'writer' | 'business' | 'hosting' | 'pro'
-type View = 'websites' | 'brands' | 'creators' | 'grants'
+type View = 'websites' | 'brands' | 'creators' | 'grants' | 'bank'
 
 const PLAN_LABEL: Record<Exclude<PlanFilter, 'all'>, string> = {
   free: 'Free', creator: 'Creator', writer: 'Writer', business: 'Business', hosting: 'Hosting', pro: 'Pro',
@@ -202,7 +203,7 @@ export default function Cappe() {
   const { toast } = useToast()
   const [params, setParams] = useSearchParams()
   const requestedView = params.get('view')
-  const view: View = requestedView === 'brands' || requestedView === 'creators' || requestedView === 'grants' ? requestedView : 'websites'
+  const view: View = requestedView === 'brands' || requestedView === 'creators' || requestedView === 'grants' || requestedView === 'bank' ? requestedView : 'websites'
   const [accounts, setAccounts] = useState<CappeAccount[]>([])
   const [totals, setTotals] = useState<CappeTotals | null>(null)
   const [plan, setPlan] = useState<PlanFilter>('all')
@@ -307,6 +308,7 @@ export default function Cappe() {
             { value: 'brands', label: `Brands${brands.length ? ` (${brands.length})` : ''}` },
             { value: 'creators', label: `Creators${creatorsCount ? ` (${creatorsCount})` : ''}` },
             { value: 'grants', label: 'Signup links' },
+            { value: 'bank', label: 'Studio bank' },
           ]}
           value={view}
           onChange={changeView}
@@ -317,6 +319,8 @@ export default function Cappe() {
         <div className="mt-7"><CappeCreators /></div>
       ) : view === 'grants' ? (
         <div className="mt-7"><CappeSignupGrants plans={plans} /></div>
+      ) : view === 'bank' ? (
+        <div className="mt-7"><CappeStudioBank /></div>
       ) : loading ? (
         <p className="mt-7 text-sm text-zinc-500">Loading…</p>
       ) : view === 'brands' ? (

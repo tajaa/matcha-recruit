@@ -49,6 +49,11 @@ def by_sha(sha: object) -> Optional[dict]:
     return _index().get(sha) if isinstance(sha, str) else None
 
 
+def is_sha(value: object) -> bool:
+    """Whether `value` could name a graphic's file (a sha256, lower-case hex)."""
+    return isinstance(value, str) and bool(_SHA.match(value))
+
+
 def url(sha: str, stretch: bool = False) -> str:
     return (STRETCH_URL if stretch else GRAPHIC_URL).format(sha=sha)
 
