@@ -13,7 +13,7 @@ const doc = (): Doc => ({
 })
 
 const store = () => new Store({
-  doc: doc(), selection: [], editing: null, page: 1, tool: 'select', view: { ...DEFAULT_VIEW }, panels: [],
+  doc: doc(), selection: [], editing: null, page: 1, tool: 'select', view: { ...DEFAULT_VIEW }, panels: [], drawer: null,
   overset: new Set(), assets: {}, dialog: null, guide: null, threading: null, snaps: null, marquee: null,
   save: { rev: 1, state: 'saved', message: null, draft: false, live: false },
 } as State, mono)

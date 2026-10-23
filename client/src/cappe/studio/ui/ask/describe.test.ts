@@ -31,7 +31,7 @@ function studio(over: Partial<State> = {}, doc = base()) {
     ] }],
   }
   const store = new Store({
-    doc: d, selection: [text], editing: null, page: 1, tool: 'select', view: { ...DEFAULT_VIEW }, panels: [],
+    doc: d, selection: [text], editing: null, page: 1, tool: 'select', view: { ...DEFAULT_VIEW }, panels: [], drawer: null,
     overset: new Set(), dialog: null, guide: null, threading: null, snaps: null, marquee: null,
     assets: { a1: { id: 'a1', url: 'https://cdn.example.test/a.jpg', alt: 'Boats at dusk', width: 1600, height: 1000, recipe: { look: 'film' } } },
     save: { rev: 1, state: 'saved', message: null, draft: false, live: false }, ...over,

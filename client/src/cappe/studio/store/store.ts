@@ -15,6 +15,8 @@ import type { Asset, Doc } from '../model/types'
 export type Tool = 'select' | 'text' | 'frame' | 'rect' | 'ellipse' | 'line' | 'hand' | 'zoom'
 export type SaveState = 'saved' | 'dirty' | 'saving' | 'error' | 'conflict'
 export type Panel = 'pages' | 'props' | 'character' | 'paragraph' | 'story' | 'ask'
+/** The side panel's tabs (ui/add/AddPanel.tsx). */
+export type AddTab = 'elements' | 'text' | 'photos' | 'uploads'
 
 export type View = {
   zoom: number // screen px per pt
@@ -35,6 +37,8 @@ export type State = {
   tool: Tool
   view: View
   panels: Panel[]
+  /** The side panel's open tab, or null with it folded away. */
+  drawer: AddTab | null
   overset: Set<string>
   assets: Record<string, Asset>
   save: { rev: number; state: SaveState; message: string | null; draft: boolean; live: boolean }

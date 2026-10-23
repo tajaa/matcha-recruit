@@ -35,7 +35,7 @@ function studio() {
   const [empty, full] = d.items.map((i) => i.id)
   d = patchItems(d, [full], { asset_id: 'a1' })
   const store = new Store({
-    doc: d, selection: [full], editing: null, page: 1, tool: 'select', view: { ...DEFAULT_VIEW }, panels: [],
+    doc: d, selection: [full], editing: null, page: 1, tool: 'select', view: { ...DEFAULT_VIEW }, panels: [], drawer: null,
     overset: new Set(), assets: { a1: { id: 'a1', url: 'https://cdn.example.test/a.jpg', credit_line: 'Haley' } },
     dialog: 'picture', guide: null, threading: null, snaps: null, marquee: null,
     save: { rev: 1, state: 'saved', message: null, draft: false, live: false },

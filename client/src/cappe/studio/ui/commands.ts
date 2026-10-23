@@ -5,7 +5,7 @@ import { boardOffset } from '../canvas/geometry'
 import { allIds, newId } from '../model/doc'
 import { addPages, arrange, deleteItems, deletePage, duplicate, movePage, patchItems, type Arrange } from '../model/ops'
 import type { Doc, Item, Thread } from '../model/types'
-import type { State, Tool } from '../store/store'
+import type { AddTab, State, Tool } from '../store/store'
 import { conversation } from './ask/conversation'
 import type { StudioCtx } from './context'
 
@@ -75,6 +75,10 @@ const tool = (t: Tool, label: string, keys: string): Command => ({
   id: `tool-${t}`, label, keys, run: ({ store, editor }) => { editor.close(); store.set({ tool: t, threading: null }) },
 })
 
+const drawer = (tab: AddTab, label: string): Command => ({
+  id: `add-${tab}`, label, run: ({ store }) => store.set({ drawer: tab }),
+})
+
 const toggle = (key: keyof State['view'], label: string, keys?: string): Command => ({
   id: `view-${key}`, label, keys,
   run: ({ store }) => store.set((s) => ({ view: { ...s.view, [key]: !s.view[key] } })),
@@ -114,6 +118,11 @@ export const COMMANDS: Command[] = [
       store.set({ selection: s.doc.items.filter((i) => i.page === page && !i.locked && !i.hidden).map((i) => i.id) })
     } },
   { id: 'deselect', label: 'Deselect', keys: '⇧⌘A', run: ({ store }) => store.set({ selection: [], threading: null }) },
+  // Insert
+  drawer('elements', 'Shapes, lines and frames…'),
+  drawer('text', 'Text styles and pairings…'),
+  drawer('photos', 'Free photos and AI pictures…'),
+  drawer('uploads', 'Your pictures…'),
   // Layout
   { id: 'page-add', label: 'Add a page', keys: '⇧⌘P',
     run: ({ store }) => store.edit((d) => addPages(d, store.get().page), { extra: { page: store.get().page + 1 } }) },

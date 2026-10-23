@@ -177,7 +177,9 @@ export default function LibraryPanel({ siteId, onPick, postId, stockQuery }: {
   )
 }
 
-function UploadForm({ siteId, onDone, onCancel }: {
+/** Upload one picture with its alt text, caption, credit and the owner's word
+ *  that they may publish it. Two columns when it has the room. */
+export function UploadForm({ siteId, onDone, onCancel }: {
   siteId: string
   onDone: (asset: CappeAsset) => void
   onCancel: () => void
@@ -213,47 +215,49 @@ function UploadForm({ siteId, onDone, onCancel }: {
   }
 
   return (
-    <form onSubmit={submit} className={`${ui.card} grid gap-3 p-4 sm:grid-cols-2`} aria-label="Upload a picture">
-      <label className="sm:col-span-2">
-        <span className={ui.label}>Picture</span>
-        <input
-          type="file"
-          accept="image/jpeg,image/png,image/webp,image/gif"
-          onChange={(e) => setFile(e.target.files?.[0] || null)}
-          className="block w-full text-sm text-zinc-300 file:mr-3 file:rounded-lg file:border-0 file:bg-zinc-800 file:px-3 file:py-2 file:text-sm file:text-zinc-200"
-        />
-        <span className="mt-1 block text-xs text-zinc-500">
-          Up to 15 MB. We remove the location and camera details before it's stored.
-        </span>
-      </label>
-      <label>
-        <span className={ui.label}>Alt text</span>
-        <input value={alt} onChange={(e) => setAlt(e.target.value)} maxLength={500} className={ui.input}
-          placeholder="What's in the picture, for people who can't see it" />
-      </label>
-      <label>
-        <span className={ui.label}>Credit</span>
-        <input value={aiMade ? 'AI illustration' : credit} onChange={(e) => setCredit(e.target.value)}
-          disabled={aiMade} maxLength={500} className={`${ui.input} disabled:opacity-60`} placeholder="Photo: your name" />
-      </label>
-      <label className="sm:col-span-2">
-        <span className={ui.label}>Caption</span>
-        <input value={caption} onChange={(e) => setCaption(e.target.value)} maxLength={1000} className={ui.input} />
-      </label>
-      <label className="flex items-start gap-2 text-sm text-zinc-300 sm:col-span-2">
-        <input type="checkbox" checked={aiMade} onChange={(e) => setAiMade(e.target.checked)} className="mt-0.5" />
-        This picture was made with AI. It will always be credited "AI illustration".
-      </label>
-      <label className="flex items-start gap-2 text-sm text-zinc-300 sm:col-span-2">
-        <input type="checkbox" checked={rights} onChange={(e) => setRights(e.target.checked)} className="mt-0.5" />
-        I took this picture or have permission to publish it.
-      </label>
-      {error && <p role="alert" className="text-sm text-red-400 sm:col-span-2">{error}</p>}
-      <div className="flex gap-2 sm:col-span-2">
-        <button type="submit" className={ui.btnPrimary} disabled={!file || !rights || busy}>
-          {busy && <Loader2 className="h-4 w-4 animate-spin" />} Add to library
-        </button>
-        <button type="button" className={ui.btnGhost} onClick={onCancel}>Cancel</button>
+    <form onSubmit={submit} className={`${ui.card} @container p-4`} aria-label="Upload a picture">
+      <div className="grid gap-3 @md:grid-cols-2">
+        <label className="@md:col-span-2">
+          <span className={ui.label}>Picture</span>
+          <input
+            type="file"
+            accept="image/jpeg,image/png,image/webp,image/gif"
+            onChange={(e) => setFile(e.target.files?.[0] || null)}
+            className="block w-full text-sm text-zinc-300 file:mr-3 file:rounded-lg file:border-0 file:bg-zinc-800 file:px-3 file:py-2 file:text-sm file:text-zinc-200"
+          />
+          <span className="mt-1 block text-xs text-zinc-500">
+            Up to 15 MB. We remove the location and camera details before it's stored.
+          </span>
+        </label>
+        <label>
+          <span className={ui.label}>Alt text</span>
+          <input value={alt} onChange={(e) => setAlt(e.target.value)} maxLength={500} className={ui.input}
+            placeholder="What's in the picture, for people who can't see it" />
+        </label>
+        <label>
+          <span className={ui.label}>Credit</span>
+          <input value={aiMade ? 'AI illustration' : credit} onChange={(e) => setCredit(e.target.value)}
+            disabled={aiMade} maxLength={500} className={`${ui.input} disabled:opacity-60`} placeholder="Photo: your name" />
+        </label>
+        <label className="@md:col-span-2">
+          <span className={ui.label}>Caption</span>
+          <input value={caption} onChange={(e) => setCaption(e.target.value)} maxLength={1000} className={ui.input} />
+        </label>
+        <label className="flex items-start gap-2 text-sm text-zinc-300 @md:col-span-2">
+          <input type="checkbox" checked={aiMade} onChange={(e) => setAiMade(e.target.checked)} className="mt-0.5" />
+          This picture was made with AI. It will always be credited "AI illustration".
+        </label>
+        <label className="flex items-start gap-2 text-sm text-zinc-300 @md:col-span-2">
+          <input type="checkbox" checked={rights} onChange={(e) => setRights(e.target.checked)} className="mt-0.5" />
+          I took this picture or have permission to publish it.
+        </label>
+        {error && <p role="alert" className="text-sm text-red-400 @md:col-span-2">{error}</p>}
+        <div className="flex gap-2 @md:col-span-2">
+          <button type="submit" className={ui.btnPrimary} disabled={!file || !rights || busy}>
+            {busy && <Loader2 className="h-4 w-4 animate-spin" />} Add to library
+          </button>
+          <button type="button" className={ui.btnGhost} onClick={onCancel}>Cancel</button>
+        </div>
       </div>
     </form>
   )

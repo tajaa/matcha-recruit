@@ -11,6 +11,7 @@ import { StudioContext, useCtx, type StudioCtx } from './context'
 import { LibraryDialog, PictureDialog, RevisionsDialog, StoryDialog } from './dialogs'
 import { markGuideSeen } from './guideContent'
 import StudioGuide from './StudioGuide'
+import AddPanel from './add/AddPanel'
 import { AskPanel } from './panels/AskPanel'
 import { ObjectPanel } from './panels/ObjectPanel'
 import { PagesPanel } from './panels/PagesPanel'
@@ -74,6 +75,7 @@ function Shell() {
         </div>
       )}
       <div className="flex min-h-0 flex-1">
+        <AddPanel />
         <ToolBar />
         <Canvas />
         <aside aria-label="Panels" className="flex w-[300px] shrink-0 flex-col overflow-y-auto border-l border-zinc-800 bg-zinc-900">

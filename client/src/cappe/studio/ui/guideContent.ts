@@ -8,7 +8,7 @@
 import type { LucideIcon } from 'lucide-react'
 import {
   FileStack, Image, Keyboard, LayoutTemplate, Link2, MousePointer2, Move, PanelsTopLeft, Ruler, Save,
-  Scissors, SlidersHorizontal, Smartphone, Sparkles, Type, ZoomIn,
+  Scissors, Shapes, SlidersHorizontal, Smartphone, Sparkles, Type, ZoomIn,
 } from 'lucide-react'
 
 export type GuideSection = {
@@ -39,7 +39,8 @@ export const GUIDE: GuideSection[] = [
     points: [
       'Top bar: the story’s name (click it for its settings: headline, kicker, dek, byline, topic and who can read it), Preview, and Publish.',
       'Menus: everything the Studio can do, with the key that does the same thing beside it.',
-      'Tools, down the left: what a click or a drag on the page makes or does.',
+      'The side panel, at the far left: Elements, Text, Photos and Yours (your pictures). Click anything there to add it, or drag it onto a page.',
+      'Tools, beside it: what a click or a drag on the page makes or does.',
       'The pages, in the middle, on a grey pasteboard you can park things on.',
       'Panels, down the right: Pages, Object, Character and Paragraph, plus the Story Editor. Window shows and hides each.',
       'Status bar, along the bottom: the zoom, the page you’re on, what the tool in hand does, a red note when text doesn’t fit, and whether everything is saved.',
@@ -63,6 +64,17 @@ export const GUIDE: GuideSection[] = [
       'Ask “how can I make this look more like…” and name a style or a kind of magazine, or attach a picture of the look you’re after (or paste one into the question).',
       'Buttons under an answer open this guide at the right section or start what the answer describes. It never changes your page itself: you make each change, and ⌘Z undoes it.',
       'Answers come from AI and can be wrong. Questions aren’t saved, and closing the Studio clears them.',
+    ],
+  },
+  {
+    id: 'add', group: 'Make', icon: Shapes, title: 'Add things from the side panel',
+    body: 'The tabs at the far left hold what you can put on a page. Click a thing to add it to the middle of the page you’re on, or drag it to the spot you want. Click a tab again (or the « at its top) to fold the panel away.',
+    points: [
+      'Elements: shapes, lines, picture frames and colour blocks. A colour block or a whole-page frame goes behind everything, edge to edge.',
+      'Text: a heading, a subheading or body text, the small styles (kicker, pull quote, caption), and font pairings set together in one frame. Double-click it on the page to type your own words.',
+      'Photos: free pictures from Openverse, the Smithsonian, The Met and NASA that a magazine may publish, each credited. The first click copies it into your library. Make an AI picture is here too.',
+      'Yours: everything in your library. Upload a picture here, then click it, or drag it onto a picture frame to fill the frame.',
+      'Insert in the menus opens each tab too.',
     ],
   },
   {
