@@ -119,6 +119,15 @@ def test_the_font_list_is_every_studio_family_once_by_kind():
     assert all(FONTS[n][0] == "serif" for n in families if f"{n} (" in serif)
 
 
+def test_a_familys_weights_are_only_the_ones_it_has():
+    # A range only where every hundred is there: never 400–700 for 400 and 700.
+    assert ask.weights_text([400, 700]) == "400/700"
+    assert ask.weights_text([100, 300, 400, 700, 900]) == "100/300/400/700/900"
+    assert ask.weights_text([100, 200, 300, 400, 500, 600, 700, 800, 900]) == "100–900"
+    assert ask.weights_text([400, 500, 600, 800]) == "400–600/800"
+    assert ask.weights_text([400]) == "400"
+
+
 def test_a_reference_picture_goes_with_the_question_and_gets_more_thought(claude):
     q = ask.question(_raw(question="Make it look like this", picture={"media_type": "image/png", "data": _picture()}))
     run(ask.answer(q))

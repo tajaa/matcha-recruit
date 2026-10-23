@@ -58,24 +58,57 @@ function runStyle(r: Run, p: Para): string {
   return bits.join(', ')
 }
 
+/** `s` cut to at most `n` UTF-16 units, never between the two halves of one
+ *  character (an emoji): a half left alone is text the server refuses. */
+export function clip(s: string, n: number): string {
+  if (s.length <= n) return s
+  const code = s.charCodeAt(n - 1)
+  return s.slice(0, code >= 0xd800 && code <= 0xdbff ? n - 1 : n)
+}
+
 function paraLine(p: Para): string {
   const text = p.runs.map((r) => r.t).join('').replace(/\s+/g, ' ').trim()
-  const excerpt = text.length > EXCERPT ? `${text.slice(0, EXCERPT)}…` : text
+  const excerpt = text.length > EXCERPT ? `${clip(text, EXCERPT)}…` : text
   const first = p.runs.find((r) => r.t.trim()) ?? p.runs[0] ?? { t: '' }
   const mixed = p.runs.some((r) => r.t.trim() && (r.font !== first.font || r.size !== first.size || r.color !== first.color
     || r.wt !== first.wt || !!r.it !== !!first.it))
   return `    · ${ROLE[p.role ?? PARA_DEFAULTS.role]}: "${excerpt || '(empty)'}" in ${runStyle(first, p)}${mixed ? ' (some words styled differently)' : ''}`
 }
 
-/** The paragraphs a text frame shows: from the composition, else (an empty
- *  or new thread) the first ones when it is the thread's first frame. */
+/** The part of a paragraph from `start` to `end` (UTF-16), its runs cut to fit. */
+function slicePara(p: Para, start: number, end: number): Para {
+  const runs: Para['runs'] = []
+  let at = 0
+  for (const r of p.runs) {
+    const a = Math.max(start, at), b = Math.min(end, at + r.t.length)
+    if (b > a) runs.push({ ...r, t: r.t.slice(a - at, b - at) })
+    at += r.t.length
+  }
+  return { ...p, runs }
+}
+
+/** What a text frame shows: from the composition, the part of each
+ *  paragraph set in it (a paragraph running on from the page before shows
+ *  its own words and type here, not its beginning); else (an empty or new
+ *  thread) the first paragraphs when it is the thread's first frame. */
 function frameParas(item: Item, threads: Thread[]): { paras: Para[]; more: number; thread: Thread | null } {
   const thread = threads.find((t) => t.frames.includes(item.id)) ?? null
   if (!thread) return { paras: [], more: 0, thread }
   const at = thread.frames.indexOf(item.id)
-  let shown = [...new Set((thread.comp?.lines ?? []).filter((l) => l[0] === at).map((l) => l[1]))]
+  const ranges = new Map<number, [number, number]>()
+  for (const l of thread.comp?.lines ?? []) {
+    if (l[0] !== at) continue
+    const r = ranges.get(l[1])
+    ranges.set(l[1], r ? [Math.min(r[0], l[2]), Math.max(r[1], l[3])] : [l[2], l[3]])
+  }
+  let shown = [...ranges.keys()]
   if (!shown.length && at === 0 && !thread.comp?.lines.length) shown = thread.paras.map((_, i) => i)
-  return { paras: shown.slice(0, MAX_PARAS).map((i) => thread.paras[i]).filter(Boolean), more: Math.max(0, shown.length - MAX_PARAS), thread }
+  const paras = shown.slice(0, MAX_PARAS).flatMap((i) => {
+    const p = thread.paras[i]
+    const r = ranges.get(i)
+    return !p ? [] : r ? [slicePara(p, r[0], r[1])] : [p]
+  })
+  return { paras, more: Math.max(0, shown.length - MAX_PARAS), thread }
 }
 
 function pictureText(asset: Asset | undefined): string {
@@ -126,7 +159,7 @@ function itemLines(item: Item, s: State, len: (pt: number) => string): string[] 
       if (item.radius) extra.push(`corners ${len(item.radius)}`)
       if (item.fill) extra.push(fillText(item.fill))
       if (item.stroke) extra.push(strokeText(item.stroke))
-      if (item.caption) extra.push(`caption "${item.caption.slice(0, EXCERPT)}"`)
+      if (item.caption) extra.push(`caption "${clip(item.caption, EXCERPT)}"`)
       break
     case 'rect':
       extra.push(fillText(item.fill), strokeText(item.stroke))
@@ -165,16 +198,21 @@ export function describeStudio(s: State): string {
 
   let text = [...out, ...body, tail].join('\n')
   if (text.length > MAX_DESCRIPTION) {
-    // Too much to send: keep the document and as many frames as fit.
+    // Too much to send: the document, then what's selected (the "this" a
+    // question means), then as many of the page's other things as fit.
     const head = out.join('\n')
+    const isSel = (i: Item) => s.selection.includes(i.id)
     const kept: string[] = []
-    let size = head.length + tail.length + 80
-    for (const line of body) {
-      if (size + line.length + 1 > MAX_DESCRIPTION) break
-      kept.push(line)
-      size += line.length + 1
+    let size = head.length + tail.length + 160, left = 0
+    for (const i of [...onPage.filter(isSel), ...elsewhere, ...onPage.filter((x) => !isSel(x))]) {
+      const lines = itemLines(i, s, len)
+      const n = lines.reduce((a, l) => a + l.length + 1, 0)
+      if (size + n > MAX_DESCRIPTION) { left++; continue }
+      kept.push(...lines)
+      size += n
     }
-    text = [head, ...kept, `…and more on the page, left out here.`, tail].join('\n')
+    text = [head, `On page ${s.page + 1}, what's selected first, then the rest:`, ...kept,
+      `…and ${left} more thing${left === 1 ? '' : 's'} left out here.`, tail].join('\n')
   }
   return text
 }
