@@ -5,6 +5,7 @@ import LibraryPanel from '../../magazine/library/LibraryPanel'
 import type { CappeAsset, CappeStoryOptions } from '../../types'
 import { studioApi, toAsset, type Revision, type StudioPost } from '../api'
 import { addItem, patchItems } from '../model/ops'
+import PictureEditor from '../picture/PictureEditor'
 import { useStudio } from '../store/store'
 import { useCtx } from './context'
 
@@ -173,5 +174,34 @@ export function RevisionsDialog() {
         ))}
       </div>
     </Dialog>
+  )
+}
+
+/** The Picture Editor on the picture frame selected: Done puts the edited
+ *  picture in the frame (one undo step) and in the library. */
+export function PictureDialog({ cutout }: { cutout?: boolean }) {
+  const c = useCtx()
+  // The frame and its picture as they were when the editor opened.
+  const [target] = useState(() => {
+    const s = c.store.get()
+    const frame = s.doc.items.find((i) => i.kind === 'image' && s.selection.includes(i.id))
+    const asset = frame?.kind === 'image' && frame.asset_id ? s.assets[frame.asset_id] : undefined
+    return frame && asset ? { frame: frame.id, asset } : null
+  })
+  const close = () => c.store.set({ dialog: null })
+  if (!target) {
+    return (
+      <Dialog title="Edit picture" onClose={close}>
+        <p className="p-4 text-sm text-zinc-300">Select a picture frame with a picture in it first.</p>
+      </Dialog>
+    )
+  }
+  return (
+    <PictureEditor siteId={c.siteId} asset={target.asset} startIn={cutout ? 'cutout' : 'adjust'} onClose={close}
+      onDone={(saved) => {
+        c.store.set((s) => ({ assets: { ...s.assets, [saved.id]: toAsset(saved) } }))
+        c.store.edit((d) => patchItems(d, [target.frame], { asset_id: saved.id }))
+        close()
+      }} />
   )
 }

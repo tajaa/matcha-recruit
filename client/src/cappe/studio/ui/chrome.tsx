@@ -10,7 +10,7 @@ const MENUS: { label: string; items: (string | '-')[] }[] = [
   { label: 'Edit', items: ['undo', 'redo', '-', 'cut', 'copy', 'paste', 'duplicate', 'delete', '-', 'select-all', 'deselect'] },
   { label: 'Layout', items: ['page-add', 'spread-add', 'page-delete', '-', 'page-up', 'page-down', '-', 'margins'] },
   { label: 'Type', items: ['story-editor', 'tool-text'] },
-  { label: 'Object', items: ['arrange-front', 'arrange-forward', 'arrange-backward', 'arrange-back', '-', 'lock', 'hide', 'show-all', '-', 'place'] },
+  { label: 'Object', items: ['arrange-front', 'arrange-forward', 'arrange-backward', 'arrange-back', '-', 'lock', 'hide', 'show-all', '-', 'place', 'edit-picture', 'cut-out'] },
   { label: 'View', items: ['zoom-in', 'zoom-out', 'fit-page', 'fit-spread', 'actual', '-', 'view-rulers', 'view-guides', 'view-margins', 'view-baseline', 'view-grid', 'view-snap'] },
 ]
 

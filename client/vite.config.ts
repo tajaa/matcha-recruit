@@ -58,9 +58,11 @@ function landingPreload(): Plugin {
 export default defineConfig({
   plugins: [react(), landingPreload(), mzFrame()],
   // Gummfit Studio's HarfBuzz finds its .wasm beside its own module
-  // (`new URL('harfbuzz.wasm', import.meta.url)`); pre-bundling would move
-  // the module away from it.
-  optimizeDeps: { exclude: ['harfbuzzjs'] },
+  // (`new URL('harfbuzz.wasm', import.meta.url)`), and the Picture Editor's
+  // onnxruntime is told where its .wasm is; pre-bundling would move them.
+  optimizeDeps: { exclude: ['harfbuzzjs', 'onnxruntime-web'] },
+  // The Picture Editor's cut-out runs onnxruntime in a module worker.
+  worker: { format: 'es' },
   build: {
     // Emit source maps alongside JS bundles and include a
     // //# sourceMappingURL= comment so browsers resolve stack traces to

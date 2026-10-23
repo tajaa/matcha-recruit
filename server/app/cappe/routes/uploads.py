@@ -237,7 +237,7 @@ async def upload_video(
 @router.get("/sites/{site_id}/assets", response_model=CappeAssetList)
 async def list_site_assets(
     site_id: UUID,
-    kind: Optional[str] = Query(default=None, pattern="^(generated|upload|stock)$"),
+    kind: Optional[str] = Query(default=None, pattern="^(generated|upload|stock|edit)$"),
     q: Optional[str] = Query(default=None, max_length=100),
     account: CappeAccount = Depends(require_cappe_account),
 ):

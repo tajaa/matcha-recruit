@@ -124,6 +124,12 @@ Website-builder frontend for the consumer brand **Gummfit**, host-routed on gumm
   an Enter let through would replace the selection. The Studio is always dark (`ui/studio.css` puts
   Tailwind's own zinc ramp back inside `.studio-dark`, whatever the dashboard theme). Fonts: `fonts/faces.ts`
   (the manifest), `fonts/loader.ts` (FontFace from the same bytes HarfBuzz measures).
+  `picture/` is the **Picture Editor** (double-click a picture frame, ⇧⌘E, the Object panel or menu):
+  `recipe.ts` mirrors the server's normalizer, `develop.ts` holds the shader and its CPU twin (tests),
+  `gl.ts` draws the preview and the full-size bake, `segment.ts` + `segment.worker.ts` run the cut-out
+  model (onnxruntime-web, `optimizeDeps.exclude`d, a module worker) and `samMath.ts` its arithmetic. The
+  cut-out's mask always follows the recipe's clicks (an effect keyed by them, a few masks kept), so undo,
+  redo, Reset all and reopening an edit show and save the mask of the clicks that are there.
 
 ## Backend pairing
 

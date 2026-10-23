@@ -2,6 +2,8 @@
 // magazine/studio/schema.py). Lengths are points; an item sits on one page,
 // in that page's coordinates; text flows through threads of text frames.
 
+import type { Recipe } from '../picture/recipe'
+
 export type Units = 'pt' | 'pc' | 'in' | 'mm' | 'cm' | 'px'
 export type Align = 'l' | 'c' | 'r' | 'j' | 'ja'
 export type Role = 'p' | 'h1' | 'h2' | 'h3' | 'quote' | 'caption'
@@ -114,6 +116,10 @@ export type Asset = {
   width?: number | null
   height?: number | null
   variants?: { webp?: { w: number; url: string }[] } | null
+  /** An edited picture's source and what was done (picture/recipe.ts), to edit it again. */
+  kind?: string
+  parent?: string | null
+  recipe?: Recipe | null
 }
 
 /** A face of the Studio's own (fonts_manifest.json). */

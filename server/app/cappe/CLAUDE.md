@@ -640,6 +640,29 @@ normalized paragraphs itself; a thread with no valid composition prints its word
   downgrade refuses while paged stories exist. **CSP**: the dashboard needs `'wasm-unsafe-eval'` and
   `worker-src 'self'` (HarfBuzz): `client/nginx.conf` ×3 in the image, and `deploy/nginx/matcha.conf` on
   the host (hand-applied per its README).
+- **Picture Editor** (`routes/pictures.py`, `studio/recipe.py`, `studio/edits.py`, `studio/models.py`,
+  migration `cappemag10`): looks, sliders, crop/straighten/turn/flip and a click-to-keep **cut-out**, all
+  in the browser (WebGL; the cut-out is SlimSAM on onnxruntime-web in a worker). Edits are never made in
+  place: Done uploads the baked picture to `POST /sites/{id}/assets/{asset_id}/edit` with its recipe, and
+  it becomes a new library picture (`kind='edit'`, `parent_asset_id` = the picture edited, `recipe` +
+  `recipe_version`, `adapted`) carrying the source's provenance and licence; BY/BY-SA credits gain
+  "(adapted)", AI pictures stay "AI illustration". Editing an edit again opens its parent with its recipe.
+  The recipe is normalized the same way on both sides (`normalize_recipe` / `studio/picture/recipe.ts`,
+  pinned by `tests/cappe/fixtures/picture_recipe_cases.json`, rewrite with `PICTURE_FIXTURES=write`).
+  **An upload only keeps the source's credit if it is that picture edited** (else 422): its size is what
+  the recipe's crop makes (`size_matches`), and its *detail* (each cell less the kept cells around it,
+  inside the bounds of what a cut-out keeps) correlates with the source's (`looks_like`, ≥ 0.5). Plain
+  light-and-dark correlation can't tell one sunset landscape from another, and comparing a whole thin
+  cut-out at thumbnail size refused real edits (a cut edge's transparent black skews the cells beside it),
+  so don't go back to either; the thresholds were set from 44 real edits from Chromium and WebKit against
+  1,008 unrelated pictures (`MIN_LIKENESS` comment). Pixels for the editor come from the same-origin,
+  owner-only, no-store `GET …/assets/{id}/pixels` (no CloudFront CORS). The cut-out model's two ONNX files
+  are pinned by sha in `studio/models_manifest.json` (Xenova/slimsam-77-uniform, Apache-2.0) and served
+  signed-in only at `/studio/models/manifest.json` and `/studio/models/{sha}.onnx`, read from
+  `CAPPE_MODELS_DIR` or storage `cappe/models/<sha>.onnx`. **Ops:** run
+  `server/scripts/fetch_magazine_models.py --upload --dry-run`, then for real, once per environment (or set
+  `CAPPE_MODELS_DIR` in dev); until then the cut-out says the model isn't on this server yet. Migration
+  `cappemag10`'s downgrade refuses while edits exist.
 
 ## Social growth (2026-10, `services/social/`, migrations `cappesocial01`–`03`)
 

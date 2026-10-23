@@ -1665,7 +1665,7 @@ export type CappePromoCode = CappePromoCodeInput & { id: string; redemption_coun
 export type CappePromoCodes = { enabled: boolean; currency: string; codes: CappePromoCode[] }
 
 // ── Image library (cappe_assets; migrations zzzzcappe23 + cappemag01) ──────
-export type CappeAssetKind = 'generated' | 'upload' | 'stock'
+export type CappeAssetKind = 'generated' | 'upload' | 'stock' | 'edit'
 
 /** Responsive sizes a library upload is stored with: WebP for srcset and one
  *  JPEG for email and link previews. Older rows have none. */
@@ -1705,6 +1705,10 @@ export type CappeAsset = {
   rights_attested_at: string | null
   moderation: 'unchecked' | 'ok' | 'flagged' | 'blocked'
   updated_at: string | null
+  /** An edited picture (kind `edit`): the picture it was made from and what was done to it. */
+  parent_asset_id?: string | null
+  recipe?: Record<string, unknown> | null
+  adapted?: boolean
 }
 
 /** Open-image archives the Library searches (cappemag03). */
