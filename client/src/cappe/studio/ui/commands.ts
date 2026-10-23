@@ -6,6 +6,7 @@ import { allIds, newId } from '../model/doc'
 import { addPages, arrange, deleteItems, deletePage, duplicate, movePage, patchItems, type Arrange } from '../model/ops'
 import type { Doc, Item, Thread } from '../model/types'
 import type { State, Tool } from '../store/store'
+import { conversation } from './ask/conversation'
 import type { StudioCtx } from './context'
 
 export type Command = {
@@ -152,6 +153,11 @@ export const COMMANDS: Command[] = [
   { id: 'cut-out', label: 'Cut out the subject…', enabled: pictureSelected, run: ({ store }) => store.set({ dialog: 'cutout' }) },
   // View
   // Help
+  { id: 'ask', label: 'Ask the Studio…',
+    run: ({ store }) => {
+      store.set((s) => ({ panels: s.panels.includes('ask') ? s.panels : [...s.panels, 'ask'] }))
+      conversation(store).focus()
+    } },
   { id: 'guide', label: 'How the Studio works', run: ({ store }) => store.set({ guide: 'start' }) },
   { id: 'shortcuts', label: 'Keyboard shortcuts', run: ({ store }) => store.set({ guide: 'keys' }) },
   { id: 'zoom-in', label: 'Zoom in', keys: '⌘=', run: (c) => zoomTo(c, c.store.get().view.zoom * 1.25) },

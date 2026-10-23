@@ -14,7 +14,7 @@ import type { Asset, Doc } from '../model/types'
 
 export type Tool = 'select' | 'text' | 'frame' | 'rect' | 'ellipse' | 'line' | 'hand' | 'zoom'
 export type SaveState = 'saved' | 'dirty' | 'saving' | 'error' | 'conflict'
-export type Panel = 'pages' | 'props' | 'character' | 'paragraph' | 'story'
+export type Panel = 'pages' | 'props' | 'character' | 'paragraph' | 'story' | 'ask'
 
 export type View = {
   zoom: number // screen px per pt

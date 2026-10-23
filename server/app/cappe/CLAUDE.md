@@ -653,6 +653,15 @@ normalized paragraphs itself; a thread with no valid composition prints its word
   `server/scripts/fetch_magazine_models.py --upload --dry-run`, then for real, once per environment (or set
   `CAPPE_MODELS_DIR` in dev); until then the cut-out says the model isn't on this server yet. Migration
   `cappemag10`'s downgrade refuses while edits exist.
+- **Ask the Studio** (`studio/ask.py`, `POST …/studio/stories/{id}/ask`; client `ui/ask/`, `ui/panels/AskPanel.tsx`):
+  one Claude Messages call per question (surface `gummfit.studio`, Haiku by default), no tools, nothing saved,
+  nothing on the page changed. **The Studio sends the guide (`ui/guideContent.ts`) and the commands
+  (`ui/commands.ts`) with each question**, so they stay the one description of what the Studio does; don't copy
+  them to the server. It also sends the page in view in words (`ui/ask/describe.ts`, in the document's units),
+  the last 6 turns and at most one reference picture (checked with Pillow, never stored); the server adds the
+  manifest's families by kind. An answer's buttons survive only if they name a guide section or command that was
+  sent, and the panel never offers Cut, Delete, Delete this page or Close as a button. 20 questions a day, 150
+  with `magazine` (`cappe_studio_ask`).
 
 ## Social growth (2026-10, `services/social/`, migrations `cappesocial01`–`03`)
 

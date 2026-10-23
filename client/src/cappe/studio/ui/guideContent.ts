@@ -8,7 +8,7 @@
 import type { LucideIcon } from 'lucide-react'
 import {
   FileStack, Image, Keyboard, LayoutTemplate, Link2, MousePointer2, Move, PanelsTopLeft, Ruler, Save,
-  Scissors, SlidersHorizontal, Smartphone, Type, ZoomIn,
+  Scissors, SlidersHorizontal, Smartphone, Sparkles, Type, ZoomIn,
 } from 'lucide-react'
 
 export type GuideSection = {
@@ -52,6 +52,17 @@ export const GUIDE: GuideSection[] = [
       '⌘0 fits the page in the window, ⌥⌘0 the whole spread, and ⌘1 shows it at actual size.',
       'Scroll to move around. Hold Space and drag to move the pages with any tool, or use the Hand tool (H).',
       'The Zoom tool (Z): click to zoom in where you click, Alt-click to zoom out.',
+    ],
+  },
+  {
+    id: 'ask', group: 'Start', icon: Sparkles, title: 'Ask the Studio',
+    body: 'Ask how to do something here, or how to make a page look the way you want, and get an answer for the page you’re on.',
+    points: [
+      'Open it with Ask in the top bar, Help → Ask the Studio…, or Window → Ask the Studio.',
+      'It knows this guide, every menu command, the fonts you can use and what is on the page in view: each frame’s place, size, type and colours. Select something first to ask about just that.',
+      'Ask “how can I make this look more like…” and name a style or a kind of magazine, or attach a picture of the look you’re after (or paste one into the question).',
+      'Buttons under an answer open this guide at the right section or start what the answer describes. It never changes your page itself: you make each change, and ⌘Z undoes it.',
+      'Answers come from AI and can be wrong. Questions aren’t saved, and closing the Studio clears them.',
     ],
   },
   {

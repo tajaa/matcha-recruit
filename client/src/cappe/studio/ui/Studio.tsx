@@ -11,6 +11,7 @@ import { StudioContext, useCtx, type StudioCtx } from './context'
 import { LibraryDialog, PictureDialog, RevisionsDialog, StoryDialog } from './dialogs'
 import { markGuideSeen } from './guideContent'
 import StudioGuide from './StudioGuide'
+import { AskPanel } from './panels/AskPanel'
 import { ObjectPanel } from './panels/ObjectPanel'
 import { PagesPanel } from './panels/PagesPanel'
 import { StoryPanel } from './panels/StoryPanel'
@@ -81,6 +82,7 @@ function Shell() {
           {panels.includes('character') && <CharacterPanel />}
           {panels.includes('paragraph') && <ParagraphPanel />}
           {panels.includes('story') && <StoryPanel />}
+          {panels.includes('ask') && <AskPanel />}
         </aside>
       </div>
       <StatusBar />
