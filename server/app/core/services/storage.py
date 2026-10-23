@@ -211,9 +211,14 @@ class StorageService:
             return f.read()
 
     def _fixed_local_path(self, key: str) -> str:
+        """app/uploads/<key>, refused unless it stays inside app/uploads."""
         if not key or key.startswith("/") or ".." in key.split("/"):
             raise RuntimeError("Unsupported storage key")
-        return self._resolve_local_upload_path(os.path.join(self.uploads_root, key))
+        root = os.path.realpath(self.uploads_root)
+        path = os.path.realpath(os.path.join(root, key))
+        if not path.startswith(root + os.sep):
+            raise RuntimeError("Local storage path is outside uploads directory")
+        return path
 
     async def put_key(self, key: str, data: bytes, content_type: str) -> None:
         """Store bytes at a fixed key (not a generated one) in the public

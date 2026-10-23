@@ -18,6 +18,10 @@ export const editorOf = (f: Element): Editor | undefined => editors.get(f)
 function registry(f: Element): Record<string, JSONContent> {
   const story = f.closest('[data-mz-s]')
   if (!story) return {}
+  return storyRegistry(story)
+}
+
+function storyRegistry(story: Element): Record<string, JSONContent> {
   let reg = registries.get(story)
   if (!reg) {
     const json = story.querySelector(':scope > script[data-mz-rt]')?.textContent
@@ -25,6 +29,12 @@ function registry(f: Element): Record<string, JSONContent> {
     registries.set(story, reg ?? {})
   }
   return reg ?? {}
+}
+
+/** A field's document as it is now (a design drawn again from the editor
+ *  outside): its field opens with these words, not the ones first printed. */
+export function rememberRich(story: Element, key: string, doc: JSONContent) {
+  storyRegistry(story)[key] = doc
 }
 
 export function makeRich(f: HTMLElement, onUpdate: (f: HTMLElement) => void, onSelection: () => void): Editor {

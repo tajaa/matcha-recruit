@@ -20,10 +20,12 @@ import type { FrameKey, FrameMessage, FrameTarget, Place } from '../canvas/bridg
 import {
   changeDesign, storyDocOf, storyFromMessage, storyPreviewBody, storySaveBody, withPicture, type StoryDoc, type StoryFields,
 } from '../canvas/storyDoc'
-import { designOf, holdsDesign, mapLayers, moveLayer, patchLayers, type ArtAt, type LayerPatch, type TextPreset } from '../design/designOps'
+import {
+  designOf, holdsDesign, mapLayers, moveLayer, patchLayers, type ArtAt, type Heights, type LayerPatch, type TextPreset,
+} from '../design/designOps'
 import type { Design, PageAspect, ShapeKind } from '../design/types'
 import {
-  addBlock, addImage, addPage, addShape, addText, artOf, command, designMessages, layerTarget, panelKey, type Clipboard, type Did,
+  addBlock, addImage, addPage, addShape, addText, artKey, artOf, command, designMessages, layerTarget, panelKey, type Clipboard, type Did,
 } from '../workspace/actions'
 import { ElementsPanel, PhotosPanel, TextPanel } from '../workspace/AddPanels'
 import ArtInspector from '../workspace/ArtInspector'
@@ -48,8 +50,14 @@ const TABS: { key: Tab; label: string; icon: typeof Type }[] = [
   { key: 'layers', label: 'Layers', icon: Layers },
 ]
 
-/** Layers copied: any picture or page of any story can take them. */
-const clipboard: Clipboard = { layers: [], from: '' }
+/** Layers copied, one clipboard a site: any picture or page of its stories
+ *  can take them (another site's library hasn't their pictures). */
+const clipboards = new Map<string, Clipboard>()
+function clipboardOf(site: string): Clipboard {
+  let c = clipboards.get(site)
+  if (!c) clipboards.set(site, (c = { layers: [], from: '' }))
+  return c
+}
 
 /** Two or three buttons, one of them on. */
 function Toggle<T extends string>({ value, options, onChange, label }: {
@@ -114,6 +122,8 @@ export default function StoryEditor() {
   const [page, setPage] = useState('')
   const [place, setPlace] = useState<Place>({ target: null, spread: 0 })
   const [typing, setTyping] = useState(false)
+  // The heights the page measured for words that grow, by picture (artKey).
+  const [heights, setHeights] = useState<Record<string, Heights>>({})
   const [pageError, setPageError] = useState<string | null>(null)
   const pageGen = useRef(0)
   const { set: setDoc, reset: resetDoc, replace: replaceDoc } = doc
@@ -292,7 +302,8 @@ export default function StoryEditor() {
       if (target.item === undefined && blocks[target.block] && blocks[target.block].type !== 'cover') removeBlock(target.block)
       return
     }
-    apply((d) => command(d, ON_PAGE, target, key, clipboard))
+    const at = target?.kind === 'layer' ? heights[artKey({ block: target.block, item: target.item })] : undefined
+    apply((d) => command(d, ON_PAGE, target, key, clipboardOf(siteId!), at))
   }
 
   // ⌘S saves, ⌘Z undoes, ⇧⌘Z (or ⌘Y) redoes — anywhere in the editor, but
@@ -336,6 +347,11 @@ export default function StoryEditor() {
       case 'mz-select': select(msg.target.kind === 'none' ? null : msg.target); return
       case 'mz-place': setPlace((p) => (p.spread === msg.spread ? p : { ...p, spread: msg.spread })); return
       case 'mz-editing': setTyping(msg.on); return
+      case 'mz-heights': {
+        const key = artKey({ block: msg.block, item: msg.item })
+        setHeights((h) => ({ ...h, [key]: msg.heights }))
+        return
+      }
       case 'mz-key':
         if (keys.current.blocked) return
         if (msg.key === 'save') setSaveAsked((n) => n + 1)
@@ -387,7 +403,7 @@ export default function StoryEditor() {
       const at = { block: t.block, item: t.item }
       if (d) {
         return (
-          <LayerInspector design={d} ids={t.ids} accent={accent} onChange={(fn) => changeArt(at, fn)} onCommand={runCommand}
+          <LayerInspector design={d} ids={t.ids} heights={heights[artKey(at)]} accent={accent} onChange={(fn) => changeArt(at, fn)} onCommand={runCommand}
             onReplacePicture={(id) => pickAsset((a) => changeArt(at, (x) => patchLayers(x, [id], { asset_id: a.id } as LayerPatch), true))} />
         )
       }

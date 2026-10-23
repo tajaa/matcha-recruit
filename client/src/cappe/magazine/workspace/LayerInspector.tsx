@@ -6,7 +6,7 @@ import {
 } from 'lucide-react'
 import type { FrameKey } from '../canvas/bridge'
 import { rtText } from '../canvas/rt'
-import { align, boxOf, distribute, patchLayers, setGeometry, topLevel, type AlignHow, type LayerPatch } from '../design/designOps'
+import { align, boxOf, distribute, patchLayers, setGeometry, topLevel, type AlignHow, type Heights, type LayerPatch } from '../design/designOps'
 import { hasItalic, weightsOf } from '../design/fontStack'
 import { BLENDS, MAX_SHADOWS, type Design, type Layer, type PaintedLayer, type Shadow } from '../design/types'
 import { AddButton, ColorField, IconBtn, NumberField, PaintField, Row, Section, Seg, Select, Slider } from './controls'
@@ -24,9 +24,11 @@ const KIND_ICON = { text: Type, image: ImageIcon, shape: Square, group: Group }
 /** Everything about the layers selected, in one place: where they sit, their
  *  type, fill, outline, corners, shadows, look, link and order. Several
  *  selected: what they share, plus lining them up. */
-export default function LayerInspector({ design, ids, accent, onChange, onCommand, onReplacePicture }: {
+export default function LayerInspector({ design, ids, heights, accent, onChange, onCommand, onReplacePicture }: {
   design: Design
   ids: string[]
+  /** The page's heights for its words that grow (designOps.Heights). */
+  heights?: Heights
   accent: string
   /** A change to the design (merged into one undo step while it runs on). */
   onChange: (fn: (d: Design) => Design) => void
@@ -42,8 +44,8 @@ export default function LayerInspector({ design, ids, accent, onChange, onComman
   const p0 = paintedOnes[0]
   const patch = (pt: LayerPatch) => onChange((d) => patchLayers(d, ids, pt))
   const geo = (g: Partial<{ x: number; y: number; w: number; h: number; rot: number }>) =>
-    onChange((d) => setGeometry(d, [{ id: first.id, ...g }]))
-  const box = boxOf(first)
+    onChange((d) => setGeometry(d, [{ id: first.id, ...g }], heights))
+  const box = boxOf(first, heights)
   const Icon = KIND_ICON[first.kind]
   const fixedText = first.kind === 'text' && first.autosize === 'none'
 
@@ -70,12 +72,12 @@ export default function LayerInspector({ design, ids, accent, onChange, onComman
           {([['left', AlignStartVertical, 'Left'], ['center', AlignCenterVertical, 'Centre'], ['right', AlignEndVertical, 'Right'],
             ['top', AlignStartHorizontal, 'Top'], ['middle', AlignCenterHorizontal, 'Middle'], ['bottom', AlignEndHorizontal, 'Bottom']] as const)
             .map(([how, I, label]) => (
-              <IconBtn key={how} title={`Align ${label.toLowerCase()}`} onClick={() => onChange((d) => align(d, ids, how as AlignHow))}><I className="h-4 w-4" /></IconBtn>
+              <IconBtn key={how} title={`Align ${label.toLowerCase()}`} onClick={() => onChange((d) => align(d, ids, how as AlignHow, heights))}><I className="h-4 w-4" /></IconBtn>
             ))}
           {picked.length >= 3 && (
             <>
-              <IconBtn title="Space evenly across" onClick={() => onChange((d) => distribute(d, ids, 'x'))}><AlignHorizontalSpaceAround className="h-4 w-4" /></IconBtn>
-              <IconBtn title="Space evenly down" onClick={() => onChange((d) => distribute(d, ids, 'y'))}><AlignVerticalSpaceAround className="h-4 w-4" /></IconBtn>
+              <IconBtn title="Space evenly across" onClick={() => onChange((d) => distribute(d, ids, 'x', heights))}><AlignHorizontalSpaceAround className="h-4 w-4" /></IconBtn>
+              <IconBtn title="Space evenly down" onClick={() => onChange((d) => distribute(d, ids, 'y', heights))}><AlignVerticalSpaceAround className="h-4 w-4" /></IconBtn>
             </>
           )}
         </div>

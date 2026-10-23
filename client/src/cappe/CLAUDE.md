@@ -104,8 +104,9 @@ Website-builder frontend for the consumer brand **Gummfit**, host-routed on gumm
   if a draft's words failed), naming any that fail. A save is settled onto the document as it is by then
   (`useHistory().map` + `issueDoc.settleIssue`/`settleStories`: words typed meanwhile stay unsaved) and
   pins each story's pre-save words into the undo states that showed them (`pinStories`), so undo reaches
-  back past a save. `EditFrame` drops a render that was loading when words were typed (it predates them)
-  and numbers renders with a counter that never repeats. Field lengths are cut by whole characters
+  back past a save. Release and Withdraw change only the issue's status, never the document, so unsaved
+  changes (the issue's and its stories') survive both. `EditFrame` drops a render that was loading when
+  words were typed (it predates them) and numbers renders with a counter that never repeats. Field lengths are cut by whole characters
   (`fields.clip`), never half an emoji.
 - `studio/` — **Gummfit Studio** (2026-10-22), the design application for stories made of pages, full
   screen at `/cappe/studio/:siteId/story/:postId` (outside `CappeLayout`; the classic `StoryEditor` hands a

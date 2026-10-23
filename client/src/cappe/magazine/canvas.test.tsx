@@ -12,7 +12,7 @@ import EditFrame from './canvas/EditFrame'
 import { PHONE, SPREAD_MIN, fitFrame } from './canvas/fit'
 import { readMessage, type FrameMessage } from './canvas/bridge'
 import { BLOCK_FIELDS, blockHasField, clip, designField, fieldShape, isRichField } from './canvas/fields'
-import { newText } from './design/designOps'
+import { newShape, newText } from './design/designOps'
 import { cleanHref, cleanRt, emptyRt, richPatch, rtText, rtToMd, type RtDoc } from './canvas/rt'
 import { richExtensions } from './frame/extensions'
 import { applyIssueEdit, coverFocal, moveCoverEl } from './canvas/issueEdits'
@@ -179,6 +179,9 @@ describe('readMessage', () => {
     expect(JSON.stringify(big).length).toBeGreaterThan(200_000)
     expect(readMessage({ type: 'mz-edit', story: 'p-1', block: 1, field: 'md', value: big, rich: true }, ctx)).not.toBeNull()
     expect(readMessage({ type: 'mz-key', key: 'undo' }, ctx)).toEqual({ type: 'mz-key', key: 'undo' })
+    // The heights the page measured for words that grow.
+    expect(readMessage({ type: 'mz-heights', story: 'p-1', block: 2, item: null, heights: { t1: 24.5, t2: 900 } }, ctx))
+      .toEqual({ type: 'mz-heights', story: 'p-1', block: 2, item: null, heights: { t1: 24.5, t2: 400 } })
   })
 
   it('refuses anything else', () => {
@@ -212,6 +215,10 @@ describe('readMessage', () => {
       { type: 'mz-select', target: { kind: 'layer', story: 'p-1', block: 2, item: null, ids: [] } },
       { type: 'mz-select', target: { kind: 'layer', story: 'p-1', block: 2, item: null, ids: ['<b>'] } },
       { type: 'mz-key', key: 'rm -rf' },
+      { type: 'mz-heights', story: 'p-1', block: 2, item: null, heights: [3] },
+      { type: 'mz-heights', story: 'p-1', block: 2, item: null, heights: { 'Bad id': 3 } },
+      { type: 'mz-heights', story: 'p-1', block: 2, item: null, heights: { t1: 'tall' } },
+      { type: 'mz-heights', story: 'someone-else', block: 2, item: null, heights: { t1: 3 } },
     ]
     for (const b of bad) expect(readMessage(b, ctx)).toBeNull()
   })
@@ -226,6 +233,8 @@ describe('a story edited on its page', () => {
     expect(applyEdit(d, 2, 'caption', 'Morning')!.blocks[2]).toMatchObject({ caption: 'Morning' })
     expect(applyEdit(d, 2, 'design.hi', doc(t('Two')))!.blocks[2]).toMatchObject({ design: { layers: [{ id: 'hi', rt: doc(t('Two')) }] } })
     expect(applyEdit(d, 2, 'design.nope', doc(t('Two')))).toBeNull()  // no such layer
+    const two = applyEdit(d, 2, 'design.hi', doc(t('Two')))!
+    expect(applyEdit(two, 2, 'design.hi', doc(t('Two')))).toBe(two)  // the same words again change nothing
     expect(applyEdit(d, 2, 'design.hi', 'Two')).toBeNull()  // a layer's words arrive as a document
     expect(applyEdit(d, 3, 'items.1.caption', 'Second')!.blocks[3]).toMatchObject({ items: [{ caption: '' }, { caption: 'Second' }] })
     expect(applyEdit(d, 4, 'items.0.a_md', doc(t('Yes')))!.blocks[4]).toMatchObject({ items: [{ q: 'Why?', a_md: 'Yes', a_rt: doc(t('Yes')) }] })
@@ -483,19 +492,49 @@ beforeEach(() => {
     Promise.resolve(body.edit ? `<p>edit ${editCalls()}</p>` : '<p>preview</p>'))
 })
 
-function mountStory() {
+function mountStory(site = 's-1', story = post()) {
   answer({
-    '/posts/p-1': post(),
+    '/posts/p-1': story,
     '/stories/options': { layouts: [], topics: [] },
     '/assets': { assets: [] },
     '/magazine': { paid_enabled: false },
   })
-  return render(<MemoryRouter initialEntries={['/cappe/sites/s-1/stories/p-1']}><Routes>
+  return render(<MemoryRouter initialEntries={[`/cappe/sites/${site}/stories/p-1`]}><Routes>
     <Route path="/cappe/sites/:siteId/stories/:postId" element={<StoryEditor />} />
   </Routes></MemoryRouter>)
 }
 
 describe('StoryEditor, on the page', () => {
+  it('keeps copied layers to their own site (another library has not their pictures)', async () => {
+    const page = { type: 'page', aspect: '4:5', design: { layers: [{ ...newShape(null, 'rect'), id: 'sq' }],
+      background: { kind: 'solid', color: '#ffffff', angle: 180, stops: [] } } } as StoryBlock
+    const designed = post({ content: { blocks: [newBlock('cover'), page] } })
+    const open = async (site: string) => {
+      const next = editCalls() + 1
+      const view = mountStory(site, designed)
+      const p = await shown(`<p>edit ${next}</p>`)
+      return { view, p }
+    }
+    const pasteOnPage = async (p: Awaited<ReturnType<typeof shown>>) => {
+      p.say({ type: 'mz-select', target: { kind: 'block', story: 'preview', block: 1 } })
+      await screen.findByRole('heading', { name: 'Designed page' })
+      p.say({ type: 'mz-key', key: 'paste' })
+      await new Promise((r) => setTimeout(r, 50))
+    }
+    let { view, p } = await open('s-1')
+    p.say({ type: 'mz-select', target: { kind: 'layer', story: 'preview', block: 1, item: null, ids: ['sq'] } })
+    await screen.findByRole('textbox', { name: 'Layer name' })
+    p.say({ type: 'mz-key', key: 'copy' })
+    view.unmount();
+    ({ view, p } = await open('s-2'))
+    await pasteOnPage(p)
+    expect(screen.queryByText('Unsaved')).toBeNull()
+    view.unmount();
+    ({ view, p } = await open('s-1'))
+    await pasteOnPage(p)
+    expect(await screen.findByText('Unsaved')).toBeInTheDocument()
+  })
+
   it('types, formats, adds and undoes on the page, and saves what it shows', async () => {
     mountStory()
     const page = await shown('<p>edit 1</p>')
@@ -632,6 +671,12 @@ describe('StoryEditor, on the page', () => {
     expect(saved).toMatchObject({ type: 'page', aspect: '4:5' })
     expect(saved.design.layers).toHaveLength(2)
     expect(saved.design.layers.find((l: { id: string }) => l.id === id)).toMatchObject({ x: 5, y: 6 })
+
+    // Words that grow are aligned by the height the page measured for them.
+    page.say({ type: 'mz-heights', story: 'preview', block: 2, item: null, heights: { [id]: 30 } })
+    page.say({ type: 'mz-select', target: { kind: 'layer', story: 'preview', block: 2, item: null, ids: [id] } })
+    fireEvent.click(await screen.findByRole('button', { name: 'Align bottom' }))
+    await waitFor(() => expect(lastLayers().find((l) => l.id === id)).toMatchObject({ y: 70 }))
   })
 })
 
@@ -690,6 +735,18 @@ describe('IssueEditor, on its pages', () => {
     expect(storyPut[1]).toMatchObject({ title: 'Low tide', content: { blocks: [expect.anything(), expect.objectContaining({ md: 'Fresh *words*' })] } })
     expect(storyPut[1]).not.toHaveProperty('status')
     await waitFor(() => expect(screen.queryByText(/Unsaved/)).toBeNull())
+  })
+
+  it('deletes a story block on Delete only, not on the layer keys', async () => {
+    mountIssue()
+    const page = await shown('<p>edit 1</p>')
+    page.say({ type: 'mz-select', target: { kind: 'block', story: P1, block: 1 } })
+    await screen.findByText('In “Low tide”')
+    for (const key of ['copy', 'duplicate', 'group', 'front'] as const) page.say({ type: 'mz-key', key })
+    await new Promise((r) => setTimeout(r, 50))
+    expect(screen.queryByText(/Unsaved/)).toBeNull()
+    page.say({ type: 'mz-key', key: 'delete' })
+    expect(await screen.findByText('Unsaved (and a story)')).toBeInTheDocument()
   })
 
   it('names a story it could not save and keeps its words', async () => {
