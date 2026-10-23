@@ -30,13 +30,16 @@ GUTTER_MAX = 288.0
 STROKE_MAX = 144.0
 RADIUS_MAX = 1000.0
 ZOOM_MIN, ZOOM_MAX = 100, 1000  # percent
+TILE_MIN, TILE_MAX = 2.0, 720.0  # a pattern's tile, in pt
+TILE_DEFAULT = 24.0
 
 UNITS = ("pt", "pc", "in", "mm", "cm", "px")
-KINDS = ("text", "image", "rect", "ellipse", "line")
+KINDS = ("text", "image", "rect", "ellipse", "line", "graphic")
 ALIGNS = ("l", "c", "r", "j", "ja")
 ROLES = ("p", "h1", "h2", "h3", "quote", "caption")
 VALIGNS = ("top", "center", "bottom", "justify")
 FITS = ("fill", "fit", "stretch")
+GRAPHIC_FITS = ("contain", "stretch", "tile")  # a graphic in its box: its own shape, any, or repeated
 LINE_ALIGNS = (0, 1, 2, 3)  # a composed line: left, center, right, justified
 
 # A run's character attributes and a paragraph's own, when not stored.
@@ -54,7 +57,8 @@ def limits() -> dict:
         "MAX_GUIDES": MAX_GUIDES, "MAX_NAME": MAX_NAME, "MAX_CAPTION": MAX_CAPTION, "PAGE_MIN": PAGE_MIN,
         "PAGE_MAX": PAGE_MAX, "COORD": COORD, "SIZE_MAX": SIZE_MAX, "TRACK_MIN": TRACK_MIN, "TRACK_MAX": TRACK_MAX,
         "INDENT_MAX": INDENT_MAX, "LEAD_MAX": LEAD_MAX, "GUTTER_MAX": GUTTER_MAX, "STROKE_MAX": STROKE_MAX,
-        "RADIUS_MAX": RADIUS_MAX, "ZOOM_MIN": ZOOM_MIN, "ZOOM_MAX": ZOOM_MAX, "UNITS": list(UNITS),
+        "RADIUS_MAX": RADIUS_MAX, "ZOOM_MIN": ZOOM_MIN, "ZOOM_MAX": ZOOM_MAX, "TILE_MIN": TILE_MIN,
+        "TILE_MAX": TILE_MAX, "TILE_DEFAULT": TILE_DEFAULT, "UNITS": list(UNITS),
         "KINDS": list(KINDS), "ALIGNS": list(ALIGNS), "ROLES": list(ROLES), "VALIGNS": list(VALIGNS),
-        "FITS": list(FITS), "CHAR_DEFAULTS": CHAR_DEFAULTS, "PARA_DEFAULTS": PARA_DEFAULTS,
+        "FITS": list(FITS), "GRAPHIC_FITS": list(GRAPHIC_FITS), "CHAR_DEFAULTS": CHAR_DEFAULTS, "PARA_DEFAULTS": PARA_DEFAULTS,
     }

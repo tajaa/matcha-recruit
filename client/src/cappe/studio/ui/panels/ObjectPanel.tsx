@@ -2,12 +2,15 @@ import { ArrowDownToLine, ArrowUpToLine, ChevronDown, ChevronUp, Eye, EyeOff, Im
 import { ColorField, IconBtn, NumberField, Row, Section, Seg, Slider } from '../../../magazine/workspace/controls'
 import { round } from '../../model/limits'
 import { arrange, patchItems, unlinkAfter, type Arrange } from '../../model/ops'
-import type { Fit, Item, Stroke, VAlign } from '../../model/types'
+import type { Fit, GraphicFit, GraphicItem, Item, Stroke, VAlign } from '../../model/types'
 import { useStudio } from '../../store/store'
 import { useCtx } from '../context'
 import { LengthField, Labeled } from '../fields'
 
 const FITS: { key: Fit; label: string }[] = [{ key: 'fill', label: 'Fill' }, { key: 'fit', label: 'Fit' }, { key: 'stretch', label: 'Stretch' }]
+const GRAPHIC_FITS: { key: GraphicFit; label: string }[] = [
+  { key: 'contain', label: 'Its shape' }, { key: 'stretch', label: 'Stretch' }, { key: 'tile', label: 'Repeat' },
+]
 const VALIGNS: { key: VAlign; label: string }[] = [
   { key: 'top', label: 'Top' }, { key: 'center', label: 'Centre' }, { key: 'bottom', label: 'Bottom' }, { key: 'justify', label: 'Justify' },
 ]
@@ -35,6 +38,7 @@ export function ObjectPanel() {
   const units = doc.units
   const kinds = new Set(items.map((i) => i.kind))
   const only = kinds.size === 1 ? one.kind : null
+  const inked = items.filter((i): i is GraphicItem => i.kind === 'graphic' && i.color !== null)
   return (
     <>
       <Section title={items.length > 1 ? `${items.length} selected` : KIND_LABEL[one.kind]} right={
@@ -120,6 +124,26 @@ export function ObjectPanel() {
         </Section>
       )}
 
+      {only === 'graphic' && one.kind === 'graphic' && (
+        <Section title="Look">
+          {/* Only the one-colour graphics take a colour: the server drops one on a colourful graphic,
+              so giving it one here would show a silhouette the reader never sees. */}
+          {inked.length > 0 && (
+            <ColorField label="Colour" value={inked[0].color ?? ''}
+              onChange={(color) => color && store.edit((d) => patchItems(d, inked.map((i) => i.id), { color }))} />
+          )}
+          {inked.length < items.length && (
+            <p className="text-[11px] text-zinc-500">
+              {inked.length ? 'The colourful graphics keep their own colours.' : 'A colourful graphic keeps its own colours.'}
+            </p>
+          )}
+          <Seg label="In its box" value={one.fit} options={GRAPHIC_FITS} onChange={(fit) => set({ fit })} />
+          {one.fit === 'tile' && (
+            <LengthField label="Pattern size" short="▦" units={units} value={one.tile} min={2} max={720} onChange={(tile) => set({ tile })} />
+          )}
+        </Section>
+      )}
+
       {(only === 'image' || only === 'rect') && 'radius' in one && (
         <Section title="Corners">
           <LengthField label="Corner radius" short="◜" units={units} value={one.radius} min={0} max={1000} onChange={(radius) => set({ radius })} />
@@ -184,5 +208,5 @@ function ThreadInfo({ frame, overset }: { frame: string; overset: Set<string> })
   )
 }
 
-const KIND_LABEL: Record<Item['kind'], string> = { text: 'Text frame', image: 'Picture frame', rect: 'Rectangle', ellipse: 'Ellipse', line: 'Line' }
+const KIND_LABEL: Record<Item['kind'], string> = { text: 'Text frame', image: 'Picture frame', rect: 'Rectangle', ellipse: 'Ellipse', line: 'Line', graphic: 'Graphic' }
 const ARRANGE: Record<Arrange, string> = { front: 'Bring to front', forward: 'Bring forward', backward: 'Send backward', back: 'Send to back' }

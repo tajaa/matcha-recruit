@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import manifest from '../../../../../../server/app/cappe/services/magazine/studio/fonts_manifest.json'
 import { cappeApi } from '../../../api'
@@ -12,8 +12,12 @@ import { DEFAULT_VIEW, Store, type State } from '../../store/store'
 import { StudioContext, type StudioCtx } from '../context'
 import AddPanel from './AddPanel'
 import { ELEMENTS, TEXT_COMBOS, TEXT_STYLES, facesOf } from './catalog'
+import { graphicsApi, type GraphicBrowse, type GraphicCard } from '../../model/graphics'
+import { ObjectPanel } from '../panels/ObjectPanel'
+import { describeStudio } from '../ask/describe'
 import { dropInto, dropOn, importStock } from './drag'
-import { addElement, addPicture, addText, landing } from './place'
+import { useGraphicSearch } from './graphicSearch'
+import { addElement, addGraphic, addPicture, addText, landing } from './place'
 
 const mono: Measure = { width: (c, t) => [...t].length * 0.5 * c.size, metrics: (c) => ({ asc: 0.8 * c.size, desc: 0.2 * c.size }) }
 const book = new FaceBook(manifest as Manifest)
@@ -252,5 +256,157 @@ describe('the side panel', () => {
     expect((only(store) as ImageItem).asset_id).toBe('a1')
     fireEvent.click(screen.getByRole('tab', { name: 'AI' }))
     await waitFor(() => expect(get).toHaveBeenLastCalledWith('/sites/s1/assets?kind=generated'))
+  })
+})
+
+const card = (over: Partial<GraphicCard>): GraphicCard => ({ sha: 'a'.repeat(64), name: 'Heart', group: 'icons', mono: true, fit: 'contain', w: 24, h: 24, ...over })
+
+describe('graphics from the bank', () => {
+  it('starts an icon its own shape in ink, named, and a sticker in its own colours', () => {
+    const { store, ctx } = studio()
+    addGraphic(ctx, card({ w: 48, h: 24 }))
+    expect(only(store)).toMatchObject({ kind: 'graphic', src: 'a'.repeat(64), color: '#1a1a1a', fit: 'contain', name: 'Heart', w: 72, h: 36 })
+    addGraphic(ctx, card({ sha: 'b'.repeat(64), name: 'Red heart', group: 'stickers', mono: false }))
+    expect(only(store)).toMatchObject({ color: null, w: 120, h: 120 })
+    const out = describeStudio(store.get())
+    expect(out).toMatch(/Graphic "Heart".*colour #1a1a1a/)
+    expect(out).toMatch(/Graphic "Red heart".*in its own colours/)
+  })
+
+  it('lays a pattern over the whole page, behind everything', () => {
+    const d = addItem(doc(), 'rect', 'p2', { x: 0, y: 0, w: 10, h: 10 }).doc
+    const { store, ctx } = studio(d)
+    addGraphic(ctx, card({ name: 'Dots', group: 'patterns', fit: 'tile', w: 20, h: 20 }))
+    expect(store.get().doc.items[0]).toMatchObject({ kind: 'graphic', fit: 'tile', x: -9, y: -9, w: 618, h: 818, color: '#d9d4cc' })
+  })
+
+  it('lets the Object panel recolour a one-colour graphic, repeat it, and says a colourful one keeps its colours', () => {
+    const { store, ctx } = studio()
+    addGraphic(ctx, card({}))
+    const { unmount } = render(<StudioContext.Provider value={ctx}><ObjectPanel /></StudioContext.Provider>)
+    expect(screen.getByText('Look', { selector: 'h3' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Repeat' }))
+    expect(only(store)).toMatchObject({ fit: 'tile' })
+    expect(screen.getByLabelText('Pattern size')).toBeInTheDocument()
+    unmount()
+    addGraphic(ctx, card({ sha: 'b'.repeat(64), name: 'Red heart', group: 'stickers', mono: false }))
+    render(<StudioContext.Provider value={ctx}><ObjectPanel /></StudioContext.Provider>)
+    expect(screen.getByText('A colourful graphic keeps its own colours.')).toBeInTheDocument()
+  })
+
+  it('recolours only the one-colour graphics of a mixed selection, whichever comes first', () => {
+    for (const stickerFirst of [false, true]) {
+      const { store, ctx } = studio()
+      const sticker = () => addGraphic(ctx, card({ sha: 'b'.repeat(64), name: 'Red heart', group: 'stickers', mono: false }))
+      if (stickerFirst) sticker()
+      addGraphic(ctx, card({}))
+      if (!stickerFirst) sticker()
+      store.set({ selection: store.get().doc.items.map((i) => i.id) })
+      const { unmount } = render(<StudioContext.Provider value={ctx}><ObjectPanel /></StudioContext.Provider>)
+      expect(screen.getByText('The colourful graphics keep their own colours.')).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: 'Colour: #1a1a1a' }))
+      const hex = screen.getByLabelText('Colour, as hex')
+      fireEvent.change(hex, { target: { value: '#aa0000' } })
+      fireEvent.blur(hex)
+      const byName = Object.fromEntries(store.get().doc.items.map((i) => [i.name, i]))
+      expect(byName['Heart']).toMatchObject({ color: '#aa0000' })
+      expect(byName['Red heart']).toMatchObject({ color: null })
+      unmount()
+    }
+  })
+
+  it('browses the bank in the Elements tab, opens a group and searches it all', async () => {
+    const icons = Array.from({ length: 24 }, (_, k) => card({ sha: k.toString(16).padStart(64, '0'), name: `Icon ${k}` }))
+    const browse: GraphicBrowse = { version: 'v', sets: [], groups: [
+      { group: 'shapes', count: 2, items: [card({ sha: 'c'.repeat(64), name: 'Star', group: 'shapes', fit: 'stretch' })] },
+      { group: 'icons', count: 1890, items: icons },
+    ] }
+    vi.spyOn(graphicsApi, 'browse').mockResolvedValue(browse)
+    const search = vi.spyOn(graphicsApi, 'search').mockResolvedValue({ total: 1, items: [card({ sha: 'd'.repeat(64), name: 'Coffee' })] })
+    const { store, ctx } = studio()
+    render(<StudioContext.Provider value={ctx}><AddPanel /></StudioContext.Provider>)
+    fireEvent.click(await screen.findByRole('button', { name: 'Add Star' }))
+    expect(only(store)).toMatchObject({ kind: 'graphic', name: 'Star', fit: 'stretch' })
+    expect(screen.getAllByRole('button', { name: /^Add Icon / })).toHaveLength(15)
+    fireEvent.click(screen.getByRole('button', { name: 'See all 1,890' }))
+    await waitFor(() => expect(search).toHaveBeenCalledWith('', 'icons', undefined, 0, 60))
+    fireEvent.click(screen.getByRole('button', { name: /Icons/ }))
+    fireEvent.change(screen.getByPlaceholderText(/Search shapes, icons/), { target: { value: 'coffee' } })
+    fireEvent.click(await screen.findByRole('button', { name: 'Add Coffee' }))
+    expect(search).toHaveBeenLastCalledWith('coffee', undefined, undefined, 0, 60)
+    expect(only(store)).toMatchObject({ name: 'Coffee' })
+  })
+})
+
+describe('searching the graphics bank', () => {
+  type Page = { total: number; items: GraphicCard[] }
+  const page = (n: number, name: string, total = 120): Page =>
+    ({ total, items: Array.from({ length: n }, (_, k) => card({ sha: `${name}${k}`.padStart(64, '0'), name: `${name} ${k}` })) })
+  const deferred = () => {
+    let resolve!: (p: Page) => void, reject!: (e: Error) => void
+    const promise = new Promise<Page>((res, rej) => { resolve = res; reject = rej })
+    return { promise, resolve, reject }
+  }
+
+  it('never asks a changed search for the old one’s next page, nor keeps an old answer', async () => {
+    vi.useFakeTimers()
+    try {
+      const calls: { args: unknown[]; d: ReturnType<typeof deferred> }[] = []
+      vi.spyOn(graphicsApi, 'search').mockImplementation((...args: unknown[]) => {
+        const d = deferred()
+        calls.push({ args, d })
+        return d.promise
+      })
+      const { result, rerender } = renderHook(({ q }) => useGraphicSearch(q), { initialProps: { q: 'dog' } })
+      await act(async () => { vi.advanceTimersByTime(250) })
+      await act(async () => { calls[0].d.resolve(page(60, 'dog')) })
+      expect(result.current.items).toHaveLength(60)
+      expect(result.current.total).toBe(120)
+
+      // A new search, still in its pause: the dog list has no total, so no More, and More does nothing.
+      rerender({ q: 'cat' })
+      expect(result.current.total).toBeNull()
+      expect(result.current.busy).toBe(true)
+      act(() => result.current.more())
+      expect(calls).toHaveLength(1)
+
+      // The new search fails: its error shows, and still no old page is asked for.
+      await act(async () => { vi.advanceTimersByTime(250) })
+      expect(calls[1].args).toEqual(['cat', undefined, undefined, 0, 60])
+      await act(async () => { calls[1].d.reject(new Error('The graphics didn’t load.')) })
+      expect(result.current.error).toBe('The graphics didn’t load.')
+      expect(result.current.total).toBeNull()
+      expect(result.current.busy).toBe(false)
+      act(() => result.current.more())
+      expect(calls).toHaveLength(2)
+
+      rerender({ q: 'cow' })
+      await act(async () => { vi.advanceTimersByTime(250) })
+      await act(async () => { calls[2].d.resolve(page(60, 'cow')) })
+      expect(result.current.items.map((c) => c.name)).toEqual(page(60, 'cow').items.map((c) => c.name))
+      act(() => result.current.more())
+      expect(calls[3].args).toEqual(['cow', undefined, undefined, 60, 60])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('drops a first page that comes back after the search changed', async () => {
+    vi.useFakeTimers()
+    try {
+      const calls: ReturnType<typeof deferred>[] = []
+      vi.spyOn(graphicsApi, 'search').mockImplementation(() => { const d = deferred(); calls.push(d); return d.promise })
+      const { result, rerender } = renderHook(({ q }) => useGraphicSearch(q), { initialProps: { q: 'dog' } })
+      await act(async () => { vi.advanceTimersByTime(250) })
+      rerender({ q: 'cat' })
+      await act(async () => { calls[0].resolve(page(60, 'dog')) })
+      expect(result.current.items).toHaveLength(0)
+      await act(async () => { vi.advanceTimersByTime(250) })
+      await act(async () => { calls[1].resolve(page(3, 'cat', 3)) })
+      expect(result.current.items.map((c) => c.name)).toEqual(['cat 0', 'cat 1', 'cat 2'])
+      expect(result.current.total).toBe(3)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

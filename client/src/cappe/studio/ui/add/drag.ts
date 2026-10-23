@@ -6,13 +6,15 @@ import type { DragEvent } from 'react'
 import { cappeApi } from '../../../api'
 import type { CappeAsset, CappeStockImports, CappeStockResult } from '../../../types'
 import type { StudioCtx } from '../context'
+import type { GraphicCard } from '../../model/graphics'
 import type { ElementSpec, TextStyle } from './catalog'
-import { addElement, addPicture, addText, type At } from './place'
+import { addElement, addGraphic, addPicture, addText, type At } from './place'
 
 export const DRAG_TYPE = 'application/x-gummfit-studio'
 
 export type Dragged =
   | { kind: 'element'; el: ElementSpec }
+  | { kind: 'graphic'; g: GraphicCard }
   | { kind: 'text'; style: TextStyle }
   | { kind: 'asset'; asset: CappeAsset }
   | { kind: 'stock'; result: CappeStockResult }
@@ -66,6 +68,7 @@ export function dropOn(c: StudioCtx, what: Dragged, at: At): Promise<void> {
 export async function dropInto(c: StudioCtx, what: Dragged, at: At): Promise<void> {
   switch (what.kind) {
     case 'element': addElement(c, what.el, at); return
+    case 'graphic': addGraphic(c, what.g, at); return
     case 'text': await addText(c, what.style, at); return
     case 'asset': addPicture(c, what.asset, at); return
     case 'stock': addPicture(c, await importStock(c.siteId, c.postId, what.result), at)

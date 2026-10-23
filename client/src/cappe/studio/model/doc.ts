@@ -127,6 +127,8 @@ export function newItem(kind: Kind, page: string, id: string, box: { x: number; 
       return { ...base, kind, fill: '#d9d4cc', stroke: null }
     case 'line':
       return { ...base, kind, stroke: { c: '#1a1a1a', w: 1 }, flip: false }
+    case 'graphic':
+      return { ...base, kind, src: '', color: null, fit: 'contain', tile: 24 }
   }
 }
 

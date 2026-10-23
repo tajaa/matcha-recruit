@@ -663,6 +663,19 @@ normalized paragraphs itself; a thread with no valid composition prints its word
   `server/scripts/fetch_magazine_models.py --upload --dry-run`, then for real, once per environment (or set
   `CAPPE_MODELS_DIR` in dev); until then the cut-out says the model isn't on this server yet. Migration
   `cappemag10`'s downgrade refuses while edits exist.
+- **Graphics bank** (`studio/graphics.py`, `graphics_own.py`, `routes/public/graphics.py`; client `model/graphics.ts`,
+  `ui/add/`): a page item of kind `graphic` names a file by sha (`src`), like faces: 3,560 cleaned SVGs (Lucide icons
+  ISC, Microsoft Fluent Emoji flat MIT, our own shapes/badges/dividers/patterns CC0) in the committed
+  `graphics_manifest.json` + `graphics_licenses.txt`. Both renderers draw it as a `div` background (colourful) or a
+  CSS mask over its `color` (one-colour, `mono`), `fit` contain / stretch / tile (`tile` pt). Stretch draws
+  `/public/graphics/stretch/<sha>.svg`, the file with `preserveAspectRatio="none"` on its root (`graphics.stretched`):
+  CSS sizing alone never distorts an SVG with a viewBox, it centres it at its own shape. The schema refuses a
+  `src` the manifest lacks, so **never take an entry out of the manifest**; the server forces `color` to null for a
+  colourful one. The side panel browses (`/public/graphics/browse`) and searches (`/public/graphics/search`) rather
+  than download the ~1 MB manifest. Files are served by sha with a no-script CSP from `CAPPE_GRAPHICS_DIR` or storage
+  `cappe/graphics/<sha>.svg`. **Ops:** run `server/scripts/build_studio_graphics.py --out DIR --upload --dry-run`,
+  then for real, once per environment (it rebuilds the manifest from pinned sources: commit any change); until then
+  graphics show as empty boxes.
 - **Ask the Studio** (`studio/ask.py`, `POST …/studio/stories/{id}/ask`; client `ui/ask/`, `ui/panels/AskPanel.tsx`):
   one Claude Messages call per question (surface `gummfit.studio`, Haiku by default), no tools, nothing saved,
   nothing on the page changed. **The Studio sends the guide (`ui/guideContent.ts`) and the commands

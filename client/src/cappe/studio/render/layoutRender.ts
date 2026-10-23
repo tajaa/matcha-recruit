@@ -12,7 +12,8 @@ import { escHtml } from '../../magazine/canvas/rt'
 import { fontStack } from '../../magazine/design/fontStack'
 import { CHAR_DEFAULTS, PARA_DEFAULTS } from '../model/limits'
 import { spreads } from '../model/doc'
-import type { Asset, CharAttrs, Doc, ImageItem, Item, Para, Run, TextItem, Thread } from '../model/types'
+import { graphicUrl } from '../model/graphics'
+import type { Asset, CharAttrs, Doc, GraphicItem, ImageItem, Item, Para, Run, TextItem, Thread } from '../model/types'
 import { faceUrl, familyName, type FaceLookup } from '../fonts/faces'
 
 /** The faces set by name (not built), by family, as the server's `Uses`. */
@@ -226,11 +227,24 @@ function lineHtml(item: Extract<Item, { kind: 'line' }>): string {
     + `<line x1="0" y1="${n(y1)}" x2="${n(item.w)}" y2="${n(y2)}" stroke="${s.c}" stroke-width="${n(s.w)}"/></svg>`
 }
 
+/** A bank graphic filling its box (render._graphic_html): its own shape,
+ *  stretched, or tiled; a one-colour one is a mask over its colour. */
+function graphicHtml(item: GraphicItem): string {
+  const src = `url(${graphicUrl(item.src, item.fit === 'stretch')})`
+  const size = item.fit === 'contain' ? 'contain' : item.fit === 'stretch' ? '100% 100%' : `${u(item.tile)} auto`
+  const place = `${item.fit === 'tile' ? '0 0' : 'center'}/${size} ${item.fit === 'tile' ? 'repeat' : 'no-repeat'}`
+  let style = box(item)
+  if (item.color) style += `;background:${item.color};-webkit-mask:${src} ${place};mask:${src} ${place}`
+  else style += `;background:${src} ${place}`
+  return `<div class="lyt-item lyt-g" style="${style}"></div>`
+}
+
 export function itemHtml(item: Item, doc: Doc, d: Draw, eager = false): string {
   switch (item.kind) {
     case 'text': return textHtml(item, d)
     case 'image': return imageHtml(item, d, doc.size.w, eager)
     case 'line': return lineHtml(item)
+    case 'graphic': return graphicHtml(item)
     default: return shapeHtml(item)
   }
 }
