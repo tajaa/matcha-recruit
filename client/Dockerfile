@@ -37,6 +37,11 @@ RUN cd oceanlab && npx vite build
 # Copy source code
 COPY . .
 
+# The main app's build outgrew Node's default heap, which is sized from the
+# machine's memory: in an 8 GB Docker Desktop VM `vite build` died with
+# "JavaScript heap out of memory" while CI's 16 GB runner passed.
+ENV NODE_OPTIONS=--max-old-space-size=4096
+
 ARG VITE_LANDING_BUILD_VERSION=0
 ARG GIT_SHA=unknown
 ENV VITE_LANDING_BUILD_VERSION=${VITE_LANDING_BUILD_VERSION}

@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, Loader2 } from 'lucide-react'
 import { cappeApi } from '../../api'
 import type { CappeReaderStory } from '../../types'
 import BookFrame from '../reader/BookFrame'
 import { readerMagazinePath, readerStoryPath } from './readerPaths'
 
-const STORY = /^\/stories\/([^/?#]+)/
+const STORY = /^\/stories\/([^/?#]+)\/?$/
+// A story made in the Studio links to its Text view (its words, read down).
+const TEXT = /^\/stories\/([^/?#]+)\/text\/?$/
 const HOME = (path: string) => path === '/' || path === '/magazine'
 
 /** `/cappe/reader/m/:slug/:story` — a story as its magazine prints it, pages
@@ -18,16 +20,17 @@ const HOME = (path: string) => path === '/' || path === '/magazine'
 export default function ShelfStory() {
   const { slug = '', story = '' } = useParams<{ slug: string; story: string }>()
   const navigate = useNavigate()
-  const key = `${slug}|${story}`
+  const asText = useSearchParams()[0].get('view') === 'text'
+  const key = `${slug}|${story}|${asText}`
   const [result, setResult] = useState<{ key: string; data?: CappeReaderStory; error?: string } | null>(null)
 
   useEffect(() => {
     let live = true
-    cappeApi.get<CappeReaderStory>(`/reader/magazines/${encodeURIComponent(slug)}/stories/${encodeURIComponent(story)}`)
+    cappeApi.get<CappeReaderStory>(`/reader/magazines/${encodeURIComponent(slug)}/stories/${encodeURIComponent(story)}${asText ? '?view=text' : ''}`)
       .then((d) => { if (live) setResult({ key, data: d }) })
       .catch((e) => { if (live) setResult({ key, error: e instanceof Error ? e.message : 'Could not open this story' }) })
     return () => { live = false }
-  }, [slug, story, key])
+  }, [slug, story, key, asText])
 
   const current = result?.key === key ? result : null
   const data = current?.data ?? null
@@ -50,15 +53,16 @@ export default function ShelfStory() {
     const origin = doc.querySelector('link[rel="canonical"]')?.getAttribute('href')?.match(/^https:\/\/[^/]+/)?.[0]
     doc.querySelectorAll('a[href^="/"]').forEach((a) => {
       const href = a.getAttribute('href') || ''
-      if (STORY.test(href) || HOME(href)) return
+      if (STORY.test(href) || TEXT.test(href) || HOME(href)) return
       if (origin) a.setAttribute('href', `${origin}${href}`)
       else a.removeAttribute('href')
     })
   }
 
   const follow = (path: string) => {
-    const toStory = path.match(STORY)
+    const toStory = path.match(STORY), toText = path.match(TEXT)
     if (toStory) navigate(readerStoryPath(slug, decodeURIComponent(toStory[1])))
+    else if (toText) navigate(`${readerStoryPath(slug, decodeURIComponent(toText[1]))}?view=text`)
     else if (HOME(path)) navigate(readerMagazinePath(slug))
   }
 

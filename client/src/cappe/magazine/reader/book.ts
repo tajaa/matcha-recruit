@@ -46,6 +46,8 @@ export function wireBook(doc: Document | null | undefined, { start = 0, onState 
   const box = doc?.querySelector<HTMLElement>('[data-mz-book]')
   const book = box?.querySelector<HTMLElement>('.mz-book')
   const pages = box?.querySelector<HTMLElement>('.mz-pages')
+  const strip = doc?.querySelector<HTMLElement>('[data-lyt-strip]')
+  if (doc && win && strip && !box) return wireStrip(win, strip, start, onState)
   if (!doc || !win || !box || !book || !pages) return null
 
   const end = box.querySelector<HTMLElement>('.mz-end')
@@ -161,6 +163,49 @@ export function wireBook(doc: Document | null | undefined, { start = 0, onState 
   return { turn: (delta) => go(cur + delta), go, state, dispose: () => clearInterval(timer) }
 }
 
+/** A story made in the Studio (`data-lyt-strip`, services/magazine/studio/
+ *  render.py): a strip of spreads (pages on a phone) that scrolls sideways.
+ *  Turned as its own `pages.js` turns it on the site, from out here. */
+function wireStrip(win: Window, strip: HTMLElement, start: number,
+  onState?: (state: BookState) => void): BookControl {
+  const total = strip.querySelectorAll('.lyt-paper').length
+  const phone = () => !!win.matchMedia?.('(max-width:699px)').matches
+  // Where each spread (each page, on a phone) starts along the strip.
+  const stops = () => {
+    const els = strip.querySelectorAll<HTMLElement>(phone() ? '.lyt-paper' : '.lyt-slot')
+    const base = strip.getBoundingClientRect().left - strip.scrollLeft
+    return Array.from(els, (el) => ({ x: Math.round(el.getBoundingClientRect().left - base), el }))
+  }
+  const at = (list: { x: number }[]) => list.reduce((best, s, i) =>
+    (Math.abs(s.x - strip.scrollLeft) < Math.abs(list[best].x - strip.scrollLeft) ? i : best), 0)
+  const state = (): BookState => {
+    const list = stops()
+    if (!list.length) return { spread: 0, spreads: 1, folio: '' }
+    const i = at(list), el = list[i].el
+    const ns = (el.classList.contains('lyt-paper') ? [el] : Array.from(el.querySelectorAll('.lyt-paper')))
+      .map((p) => Number(p.getAttribute('data-lyt-n')))
+    const shown = ns.length > 1 ? `Pages ${ns[0]}–${ns[ns.length - 1]}` : `Page ${ns[0]}`
+    return { spread: i, spreads: list.length, folio: list.length > 1 ? `${shown} of ${total}` : '' }
+  }
+  let told = ''
+  const emit = () => {
+    const s = state(), key = `${s.spread}|${s.spreads}|${s.folio}`
+    if (key !== told) { told = key; onState?.(s) }
+  }
+  const go = (i: number, smooth = true) => {
+    const list = stops()
+    if (!list.length) return
+    const to = list[Math.max(0, Math.min(list.length - 1, i))].x
+    if (smooth && typeof strip.scrollTo === 'function') strip.scrollTo({ left: to, behavior: 'smooth' })
+    else strip.scrollLeft = to
+    emit()
+  }
+  go(start, false)
+  // A scroll in the frame can't be heard from here: the strip is looked at.
+  const timer = setInterval(emit, POLL_MS)
+  return { turn: (delta) => go(at(stops()) + delta), go: (i) => go(i), state, dispose: () => clearInterval(timer) }
+}
+
 /** Where a link in the frame goes: a blank page whose fragment names it.
  *  Following it fires the frame's `load` (which Safari does deliver to the
  *  page outside), and `followedLink` reads it back. */
@@ -176,7 +221,7 @@ export function prepareFrame(doc: Document | null | undefined, { follow, openExt
 }): void {
   if (!doc?.head) return
   const style = doc.createElement('style')
-  style.textContent = '.mz-turn,[data-mz-folio]{display:none!important}'
+  style.textContent = '.mz-turn,[data-mz-folio],.lyt-turn,[data-lyt-folio]{display:none!important}'
     + `.mz-jump{position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none}`
   doc.head.appendChild(style)
   // A contents entry (or a cover line) names a story in the same book: it

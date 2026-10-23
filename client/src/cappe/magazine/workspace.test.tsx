@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { createEvent, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, createEvent, fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import type { CappeAsset, StoryBlock } from '../types'
 import type { FrameTarget } from './canvas/bridge'
@@ -284,6 +284,48 @@ describe('LayerInspector', () => {
     expect(onCommand).toHaveBeenCalledWith('group')
     fireEvent.click(screen.getByRole('button', { name: 'Bring to front (⌥⌘])' }))
     expect(onCommand).toHaveBeenLastCalledWith('front')
+  })
+
+  it('changes nothing for a number left as it was', () => {
+    const seen = { design: { layers: [] } as Design }
+    render(<Inspect start={{ layers: [words('w1')] }} ids={['w1']} seen={seen} />)
+    const before = seen.design
+    for (const label of ["X, percent of the picture's width", 'Width', 'Turn']) {
+      const box = screen.getByLabelText(label)
+      fireEvent.focus(box)
+      fireEvent.blur(box)
+    }
+    // The same number typed again is no change either.
+    const x = screen.getByLabelText("X, percent of the picture's width")
+    fireEvent.change(x, { target: { value: String((before.layers[0] as TextLayer).x) } })
+    fireEvent.keyDown(x, { key: 'Enter' })
+    expect(seen.design).toBe(before)
+  })
+
+  it('keeps a gradient stop where it is dragged or typed, still selected', () => {
+    const seen = { design: { layers: [] } as Design }
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 100, 20))
+    HTMLElement.prototype.setPointerCapture ??= () => {}
+    render(<Inspect start={{ layers: [shape('s1')] }} ids={['s1']} seen={seen} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Linear' }))
+    const stops = () => (seen.design.layers[0] as Extract<Layer, { kind: 'shape' }>).fill.stops.map((x) => x.at)
+    expect(stops()).toEqual([0, 100])
+    const drag = (name: string, to: number) => {
+      const knob = screen.getByRole('button', { name })
+      fireEvent.pointerDown(knob, { pointerId: 1 })
+      act(() => { knob.dispatchEvent(new MouseEvent('pointermove', { clientX: to })) })
+      act(() => { knob.dispatchEvent(new MouseEvent('pointerup')) })
+    }
+    drag('Stop at 0%', 40)
+    expect(stops()).toEqual([40, 100])  // where it was let go
+    drag('Stop at 100%', 20)
+    expect(stops()).toEqual([20, 40])
+    expect(screen.getByLabelText('Stop position')).toHaveValue('20')  // the one dragged
+    const pos = screen.getByLabelText('Stop position')
+    fireEvent.change(pos, { target: { value: '60' } })
+    fireEvent.blur(pos)
+    expect(stops()).toEqual([40, 60])
+    expect(screen.getByLabelText('Stop position')).toHaveValue('60')  // still the one moved
   })
 
   it('replaces, fits and colours a picture laid on another', () => {

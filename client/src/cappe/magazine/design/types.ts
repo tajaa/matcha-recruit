@@ -67,6 +67,8 @@ export const BLENDS: Blend[] = ['normal', 'multiply', 'screen', 'overlay', 'dark
 
 /** The limits the server keeps a design to (design_schema.py). */
 export const MAX_LAYERS = 200
+/** Groups nest at most this deep (a top-level group is 1). */
+export const MAX_DEPTH = 4
 export const MAX_STOPS = 8
 export const MAX_SHADOWS = 4
 export const MAX_TEXT = 2_000

@@ -4,12 +4,14 @@ What each block pins:
 
   * which followed magazines are live is `live_magazine`'s rule, applied to
     many sites with each owner plan resolved once;
-  * following is idempotent and capped; unfollowing works on a magazine that
-    is down (or gone);
+  * following is idempotent and capped, the count and the insert under the
+    account's lock (two follows at once can't pass the cap); unfollowing works
+    on a magazine that is down (or gone);
   * only a live, published magazine can be followed;
   * the Following list keeps a magazine that is down, marked so;
   * the feed reads only live followed magazines, newest first, a page at a
-    time, each story naming its magazine;
+    time, each story naming its magazine, and its last page says there is no
+    more (the route refuses the page after it);
   * the owner sees a count, never who;
   * the follow box on a magazine's page links to the dashboard to follow there.
 
@@ -68,6 +70,13 @@ def _entitlements(monkeypatch, by_plan):
     return calls
 
 
+class Conn(QueryConn):
+    """QueryConn that also opens (pretend) transactions."""
+
+    def transaction(self):
+        return self
+
+
 # ── which followed magazines are live ────────────────────────────────────────
 
 def test_live_magazines_resolves_each_plan_once(monkeypatch):
@@ -107,19 +116,31 @@ def test_a_magazine_turned_off_is_never_asked_about_its_owner(monkeypatch):
 
 def test_following_is_one_row_and_idempotent():
     site = _site("a")
-    conn = QueryConn(fetchval={"COUNT(*)": 3})
+    conn = Conn(fetchval={"COUNT(*)": 3})
     asyncio.run(follows.follow(conn, ACCOUNT.id, site))
-    sql, args = [(c[1], c[2]) for c in conn.calls if c[0] == "execute"][0]
+    sql, args = [(c[1], c[2]) for c in conn.calls if c[0] == "execute"][1]
     assert "ON CONFLICT DO NOTHING" in sql and args == (ACCOUNT.id, site["id"])
+
+
+def test_the_count_and_the_insert_hold_the_accounts_lock():
+    # At 499, two follows at once both read 499 and both inserted (501 rows,
+    # the oldest then fell off the list). The lock comes first, in the same
+    # transaction, so the second waits for the first's insert.
+    conn = Conn(fetchval={"COUNT(*)": follows.FOLLOW_LIMIT - 1})
+    asyncio.run(follows.follow(conn, ACCOUNT.id, _site("a")))
+    kinds = [(k, sql.split()[0], args) for k, sql, args in conn.calls]
+    assert kinds[0] == ("execute", "SELECT", (f"cappe_follow:{ACCOUNT.id}",))
+    assert "pg_advisory_xact_lock" in conn.calls[0][1]
+    assert [k for k, *_ in kinds] == ["execute", "fetchval", "execute"]
 
 
 def test_the_cap_refuses_a_new_follow_but_not_a_repeat():
     site = _site("a")
-    at_cap = QueryConn(fetchval={"COUNT(*)": follows.FOLLOW_LIMIT, "SELECT 1 FROM": None})
+    at_cap = Conn(fetchval={"COUNT(*)": follows.FOLLOW_LIMIT, "SELECT 1 FROM": None})
     with pytest.raises(HTTPException) as err:
         asyncio.run(follows.follow(at_cap, ACCOUNT.id, site))
     assert err.value.status_code == 409 and err.value.detail["code"] == "follow_limit"
-    again = QueryConn(fetchval={"COUNT(*)": follows.FOLLOW_LIMIT, "SELECT 1 FROM": 1})
+    again = Conn(fetchval={"COUNT(*)": follows.FOLLOW_LIMIT, "SELECT 1 FROM": 1})
     asyncio.run(follows.follow(again, ACCOUNT.id, site))
 
 
@@ -134,7 +155,7 @@ def _client(monkeypatch, conn):
 
 def test_a_live_magazine_is_followed(monkeypatch):
     site = _site("salt")
-    conn = QueryConn(fetchrow={"FROM cappe_sites": site}, fetchval={"COUNT(*)": 0})
+    conn = Conn(fetchrow={"FROM cappe_sites": site}, fetchval={"COUNT(*)": 0})
 
     async def live(c, s):
         return _mag(site)
@@ -233,6 +254,8 @@ def test_the_feed_is_live_followed_stories_newest_first_a_page_at_a_time(monkeyp
     first = out["stories"][0]
     assert first["slug"] == "s0" and first["magazine"] == {"slug": "b", "name": "B Mag", "accent": None}
     assert sorted(n for _s, n in cover_calls) == [6, 6]  # one covers read per magazine on the page
+    last = asyncio.run(follows.feed(conn, ACCOUNT.id, page=follows.FEED_MAX_PAGE))
+    assert last["has_more"] is False and len(last["stories"]) == follows.FEED_PAGE  # no page the route refuses
 
 
 def test_the_feed_route_pages(monkeypatch):
@@ -245,8 +268,10 @@ def test_the_feed_route_pages(monkeypatch):
     monkeypatch.setattr(follows, "feed", feed)
     with _client(monkeypatch, QueryConn()) as client:
         assert client.get("/reader/feed?page=3").json()["page"] == 3
+        assert got["args"] == (ACCOUNT.id, 3)
         assert client.get("/reader/feed?page=0").status_code == 422
-    assert got["args"] == (ACCOUNT.id, 3)
+        assert client.get(f"/reader/feed?page={follows.FEED_MAX_PAGE}").status_code == 200
+        assert client.get(f"/reader/feed?page={follows.FEED_MAX_PAGE + 1}").status_code == 422
 
 
 # ── the owner's count ────────────────────────────────────────────────────────
@@ -284,5 +309,3 @@ def test_every_page_with_the_box_passes_its_slug():
 
     for mod in (pages, issue_pages):
         assert "follow_html(mag)" not in inspect.getsource(mod)
-
-

@@ -46,6 +46,8 @@ export type FrameMessage =
   | { type: 'mz-focal'; target: FrameTarget; x: number; y: number }
   | { type: 'mz-key'; key: FrameKey }
   | { type: 'mz-layers'; story: string; block: number; item: number | null; changes: LayerChange[] }
+  /** The heights the page measured for a design's words that grow (`autosize: 'height'`). */
+  | { type: 'mz-heights'; story: string; block: number; item: number | null; heights: Record<string, number> }
 
 /** The longest plain words the page may send (a field's own limit is applied
  *  where the edit lands: storyDoc), and the largest rich document, as JSON:
@@ -184,6 +186,21 @@ export function readMessage(data: unknown, ctx: BridgeContext): FrameMessage | n
       const changes = d.changes.map(layerChange)
       return changes.every((c): c is LayerChange => c !== null) && changes.length
         ? { type: 'mz-layers', story: s, block: b, item, changes } : null
+    }
+    case 'mz-heights': {
+      const s = story(d.story, ctx), b = int(d.block, 0, MAX_BLOCK)
+      const item = d.item === null ? null : int(d.item, 0, 11)
+      const given = obj(d.heights)
+      if (!s || b === null || (item === null && d.item !== null) || !given) return null
+      const entries = Object.entries(given)
+      if (entries.length > MAX_CHANGES) return null
+      const heights: Record<string, number> = {}
+      for (const [id, v] of entries) {
+        const h = between(v, 0.5, 400)
+        if (!LAYER_ID.test(id) || h === null) return null
+        heights[id] = h
+      }
+      return { type: 'mz-heights', story: s, block: b, item, heights }
     }
     default: return null
   }
