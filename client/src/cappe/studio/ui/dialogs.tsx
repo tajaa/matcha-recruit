@@ -198,6 +198,7 @@ export function PictureDialog({ cutout }: { cutout?: boolean }) {
   }
   return (
     <PictureEditor siteId={c.siteId} asset={target.asset} startIn={cutout ? 'cutout' : 'adjust'} onClose={close}
+      onHelp={(section) => c.store.set({ guide: section })}
       onDone={(saved) => {
         c.store.set((s) => ({ assets: { ...s.assets, [saved.id]: toAsset(saved) } }))
         c.store.edit((d) => patchItems(d, [target.frame], { asset_id: saved.id }))

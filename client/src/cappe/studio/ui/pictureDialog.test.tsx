@@ -11,11 +11,12 @@ import { PictureDialog } from './dialogs'
 // The editor itself is tested on its own; here it says where it opened and
 // hands back an edited picture.
 vi.mock('../picture/PictureEditor', () => ({
-  default: ({ asset, startIn, onDone, onClose }: { asset: { id: string }; startIn: string; onDone: (a: unknown) => void; onClose: () => void }) => (
+  default: ({ asset, startIn, onDone, onClose, onHelp }: { asset: { id: string }; startIn: string; onDone: (a: unknown) => void; onClose: () => void; onHelp: (s: string) => void }) => (
     <div>
       <p>Editing {asset.id} in {startIn}</p>
       <button type="button" onClick={() => onDone({ id: 'e1', kind: 'edit', url: 'https://cdn.example.test/e.png', parent_asset_id: asset.id, recipe: { look: 'noir' }, credit_line: 'Haley' })}>Finish</button>
       <button type="button" onClick={onClose}>Leave</button>
+      <button type="button" onClick={() => onHelp('cutout')}>Help</button>
     </div>
   ),
 }))
@@ -36,7 +37,7 @@ function studio() {
   const store = new Store({
     doc: d, selection: [full], editing: null, page: 1, tool: 'select', view: { ...DEFAULT_VIEW }, panels: [],
     overset: new Set(), assets: { a1: { id: 'a1', url: 'https://cdn.example.test/a.jpg', credit_line: 'Haley' } },
-    dialog: 'picture', threading: null, snaps: null, marquee: null,
+    dialog: 'picture', guide: null, threading: null, snaps: null, marquee: null,
     save: { rev: 1, state: 'saved', message: null, draft: false, live: false },
   } as State, mono)
   const ctx = { store, siteId: 's1' } as unknown as StudioCtx
@@ -66,6 +67,16 @@ describe('the Picture Editor in the Studio', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Leave' }))
     expect(store.get().dialog).toBeNull()
     expect(store.get().doc.items.find((i) => i.id === full)).toMatchObject({ asset_id: 'a1' })
+  })
+
+  it('opens the guide at the section asked for, over the editor', () => {
+    const { store, ctx } = studio()
+    show(ctx, true)
+    fireEvent.click(screen.getByRole('button', { name: 'Help' }))
+    expect(store.get().guide).toBe('cutout')
+    expect(store.get().dialog).toBe('picture')
+    COMMANDS.find((c) => c.id === 'shortcuts')!.run(ctx)
+    expect(store.get().guide).toBe('keys')
   })
 
   it('asks for a picture when the frame selected is empty', () => {

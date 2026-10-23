@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { FlipHorizontal2, FlipVertical2, Loader2, Redo2, RotateCcw, RotateCw, Undo2, X } from 'lucide-react'
+import { CircleHelp, FlipHorizontal2, FlipVertical2, Loader2, Redo2, RotateCcw, RotateCw, Undo2, X } from 'lucide-react'
 import type { CappeAsset } from '../../types'
 import { studioApi } from '../api'
 import type { Asset } from '../model/types'
@@ -58,12 +58,14 @@ const errorText = (e: unknown, fallback: string) => (e instanceof Error && e.mes
  *  full size and saves it as a new picture made from this one (the server
  *  keeps the recipe, the source and its credit). Editing an edited picture
  *  starts again from its source, with its recipe. */
-export default function PictureEditor({ siteId, asset, startIn = 'adjust', onDone, onClose }: {
+export default function PictureEditor({ siteId, asset, startIn = 'adjust', onDone, onClose, onHelp }: {
   siteId: string
   asset: Asset
   startIn?: Mode
   onDone: (saved: CappeAsset) => void
   onClose: () => void
+  /** Open the Studio's guide at this section (`picture` or `cutout`). */
+  onHelp?: (section: 'picture' | 'cutout') => void
 }) {
   const reopened = asset.kind === 'edit' && !!asset.parent
   const [recipe, setRecipe] = useState<Recipe>(() => (reopened ? normalizeRecipe(asset.recipe) : {}))
@@ -454,6 +456,10 @@ export default function PictureEditor({ siteId, asset, startIn = 'adjust', onDon
         </div>
         <div className="ml-auto flex items-center gap-2">
           {error && <span role="alert" className="max-w-md truncate text-xs text-red-300" title={error}>{error}</span>}
+          {onHelp && (
+            <button type="button" onClick={() => onHelp(mode === 'cutout' ? 'cutout' : 'picture')} aria-label="How the Picture Editor works"
+              title="How the Picture Editor works" className="rounded-md p-1 text-zinc-400 hover:bg-zinc-800 hover:text-white"><CircleHelp className="h-4 w-4" /></button>
+          )}
           <button type="button" onClick={onClose} disabled={phase === 'saving'} className="rounded-md px-3 py-1 text-xs text-zinc-300 hover:bg-zinc-800">Cancel</button>
           <button type="button" onClick={() => void done()} disabled={busy}
             className="inline-flex items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50">

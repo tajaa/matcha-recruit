@@ -151,6 +151,9 @@ export const COMMANDS: Command[] = [
   { id: 'edit-picture', label: 'Edit picture…', keys: '⇧⌘E', enabled: pictureSelected, run: ({ store }) => store.set({ dialog: 'picture' }) },
   { id: 'cut-out', label: 'Cut out the subject…', enabled: pictureSelected, run: ({ store }) => store.set({ dialog: 'cutout' }) },
   // View
+  // Help
+  { id: 'guide', label: 'How the Studio works', run: ({ store }) => store.set({ guide: 'start' }) },
+  { id: 'shortcuts', label: 'Keyboard shortcuts', run: ({ store }) => store.set({ guide: 'keys' }) },
   { id: 'zoom-in', label: 'Zoom in', keys: '⌘=', run: (c) => zoomTo(c, c.store.get().view.zoom * 1.25) },
   { id: 'zoom-out', label: 'Zoom out', keys: '⌘-', run: (c) => zoomTo(c, c.store.get().view.zoom / 1.25) },
   { id: 'fit-page', label: 'Fit page in window', keys: '⌘0', run: (c) => c.fit(c.store.get().page, false) },

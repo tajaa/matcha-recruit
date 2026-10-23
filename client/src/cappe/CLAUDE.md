@@ -130,6 +130,10 @@ Website-builder frontend for the consumer brand **Gummfit**, host-routed on gumm
   model (onnxruntime-web, `optimizeDeps.exclude`d, a module worker) and `samMath.ts` its arithmetic. The
   cut-out's mask always follows the recipe's clicks (an effect keyed by them, a few masks kept), so undo,
   redo, Reset all and reopening an edit show and save the mask of the clicks that are there.
+  **The guide** (`ui/StudioGuide.tsx`, words in `ui/guideContent.ts`) explains every part of the Studio; it
+  opens on a first visit (localStorage `cappe-studio-guide-seen`), from Help, the top bar's ? and the
+  Picture Editor's ?. **A change to a tool, panel, menu or key changes its section in the same PR**; the
+  shortcuts section is built from `COMMANDS`, and a test holds the tool keys to the commands.
 
 ## Backend pairing
 
