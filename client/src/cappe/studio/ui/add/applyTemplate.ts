@@ -3,10 +3,13 @@
 // with the page, and each run of linked frames made one thread. A blank page
 // (nothing on it but empty text frames) takes the template; otherwise it
 // goes on a new page after the one in view, so nothing is ever covered or
-// lost. One undo step.
+// lost. "The one in view" is the one in view at the click, even if the
+// faces take a moment and the writer turns the page meanwhile. A story with
+// no room for it (pages, texts, frames) is told so and left as it was. One
+// undo step.
 
 import { allIds, newId, newItem } from '../../model/doc'
-import { CHAR_DEFAULTS, round } from '../../model/limits'
+import { CHAR_DEFAULTS, LIMITS, docProblem, round } from '../../model/limits'
 import { addPages, deleteItems } from '../../model/ops'
 import type { Doc, Item, Para, Thread } from '../../model/types'
 import type { StudioCtx } from '../context'
@@ -102,23 +105,52 @@ export function previewDoc(t: Template, doc: Doc): Doc {
   return { ...base, ...templateItems(t, base, 'p1') }
 }
 
-/** Use a template: on the page in view if it's blank, else a new page after
- *  it. Returns the page it went on. */
-export async function applyTemplate(c: StudioCtx, t: Template): Promise<number> {
-  const book = c.fonts.book
-  await Promise.all(templateFaces(t).map(([f, w, i]) => book.face(f, w, i)).filter((f) => !!f)
-    .map((f) => c.fonts.ensure(f!).catch(() => {})))
-  const s = c.store.get()
-  const page = s.page
-  const blank = blankPage(s.doc, page)
-  const target = blank ? page : page + 1
+const preparing = new WeakSet<object>()
+
+/** Whether a template is still being set up in this Studio (its faces loading). */
+export function preparingTemplate(c: StudioCtx): boolean {
+  return preparing.has(c.store)
+}
+
+/** Use a template: on the page in view when it was clicked if that page is
+ *  blank, else a new page after it. Returns the page it went on, or null when
+ *  it went nowhere: another template is still being set up, the page was
+ *  deleted meanwhile, or the story has no room for it (the Studio's notice
+ *  says which). Nothing is changed then. */
+export async function applyTemplate(c: StudioCtx, t: Template): Promise<number | null> {
+  if (preparing.has(c.store)) return null
+  const clicked = c.store.get()
+  const pageId = clicked.doc.pages[clicked.page]?.id
+  if (!pageId) return null
+  preparing.add(c.store)
+  try {
+    const book = c.fonts.book
+    await Promise.all(templateFaces(t).map(([f, w, i]) => book.face(f, w, i)).filter((f) => !!f)
+      .map((f) => c.fonts.ensure(f!).catch(() => {})))
+  } finally {
+    preparing.delete(c.store)
+  }
+  const refuse = (notice: string) => { c.store.set({ notice }); return null }
   c.editor.close()
-  c.store.edit((d) => {
-    const onPage = d.items.filter((i) => i.page === d.pages[page].id).map((i) => i.id)
-    const next = blank ? deleteItems(d, onPage) : addPages(d, page)
-    const built = templateItems(t, next, next.pages[target].id)
-    return { ...next, items: [...next.items, ...built.items], threads: [...next.threads, ...built.threads] }
-  }, { key: `template:${Date.now()}`, extra: { page: target, selection: [], tool: 'select', threading: null } })
+  const d = c.store.get().doc
+  const page = d.pages.findIndex((p) => p.id === pageId)
+  if (page < 0) return refuse('The page that template was for has been deleted.')
+  const blank = blankPage(d, page)
+  if (!blank && d.pages.length >= LIMITS.MAX_PAGES) {
+    return refuse(`A story holds at most ${LIMITS.MAX_PAGES} pages, so the template has no new page to go on. Clear a page to lay it out there.`)
+  }
+  const target = blank ? page : page + 1
+  const onPage = d.items.filter((i) => i.page === pageId).map((i) => i.id)
+  const next = blank ? deleteItems(d, onPage) : addPages(d, page)
+  const dest = next.pages[target]?.id
+  if (!dest || (!blank && (next.pages.length !== d.pages.length + 1 || d.pages.some((p) => p.id === dest)))) {
+    return refuse('Couldn’t add a page for that template.')
+  }
+  const built = templateItems(t, next, dest)
+  const done = { ...next, items: [...next.items, ...built.items], threads: [...next.threads, ...built.threads] }
+  const problem = docProblem(done)
+  if (problem) return refuse(`The template wasn’t added: ${problem}`)
+  c.store.edit(() => done, { key: `template:${Date.now()}`, extra: { page: target, selection: [], tool: 'select', threading: null, notice: null } })
   c.store.seal()
   c.fit?.(target, false)
   return target
