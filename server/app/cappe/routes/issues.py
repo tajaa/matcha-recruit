@@ -158,7 +158,10 @@ async def preview_issue(site_id: UUID, body: CappeMagazineIssuePreview,
         except IssueError as exc:
             raise _unprocessable(exc) from exc
         rows = await conn.fetch(
-            f"SELECT {POST_COLS} FROM cappe_posts WHERE site_id = $1 AND id = ANY($2::uuid[]) AND hidden_at IS NULL",
+            # Drafts show as they will once released; an archived story never
+            # appears in the issue a reader gets, so it doesn't here either.
+            f"SELECT {POST_COLS} FROM cappe_posts WHERE site_id = $1 AND id = ANY($2::uuid[]) AND hidden_at IS NULL "
+            "AND status IN ('draft', 'published')",
             site_id, ids,
         ) if ids else []
         by_id = {str(r["id"]): post_row(r) for r in rows}
