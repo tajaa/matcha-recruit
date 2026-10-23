@@ -99,7 +99,7 @@ function itemLines(item: Item, s: State, len: (pt: number) => string): string[] 
     `at ${len(item.x)} from the left, ${len(item.y)} from the top; ${len(item.w)} × ${len(item.h)}`,
   ]
   if (item.rot) head.push(`turned ${n(item.rot)}°`)
-  if (item.opacity < 1) head.push(`opacity ${Math.round(item.opacity * 100)}%`)
+  if (item.opacity < 100) head.push(`opacity ${item.opacity}%`) // stored as a percentage
   const extra: string[] = []
   switch (item.kind) {
     case 'text': {

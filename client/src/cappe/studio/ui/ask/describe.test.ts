@@ -22,6 +22,7 @@ function studio(over: Partial<State> = {}, doc = base()) {
   const [text, image, , rect] = d.items.map((i) => i.id)
   d = patchItems(d, [image], { asset_id: 'a1', fit: 'fill' })
   d = patchItems(d, [rect], { fill: '#d4502a' })
+  d = patchItems(d, [image], { opacity: 60 })
   d = {
     ...d,
     threads: [{ id: 's1', frames: [text], paras: [
@@ -61,6 +62,8 @@ describe('what Ask the Studio sends about the page', () => {
     expect(out).toContain('· Body text: "Body copy starts here" in Source Serif 4 400, 10.5 pt, leading auto, tracking 0, #1a1a1a, left (some words styled differently)')
     expect(out).toContain('shows "Boats at dusk", landscape, edited with the Film look; fit Fill')
     expect(out).toContain('stroke 1 pt')
+    expect(out).toContain('opacity 60%')
+    expect(out.match(/opacity/g)).toHaveLength(1) // a solid frame doesn't say so
     expect(out).not.toContain('#d4502a') // page 3's box isn't in view
   })
 
