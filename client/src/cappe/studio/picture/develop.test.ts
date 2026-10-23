@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { developPixel, grainNoise, hueRgb, outputUv, sourceUv } from './develop'
+import { FRAGMENT, developPixel, grainNoise, hueRgb, outputUv, sourceUv } from './develop'
 import { normalizeRecipe, type Crop, type Recipe } from './recipe'
 
 const crop = (c: Partial<Crop>): Crop => normalizeRecipe({ crop: c }).crop!
@@ -45,6 +45,21 @@ describe('where an output pixel comes from', () => {
 })
 
 describe('a developed pixel', () => {
+  it('keeps what exposure brightened bright when the highlights go up', () => {
+    // Past white, the tone curves would turn round and darken it (to black).
+    for (const r of [{ exposure: 1, highlights: 100 }, { exposure: 2, highlights: 50 }, { exposure: 1, shadows: 100 }]) {
+      expect(Math.min(...dev([1, 1, 1], r))).toBeGreaterThan(0.99)
+    }
+    expect(Math.min(...dev([0.9, 0.9, 0.9], { exposure: 1, highlights: 100 }))).toBeGreaterThan(0.99)
+    // The shader does the same (its lightness clamped before the curves).
+    expect(FRAGMENT).toContain('float L = clamp(luma(d), 0.0, 1.0);')
+  })
+
+  it('keeps a transparent picture transparent (the shader multiplies in its cut-out)', () => {
+    expect(FRAGMENT).toContain('float alpha = src.a;')
+    expect(FRAGMENT).toContain('alpha *= uInvert > 0.5 ? 1.0 - m : m;')
+  })
+
   const grey: [number, number, number] = [0.5, 0.5, 0.5]
   const orange: [number, number, number] = [0.9, 0.5, 0.2]
 

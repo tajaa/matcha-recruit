@@ -35,6 +35,8 @@ MIN_LIKENESS = 0.5
 _WORK = 256  # px: both pictures are compared at most this big
 _CELLS = 64  # what's kept, on its long side
 _KEPT = 250  # a cell's opacity to count as kept, so cells across a cut edge are left out
+_SEEN = 32  # a pixel's opacity to show at all
+_RIM, _RIM_PX = 0.25, 64  # translucent pixels a cut edge's soft rim may add: a share of the kept ones, or this many
 _REACH = 2  # cells: a cell's detail is it less the kept cells this near it
 _FLAT = 1.0  # grey levels of detail: less is nothing visible to compare (or to borrow a credit for)
 _MIN_CELLS = 16
@@ -57,26 +59,40 @@ def size_matches(source: dict, width: int, height: int, recipe: dict) -> bool:
     return abs(want_w - width) <= SIZE_SLACK and abs(want_h - height) <= SIZE_SLACK
 
 
+_SUPER = 4  # the reference is sampled this much finer, then averaged down (no aliasing)
+
+
 def _reference(source: Image.Image, recipe: dict, size: tuple[int, int]) -> Image.Image:
     """The source turned, flipped, straightened and cropped as the recipe says
-    (the Studio's shader, roughly), at `size`."""
+    (the Studio's shader, roughly), at `size`. Drawn straight at that size by
+    one affine map: straightening grows the picture to cover its box, and on a
+    long thin picture that growth is thousands of times over, so the grown
+    picture is never made."""
     img = ImageOps.exif_transpose(source).convert("L")
     crop = recipe.get("crop")
-    if crop:
-        img = img.rotate(-crop["turn"], expand=True) if crop["turn"] else img
-        if crop["flip_h"]:
-            img = ImageOps.mirror(img)
-        if crop["flip_v"]:
-            img = ImageOps.flip(img)
-        w, h = img.size
-        if crop["angle"]:
-            s = cover_scale(w, h, crop["angle"])
-            # A positive angle turns the picture clockwise, as the Studio does.
-            img = img.resize((round(w * s), round(h * s))).rotate(-crop["angle"], resample=Image.BILINEAR)
-            dx, dy = (img.width - w) / 2, (img.height - h) / 2
-            img = img.crop((dx, dy, dx + w, dy + h))
-        img = img.crop((crop["x"] * w, crop["y"] * h, (crop["x"] + crop["w"]) * w, (crop["y"] + crop["h"]) * h))
-    return img.resize(size, Image.BILINEAR)
+    if not crop:
+        return img.resize(size, Image.BILINEAR)
+    img = img.rotate(-crop["turn"], expand=True) if crop["turn"] else img
+    if crop["flip_h"]:
+        img = ImageOps.mirror(img)
+    if crop["flip_v"]:
+        img = ImageOps.flip(img)
+    w, h = img.size
+    # The crop, in the straightened picture's pixels, sampled at `out`.
+    out = (size[0] * _SUPER, size[1] * _SUPER)
+    sx, sy = crop["w"] * w / out[0], crop["h"] * h / out[1]
+    x0, y0 = crop["x"] * w, crop["y"] * h
+    # A straightened point P (from the middle) is the turned picture's point
+    # middle + R(-angle)·P / scale, with R the Studio's clockwise turn.
+    a = math.radians(crop["angle"] or 0)
+    k = 1 / cover_scale(w, h, crop["angle"]) if crop["angle"] else 1.0
+    c, s = math.cos(a) * k, math.sin(a) * k
+    cx, cy = w / 2, h / 2
+    # Output (x, y) → P = (x0 + x·sx − cx, y0 + y·sy − cy) → input.
+    px, py = x0 - cx, y0 - cy
+    data = (c * sx, s * sy, cx + c * px + s * py,
+            -s * sx, c * sy, cy - s * px + c * py)
+    return img.transform(out, Image.AFFINE, data, resample=Image.BILINEAR).resize(size, Image.BOX)
 
 
 def _detail(grey: bytes, kept: list[bool], w: int, h: int) -> list[float]:
@@ -117,10 +133,32 @@ def _correlation(a: list[float], b: list[float]) -> Optional[float]:
     return sum((x - ma) * (y - mb) for x, y in zip(a, b)) / math.sqrt(va * vb)
 
 
+def _compare(ref: Image.Image, grey: Image.Image, alpha: Image.Image, cutoff: int) -> Optional[bool]:
+    """Whether the detail where the edit's opacity reaches `cutoff` is the
+    source's there; None when too little reaches it to tell."""
+    box = alpha.point(lambda v: 255 if v >= cutoff else 0).getbbox()
+    if box is None:
+        return None
+    ref, grey, alpha = ref.crop(box), grey.crop(box), alpha.crop(box)
+    s = min(1.0, _CELLS / max(grey.size))
+    cells = (max(1, round(grey.width * s)), max(1, round(grey.height * s)))
+    ref, grey, alpha = ref.resize(cells, Image.BOX), grey.resize(cells, Image.BOX), alpha.resize(cells, Image.BOX)
+    kept = [v >= cutoff for v in alpha.tobytes()]
+    if sum(kept) < _MIN_CELLS:
+        return None
+    theirs, ours = _detail(ref.tobytes(), kept, *cells), _detail(grey.tobytes(), kept, *cells)
+    if _spread(ours) < _FLAT:
+        return True
+    likeness = _correlation(theirs, ours)
+    return likeness is not None and likeness >= MIN_LIKENESS
+
+
 def looks_like(source_bytes: bytes, edited_bytes: bytes, recipe: dict) -> bool:
     """Whether the edit is the source edited: their detail compared inside
     what the edit keeps (the bounds of a cut-out, scaled up). An edit with
-    nothing visible left (all cut away, a sliver, flat) is taken."""
+    nothing visible left (all cut away, a sliver, flat) is taken. What shows
+    only translucently is held to it too, when there's more of it than a cut
+    edge's soft rim: a picture can't pass by being 97% opaque."""
     edited = ImageOps.exif_transpose(Image.open(io.BytesIO(edited_bytes)))
     w, h = edited.size
     k = min(1.0, _WORK / max(w, h))
@@ -130,21 +168,13 @@ def looks_like(source_bytes: bytes, edited_bytes: bytes, recipe: dict) -> bool:
     # doesn't darken the cells beside it.
     small = edited.convert("RGBA").convert("RGBa").resize(size, Image.BOX).convert("RGBA")
     grey, alpha = small.convert("L"), small.getchannel("A")
-    box = alpha.point(lambda v: 255 if v >= _KEPT else 0).getbbox()
-    if box is None:
-        return True
-    ref, grey, alpha = ref.crop(box), grey.crop(box), alpha.crop(box)
-    s = min(1.0, _CELLS / max(grey.size))
-    cells = (max(1, round(grey.width * s)), max(1, round(grey.height * s)))
-    ref, grey, alpha = ref.resize(cells, Image.BOX), grey.resize(cells, Image.BOX), alpha.resize(cells, Image.BOX)
-    kept = [v >= _KEPT for v in alpha.tobytes()]
-    if sum(kept) < _MIN_CELLS:
-        return True
-    theirs, ours = _detail(ref.tobytes(), kept, *cells), _detail(grey.tobytes(), kept, *cells)
-    if _spread(ours) < _FLAT:
-        return True
-    likeness = _correlation(theirs, ours)
-    return likeness is not None and likeness >= MIN_LIKENESS
+    if _compare(ref, grey, alpha, _KEPT) is False:
+        return False
+    opacity = alpha.tobytes()
+    kept, seen = sum(v >= _KEPT for v in opacity), sum(v >= _SEEN for v in opacity)
+    if seen - kept > max(_RIM * kept, _RIM_PX):
+        return _compare(ref, grey, alpha, _SEEN) is not False
+    return True
 
 
 async def insert_edit(conn, *, account_id: UUID, site_id: UUID, source: dict, recipe: dict, url: str,
