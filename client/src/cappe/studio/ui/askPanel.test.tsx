@@ -34,7 +34,7 @@ const doc = (): Doc => ({
 function studio() {
   const d = addItem(doc(), 'rect', 'p1', { x: 0, y: 0, w: 100, h: 100 }).doc
   const store = new Store({
-    doc: d, selection: [], editing: null, page: 0, tool: 'select', view: { ...DEFAULT_VIEW }, panels: ['ask'],
+    doc: d, selection: [], editing: null, page: 0, tool: 'select', view: { ...DEFAULT_VIEW }, panels: ['ask'], drawer: null,
     overset: new Set(), assets: {}, dialog: null, guide: null, threading: null, snaps: null, marquee: null,
     save: { rev: 1, state: 'saved', message: null, draft: false, live: false },
   } as State, mono)

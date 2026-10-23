@@ -1,4 +1,6 @@
-import { useLayoutEffect, useMemo, useRef } from 'react'
+import { useLayoutEffect, useMemo, useRef, type DragEvent } from 'react'
+import { dragging, dropOn, endDrag } from '../ui/add/drag'
+import { landing } from '../ui/add/place'
 import layoutCss from '../render/layout.css?raw'
 import { facesCss, frameThreads, pageItemsHtml, type Draw } from '../render/layoutRender'
 import { setHtml } from '../render/sink'
@@ -31,12 +33,25 @@ export default function Canvas() {
   const css = useMemo(() => layoutCss + facesCss(doc, fonts.book.face), [doc, fonts])
   const cursor = tool === 'hand' ? 'grab' : tool === 'zoom' ? 'zoom-in' : tool === 'select' ? 'default' : 'crosshair'
   const inset = rulers ? RULER : 0
+  // Something dragged from the side panel lands where it is let go.
+  const over = (e: DragEvent) => {
+    if (!dragging(e.dataTransfer.types)) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'copy'
+  }
+  const drop = (e: DragEvent) => {
+    const what = dragging(e.dataTransfer.types)
+    if (!what) return
+    e.preventDefault()
+    endDrag()
+    void dropOn(ctx, what, landing(ctx, e))
+  }
 
   return (
     <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden" style={{ background: PASTEBOARD }}>
       <style>{css}</style>
       {rulers && <Rulers scroller={scroller} lay={lay} />}
-      <div ref={scroller} data-studio-scroller onPointerDown={pointer.down} onDoubleClick={pointer.double}
+      <div ref={scroller} data-studio-scroller onPointerDown={pointer.down} onDoubleClick={pointer.double} onDragOver={over} onDrop={drop}
         className="absolute overflow-auto overscroll-contain"
         style={{ left: inset, top: inset, right: 0, bottom: 0, cursor, touchAction: 'none', containerType: 'size' }}>
         <div className="w-max" style={{ padding: '50cqh 50cqw' }}>

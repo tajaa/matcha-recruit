@@ -12,6 +12,7 @@ import { StudioContext, useCtx, type StudioCtx } from './context'
 import { LibraryDialog, PictureDialog, RevisionsDialog, StoryDialog } from './dialogs'
 import { markGuideSeen } from './guideContent'
 import StudioGuide from './StudioGuide'
+import AddPanel from './add/AddPanel'
 import { AskPanel } from './panels/AskPanel'
 import { ObjectPanel } from './panels/ObjectPanel'
 import { PagesPanel } from './panels/PagesPanel'
@@ -36,6 +37,7 @@ function Shell() {
   const conflict = useStudio(c.store, (s) => s.save.state === 'conflict')
   const [preview, setPreview] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const storeNotice = useStudio(c.store, (s) => s.notice ?? null)
   // While the preview is up its keys turn its pages: none reach the Studio.
   const previewing = useRef(false)
   useEffect(() => { previewing.current = preview !== null }, [preview])
@@ -72,13 +74,14 @@ function Shell() {
           <button type="button" onClick={() => window.location.reload()} className="rounded border border-amber-400/50 px-2 py-0.5 hover:bg-amber-500/20">Reload it</button>
         </div>
       )}
-      {notice && (
+      {(notice || storeNotice) && (
         <div role="alert" className="flex items-center gap-3 bg-red-500/15 px-4 py-2 text-xs text-red-300">
-          {notice}
-          <button type="button" onClick={() => setNotice(null)} aria-label="Dismiss" className="ml-auto"><X className="h-3.5 w-3.5" /></button>
+          {notice || storeNotice}
+          <button type="button" onClick={() => { setNotice(null); c.store.set({ notice: null }) }} aria-label="Dismiss" className="ml-auto"><X className="h-3.5 w-3.5" /></button>
         </div>
       )}
       <div className="flex min-h-0 flex-1">
+        <AddPanel />
         <ToolBar />
         <Canvas />
         <aside aria-label="Panels" className="flex w-[300px] shrink-0 flex-col overflow-y-auto border-l border-zinc-800 bg-zinc-900">
