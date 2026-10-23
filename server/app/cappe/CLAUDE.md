@@ -666,6 +666,11 @@ normalized paragraphs itself; a thread with no valid composition prints its word
   `cappe/graphics/<sha>.svg`. **Ops:** run `server/scripts/build_studio_graphics.py --out DIR --upload --dry-run`,
   then for real, once per environment (it rebuilds the manifest from pinned sources: commit any change); until then
   graphics show as empty boxes.
+- **Page templates** (client only: `ui/add/templates.ts`, `applyTemplate.ts`, `TemplatesTab.tsx`): 13 pages drawn on
+  Letter and fitted to the story's size when used (type scaled, edge items out to the bleed, linked frames one
+  thread). A blank page takes the template; any other gets a new page after it, so nothing is covered. One undo
+  step. `templates.test.tsx` holds every face and graphic to the bank and composes each frame at its face's real
+  ascent and descent: a display face can be far taller than its size, so size frames from that test, not by eye.
 - **Ask the Studio** (`studio/ask.py`, `POST …/studio/stories/{id}/ask`; client `ui/ask/`, `ui/panels/AskPanel.tsx`):
   one Claude Messages call per question (surface `gummfit.studio`, Haiku by default), no tools, nothing saved,
   nothing on the page changed. **The Studio sends the guide (`ui/guideContent.ts`) and the commands

@@ -119,6 +119,7 @@ export const COMMANDS: Command[] = [
     } },
   { id: 'deselect', label: 'Deselect', keys: '⇧⌘A', run: ({ store }) => store.set({ selection: [], threading: null }) },
   // Insert
+  drawer('templates', 'Page templates…'),
   drawer('elements', 'Shapes, lines and frames…'),
   drawer('text', 'Text styles and pairings…'),
   drawer('photos', 'Free photos and AI pictures…'),

@@ -39,7 +39,7 @@ export const GUIDE: GuideSection[] = [
     points: [
       'Top bar: the story’s name (click it for its settings: headline, kicker, dek, byline, topic and who can read it), Preview, and Publish.',
       'Menus: everything the Studio can do, with the key that does the same thing beside it.',
-      'The side panel, at the far left: Elements, Text, Photos and Yours (your pictures). Click anything there to add it, or drag it onto a page.',
+      'The side panel, at the far left: Templates, Elements, Text, Photos and Yours (your pictures). Click anything there to add it, or drag it onto a page.',
       'Tools, beside it: what a click or a drag on the page makes or does.',
       'The pages, in the middle, on a grey pasteboard you can park things on.',
       'Panels, down the right: Pages, Object, Character and Paragraph, plus the Story Editor. Window shows and hides each.',
@@ -70,6 +70,7 @@ export const GUIDE: GuideSection[] = [
     id: 'add', group: 'Make', icon: Shapes, title: 'Add things from the side panel',
     body: 'The tabs at the far left hold what you can put on a page. Click a thing to add it to the middle of the page you’re on, or drag it to the spot you want. Click a tab again (or the « at its top) to fold the panel away.',
     points: [
+      'Templates: ready-made pages (covers, openers, story pages, photo pages, contents, an interview, a list, a back page). On a blank page a template lays out that page; otherwise it comes in as a new page after the one you’re on, so nothing is covered. Fill its picture frames and type over its words.',
       'Elements: shapes, lines, picture frames and colour blocks, and over 3,500 graphics: icons, stickers, badges, dividers and patterns. Search them all at the top; See all opens a whole group. A colour block, a whole-page frame or a pattern goes behind everything, edge to edge.',
       'Select a one-colour graphic (a shape, icon, badge, divider or pattern) and its Look, in the Object panel, changes its colour and whether it keeps its shape, stretches or repeats. Stickers keep their own colours.',
       'Text: a heading, a subheading or body text, the small styles (kicker, pull quote, caption), and font pairings set together in one frame. Double-click it on the page to type your own words.',

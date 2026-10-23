@@ -8,7 +8,7 @@ import { useCtx } from './context'
 const MENUS: { label: string; items: (string | '-')[] }[] = [
   { label: 'File', items: ['save', 'story', 'revisions', '-', 'close'] },
   { label: 'Edit', items: ['undo', 'redo', '-', 'cut', 'copy', 'paste', 'duplicate', 'delete', '-', 'select-all', 'deselect'] },
-  { label: 'Insert', items: ['add-elements', 'add-text', 'add-photos', 'add-uploads', '-', 'place', 'tool-text'] },
+  { label: 'Insert', items: ['add-templates', 'add-elements', 'add-text', 'add-photos', 'add-uploads', '-', 'place', 'tool-text'] },
   { label: 'Layout', items: ['page-add', 'spread-add', 'page-delete', '-', 'page-up', 'page-down', '-', 'margins'] },
   { label: 'Type', items: ['story-editor', 'tool-text'] },
   { label: 'Object', items: ['arrange-front', 'arrange-forward', 'arrange-backward', 'arrange-back', '-', 'lock', 'hide', 'show-all', '-', 'place', 'edit-picture', 'cut-out'] },
