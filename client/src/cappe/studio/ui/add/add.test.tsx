@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import manifest from '../../../../../../server/app/cappe/services/magazine/studio/fonts_manifest.json'
 import { cappeApi } from '../../../api'
@@ -6,7 +6,7 @@ import type { CappeAsset, CappeStockResult } from '../../../types'
 import type { Measure } from '../../compose/compose'
 import { FaceBook, type Manifest } from '../../fonts/faces'
 import { layout } from '../../canvas/geometry'
-import { addItem } from '../../model/ops'
+import { addItem, deletePage, movePage } from '../../model/ops'
 import type { Doc, ImageItem } from '../../model/types'
 import { DEFAULT_VIEW, Store, type State } from '../../store/store'
 import { StudioContext, type StudioCtx } from '../context'
@@ -16,7 +16,7 @@ import { graphicsApi, matchPicks, type GraphicBrowse, type GraphicCard } from '.
 import type { BankPhoto } from './bank'
 import { ObjectPanel } from '../panels/ObjectPanel'
 import { describeStudio } from '../ask/describe'
-import { dropInto, importStock } from './drag'
+import { dropInto, dropOn, importStock } from './drag'
 import { addElement, addGraphic, addPicture, addText, landing } from './place'
 
 const mono: Measure = { width: (c, t) => [...t].length * 0.5 * c.size, metrics: (c) => ({ asc: 0.8 * c.size, desc: 0.2 * c.size }) }
@@ -89,7 +89,7 @@ describe('putting things on the page', () => {
     const lay = layout(store.get().doc)
     const o = lay.origin[0]
     const at = landing(ctx, { clientX: o.x + 590, clientY: o.y + 10 })
-    expect(at).toMatchObject({ page: 0, x: 590, y: 10, hit: null, dropped: true })
+    expect(at).toMatchObject({ page: 0, pageId: 'p1', x: 590, y: 10, hit: null, dropped: true })
     addElement(ctx, el('square'), at)
     expect(only(store)).toMatchObject({ page: 'p1', x: 609 - 144, y: -9 })
     expect(store.get().page).toBe(0)
@@ -143,6 +143,36 @@ describe('putting things on the page', () => {
   })
 })
 
+describe('what lands after a wait', () => {
+  it('lands text on its page though the pages moved while its faces loaded, and says when the page went', async () => {
+    const { store, ctx } = studio()  // page 2 (p2) in view
+    const held: (() => void)[] = []
+    vi.mocked(ctx.fonts.ensure).mockImplementation(() => new Promise<void>((resolve) => { held.push(resolve) }))
+    const landed = addText(ctx, TEXT_STYLES[0])
+    store.edit((d) => movePage(d, 1, 0))  // p2 is the first page now
+    held.splice(0).forEach((go) => go())
+    const id = await landed
+    expect(store.get().doc.items.find((i) => i.id === id)?.page).toBe('p2')
+
+    const lost = addText(ctx, TEXT_STYLES[0])
+    store.edit((d) => deletePage(d, d.pages.findIndex((p) => p.id === 'p2')))
+    const before = store.get().doc.items.length
+    held.splice(0).forEach((go) => go())
+    await expect(lost).rejects.toThrow('isn’t there any more')
+    expect(store.get().doc.items).toHaveLength(before)
+  })
+
+  it('says in the Studio’s bar why a dropped archive picture couldn’t be added', async () => {
+    vi.spyOn(cappeApi, 'post').mockResolvedValue({ imports: [{ id: 'j1', status: 'refused', error: 'Not licensed for reuse.', asset: null }] })
+    const { store, ctx } = studio()
+    const result = { source: 'nasa', source_id: 'moon-1', title: 'The Moon', credit_line: 'NASA', license: 'pdm', license_version: '',
+      thumb: '/thumb', imported: false } as unknown as CappeStockResult
+    await dropOn(ctx, { kind: 'stock', result }, landing(ctx))
+    expect(store.get().notice).toBe('Not licensed for reuse.')
+    expect(store.get().doc.items).toEqual([])
+  })
+})
+
 describe('archive pictures', () => {
   const result = { source: 'nasa', source_id: 'moon-1', title: 'The Moon', credit_line: 'NASA', license: 'pdm', license_version: '',
     thumb: '/thumb', imported: false } as unknown as CappeStockResult
@@ -190,6 +220,19 @@ describe('the side panel', () => {
     await waitFor(() => expect(store.get().doc.items).toHaveLength(1))
     expect(store.get().doc.threads[0].paras[0].runs[0]).toMatchObject({ t: 'Add a heading', font: 'Playfair Display', wt: 800 })
     expect(screen.getByRole('button', { name: 'Add fashion text' })).toBeInTheDocument()
+  })
+
+  it('puts nothing on the page from an AI picture cancelled while it was drawing', async () => {
+    const { store, ctx } = studio(doc(), { drawer: 'photos' })
+    let finish: (a: CappeAsset) => void = () => {}
+    vi.spyOn(cappeApi, 'post').mockImplementation(() => new Promise((resolve) => { finish = resolve as (a: CappeAsset) => void }))
+    show(ctx)
+    fireEvent.click(screen.getByRole('button', { name: /Make an AI picture/ }))
+    fireEvent.change(screen.getByPlaceholderText(/lighthouse keeper/), { target: { value: 'A red kite over the sea' } })
+    fireEvent.submit(screen.getByRole('form', { name: 'Illustrate' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    await act(async () => { finish(asset({ id: 'kite' })) })
+    expect(store.get().doc.items).toEqual([])
   })
 
   it('finds free photos and adds one with a click', async () => {

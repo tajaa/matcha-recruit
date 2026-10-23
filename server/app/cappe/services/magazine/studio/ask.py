@@ -191,6 +191,22 @@ def _commands_text(commands: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def weights_text(weights: list[int]) -> str:
+    """A family's weights as the Studio offers them: a run of every hundred as
+    a range (100–900), the rest one by one (400/700): never a range with
+    weights missing from it."""
+    runs: list[list[int]] = []
+    for w in sorted(set(weights)):
+        if runs and w - runs[-1][-1] == 100:
+            runs[-1].append(w)
+        else:
+            runs.append([w])
+    parts: list[str] = []
+    for r in runs:
+        parts.extend([f"{r[0]}–{r[-1]}"] if len(r) >= 3 else [str(w) for w in r])
+    return "/".join(parts)
+
+
 @lru_cache(maxsize=1)
 def fonts_text() -> str:
     """The Studio's families by kind, each with the weights it has and
@@ -204,9 +220,7 @@ def fonts_text() -> str:
     for name in sorted(families):
         fam = families[name]
         kind, body = FONTS.get(name, ("other", False, (), ()))[:2]
-        weights = sorted(fam["weights"])
-        span = str(weights[0]) if len(weights) == 1 else f"{weights[0]}–{weights[-1]}"
-        notes = [span] + (["italic"] if fam["italic"] else []) + (["good for body text"] if body else [])
+        notes = [weights_text(fam["weights"])] + (["italic"] if fam["italic"] else []) + (["good for body text"] if body else [])
         groups.setdefault(_KINDS.get(kind, "Other"), []).append(f"{name} ({', '.join(notes)})")
     return "\n".join(f"{kind}: {'; '.join(names)}" for kind, names in groups.items())
 
