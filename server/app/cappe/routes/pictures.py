@@ -21,7 +21,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import JSONResponse, Response
-from PIL import Image, UnidentifiedImageError
+from PIL import Image
 
 from ...core.services.redis_cache import check_rate_limit
 from ...core.services.storage import get_storage
@@ -67,12 +67,26 @@ async def picture_pixels(site_id: UUID, asset_id: UUID, account: CappeAccount = 
     return Response(data, media_type=asset.get("mime") or "image/jpeg", headers=_NO_STORE)
 
 
-def _size(data: bytes) -> tuple[int, int]:
+def _probe(data: bytes, *, still: bool) -> tuple[int, int]:
+    """A picture's size, read from its header before any of it is decoded:
+    refused when it isn't one, is bigger than the library takes, or (`still`)
+    has more than one frame (the Studio saves an edit as one still image, and
+    only that frame is compared with the source)."""
     try:
+        with Image.open(io.BytesIO(data)) as probe:
+            probe.verify()
         with Image.open(io.BytesIO(data)) as img:
-            return img.size
-    except (UnidentifiedImageError, OSError) as exc:
+            size, frames = img.size, getattr(img, "n_frames", 1)
+            # As shown: a quarter turn in its EXIF swaps its sides.
+            if img.getexif().get(0x0112) in (5, 6, 7, 8):
+                size = (size[1], size[0])
+    except Exception as exc:  # Pillow raises a different error per format
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="That isn't a picture.") from exc
+    if size[0] * size[1] > media.MAX_PIXELS:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="That image is too large.")
+    if still and frames > 1:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="An edited picture is one still image.")
+    return size
 
 
 @router.post("/sites/{site_id}/assets/{asset_id}/edit", response_model=CappeAsset, status_code=status.HTTP_201_CREATED)
@@ -95,10 +109,14 @@ async def save_picture_edit(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported image type")
     data = await read_capped(file, _MAX_EDIT_BYTES, "Image too large (max 25 MB)")
     content_type = upload_guard.verify_upload(data, file.content_type, upload_guard.ALLOWED_IMAGE)
-    width, height = await asyncio.to_thread(_size, data)
-    if not edits.size_matches(source, width, height, clean):
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=NOT_AN_EDIT)
+    width, height = await asyncio.to_thread(_probe, data, still=True)
     original = await _source_bytes(source)
+    # The source as it is (an old row may not have its size stored), and no
+    # bigger than the library takes, before either is decoded to compare.
+    src_w, src_h = await asyncio.to_thread(_probe, original, still=False)
+    known = {**source, "width": source.get("width") or src_w, "height": source.get("height") or src_h}
+    if not edits.size_matches(known, width, height, clean):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=NOT_AN_EDIT)
     if not await asyncio.to_thread(edits.looks_like, original, data, clean):
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=NOT_AN_EDIT)
     try:
