@@ -416,6 +416,12 @@ def test_fixed_keys_on_local_storage(tmp_path):
     for bad in ("../escape", "/abs", ""):
         with pytest.raises(RuntimeError):
             asyncio.run(s.get_key(bad))
+    # A link inside uploads that leads out of it is refused too.
+    (tmp_path / "outside").mkdir()
+    (tmp_path / "outside" / "secret").write_bytes(b"no")
+    (tmp_path / "uploads" / "link").symlink_to(tmp_path / "outside")
+    with pytest.raises(RuntimeError):
+        asyncio.run(s.get_key("link/secret"))
 
 
 def test_fixed_keys_on_s3(tmp_path):
