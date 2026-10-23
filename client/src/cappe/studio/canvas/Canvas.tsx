@@ -1,5 +1,5 @@
 import { useLayoutEffect, useMemo, useRef, type DragEvent } from 'react'
-import { dragging, dropInto, endDrag } from '../ui/add/drag'
+import { dragging, dropOn, endDrag } from '../ui/add/drag'
 import { landing } from '../ui/add/place'
 import layoutCss from '../render/layout.css?raw'
 import { facesCss, frameThreads, pageItemsHtml, type Draw } from '../render/layoutRender'
@@ -44,7 +44,7 @@ export default function Canvas() {
     if (!what) return
     e.preventDefault()
     endDrag()
-    void dropInto(ctx, what, landing(ctx, e)).catch(() => {}) // an archive picture that fails says so in its tab
+    void dropOn(ctx, what, landing(ctx, e))
   }
 
   return (

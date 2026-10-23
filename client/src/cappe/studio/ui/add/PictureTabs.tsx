@@ -33,7 +33,14 @@ export function PhotosTab() {
   const [searching, setSearching] = useState(false)
   const [adding, setAdding] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
-  const [ai, setAi] = useState(false)
+  // The AI form open now (a run number; 0: none). A picture made by a form
+  // since cancelled or replaced stays in the library but isn't put on the page.
+  const [aiRun, setAiRun] = useState(0)
+  const liveAi = useRef(0)
+  const nextAi = useRef(0)
+  useEffect(() => () => { liveAi.current = 0 }, [])
+  const openAi = () => { const run = ++nextAi.current; liveAi.current = run; setAiRun(run) }
+  const closeAi = () => { liveAi.current = 0; setAiRun(0) }
   const gen = useRef(0)
 
   const search = async (src: CappeStockSearchSource, q: string, page: number) => {
@@ -146,10 +153,11 @@ export function PhotosTab() {
           className="w-full rounded-md border border-zinc-700 py-1.5 text-xs text-zinc-300 hover:border-zinc-500">More</button>
       )}
       <div className="border-t border-zinc-800 pt-3">
-        {ai
-          ? <IllustrateForm siteId={c.siteId} onDone={(a) => { setAi(false); addPicture(c, a) }} onCancel={() => setAi(false)} />
+        {aiRun
+          ? <IllustrateForm siteId={c.siteId} onCancel={closeAi}
+              onDone={(a) => { if (liveAi.current !== aiRun) return; closeAi(); addPicture(c, a) }} />
           : (
-            <button type="button" onClick={() => setAi(true)} className="flex w-full items-center justify-center gap-1.5 rounded-md border border-zinc-700 py-2 text-xs text-zinc-200 hover:border-emerald-500">
+            <button type="button" onClick={openAi} className="flex w-full items-center justify-center gap-1.5 rounded-md border border-zinc-700 py-2 text-xs text-zinc-200 hover:border-emerald-500">
               <Sparkles className="h-3.5 w-3.5 text-emerald-400" />Make an AI picture
             </button>
           )}
