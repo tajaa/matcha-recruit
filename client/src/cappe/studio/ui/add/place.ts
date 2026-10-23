@@ -7,6 +7,7 @@ import { layout, hitItem, pageAt } from '../../canvas/geometry'
 import { allIds, newId, pageSide } from '../../model/doc'
 import { CHAR_DEFAULTS, clamp } from '../../model/limits'
 import { addItem, arrange, patchItems } from '../../model/ops'
+import type { GraphicCard } from '../../model/graphics'
 import type { Doc, Item, Para } from '../../model/types'
 import { toAsset } from '../../api'
 import type { CappeAsset } from '../../../types'
@@ -148,5 +149,32 @@ export function addPicture(c: StudioCtx, asset: CappeAsset, at: At = landing(c))
     return patchItems(r.doc, [id], { asset_id: asset.id })
   }, { key: `add:${Date.now()}` })
   select(c, id, page)
+  return id
+}
+
+/** How big a graphic starts, and in what colour, by its group. */
+const GRAPHIC_START: Record<GraphicCard['group'], { size: number; color: string }> = {
+  shapes: { size: 144, color: '#d9d4cc' }, badges: { size: 144, color: '#b4532a' }, icons: { size: 72, color: '#1a1a1a' },
+  stickers: { size: 120, color: '#1a1a1a' }, lines: { size: 216, color: '#1a1a1a' }, patterns: { size: 0, color: '#d9d4cc' },
+}
+
+/** One of the bank's graphics, its own shape (a pattern covers the page,
+ *  behind everything). Returns its id. */
+export function addGraphic(c: StudioCtx, g: GraphicCard, at: At = landing(c)): string {
+  const start = GRAPHIC_START[g.group]
+  const doc = c.store.get().doc
+  const ratio = g.w > 0 && g.h > 0 ? g.w / g.h : 1
+  const longest = start.size
+  const size = ratio >= 1 ? { w: longest, h: longest / ratio } : { w: longest * ratio, h: longest }
+  const b = doc.bleed
+  const box = g.group === 'patterns' ? { x: -b, y: -b, w: doc.size.w + 2 * b, h: doc.size.h + 2 * b } : centred(doc, at, size)
+  let id = ''
+  c.store.edit((d) => {
+    const r = addItem(d, 'graphic', d.pages[at.page].id, box)
+    id = r.id
+    const next = patchItems(r.doc, [id], { src: g.sha, color: g.mono ? start.color : null, fit: g.fit, name: g.name.slice(0, 60) })
+    return g.group === 'patterns' ? arrange(next, [id], 'back') : next
+  }, { key: `add:${Date.now()}` })
+  select(c, id, at.page)
   return id
 }

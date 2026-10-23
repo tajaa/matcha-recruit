@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { ChevronsLeft, Image as ImageIcon, Images, Search, Shapes, Type } from 'lucide-react'
+import { graphicsApi, type GraphicBrowse, type GraphicGroup } from '../../model/graphics'
 import { familyName } from '../../fonts/faces'
 import { CHAR_DEFAULTS } from '../../model/limits'
 import type { Doc } from '../../model/types'
 import { useStudio, type AddTab } from '../../store/store'
 import { useCtx } from '../context'
-import { ELEMENT_GROUPS, TEXT_COMBOS, TEXT_STYLES, facesOf, type ElementSpec, type TextPart, type TextStyle } from './catalog'
+import { ELEMENT_GROUPS, ELEMENTS, TEXT_COMBOS, TEXT_STYLES, facesOf, type ElementSpec, type TextPart, type TextStyle } from './catalog'
 import { endDrag, startDrag } from './drag'
+import { GROUP_TITLE } from './graphicSearch'
+import { GraphicGrid, GroupView, SearchResults } from './GraphicTiles'
 import { PhotosTab, YourPicturesTab } from './PictureTabs'
 import { addElement, addText } from './place'
 
@@ -90,38 +93,99 @@ function ElementArt({ el, doc }: { el: ElementSpec; doc: Doc }) {
   )
 }
 
+function ElementTile({ el, doc }: { el: ElementSpec; doc: Doc }) {
+  const c = useCtx()
+  return (
+    <button type="button" draggable onDragStart={(e) => startDrag(e, { kind: 'element', el })} onDragEnd={endDrag}
+      onClick={() => addElement(c, el)} aria-label={`Add ${el.label.toLowerCase()}`} title={el.label}
+      className="flex flex-col items-center gap-1 rounded-md border border-zinc-800 bg-zinc-950/60 p-2 text-[10px] text-zinc-400 hover:border-emerald-500 hover:text-zinc-100">
+      <ElementArt el={el} doc={doc} />
+      <span className="max-w-full truncate">{el.label}</span>
+    </button>
+  )
+}
+
+function SectionHead({ title, count, onAll }: { title: string; count?: number; onAll?: () => void }) {
+  return (
+    <div className="mb-2 flex items-center justify-between">
+      <h3 className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400">{title}</h3>
+      {onAll && (
+        <button type="button" onClick={onAll} className="text-[11px] text-emerald-400 hover:text-emerald-300">
+          See all{count ? ` ${count.toLocaleString()}` : ''}
+        </button>
+      )}
+    </div>
+  )
+}
+
+/** Where each basic element sits among the bank's groups. */
+const NATIVE_IN: Record<string, GraphicGroup | 'frames' | 'blocks'> = {
+  Shapes: 'shapes', Lines: 'lines', 'Picture frames': 'frames', 'Colour blocks': 'blocks',
+}
+const ORDER: (GraphicGroup | 'frames' | 'blocks')[] = ['shapes', 'lines', 'badges', 'icons', 'stickers', 'patterns', 'frames', 'blocks']
+const FIRST: Partial<Record<GraphicGroup, number>> = { shapes: 8, badges: 8, icons: 15, stickers: 12, patterns: 8, lines: 4 }
+
 function ElementsTab() {
   const c = useCtx()
   const doc = useStudio(c.store, (s) => s.doc)
   const [q, setQ] = useState('')
+  const [open, setOpen] = useState<GraphicGroup | null>(null)
+  const [bank, setBank] = useState<GraphicBrowse | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    graphicsApi.browse().then(setBank, (e) => setError(e instanceof Error ? e.message : 'The graphics didn’t load.'))
+  }, [])
   const want = q.trim().toLowerCase()
-  const groups = ELEMENT_GROUPS.map((g) => ({ ...g, items: g.items.filter((i) => !want
-    || `${g.title} ${i.label}`.toLowerCase().includes(want)) })).filter((g) => g.items.length)
+  const native = (title: string) => ELEMENT_GROUPS.find((g) => g.title === title)?.items ?? []
+  const nativeMatches = ELEMENTS.filter((el) => {
+    const group = ELEMENT_GROUPS.find((g) => g.items.includes(el))!.title
+    return `${group} ${el.label}`.toLowerCase().includes(want)
+  })
+
+  const search = (
+    <label className="relative block">
+      <span className="sr-only">Search elements</span>
+      <Search className="pointer-events-none absolute left-2.5 top-2 h-4 w-4 text-zinc-500" />
+      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search shapes, icons, stickers…"
+        className="w-full rounded-md border border-zinc-700 bg-zinc-950 py-1.5 pl-8 pr-2 text-xs text-zinc-100 placeholder:text-zinc-600 focus:border-emerald-500 focus:outline-none" />
+    </label>
+  )
+  if (open) return <div className="space-y-3">{search}<GroupView group={open} q={want} onBack={() => setOpen(null)} /></div>
+  if (want) {
+    return (
+      <div className="space-y-4">
+        {search}
+        {nativeMatches.length > 0 && (
+          <div className="grid grid-cols-3 gap-2">{nativeMatches.map((el) => <ElementTile key={el.id} el={el} doc={doc} />)}</div>
+        )}
+        <SearchResults q={want} />
+      </div>
+    )
+  }
   return (
-    <div className="space-y-4">
-      <label className="relative block">
-        <span className="sr-only">Search elements</span>
-        <Search className="pointer-events-none absolute left-2.5 top-2 h-4 w-4 text-zinc-500" />
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search shapes, lines, frames…"
-          className="w-full rounded-md border border-zinc-700 bg-zinc-950 py-1.5 pl-8 pr-2 text-xs text-zinc-100 placeholder:text-zinc-600 focus:border-emerald-500 focus:outline-none" />
-      </label>
-      <p className={HINT}>Click to add one to the page, or drag it where you want it.</p>
-      {groups.map((g) => (
-        <section key={g.title}>
-          <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-400">{g.title}</h3>
-          <div className="grid grid-cols-3 gap-2">
-            {g.items.map((el) => (
-              <button key={el.id} type="button" draggable onDragStart={(e) => startDrag(e, { kind: 'element', el })} onDragEnd={endDrag}
-                onClick={() => addElement(c, el)} aria-label={`Add ${el.label.toLowerCase()}`} title={el.label}
-                className="flex flex-col items-center gap-1 rounded-md border border-zinc-800 bg-zinc-950/60 p-2 text-[10px] text-zinc-400 hover:border-emerald-500 hover:text-zinc-100">
-                <ElementArt el={el} doc={doc} />
-                <span className="truncate">{el.label}</span>
-              </button>
-            ))}
-          </div>
-        </section>
-      ))}
-      {!groups.length && <p className="text-xs text-zinc-500">Nothing matches “{q}”.</p>}
+    <div className="space-y-5">
+      {search}
+      <p className={HINT}>Click to add one to the page, or drag it where you want it. Change a shape or icon’s colour in the Object panel.</p>
+      {error && <p role="alert" className="text-xs text-red-300">{error}</p>}
+      {ORDER.map((key) => {
+        const title = key === 'frames' ? 'Picture frames' : key === 'blocks' ? 'Colour blocks' : GROUP_TITLE[key]
+        const basics = native(Object.keys(NATIVE_IN).find((t) => NATIVE_IN[t] === key) ?? '')
+        const group = key === 'frames' || key === 'blocks' ? null : bank?.groups.find((g) => g.group === key)
+        if (!basics.length && !group?.items.length) return null
+        return (
+          <section key={key}>
+            <SectionHead title={title} count={group?.count} onAll={group && group.count > (FIRST[group.group] ?? 0) ? () => setOpen(group.group) : undefined} />
+            {basics.length > 0 && <div className="mb-1.5 grid grid-cols-3 gap-2">{basics.map((el) => <ElementTile key={el.id} el={el} doc={doc} />)}</div>}
+            {group && <GraphicGrid items={group.items.slice(0, FIRST[group.group] ?? 8)} group={group.group} />}
+          </section>
+        )
+      })}
+      {bank && (
+        <p className="text-[10px] leading-snug text-zinc-600">
+          Icons from Lucide (ISC), stickers from Microsoft Fluent Emoji (MIT), the rest drawn by Gummfit.{' '}
+          <a href="/api/cappe/public/graphics/licenses.txt" target="_blank" rel="noreferrer" className="underline hover:text-zinc-400">Licences</a>
+        </p>
+      )}
     </div>
   )
 }

@@ -19,6 +19,7 @@ from . import (
     creators,
     directory,
     fonts,
+    graphics,
     forms,
     magazine,
     messages,
@@ -59,3 +60,4 @@ router.include_router(social_meta.router)
 router.include_router(stock.router)
 router.include_router(magazine.router)
 router.include_router(fonts.router)
+router.include_router(graphics.router)

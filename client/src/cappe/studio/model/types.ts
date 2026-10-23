@@ -80,7 +80,11 @@ export type ImageItem = Base & {
 export type RectItem = Base & { kind: 'rect'; fill: string | null; stroke: Stroke | null; radius: number }
 export type EllipseItem = Base & { kind: 'ellipse'; fill: string | null; stroke: Stroke | null }
 export type LineItem = Base & { kind: 'line'; stroke: Stroke; flip: boolean }
-export type Item = TextItem | ImageItem | RectItem | EllipseItem | LineItem
+export type GraphicFit = 'contain' | 'stretch' | 'tile'
+/** One of the bank's graphics (server studio/graphics.py), by its file's sha:
+ *  a one-colour one takes `color`; `tile` is a pattern's repeat, in pt. */
+export type GraphicItem = Base & { kind: 'graphic'; src: string; color: string | null; fit: GraphicFit; tile: number }
+export type Item = TextItem | ImageItem | RectItem | EllipseItem | LineItem | GraphicItem
 export type Kind = Item['kind']
 
 export type Guide = { id: string; page: string; axis: 'v' | 'h'; at: number }

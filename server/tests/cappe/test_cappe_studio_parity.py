@@ -19,6 +19,7 @@ import re
 from pathlib import Path
 
 from app.cappe.services.magazine.studio import fonts as faces
+from app.cappe.services.magazine.studio import graphics as G
 from app.cappe.services.magazine.studio import limits as L
 from app.cappe.services.magazine.studio import render as R
 from app.cappe.services.magazine.studio import schema as S
@@ -87,12 +88,23 @@ def _cases() -> list[dict]:
          "stroke": {"c": "#00aa00", "w": 3}, "flip": True},
         {"id": "h1", "kind": "rect", "page": "p2", "w": 10, "h": 10, "hidden": True, "fill": "#999999"},
     ], "threads": []}
+    by_id = {g["id"]: g["sha"] for g in G.manifest()["graphics"]}
+    graphic_page = {"pages": [{"id": "p1"}], "items": [
+        {"id": "g1", "kind": "graphic", "page": "p1", "x": 20, "y": 30, "w": 144, "h": 120, "src": by_id["gummfit/star"],
+         "color": "#B4532A", "fit": "stretch", "rot": 15, "opacity": 70},
+        {"id": "g2", "kind": "graphic", "page": "p1", "x": 200, "y": 30, "w": 96, "h": 96, "src": by_id["fluent/red-heart"],
+         "color": "#00ff00"},
+        {"id": "g3", "kind": "graphic", "page": "p1", "x": -9, "y": -9, "w": 630, "h": 810, "src": by_id["gummfit/dots"],
+         "color": "#d9d4cc", "fit": "tile", "tile": 18.5},
+        {"id": "g4", "kind": "graphic", "page": "p1", "x": 300, "y": 300, "w": 72, "h": 72, "src": by_id["lucide/heart"]},
+    ], "threads": []}
     locked = {**composed, "paywall_page": 2}
     a4 = {**composed, "size": {"w": 595.28, "h": 841.89}}
     out = []
     for name, raw, locked_from in [("composed text", composed, None), ("flowed text", flowed, None),
                                    ("pictures and shapes", pictures, None), ("locked pages", locked, 2),
-                                   ("a4 pages", a4, None), ("uncomposed past the wall", flowed, 2)]:
+                                   ("a4 pages", a4, None), ("uncomposed past the wall", flowed, 2),
+                                   ("graphics", graphic_page, None)]:
         doc = S.normalize_doc(raw)
         html, used = R.pages_html(doc, ASSETS, locked_from=locked_from, label="Pages of 'Tide'")
         out.append({"name": name, "doc": doc, "locked_from": locked_from, "html": html,
@@ -126,6 +138,11 @@ def test_the_fixture_covers_what_it_says():
     assert "javascript:" not in cases["pictures and shapes"]["html"]
     assert "lyt-page--locked" in cases["locked pages"]["html"]
     assert "Flowing" not in cases["uncomposed past the wall"]["html"].split('data-lyt-lock="3"')[0]
+    g = cases["graphics"]["html"]
+    assert "background:#b4532a;-webkit-mask:url(/api/cappe/public/graphics/" in g  # a one-colour graphic, recoloured
+    assert "center/100% 100% no-repeat" in g and "center/contain no-repeat" in g
+    assert "0 0/calc(18.5 * var(--u)) auto repeat" in g  # a pattern
+    assert g.count("-webkit-mask:") == 3  # the colourful heart is drawn as it is, its colour dropped
 
 
 def test_both_copies_of_layout_css_are_the_same():

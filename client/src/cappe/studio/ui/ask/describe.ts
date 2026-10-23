@@ -17,7 +17,7 @@ const EXCERPT = 140
 
 const UNIT_NAME: Record<Units, string> = { pt: 'points', pc: 'picas', in: 'inches', mm: 'millimetres', cm: 'centimetres', px: 'pixels' }
 const SUFFIX: Record<Units, string> = { pt: ' pt', pc: '', in: ' in', mm: ' mm', cm: ' cm', px: ' px' }
-const KIND: Record<Item['kind'], string> = { text: 'Text frame', image: 'Picture frame', rect: 'Rectangle', ellipse: 'Ellipse', line: 'Line' }
+const KIND: Record<Item['kind'], string> = { text: 'Text frame', image: 'Picture frame', rect: 'Rectangle', ellipse: 'Ellipse', line: 'Line', graphic: 'Graphic' }
 const ROLE = { p: 'Body text', h1: 'Headline', h2: 'Heading', h3: 'Subheading', quote: 'Pull quote', caption: 'Caption' } as const
 const ALIGN = { l: 'left', c: 'centred', r: 'right', j: 'justified', ja: 'justified, last line too' } as const
 const FIT = { fill: 'Fill', fit: 'Fit', stretch: 'Stretch' } as const
@@ -137,6 +137,11 @@ function itemLines(item: Item, s: State, len: (pt: number) => string): string[] 
       break
     case 'line':
       extra.push(strokeText(item.stroke))
+      break
+    case 'graphic':
+      extra.push(item.color ? `colour ${item.color}` : 'in its own colours')
+      if (item.fit === 'tile') extra.push(`repeated as a pattern every ${len(item.tile)}`)
+      else if (item.fit === 'stretch') extra.push('stretched to its box')
       break
   }
   return [[...head, ...extra].join('; ')]

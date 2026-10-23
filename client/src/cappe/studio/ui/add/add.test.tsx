@@ -12,8 +12,11 @@ import { DEFAULT_VIEW, Store, type State } from '../../store/store'
 import { StudioContext, type StudioCtx } from '../context'
 import AddPanel from './AddPanel'
 import { ELEMENTS, TEXT_COMBOS, TEXT_STYLES, facesOf } from './catalog'
+import { graphicsApi, type GraphicBrowse, type GraphicCard } from '../../model/graphics'
+import { ObjectPanel } from '../panels/ObjectPanel'
+import { describeStudio } from '../ask/describe'
 import { dropInto, importStock } from './drag'
-import { addElement, addPicture, addText, landing } from './place'
+import { addElement, addGraphic, addPicture, addText, landing } from './place'
 
 const mono: Measure = { width: (c, t) => [...t].length * 0.5 * c.size, metrics: (c) => ({ asc: 0.8 * c.size, desc: 0.2 * c.size }) }
 const book = new FaceBook(manifest as Manifest)
@@ -209,5 +212,63 @@ describe('the side panel', () => {
     expect((only(store) as ImageItem).asset_id).toBe('a1')
     fireEvent.click(screen.getByRole('tab', { name: 'AI' }))
     await waitFor(() => expect(get).toHaveBeenLastCalledWith('/sites/s1/assets?kind=generated'))
+  })
+})
+
+const card = (over: Partial<GraphicCard>): GraphicCard => ({ sha: 'a'.repeat(64), name: 'Heart', group: 'icons', mono: true, fit: 'contain', w: 24, h: 24, ...over })
+
+describe('graphics from the bank', () => {
+  it('starts an icon its own shape in ink, named, and a sticker in its own colours', () => {
+    const { store, ctx } = studio()
+    addGraphic(ctx, card({ w: 48, h: 24 }))
+    expect(only(store)).toMatchObject({ kind: 'graphic', src: 'a'.repeat(64), color: '#1a1a1a', fit: 'contain', name: 'Heart', w: 72, h: 36 })
+    addGraphic(ctx, card({ sha: 'b'.repeat(64), name: 'Red heart', group: 'stickers', mono: false }))
+    expect(only(store)).toMatchObject({ color: null, w: 120, h: 120 })
+    const out = describeStudio(store.get())
+    expect(out).toMatch(/Graphic "Heart".*colour #1a1a1a/)
+    expect(out).toMatch(/Graphic "Red heart".*in its own colours/)
+  })
+
+  it('lays a pattern over the whole page, behind everything', () => {
+    const d = addItem(doc(), 'rect', 'p2', { x: 0, y: 0, w: 10, h: 10 }).doc
+    const { store, ctx } = studio(d)
+    addGraphic(ctx, card({ name: 'Dots', group: 'patterns', fit: 'tile', w: 20, h: 20 }))
+    expect(store.get().doc.items[0]).toMatchObject({ kind: 'graphic', fit: 'tile', x: -9, y: -9, w: 618, h: 818, color: '#d9d4cc' })
+  })
+
+  it('lets the Object panel recolour a one-colour graphic, repeat it, and says a colourful one keeps its colours', () => {
+    const { store, ctx } = studio()
+    addGraphic(ctx, card({}))
+    const { unmount } = render(<StudioContext.Provider value={ctx}><ObjectPanel /></StudioContext.Provider>)
+    expect(screen.getByText('Look', { selector: 'h3' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Repeat' }))
+    expect(only(store)).toMatchObject({ fit: 'tile' })
+    expect(screen.getByLabelText('Pattern size')).toBeInTheDocument()
+    unmount()
+    addGraphic(ctx, card({ sha: 'b'.repeat(64), name: 'Red heart', group: 'stickers', mono: false }))
+    render(<StudioContext.Provider value={ctx}><ObjectPanel /></StudioContext.Provider>)
+    expect(screen.getByText('A colourful graphic keeps its own colours.')).toBeInTheDocument()
+  })
+
+  it('browses the bank in the Elements tab, opens a group and searches it all', async () => {
+    const icons = Array.from({ length: 24 }, (_, k) => card({ sha: k.toString(16).padStart(64, '0'), name: `Icon ${k}` }))
+    const browse: GraphicBrowse = { version: 'v', sets: [], groups: [
+      { group: 'shapes', count: 2, items: [card({ sha: 'c'.repeat(64), name: 'Star', group: 'shapes', fit: 'stretch' })] },
+      { group: 'icons', count: 1890, items: icons },
+    ] }
+    vi.spyOn(graphicsApi, 'browse').mockResolvedValue(browse)
+    const search = vi.spyOn(graphicsApi, 'search').mockResolvedValue({ total: 1, items: [card({ sha: 'd'.repeat(64), name: 'Coffee' })] })
+    const { store, ctx } = studio()
+    render(<StudioContext.Provider value={ctx}><AddPanel /></StudioContext.Provider>)
+    fireEvent.click(await screen.findByRole('button', { name: 'Add Star' }))
+    expect(only(store)).toMatchObject({ kind: 'graphic', name: 'Star', fit: 'stretch' })
+    expect(screen.getAllByRole('button', { name: /^Add Icon / })).toHaveLength(15)
+    fireEvent.click(screen.getByRole('button', { name: 'See all 1,890' }))
+    await waitFor(() => expect(search).toHaveBeenCalledWith('', 'icons', undefined, 0, 60))
+    fireEvent.click(screen.getByRole('button', { name: /Icons/ }))
+    fireEvent.change(screen.getByPlaceholderText(/Search shapes, icons/), { target: { value: 'coffee' } })
+    fireEvent.click(await screen.findByRole('button', { name: 'Add Coffee' }))
+    expect(search).toHaveBeenLastCalledWith('coffee', undefined, undefined, 0, 60)
+    expect(only(store)).toMatchObject({ name: 'Coffee' })
   })
 })

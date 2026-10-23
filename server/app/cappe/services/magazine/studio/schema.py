@@ -41,6 +41,7 @@ from typing import Any, Iterable, Optional
 from uuid import UUID
 
 from ..fonts import FONTS, has_italic, nearest_weight
+from . import graphics
 from . import limits as L
 
 _ID = re.compile(r"^[a-z0-9]{1,12}$")
@@ -312,6 +313,13 @@ def _item(raw: Any, pages: set[str]) -> dict:
         out.update(fill=_colour(raw.get("fill"), None), stroke=_stroke(raw.get("stroke")))
         if kind == "rect":
             out["radius"] = num(raw.get("radius"), 0, L.RADIUS_MAX, 0)
+    elif kind == "graphic":  # one of the bank's (graphics.py); only a one-colour one takes a colour
+        g = graphics.by_sha(raw.get("src"))
+        if g is None:
+            raise DocError("A graphic on a page isn't one the Studio has. Reload the Studio and try again.")
+        out.update(src=g["sha"], color=_colour(raw.get("color"), "#1a1a1a") if g.get("mono") else None,
+                   fit=_choice(raw.get("fit"), L.GRAPHIC_FITS, g.get("fit") if g.get("fit") in L.GRAPHIC_FITS else None),
+                   tile=num(raw.get("tile"), L.TILE_MIN, L.TILE_MAX, L.TILE_DEFAULT))
     else:  # a line, from its box's top-left corner to its bottom-right (or, flipped, bottom-left to top-right)
         out.update(stroke=_stroke(raw.get("stroke"), {"c": "#1a1a1a", "w": 1.0}), flip=bool(raw.get("flip")))
     return out

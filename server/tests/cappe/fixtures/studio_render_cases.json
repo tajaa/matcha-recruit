@@ -1143,6 +1143,123 @@
    "html": "<div class=\"lyt\" data-lyt style=\"--pw:612;--ph:792;--sw:1224;--paper:#ffffff\"><div class=\"lyt-strip\" data-lyt-strip tabindex=\"0\" role=\"region\" aria-label=\"Pages of &#x27;Tide&#x27;\"><div class=\"lyt-slot\" data-lyt-spread=\"0\"><div class=\"lyt-spread\" style=\"width:calc(612 * var(--u));height:calc(792 * var(--u))\"><div class=\"lyt-paper\" data-lyt-n=\"1\" style=\"left:calc(0 * var(--u));width:calc(612 * var(--u))\"></div><div class=\"lyt-page\" data-lyt-page=\"1\" style=\"left:calc(0 * var(--u));width:calc(612 * var(--u))\"><div class=\"lyt-item lyt-text\" style=\"left:calc(54 * var(--u));top:calc(54 * var(--u));width:calc(240 * var(--u));height:calc(300 * var(--u))\"></div></div></div></div><div class=\"lyt-slot\" data-lyt-spread=\"1\"><div class=\"lyt-spread\" style=\"width:calc(1224 * var(--u));height:calc(792 * var(--u))\"><div class=\"lyt-paper\" data-lyt-n=\"2\" style=\"left:calc(0 * var(--u));width:calc(612 * var(--u))\"></div><div class=\"lyt-paper\" data-lyt-n=\"3\" style=\"left:calc(612 * var(--u));width:calc(612 * var(--u))\"></div><div class=\"lyt-page lyt-page--locked\" data-lyt-lock=\"2\" style=\"left:calc(0 * var(--u));width:calc(612 * var(--u))\"><p class=\"lyt-lock\">For subscribers</p><a class=\"lyt-lock-go\" href=\"#mz-paywall\">Subscribe or sign in to read on</a></div><div class=\"lyt-page lyt-page--locked\" data-lyt-lock=\"3\" style=\"left:calc(612 * var(--u));width:calc(612 * var(--u))\"><p class=\"lyt-lock\">For subscribers</p><a class=\"lyt-lock-go\" href=\"#mz-paywall\">Subscribe or sign in to read on</a></div></div></div></div></div>",
    "used": {},
    "faces_css": "@font-face{font-family:'f-1111111111111111';src:url(/api/cappe/public/fonts/1111111111111111111111111111111111111111111111111111111111111111.ttf) format('truetype');font-display:block}"
+  },
+  {
+   "name": "graphics",
+   "doc": {
+    "v": 1,
+    "size": {
+     "w": 612,
+     "h": 792
+    },
+    "facing": true,
+    "margins": {
+     "t": 36,
+     "b": 36,
+     "i": 36,
+     "o": 36
+    },
+    "cols": {
+     "n": 1,
+     "g": 12
+    },
+    "baseline": {
+     "start": 36,
+     "step": 12
+    },
+    "grid": {
+     "step": 12
+    },
+    "bleed": 9,
+    "units": "in",
+    "paper": "#ffffff",
+    "pages": [
+     {
+      "id": "p1"
+     }
+    ],
+    "guides": [],
+    "items": [
+     {
+      "id": "g1",
+      "kind": "graphic",
+      "page": "p1",
+      "x": 20,
+      "y": 30,
+      "w": 144,
+      "h": 120,
+      "rot": 15,
+      "opacity": 70,
+      "locked": false,
+      "hidden": false,
+      "name": "",
+      "src": "f9b482c91efd96ccd224b33b69e44dbec593d6925a49ad2afbc5ad49af70fc89",
+      "color": "#b4532a",
+      "fit": "stretch",
+      "tile": 24.0
+     },
+     {
+      "id": "g2",
+      "kind": "graphic",
+      "page": "p1",
+      "x": 200,
+      "y": 30,
+      "w": 96,
+      "h": 96,
+      "rot": 0,
+      "opacity": 100,
+      "locked": false,
+      "hidden": false,
+      "name": "",
+      "src": "c9cd3f4910105f7758bfd62ce694a4683f8d06b7abd12e147c92e04795ff86f5",
+      "color": null,
+      "fit": "contain",
+      "tile": 24.0
+     },
+     {
+      "id": "g3",
+      "kind": "graphic",
+      "page": "p1",
+      "x": -9,
+      "y": -9,
+      "w": 630,
+      "h": 810,
+      "rot": 0,
+      "opacity": 100,
+      "locked": false,
+      "hidden": false,
+      "name": "",
+      "src": "222e0ccd5dd7cdb38404a53abe8a06008cae9ddddb33ddb545f204dafcd1701b",
+      "color": "#d9d4cc",
+      "fit": "tile",
+      "tile": 18.5
+     },
+     {
+      "id": "g4",
+      "kind": "graphic",
+      "page": "p1",
+      "x": 300,
+      "y": 300,
+      "w": 72,
+      "h": 72,
+      "rot": 0,
+      "opacity": 100,
+      "locked": false,
+      "hidden": false,
+      "name": "",
+      "src": "24a1ab9bf17584c896b2f87501a882b9b5b9503e663ad66598e0e2b9f3a44889",
+      "color": "#1a1a1a",
+      "fit": "contain",
+      "tile": 24.0
+     }
+    ],
+    "threads": [],
+    "paywall_page": null
+   },
+   "locked_from": null,
+   "html": "<div class=\"lyt\" data-lyt style=\"--pw:612;--ph:792;--sw:1224;--paper:#ffffff\"><div class=\"lyt-strip\" data-lyt-strip tabindex=\"0\" role=\"region\" aria-label=\"Pages of &#x27;Tide&#x27;\"><div class=\"lyt-slot\" data-lyt-spread=\"0\"><div class=\"lyt-spread\" style=\"width:calc(612 * var(--u));height:calc(792 * var(--u))\"><div class=\"lyt-paper\" data-lyt-n=\"1\" style=\"left:calc(0 * var(--u));width:calc(612 * var(--u))\"></div><div class=\"lyt-page\" data-lyt-page=\"1\" style=\"left:calc(0 * var(--u));width:calc(612 * var(--u))\"><div class=\"lyt-item lyt-g\" style=\"left:calc(20 * var(--u));top:calc(30 * var(--u));width:calc(144 * var(--u));height:calc(120 * var(--u));transform:rotate(15deg);opacity:0.7;background:#b4532a;-webkit-mask:url(/api/cappe/public/graphics/f9b482c91efd96ccd224b33b69e44dbec593d6925a49ad2afbc5ad49af70fc89.svg) center/100% 100% no-repeat;mask:url(/api/cappe/public/graphics/f9b482c91efd96ccd224b33b69e44dbec593d6925a49ad2afbc5ad49af70fc89.svg) center/100% 100% no-repeat\"></div><div class=\"lyt-item lyt-g\" style=\"left:calc(200 * var(--u));top:calc(30 * var(--u));width:calc(96 * var(--u));height:calc(96 * var(--u));background:url(/api/cappe/public/graphics/c9cd3f4910105f7758bfd62ce694a4683f8d06b7abd12e147c92e04795ff86f5.svg) center/contain no-repeat\"></div><div class=\"lyt-item lyt-g\" style=\"left:calc(-9 * var(--u));top:calc(-9 * var(--u));width:calc(630 * var(--u));height:calc(810 * var(--u));background:#d9d4cc;-webkit-mask:url(/api/cappe/public/graphics/222e0ccd5dd7cdb38404a53abe8a06008cae9ddddb33ddb545f204dafcd1701b.svg) 0 0/calc(18.5 * var(--u)) auto repeat;mask:url(/api/cappe/public/graphics/222e0ccd5dd7cdb38404a53abe8a06008cae9ddddb33ddb545f204dafcd1701b.svg) 0 0/calc(18.5 * var(--u)) auto repeat\"></div><div class=\"lyt-item lyt-g\" style=\"left:calc(300 * var(--u));top:calc(300 * var(--u));width:calc(72 * var(--u));height:calc(72 * var(--u));background:#1a1a1a;-webkit-mask:url(/api/cappe/public/graphics/24a1ab9bf17584c896b2f87501a882b9b5b9503e663ad66598e0e2b9f3a44889.svg) center/contain no-repeat;mask:url(/api/cappe/public/graphics/24a1ab9bf17584c896b2f87501a882b9b5b9503e663ad66598e0e2b9f3a44889.svg) center/contain no-repeat\"></div></div></div></div></div></div>",
+   "used": {},
+   "faces_css": ""
   }
  ]
 }
