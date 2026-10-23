@@ -593,6 +593,54 @@ What is built so far:
   navigates back, and the book is re-measured and turned to the caret when typing runs onto a new spread
   (`book.js` counts spreads only on resize and load).
 
+### Gummfit Studio: stories made of pages (2026-10-22, `services/magazine/studio/`, `cappemag09`)
+
+A story with `format='pages'` is a document of exact pages designed in the Studio
+(`client/src/cappe/studio/`): `content = {"doc": {...}}`, normalized by `studio/schema.normalize_doc`
+(lengths in pt to 2 places, every id/enum/colour/font/asset checked, limits in `studio/limits.py`, mirrored
+by `client/src/cappe/studio/model/limits.ts` and pinned by a test). Text lives in threads of text frames;
+each thread stores its **composition** (`comp.lines`, `[frame, para, start, end, x, baseline, width, align]`,
+UTF-16 offsets), made by the Studio's composer (HarfBuzz on our own faces). **The server never measures
+text**: it checks the composition's shape (`valid_comp`, else dropped) and slices the words out of the
+normalized paragraphs itself; a thread with no valid composition prints its words flowed in one frame.
+- **One renderer in two languages, byte-equal**: `studio/render.py` and `client/src/cappe/studio/render/
+  layoutRender.ts`, held equal by `tests/cappe/fixtures/studio_render_cases.json` (rewrite it with
+  `STUDIO_FIXTURES=write`); `studio/layout.css` and the client's copy are byte-equal (tested). Every size is
+  `calc(N * var(--u))`, `--u` one point on screen (the reader sets it from container units, the Studio from
+  its zoom). A line is an absolutely placed `white-space:pre` box anchored by its **bottom** (a zero-height
+  strut at the baseline), the space it breaks at follows as its own `.lyt-sp`, justified lines use
+  `text-align-last:justify`: no browser re-breaks a line. Paragraphs are `<p>` holding their lines, so
+  copy and screen readers read in order.
+- **Faces are ours** (`studio/fonts.py`, committed `fonts_manifest.json`: google/fonts at a pinned commit,
+  static Latin subsets, metrics normalized by `server/scripts/build_magazine_fonts.py`). Served by sha at
+  `/api/cappe/public/fonts/{sha}.ttf` (`routes/public/fonts.py`: manifest shas only, bytes checked against
+  the sha, immutable; read from `CAPPE_FONTS_DIR` or storage key `cappe/fonts/<sha>.ttf`). Every face has
+  its own family name (`f-<sha16>`), so an installed font never stands in. **Ops:** run the build script
+  once per environment (`--out DIR --upload --dry-run`, then for real) or the Studio and readers fall back
+  to system fonts.
+- **Saving** (`routes/studio.py`): `PUT …/studio/stories/{id}` with `base_rev` (a stale one is 409
+  `{code:"stale_rev", rev}`); an unpublished story saves to itself; a **published** one saves to its
+  working copy (`cappe_posts.draft`; readers keep the live pages, nothing is invalidated) until
+  `publish: true` makes it live (kept as a revision, cache dropped). Revisions (`cappe_post_revisions`,
+  kinds save/publish/restore/convert, `KEEP_REVISIONS`), discard, restore. The story API (`routes/blog.py`)
+  changes only what isn't on the pages (title, dek, byline, topic, access, status): content, cover or format
+  of a paged story is 422 `EDIT_IN_STUDIO`, a changed `body` 409, and a story can't become pages there.
+  A draft still at its placeholder slug (`untitled-story-N`, either editor) takes its headline's slug the
+  first time it is published; never after.
+- **Readers**: `/stories/{slug}` is the pages strip (`studio/reader.css`, `pages.js`: arrows, keys, folio;
+  under 700 px one page at a time); `/stories/{slug}/text` is the **Text view** (`studio/text_view.text_blocks`:
+  the threads and pictures in reading order as ordinary blocks, through the classic book), which is also
+  what `story_blocks` returns for a paged story, so the feed, issue emails, `story_text` (iOS body, word
+  count, search) and Assist all get words. Other stories' `/text` is a 308 to the story.
+- **Paywall by page**: `doc.paywall_page` (2 or later; page 1 is always free). Pages from it are empty
+  placeholders in the HTML and cache (`data-lyt-lock`, with a link to `#mz-paywall`); `/paid` returns
+  `pages: [{n, html}]` and `paywall.js` fills them. The Text view cuts paragraphs where they cross into a
+  locked page; the public JSON never carries a paged story's `content`.
+- **Migration `cappemag09`**: format `pages`, `cappe_posts.rev` + `draft`, `cappe_post_revisions`; its
+  downgrade refuses while paged stories exist. **CSP**: the dashboard needs `'wasm-unsafe-eval'` and
+  `worker-src 'self'` (HarfBuzz): `client/nginx.conf` ×3 in the image, and `deploy/nginx/matcha.conf` on
+  the host (hand-applied per its README).
+
 ## Social growth (2026-10, `services/social/`, migrations `cappesocial01`–`03`)
 
 Owners connect the Instagram business account and Facebook Page they already run, drop photos

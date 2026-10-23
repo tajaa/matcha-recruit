@@ -1,0 +1,38 @@
+/* A paged story's pages (server services/magazine/studio/render.py; the same
+   file is client/src/cappe/studio/render/layout.css). --u is one point on
+   screen: a reader's from the width it has, the Studio's from its zoom. */
+.lyt{container-type:inline-size;position:relative;--u:min(calc(100cqw / var(--sw)),calc((100svh - 96px) / var(--ph)))}
+.lyt-strip{display:flex;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;scrollbar-width:none;overscroll-behavior-x:contain;outline:none}
+.lyt-strip::-webkit-scrollbar{display:none}
+.lyt-slot{flex:0 0 100cqw;display:flex;justify-content:center;align-items:flex-start;scroll-snap-align:center}
+.lyt-spread{position:relative;flex:none;overflow:hidden;box-shadow:0 10px 40px rgba(0,0,0,.18)}
+.lyt-paper{position:absolute;top:0;height:100%;background:var(--paper,#fff)}
+.lyt-page{position:absolute;top:0;height:100%}
+.lyt-page--locked{display:flex;flex-direction:column;gap:12px;align-items:center;justify-content:center;background:repeating-linear-gradient(135deg,rgba(0,0,0,.03) 0 12px,rgba(0,0,0,.06) 12px 24px)}
+.lyt-lock{margin:0;font:600 13px/1.4 system-ui,-apple-system,sans-serif;letter-spacing:.08em;text-transform:uppercase;color:rgba(0,0,0,.45)}
+.lyt a.lyt-lock-go{font:600 15px/1.4 system-ui,-apple-system,sans-serif;color:#1a1a1a;text-decoration:underline;text-underline-offset:3px}
+.lyt-item{position:absolute;box-sizing:border-box;margin:0;padding:0}
+.lyt-img{overflow:hidden}
+.lyt-pic{position:absolute;inset:0;display:block;width:100%;height:100%;max-width:none;margin:0}
+.lyt-credit{position:absolute;right:0;bottom:0;max-width:100%;padding:2px 5px;font:500 9px/1.3 system-ui,-apple-system,sans-serif;color:#fff;text-shadow:0 0 3px rgba(0,0,0,.8);text-align:right;opacity:.85}
+.lyt-credit a{color:inherit;text-decoration:none}
+.lyt-k{position:absolute;inset:0;pointer-events:none}
+.lyt-line{overflow:visible}
+.lyt-p{margin:0;padding:0;display:block}
+.lyt-l{position:absolute;display:block;top:auto;height:auto;margin:0;padding:0;white-space:pre;line-height:0;font-size:0;color:#1a1a1a;
+  font-weight:normal;font-style:normal;font-kerning:normal;font-synthesis:none;font-optical-sizing:none;text-rendering:geometricPrecision;
+  -webkit-text-size-adjust:100%;text-size-adjust:100%;hyphens:manual;font-variant-ligatures:normal;font-feature-settings:"kern" 1,"liga" 1,"calt" 1;
+  text-align:left;text-indent:0;text-transform:none;letter-spacing:0;word-spacing:0}
+.lyt-l--c{text-align:center}
+.lyt-l--r{text-align:right}
+.lyt-l--j{text-align:justify;text-align-last:justify;white-space:nowrap}
+.lyt-l>span{line-height:0;vertical-align:baseline}
+.lyt-sp{position:absolute;white-space:pre;font-size:0;line-height:0}
+.lyt-flow{position:absolute;inset:0;box-sizing:border-box;overflow:hidden;color:#1a1a1a}
+.lyt-flow p{margin:0}
+@media (max-width:699px){
+  .lyt{--u:calc(100cqw / var(--pw))}
+  .lyt-slot{flex:none;display:block;scroll-snap-align:none}
+  .lyt-spread{box-shadow:none}
+  .lyt-paper{scroll-snap-align:start}
+}

@@ -1,0 +1,1148 @@
+{
+ "faces": [
+  {
+   "family": "Source Serif 4",
+   "weight": 400,
+   "italic": false,
+   "sha": "1111111111111111111111111111111111111111111111111111111111111111"
+  },
+  {
+   "family": "Source Serif 4",
+   "weight": 700,
+   "italic": false,
+   "sha": "2222222222222222222222222222222222222222222222222222222222222222"
+  },
+  {
+   "family": "Inter",
+   "weight": 400,
+   "italic": true,
+   "sha": "3333333333333333333333333333333333333333333333333333333333333333"
+  }
+ ],
+ "assets": {
+  "8d7d2b1e-4d5e-4d0a-9d73-1b2c3d4e5f60": {
+   "id": "8d7d2b1e-4d5e-4d0a-9d73-1b2c3d4e5f60",
+   "url": "https://cdn.example.test/a.jpg",
+   "alt": "Boats \"at\" dawn",
+   "credit_line": "Photo: Ana & Bo",
+   "license": "by",
+   "ai_generated": false,
+   "source_url": "https://flickr.example.test/p/1",
+   "width": 1600,
+   "height": 1000,
+   "variants": {
+    "webp": [
+     {
+      "w": 960,
+      "url": "https://cdn.example.test/a-960.webp"
+     },
+     {
+      "w": 480,
+      "url": "https://cdn.example.test/a-480.webp"
+     }
+    ]
+   }
+  },
+  "11111111-1111-4111-8111-111111111111": {
+   "id": "11111111-1111-4111-8111-111111111111",
+   "url": "https://cdn.example.test/b.png",
+   "alt": null,
+   "credit_line": "ignored",
+   "ai_generated": true,
+   "source_url": null,
+   "width": 512,
+   "height": 512,
+   "variants": {}
+  },
+  "22222222-2222-4222-8222-222222222222": {
+   "id": "22222222-2222-4222-8222-222222222222",
+   "url": "javascript:alert(1)",
+   "alt": "x",
+   "credit_line": "",
+   "ai_generated": false,
+   "variants": {}
+  }
+ },
+ "label": "Pages of 'Tide'",
+ "cases": [
+  {
+   "name": "composed text",
+   "doc": {
+    "v": 1,
+    "size": {
+     "w": 612,
+     "h": 792
+    },
+    "facing": true,
+    "margins": {
+     "t": 36,
+     "b": 36,
+     "i": 36,
+     "o": 36
+    },
+    "cols": {
+     "n": 1,
+     "g": 12
+    },
+    "baseline": {
+     "start": 36,
+     "step": 12
+    },
+    "grid": {
+     "step": 12
+    },
+    "bleed": 9,
+    "units": "in",
+    "paper": "#ffffff",
+    "pages": [
+     {
+      "id": "p1"
+     },
+     {
+      "id": "p2"
+     },
+     {
+      "id": "p3"
+     }
+    ],
+    "guides": [],
+    "items": [
+     {
+      "id": "t1",
+      "kind": "text",
+      "page": "p1",
+      "x": 54,
+      "y": 54,
+      "w": 240,
+      "h": 300,
+      "rot": 0,
+      "opacity": 100,
+      "locked": false,
+      "hidden": false,
+      "name": "",
+      "cols": 1,
+      "gutter": 12,
+      "inset": 0,
+      "valign": "top",
+      "fill": null,
+      "stroke": null
+     },
+     {
+      "id": "t2",
+      "kind": "text",
+      "page": "p2",
+      "x": 54,
+      "y": 54,
+      "w": 240,
+      "h": 300,
+      "rot": -3.5,
+      "opacity": 80,
+      "locked": false,
+      "hidden": false,
+      "name": "",
+      "cols": 1,
+      "gutter": 12,
+      "inset": 0,
+      "valign": "top",
+      "fill": "#f4efe8",
+      "stroke": {
+       "c": "#000000",
+       "w": 1.5
+      }
+     }
+    ],
+    "threads": [
+     {
+      "id": "s1",
+      "frames": [
+       "t1",
+       "t2"
+      ],
+      "paras": [
+       {
+        "runs": [
+         {
+          "t": "Low tide at "
+         },
+         {
+          "t": "dawn",
+          "wt": 700
+         },
+         {
+          "t": " and the boats come in",
+          "font": "Inter",
+          "it": true,
+          "track": 40,
+          "color": "#aa3300"
+         }
+        ],
+        "align": "j"
+       },
+       {
+        "runs": [
+         {
+          "t": "Second 😀 paragraph, underlined",
+          "size": 14,
+          "u": true
+         }
+        ],
+        "align": "c"
+       },
+       {
+        "runs": [
+         {
+          "t": "Right & <b>escaped</b> \"text\"",
+          "font": "Lora",
+          "wt": 700
+         }
+        ],
+        "align": "r"
+       }
+      ],
+      "comp": {
+       "lines": [
+        [
+         0,
+         0,
+         0,
+         20,
+         0,
+         14,
+         240,
+         3
+        ],
+        [
+         0,
+         0,
+         21,
+         38,
+         0,
+         28,
+         240,
+         0
+        ],
+        [
+         0,
+         1,
+         0,
+         9,
+         10.5,
+         50,
+         229.5,
+         1
+        ],
+        [
+         1,
+         1,
+         10,
+         31,
+         0,
+         18.25,
+         240,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         29,
+         0,
+         40,
+         240,
+         2
+        ]
+       ]
+      }
+     }
+    ],
+    "paywall_page": null
+   },
+   "locked_from": null,
+   "html": "<div class=\"lyt\" data-lyt style=\"--pw:612;--ph:792;--sw:1224;--paper:#ffffff\"><div class=\"lyt-strip\" data-lyt-strip tabindex=\"0\" role=\"region\" aria-label=\"Pages of &#x27;Tide&#x27;\"><div class=\"lyt-slot\" data-lyt-spread=\"0\"><div class=\"lyt-spread\" style=\"width:calc(612 * var(--u));height:calc(792 * var(--u))\"><div class=\"lyt-paper\" data-lyt-n=\"1\" style=\"left:calc(0 * var(--u));width:calc(612 * var(--u))\"></div><div class=\"lyt-page\" data-lyt-page=\"1\" style=\"left:calc(0 * var(--u));width:calc(612 * var(--u))\"><div class=\"lyt-item lyt-text\" style=\"left:calc(54 * var(--u));top:calc(54 * var(--u));width:calc(240 * var(--u));height:calc(300 * var(--u))\"><p class=\"lyt-p\"><span class=\"lyt-l lyt-l--j\" style=\"left:calc(0 * var(--u));bottom:calc(286 * var(--u));width:calc(240 * var(--u))\"><span style=\"font-family:'f-1111111111111111';font-size:calc(10.5 * var(--u))\">Low tide at </span><span style=\"font-family:'f-2222222222222222';font-size:calc(10.5 * var(--u))\">dawn</span><span style=\"font-family:'f-3333333333333333';font-size:calc(10.5 * var(--u));letter-spacing:calc(0.42 * var(--u));color:#aa3300\"> and</span></span><span class=\"lyt-sp\"> </span><span class=\"lyt-l\" style=\"left:calc(0 * var(--u));bottom:calc(272 * var(--u));width:calc(240 * var(--u))\"><span style=\"font-family:'f-3333333333333333';font-size:calc(10.5 * var(--u));letter-spacing:calc(0.42 * var(--u));color:#aa3300\">the boats come in</span></span></p><p class=\"lyt-p\"><span class=\"lyt-l lyt-l--c\" style=\"left:calc(10.5 * var(--u));bottom:calc(250 * var(--u));width:calc(229.5 * var(--u))\"><span style=\"font-family:'f-1111111111111111';font-size:calc(14 * var(--u));text-decoration:underline\">Second 😀</span></span><span class=\"lyt-sp\"> </span></p></div></div></div></div><div class=\"lyt-slot\" data-lyt-spread=\"1\"><div class=\"lyt-spread\" style=\"width:calc(1224 * var(--u));height:calc(792 * var(--u))\"><div class=\"lyt-paper\" data-lyt-n=\"2\" style=\"left:calc(0 * var(--u));width:calc(612 * var(--u))\"></div><div class=\"lyt-paper\" data-lyt-n=\"3\" style=\"left:calc(612 * var(--u));width:calc(612 * var(--u))\"></div><div class=\"lyt-page\" data-lyt-page=\"2\" style=\"left:calc(0 * var(--u));width:calc(612 * var(--u))\"><div class=\"lyt-item lyt-text\" style=\"left:calc(54 * var(--u));top:calc(54 * var(--u));width:calc(240 * var(--u));height:calc(300 * var(--u));transform:rotate(-3.5deg);opacity:0.8;background:#f4efe8\"><p class=\"lyt-p\"><span class=\"lyt-l lyt-l--c\" style=\"left:calc(0 * var(--u));bottom:calc(281.75 * var(--u));width:calc(240 * var(--u))\"><span style=\"font-family:'f-1111111111111111';font-size:calc(14 * var(--u));text-decoration:underline\">paragraph, underlined</span></span></p><p class=\"lyt-p\"><span class=\"lyt-l lyt-l--r\" style=\"left:calc(0 * var(--u));bottom:calc(260 * var(--u));width:calc(240 * var(--u))\"><span style=\"font-family:'Lora', Georgia, 'Times New Roman', serif;font-weight:700;font-size:calc(10.5 * var(--u))\">Right &amp; &lt;b&gt;escaped&lt;/b&gt; \"text\"</span></span></p><i class=\"lyt-k\" style=\"box-shadow:inset 0 0 0 calc(1.5 * var(--u)) #000000\"></i></div></div><div class=\"lyt-page\" data-lyt-page=\"3\" style=\"left:calc(612 * var(--u));width:calc(612 * var(--u))\"></div></div></div></div></div>",
+   "used": {
+    "Lora": [
+     "700|0"
+    ]
+   },
+   "faces_css": "@font-face{font-family:'f-1111111111111111';src:url(/api/cappe/public/fonts/1111111111111111111111111111111111111111111111111111111111111111.ttf) format('truetype');font-display:block}@font-face{font-family:'f-2222222222222222';src:url(/api/cappe/public/fonts/2222222222222222222222222222222222222222222222222222222222222222.ttf) format('truetype');font-display:block}@font-face{font-family:'f-3333333333333333';src:url(/api/cappe/public/fonts/3333333333333333333333333333333333333333333333333333333333333333.ttf) format('truetype');font-display:block}"
+  },
+  {
+   "name": "flowed text",
+   "doc": {
+    "v": 1,
+    "size": {
+     "w": 612,
+     "h": 792
+    },
+    "facing": true,
+    "margins": {
+     "t": 36,
+     "b": 36,
+     "i": 36,
+     "o": 36
+    },
+    "cols": {
+     "n": 1,
+     "g": 12
+    },
+    "baseline": {
+     "start": 36,
+     "step": 12
+    },
+    "grid": {
+     "step": 12
+    },
+    "bleed": 9,
+    "units": "in",
+    "paper": "#ffffff",
+    "pages": [
+     {
+      "id": "p1"
+     },
+     {
+      "id": "p2"
+     },
+     {
+      "id": "p3"
+     }
+    ],
+    "guides": [],
+    "items": [
+     {
+      "id": "t1",
+      "kind": "text",
+      "page": "p1",
+      "x": 54,
+      "y": 54,
+      "w": 240,
+      "h": 300,
+      "rot": 0,
+      "opacity": 100,
+      "locked": false,
+      "hidden": false,
+      "name": "",
+      "cols": 2,
+      "gutter": 9,
+      "inset": 6,
+      "valign": "top",
+      "fill": null,
+      "stroke": null
+     },
+     {
+      "id": "t2",
+      "kind": "text",
+      "page": "p3",
+      "x": 54,
+      "y": 54,
+      "w": 240,
+      "h": 300,
+      "rot": 0,
+      "opacity": 100,
+      "locked": false,
+      "hidden": false,
+      "name": "",
+      "cols": 1,
+      "gutter": 12,
+      "inset": 0,
+      "valign": "top",
+      "fill": null,
+      "stroke": null
+     }
+    ],
+    "threads": [
+     {
+      "id": "s1",
+      "frames": [
+       "t1",
+       "t2"
+      ],
+      "paras": [
+       {
+        "runs": [
+         {
+          "t": "Flowing <words>"
+         }
+        ],
+        "align": "ja",
+        "li": 6,
+        "ri": 3,
+        "fi": 12,
+        "sb": 4,
+        "sa": 2,
+        "lead": 13.5
+       },
+       {
+        "runs": [
+         {
+          "t": "",
+          "size": 20
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "paywall_page": null
+   },
+   "locked_from": null,
+   "html": "<div class=\"lyt\" data-lyt style=\"--pw:612;--ph:792;--sw:1224;--paper:#ffffff\"><div class=\"lyt-strip\" data-lyt-strip tabindex=\"0\" role=\"region\" aria-label=\"Pages of &#x27;Tide&#x27;\"><div class=\"lyt-slot\" data-lyt-spread=\"0\"><div class=\"lyt-spread\" style=\"width:calc(612 * var(--u));height:calc(792 * var(--u))\"><div class=\"lyt-paper\" data-lyt-n=\"1\" style=\"left:calc(0 * var(--u));width:calc(612 * var(--u))\"></div><div class=\"lyt-page\" data-lyt-page=\"1\" style=\"left:calc(0 * var(--u));width:calc(612 * var(--u))\"><div class=\"lyt-item lyt-text\" style=\"left:calc(54 * var(--u));top:calc(54 * var(--u));width:calc(240 * var(--u));height:calc(300 * var(--u))\"><div class=\"lyt-flow\" style=\"padding:calc(6 * var(--u));column-count:2;column-gap:calc(9 * var(--u))\"><p style=\"text-align:justify;padding-left:calc(6 * var(--u));padding-right:calc(3 * var(--u));text-indent:calc(12 * var(--u));margin-top:calc(4 * var(--u));margin-bottom:calc(2 * var(--u));line-height:calc(13.5 * var(--u))\"><span style=\"font-family:'f-1111111111111111';font-size:calc(10.5 * var(--u))\">Flowing &lt;words&gt;</span></p><p style=\"text-align:left\"><span style=\"font-family:'f-1111111111111111';font-size:calc(20 * var(--u))\"></span></p></div></div></div></div></div><div class=\"lyt-slot\" data-lyt-spread=\"1\"><div class=\"lyt-spread\" style=\"width:calc(1224 * var(--u));height:calc(792 * var(--u))\"><div class=\"lyt-paper\" data-lyt-n=\"2\" style=\"left:calc(0 * var(--u));width:calc(612 * var(--u))\"></div><div class=\"lyt-paper\" data-lyt-n=\"3\" style=\"left:calc(612 * var(--u));width:calc(612 * var(--u))\"></div><div class=\"lyt-page\" data-lyt-page=\"2\" style=\"left:calc(0 * var(--u));width:calc(612 * var(--u))\"></div><div class=\"lyt-page\" data-lyt-page=\"3\" style=\"left:calc(612 * var(--u));width:calc(612 * var(--u))\"><div class=\"lyt-item lyt-text\" style=\"left:calc(54 * var(--u));top:calc(54 * var(--u));width:calc(240 * var(--u));height:calc(300 * var(--u))\"></div></div></div></div></div></div>",
+   "used": {},
+   "faces_css": "@font-face{font-family:'f-1111111111111111';src:url(/api/cappe/public/fonts/1111111111111111111111111111111111111111111111111111111111111111.ttf) format('truetype');font-display:block}"
+  },
+  {
+   "name": "pictures and shapes",
+   "doc": {
+    "v": 1,
+    "size": {
+     "w": 612,
+     "h": 792
+    },
+    "facing": false,
+    "margins": {
+     "t": 36,
+     "b": 36,
+     "i": 36,
+     "o": 36
+    },
+    "cols": {
+     "n": 1,
+     "g": 12
+    },
+    "baseline": {
+     "start": 36,
+     "step": 12
+    },
+    "grid": {
+     "step": 12
+    },
+    "bleed": 9,
+    "units": "in",
+    "paper": "#fffaf0",
+    "pages": [
+     {
+      "id": "p1"
+     },
+     {
+      "id": "p2"
+     }
+    ],
+    "guides": [],
+    "items": [
+     {
+      "id": "i1",
+      "kind": "image",
+      "page": "p1",
+      "x": -9,
+      "y": -9,
+      "w": 630,
+      "h": 400,
+      "rot": 12.25,
+      "opacity": 100,
+      "locked": false,
+      "hidden": false,
+      "name": "",
+      "asset_id": "8d7d2b1e-4d5e-4d0a-9d73-1b2c3d4e5f60",
+      "fit": "fit",
+      "fx": 33.33,
+      "fy": 70,
+      "zoom": 125,
+      "fill": null,
+      "stroke": {
+       "c": "#ffffff",
+       "w": 4
+      },
+      "radius": 6,
+      "caption": ""
+     },
+     {
+      "id": "i2",
+      "kind": "image",
+      "page": "p1",
+      "x": 0,
+      "y": 420,
+      "w": 200,
+      "h": 200,
+      "rot": 0,
+      "opacity": 100,
+      "locked": false,
+      "hidden": false,
+      "name": "",
+      "asset_id": "11111111-1111-4111-8111-111111111111",
+      "fit": "fill",
+      "fx": 50,
+      "fy": 50,
+      "zoom": 100,
+      "fill": null,
+      "stroke": null,
+      "radius": 0,
+      "caption": ""
+     },
+     {
+      "id": "i3",
+      "kind": "image",
+      "page": "p1",
+      "x": 220,
+      "y": 420,
+      "w": 200,
+      "h": 200,
+      "rot": 0,
+      "opacity": 100,
+      "locked": false,
+      "hidden": false,
+      "name": "",
+      "asset_id": "22222222-2222-4222-8222-222222222222",
+      "fit": "fill",
+      "fx": 50,
+      "fy": 50,
+      "zoom": 100,
+      "fill": null,
+      "stroke": null,
+      "radius": 0,
+      "caption": ""
+     },
+     {
+      "id": "i4",
+      "kind": "image",
+      "page": "p2",
+      "x": 10,
+      "y": 10,
+      "w": 50,
+      "h": 50,
+      "rot": 0,
+      "opacity": 100,
+      "locked": false,
+      "hidden": false,
+      "name": "",
+      "asset_id": null,
+      "fit": "fill",
+      "fx": 50,
+      "fy": 50,
+      "zoom": 100,
+      "fill": "#cccccc",
+      "stroke": null,
+      "radius": 0,
+      "caption": ""
+     },
+     {
+      "id": "r1",
+      "kind": "rect",
+      "page": "p2",
+      "x": 100,
+      "y": 100,
+      "w": 120,
+      "h": 60,
+      "rot": 0,
+      "opacity": 45,
+      "locked": false,
+      "hidden": false,
+      "name": "",
+      "fill": "#123456",
+      "stroke": null,
+      "radius": 8
+     },
+     {
+      "id": "e1",
+      "kind": "ellipse",
+      "page": "p2",
+      "x": 300,
+      "y": 100,
+      "w": 90,
+      "h": 90,
+      "rot": 0,
+      "opacity": 100,
+      "locked": false,
+      "hidden": false,
+      "name": "",
+      "fill": null,
+      "stroke": {
+       "c": "#ff0000",
+       "w": 2
+      }
+     },
+     {
+      "id": "l1",
+      "kind": "line",
+      "page": "p2",
+      "x": 54,
+      "y": 700,
+      "w": 504,
+      "h": 0,
+      "rot": 0,
+      "opacity": 100,
+      "locked": false,
+      "hidden": false,
+      "name": "",
+      "stroke": {
+       "c": "#1a1a1a",
+       "w": 1.0
+      },
+      "flip": false
+     },
+     {
+      "id": "l2",
+      "kind": "line",
+      "page": "p2",
+      "x": 54,
+      "y": 600,
+      "w": 100,
+      "h": 80,
+      "rot": 0,
+      "opacity": 100,
+      "locked": false,
+      "hidden": false,
+      "name": "",
+      "stroke": {
+       "c": "#00aa00",
+       "w": 3
+      },
+      "flip": true
+     },
+     {
+      "id": "h1",
+      "kind": "rect",
+      "page": "p2",
+      "x": 0,
+      "y": 0,
+      "w": 10,
+      "h": 10,
+      "rot": 0,
+      "opacity": 100,
+      "locked": false,
+      "hidden": true,
+      "name": "",
+      "fill": "#999999",
+      "stroke": null,
+      "radius": 0
+     }
+    ],
+    "threads": [],
+    "paywall_page": null
+   },
+   "locked_from": null,
+   "html": "<div class=\"lyt\" data-lyt style=\"--pw:612;--ph:792;--sw:612;--paper:#fffaf0\"><div class=\"lyt-strip\" data-lyt-strip tabindex=\"0\" role=\"region\" aria-label=\"Pages of &#x27;Tide&#x27;\"><div class=\"lyt-slot\" data-lyt-spread=\"0\"><div class=\"lyt-spread\" style=\"width:calc(612 * var(--u));height:calc(792 * var(--u))\"><div class=\"lyt-paper\" data-lyt-n=\"1\" style=\"left:calc(0 * var(--u));width:calc(612 * var(--u))\"></div><div class=\"lyt-page\" data-lyt-page=\"1\" style=\"left:calc(0 * var(--u));width:calc(612 * var(--u))\"><figure class=\"lyt-item lyt-img\" style=\"left:calc(-9 * var(--u));top:calc(-9 * var(--u));width:calc(630 * var(--u));height:calc(400 * var(--u));transform:rotate(12.25deg);border-radius:calc(6 * var(--u))\"><img src=\"https://cdn.example.test/a.jpg\" alt=\"Boats &quot;at&quot; dawn\" srcset=\"https://cdn.example.test/a-480.webp 480w, https://cdn.example.test/a-960.webp 960w\" sizes=\"(min-width: 700px) 52vw, 103vw\" fetchpriority=\"high\" class=\"lyt-pic\" style=\"object-fit:contain;object-position:33.33% 70%;transform:scale(1.25);transform-origin:33.33% 70%\" /><figcaption class=\"lyt-credit\"><span class=\"mz-credit\"><a href=\"https://flickr.example.test/p/1\" rel=\"nofollow noopener\" target=\"_blank\">Photo: Ana &amp; Bo</a></span></figcaption><i class=\"lyt-k\" style=\"box-shadow:inset 0 0 0 calc(4 * var(--u)) #ffffff;border-radius:calc(6 * var(--u))\"></i></figure><figure class=\"lyt-item lyt-img\" style=\"left:calc(0 * var(--u));top:calc(420 * var(--u));width:calc(200 * var(--u));height:calc(200 * var(--u))\"><img src=\"https://cdn.example.test/b.png\" alt=\"\" fetchpriority=\"high\" class=\"lyt-pic\" style=\"object-fit:cover;object-position:50% 50%\" /><figcaption class=\"lyt-credit\"><span class=\"mz-credit mz-credit--ai\">AI illustration</span></figcaption></figure><figure class=\"lyt-item lyt-img\" style=\"left:calc(220 * var(--u));top:calc(420 * var(--u));width:calc(200 * var(--u));height:calc(200 * var(--u))\"></figure></div></div></div><div class=\"lyt-slot\" data-lyt-spread=\"1\"><div class=\"lyt-spread\" style=\"width:calc(612 * var(--u));height:calc(792 * var(--u))\"><div class=\"lyt-paper\" data-lyt-n=\"2\" style=\"left:calc(0 * var(--u));width:calc(612 * var(--u))\"></div><div class=\"lyt-page\" data-lyt-page=\"2\" style=\"left:calc(0 * var(--u));width:calc(612 * var(--u))\"><figure class=\"lyt-item lyt-img\" style=\"left:calc(10 * var(--u));top:calc(10 * var(--u));width:calc(50 * var(--u));height:calc(50 * var(--u));background:#cccccc\"></figure><div class=\"lyt-item lyt-shape\" style=\"left:calc(100 * var(--u));top:calc(100 * var(--u));width:calc(120 * var(--u));height:calc(60 * var(--u));opacity:0.45;background:#123456;border-radius:calc(8 * var(--u))\"></div><div class=\"lyt-item lyt-shape\" style=\"left:calc(300 * var(--u));top:calc(100 * var(--u));width:calc(90 * var(--u));height:calc(90 * var(--u));border-radius:50%\"><i class=\"lyt-k\" style=\"box-shadow:inset 0 0 0 calc(2 * var(--u)) #ff0000;border-radius:50%\"></i></div><svg class=\"lyt-item lyt-line\" style=\"left:calc(53.5 * var(--u));top:calc(699.5 * var(--u));width:calc(505 * var(--u));height:calc(1 * var(--u))\" viewBox=\"-0.5 -0.5 505 1\" aria-hidden=\"true\"><line x1=\"0\" y1=\"0\" x2=\"504\" y2=\"0\" stroke=\"#1a1a1a\" stroke-width=\"1\"/></svg><svg class=\"lyt-item lyt-line\" style=\"left:calc(52.5 * var(--u));top:calc(598.5 * var(--u));width:calc(103 * var(--u));height:calc(83 * var(--u))\" viewBox=\"-1.5 -1.5 103 83\" aria-hidden=\"true\"><line x1=\"0\" y1=\"80\" x2=\"100\" y2=\"0\" stroke=\"#00aa00\" stroke-width=\"3\"/></svg></div></div></div></div></div>",
+   "used": {},
+   "faces_css": ""
+  },
+  {
+   "name": "locked pages",
+   "doc": {
+    "v": 1,
+    "size": {
+     "w": 612,
+     "h": 792
+    },
+    "facing": true,
+    "margins": {
+     "t": 36,
+     "b": 36,
+     "i": 36,
+     "o": 36
+    },
+    "cols": {
+     "n": 1,
+     "g": 12
+    },
+    "baseline": {
+     "start": 36,
+     "step": 12
+    },
+    "grid": {
+     "step": 12
+    },
+    "bleed": 9,
+    "units": "in",
+    "paper": "#ffffff",
+    "pages": [
+     {
+      "id": "p1"
+     },
+     {
+      "id": "p2"
+     },
+     {
+      "id": "p3"
+     }
+    ],
+    "guides": [],
+    "items": [
+     {
+      "id": "t1",
+      "kind": "text",
+      "page": "p1",
+      "x": 54,
+      "y": 54,
+      "w": 240,
+      "h": 300,
+      "rot": 0,
+      "opacity": 100,
+      "locked": false,
+      "hidden": false,
+      "name": "",
+      "cols": 1,
+      "gutter": 12,
+      "inset": 0,
+      "valign": "top",
+      "fill": null,
+      "stroke": null
+     },
+     {
+      "id": "t2",
+      "kind": "text",
+      "page": "p2",
+      "x": 54,
+      "y": 54,
+      "w": 240,
+      "h": 300,
+      "rot": -3.5,
+      "opacity": 80,
+      "locked": false,
+      "hidden": false,
+      "name": "",
+      "cols": 1,
+      "gutter": 12,
+      "inset": 0,
+      "valign": "top",
+      "fill": "#f4efe8",
+      "stroke": {
+       "c": "#000000",
+       "w": 1.5
+      }
+     }
+    ],
+    "threads": [
+     {
+      "id": "s1",
+      "frames": [
+       "t1",
+       "t2"
+      ],
+      "paras": [
+       {
+        "runs": [
+         {
+          "t": "Low tide at "
+         },
+         {
+          "t": "dawn",
+          "wt": 700
+         },
+         {
+          "t": " and the boats come in",
+          "font": "Inter",
+          "it": true,
+          "track": 40,
+          "color": "#aa3300"
+         }
+        ],
+        "align": "j"
+       },
+       {
+        "runs": [
+         {
+          "t": "Second 😀 paragraph, underlined",
+          "size": 14,
+          "u": true
+         }
+        ],
+        "align": "c"
+       },
+       {
+        "runs": [
+         {
+          "t": "Right & <b>escaped</b> \"text\"",
+          "font": "Lora",
+          "wt": 700
+         }
+        ],
+        "align": "r"
+       }
+      ],
+      "comp": {
+       "lines": [
+        [
+         0,
+         0,
+         0,
+         20,
+         0,
+         14,
+         240,
+         3
+        ],
+        [
+         0,
+         0,
+         21,
+         38,
+         0,
+         28,
+         240,
+         0
+        ],
+        [
+         0,
+         1,
+         0,
+         9,
+         10.5,
+         50,
+         229.5,
+         1
+        ],
+        [
+         1,
+         1,
+         10,
+         31,
+         0,
+         18.25,
+         240,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         29,
+         0,
+         40,
+         240,
+         2
+        ]
+       ]
+      }
+     }
+    ],
+    "paywall_page": 2
+   },
+   "locked_from": 2,
+   "html": "<div class=\"lyt\" data-lyt style=\"--pw:612;--ph:792;--sw:1224;--paper:#ffffff\"><div class=\"lyt-strip\" data-lyt-strip tabindex=\"0\" role=\"region\" aria-label=\"Pages of &#x27;Tide&#x27;\"><div class=\"lyt-slot\" data-lyt-spread=\"0\"><div class=\"lyt-spread\" style=\"width:calc(612 * var(--u));height:calc(792 * var(--u))\"><div class=\"lyt-paper\" data-lyt-n=\"1\" style=\"left:calc(0 * var(--u));width:calc(612 * var(--u))\"></div><div class=\"lyt-page\" data-lyt-page=\"1\" style=\"left:calc(0 * var(--u));width:calc(612 * var(--u))\"><div class=\"lyt-item lyt-text\" style=\"left:calc(54 * var(--u));top:calc(54 * var(--u));width:calc(240 * var(--u));height:calc(300 * var(--u))\"><p class=\"lyt-p\"><span class=\"lyt-l lyt-l--j\" style=\"left:calc(0 * var(--u));bottom:calc(286 * var(--u));width:calc(240 * var(--u))\"><span style=\"font-family:'f-1111111111111111';font-size:calc(10.5 * var(--u))\">Low tide at </span><span style=\"font-family:'f-2222222222222222';font-size:calc(10.5 * var(--u))\">dawn</span><span style=\"font-family:'f-3333333333333333';font-size:calc(10.5 * var(--u));letter-spacing:calc(0.42 * var(--u));color:#aa3300\"> and</span></span><span class=\"lyt-sp\"> </span><span class=\"lyt-l\" style=\"left:calc(0 * var(--u));bottom:calc(272 * var(--u));width:calc(240 * var(--u))\"><span style=\"font-family:'f-3333333333333333';font-size:calc(10.5 * var(--u));letter-spacing:calc(0.42 * var(--u));color:#aa3300\">the boats come in</span></span></p><p class=\"lyt-p\"><span class=\"lyt-l lyt-l--c\" style=\"left:calc(10.5 * var(--u));bottom:calc(250 * var(--u));width:calc(229.5 * var(--u))\"><span style=\"font-family:'f-1111111111111111';font-size:calc(14 * var(--u));text-decoration:underline\">Second 😀</span></span><span class=\"lyt-sp\"> </span></p></div></div></div></div><div class=\"lyt-slot\" data-lyt-spread=\"1\"><div class=\"lyt-spread\" style=\"width:calc(1224 * var(--u));height:calc(792 * var(--u))\"><div class=\"lyt-paper\" data-lyt-n=\"2\" style=\"left:calc(0 * var(--u));width:calc(612 * var(--u))\"></div><div class=\"lyt-paper\" data-lyt-n=\"3\" style=\"left:calc(612 * var(--u));width:calc(612 * var(--u))\"></div><div class=\"lyt-page lyt-page--locked\" data-lyt-lock=\"2\" style=\"left:calc(0 * var(--u));width:calc(612 * var(--u))\"><p class=\"lyt-lock\">For subscribers</p><a class=\"lyt-lock-go\" href=\"#mz-paywall\">Subscribe or sign in to read on</a></div><div class=\"lyt-page lyt-page--locked\" data-lyt-lock=\"3\" style=\"left:calc(612 * var(--u));width:calc(612 * var(--u))\"><p class=\"lyt-lock\">For subscribers</p><a class=\"lyt-lock-go\" href=\"#mz-paywall\">Subscribe or sign in to read on</a></div></div></div></div></div>",
+   "used": {},
+   "faces_css": "@font-face{font-family:'f-1111111111111111';src:url(/api/cappe/public/fonts/1111111111111111111111111111111111111111111111111111111111111111.ttf) format('truetype');font-display:block}@font-face{font-family:'f-2222222222222222';src:url(/api/cappe/public/fonts/2222222222222222222222222222222222222222222222222222222222222222.ttf) format('truetype');font-display:block}@font-face{font-family:'f-3333333333333333';src:url(/api/cappe/public/fonts/3333333333333333333333333333333333333333333333333333333333333333.ttf) format('truetype');font-display:block}"
+  },
+  {
+   "name": "a4 pages",
+   "doc": {
+    "v": 1,
+    "size": {
+     "w": 595.28,
+     "h": 841.89
+    },
+    "facing": true,
+    "margins": {
+     "t": 36,
+     "b": 36,
+     "i": 36,
+     "o": 36
+    },
+    "cols": {
+     "n": 1,
+     "g": 12
+    },
+    "baseline": {
+     "start": 36,
+     "step": 12
+    },
+    "grid": {
+     "step": 12
+    },
+    "bleed": 9,
+    "units": "in",
+    "paper": "#ffffff",
+    "pages": [
+     {
+      "id": "p1"
+     },
+     {
+      "id": "p2"
+     },
+     {
+      "id": "p3"
+     }
+    ],
+    "guides": [],
+    "items": [
+     {
+      "id": "t1",
+      "kind": "text",
+      "page": "p1",
+      "x": 54,
+      "y": 54,
+      "w": 240,
+      "h": 300,
+      "rot": 0,
+      "opacity": 100,
+      "locked": false,
+      "hidden": false,
+      "name": "",
+      "cols": 1,
+      "gutter": 12,
+      "inset": 0,
+      "valign": "top",
+      "fill": null,
+      "stroke": null
+     },
+     {
+      "id": "t2",
+      "kind": "text",
+      "page": "p2",
+      "x": 54,
+      "y": 54,
+      "w": 240,
+      "h": 300,
+      "rot": -3.5,
+      "opacity": 80,
+      "locked": false,
+      "hidden": false,
+      "name": "",
+      "cols": 1,
+      "gutter": 12,
+      "inset": 0,
+      "valign": "top",
+      "fill": "#f4efe8",
+      "stroke": {
+       "c": "#000000",
+       "w": 1.5
+      }
+     }
+    ],
+    "threads": [
+     {
+      "id": "s1",
+      "frames": [
+       "t1",
+       "t2"
+      ],
+      "paras": [
+       {
+        "runs": [
+         {
+          "t": "Low tide at "
+         },
+         {
+          "t": "dawn",
+          "wt": 700
+         },
+         {
+          "t": " and the boats come in",
+          "font": "Inter",
+          "it": true,
+          "track": 40,
+          "color": "#aa3300"
+         }
+        ],
+        "align": "j"
+       },
+       {
+        "runs": [
+         {
+          "t": "Second 😀 paragraph, underlined",
+          "size": 14,
+          "u": true
+         }
+        ],
+        "align": "c"
+       },
+       {
+        "runs": [
+         {
+          "t": "Right & <b>escaped</b> \"text\"",
+          "font": "Lora",
+          "wt": 700
+         }
+        ],
+        "align": "r"
+       }
+      ],
+      "comp": {
+       "lines": [
+        [
+         0,
+         0,
+         0,
+         20,
+         0,
+         14,
+         240,
+         3
+        ],
+        [
+         0,
+         0,
+         21,
+         38,
+         0,
+         28,
+         240,
+         0
+        ],
+        [
+         0,
+         1,
+         0,
+         9,
+         10.5,
+         50,
+         229.5,
+         1
+        ],
+        [
+         1,
+         1,
+         10,
+         31,
+         0,
+         18.25,
+         240,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         29,
+         0,
+         40,
+         240,
+         2
+        ]
+       ]
+      }
+     }
+    ],
+    "paywall_page": null
+   },
+   "locked_from": null,
+   "html": "<div class=\"lyt\" data-lyt style=\"--pw:595.28;--ph:841.89;--sw:1190.56;--paper:#ffffff\"><div class=\"lyt-strip\" data-lyt-strip tabindex=\"0\" role=\"region\" aria-label=\"Pages of &#x27;Tide&#x27;\"><div class=\"lyt-slot\" data-lyt-spread=\"0\"><div class=\"lyt-spread\" style=\"width:calc(595.28 * var(--u));height:calc(841.89 * var(--u))\"><div class=\"lyt-paper\" data-lyt-n=\"1\" style=\"left:calc(0 * var(--u));width:calc(595.28 * var(--u))\"></div><div class=\"lyt-page\" data-lyt-page=\"1\" style=\"left:calc(0 * var(--u));width:calc(595.28 * var(--u))\"><div class=\"lyt-item lyt-text\" style=\"left:calc(54 * var(--u));top:calc(54 * var(--u));width:calc(240 * var(--u));height:calc(300 * var(--u))\"><p class=\"lyt-p\"><span class=\"lyt-l lyt-l--j\" style=\"left:calc(0 * var(--u));bottom:calc(286 * var(--u));width:calc(240 * var(--u))\"><span style=\"font-family:'f-1111111111111111';font-size:calc(10.5 * var(--u))\">Low tide at </span><span style=\"font-family:'f-2222222222222222';font-size:calc(10.5 * var(--u))\">dawn</span><span style=\"font-family:'f-3333333333333333';font-size:calc(10.5 * var(--u));letter-spacing:calc(0.42 * var(--u));color:#aa3300\"> and</span></span><span class=\"lyt-sp\"> </span><span class=\"lyt-l\" style=\"left:calc(0 * var(--u));bottom:calc(272 * var(--u));width:calc(240 * var(--u))\"><span style=\"font-family:'f-3333333333333333';font-size:calc(10.5 * var(--u));letter-spacing:calc(0.42 * var(--u));color:#aa3300\">the boats come in</span></span></p><p class=\"lyt-p\"><span class=\"lyt-l lyt-l--c\" style=\"left:calc(10.5 * var(--u));bottom:calc(250 * var(--u));width:calc(229.5 * var(--u))\"><span style=\"font-family:'f-1111111111111111';font-size:calc(14 * var(--u));text-decoration:underline\">Second 😀</span></span><span class=\"lyt-sp\"> </span></p></div></div></div></div><div class=\"lyt-slot\" data-lyt-spread=\"1\"><div class=\"lyt-spread\" style=\"width:calc(1190.56 * var(--u));height:calc(841.89 * var(--u))\"><div class=\"lyt-paper\" data-lyt-n=\"2\" style=\"left:calc(0 * var(--u));width:calc(595.28 * var(--u))\"></div><div class=\"lyt-paper\" data-lyt-n=\"3\" style=\"left:calc(595.28 * var(--u));width:calc(595.28 * var(--u))\"></div><div class=\"lyt-page\" data-lyt-page=\"2\" style=\"left:calc(0 * var(--u));width:calc(595.28 * var(--u))\"><div class=\"lyt-item lyt-text\" style=\"left:calc(54 * var(--u));top:calc(54 * var(--u));width:calc(240 * var(--u));height:calc(300 * var(--u));transform:rotate(-3.5deg);opacity:0.8;background:#f4efe8\"><p class=\"lyt-p\"><span class=\"lyt-l lyt-l--c\" style=\"left:calc(0 * var(--u));bottom:calc(281.75 * var(--u));width:calc(240 * var(--u))\"><span style=\"font-family:'f-1111111111111111';font-size:calc(14 * var(--u));text-decoration:underline\">paragraph, underlined</span></span></p><p class=\"lyt-p\"><span class=\"lyt-l lyt-l--r\" style=\"left:calc(0 * var(--u));bottom:calc(260 * var(--u));width:calc(240 * var(--u))\"><span style=\"font-family:'Lora', Georgia, 'Times New Roman', serif;font-weight:700;font-size:calc(10.5 * var(--u))\">Right &amp; &lt;b&gt;escaped&lt;/b&gt; \"text\"</span></span></p><i class=\"lyt-k\" style=\"box-shadow:inset 0 0 0 calc(1.5 * var(--u)) #000000\"></i></div></div><div class=\"lyt-page\" data-lyt-page=\"3\" style=\"left:calc(595.28 * var(--u));width:calc(595.28 * var(--u))\"></div></div></div></div></div>",
+   "used": {
+    "Lora": [
+     "700|0"
+    ]
+   },
+   "faces_css": "@font-face{font-family:'f-1111111111111111';src:url(/api/cappe/public/fonts/1111111111111111111111111111111111111111111111111111111111111111.ttf) format('truetype');font-display:block}@font-face{font-family:'f-2222222222222222';src:url(/api/cappe/public/fonts/2222222222222222222222222222222222222222222222222222222222222222.ttf) format('truetype');font-display:block}@font-face{font-family:'f-3333333333333333';src:url(/api/cappe/public/fonts/3333333333333333333333333333333333333333333333333333333333333333.ttf) format('truetype');font-display:block}"
+  },
+  {
+   "name": "uncomposed past the wall",
+   "doc": {
+    "v": 1,
+    "size": {
+     "w": 612,
+     "h": 792
+    },
+    "facing": true,
+    "margins": {
+     "t": 36,
+     "b": 36,
+     "i": 36,
+     "o": 36
+    },
+    "cols": {
+     "n": 1,
+     "g": 12
+    },
+    "baseline": {
+     "start": 36,
+     "step": 12
+    },
+    "grid": {
+     "step": 12
+    },
+    "bleed": 9,
+    "units": "in",
+    "paper": "#ffffff",
+    "pages": [
+     {
+      "id": "p1"
+     },
+     {
+      "id": "p2"
+     },
+     {
+      "id": "p3"
+     }
+    ],
+    "guides": [],
+    "items": [
+     {
+      "id": "t1",
+      "kind": "text",
+      "page": "p1",
+      "x": 54,
+      "y": 54,
+      "w": 240,
+      "h": 300,
+      "rot": 0,
+      "opacity": 100,
+      "locked": false,
+      "hidden": false,
+      "name": "",
+      "cols": 2,
+      "gutter": 9,
+      "inset": 6,
+      "valign": "top",
+      "fill": null,
+      "stroke": null
+     },
+     {
+      "id": "t2",
+      "kind": "text",
+      "page": "p3",
+      "x": 54,
+      "y": 54,
+      "w": 240,
+      "h": 300,
+      "rot": 0,
+      "opacity": 100,
+      "locked": false,
+      "hidden": false,
+      "name": "",
+      "cols": 1,
+      "gutter": 12,
+      "inset": 0,
+      "valign": "top",
+      "fill": null,
+      "stroke": null
+     }
+    ],
+    "threads": [
+     {
+      "id": "s1",
+      "frames": [
+       "t1",
+       "t2"
+      ],
+      "paras": [
+       {
+        "runs": [
+         {
+          "t": "Flowing <words>"
+         }
+        ],
+        "align": "ja",
+        "li": 6,
+        "ri": 3,
+        "fi": 12,
+        "sb": 4,
+        "sa": 2,
+        "lead": 13.5
+       },
+       {
+        "runs": [
+         {
+          "t": "",
+          "size": 20
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "paywall_page": null
+   },
+   "locked_from": 2,
+   "html": "<div class=\"lyt\" data-lyt style=\"--pw:612;--ph:792;--sw:1224;--paper:#ffffff\"><div class=\"lyt-strip\" data-lyt-strip tabindex=\"0\" role=\"region\" aria-label=\"Pages of &#x27;Tide&#x27;\"><div class=\"lyt-slot\" data-lyt-spread=\"0\"><div class=\"lyt-spread\" style=\"width:calc(612 * var(--u));height:calc(792 * var(--u))\"><div class=\"lyt-paper\" data-lyt-n=\"1\" style=\"left:calc(0 * var(--u));width:calc(612 * var(--u))\"></div><div class=\"lyt-page\" data-lyt-page=\"1\" style=\"left:calc(0 * var(--u));width:calc(612 * var(--u))\"><div class=\"lyt-item lyt-text\" style=\"left:calc(54 * var(--u));top:calc(54 * var(--u));width:calc(240 * var(--u));height:calc(300 * var(--u))\"></div></div></div></div><div class=\"lyt-slot\" data-lyt-spread=\"1\"><div class=\"lyt-spread\" style=\"width:calc(1224 * var(--u));height:calc(792 * var(--u))\"><div class=\"lyt-paper\" data-lyt-n=\"2\" style=\"left:calc(0 * var(--u));width:calc(612 * var(--u))\"></div><div class=\"lyt-paper\" data-lyt-n=\"3\" style=\"left:calc(612 * var(--u));width:calc(612 * var(--u))\"></div><div class=\"lyt-page lyt-page--locked\" data-lyt-lock=\"2\" style=\"left:calc(0 * var(--u));width:calc(612 * var(--u))\"><p class=\"lyt-lock\">For subscribers</p><a class=\"lyt-lock-go\" href=\"#mz-paywall\">Subscribe or sign in to read on</a></div><div class=\"lyt-page lyt-page--locked\" data-lyt-lock=\"3\" style=\"left:calc(612 * var(--u));width:calc(612 * var(--u))\"><p class=\"lyt-lock\">For subscribers</p><a class=\"lyt-lock-go\" href=\"#mz-paywall\">Subscribe or sign in to read on</a></div></div></div></div></div>",
+   "used": {},
+   "faces_css": "@font-face{font-family:'f-1111111111111111';src:url(/api/cappe/public/fonts/1111111111111111111111111111111111111111111111111111111111111111.ttf) format('truetype');font-display:block}"
+  }
+ ]
+}

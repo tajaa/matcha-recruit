@@ -239,7 +239,9 @@ class CappePostCreate(BaseModel):
     status: Literal["draft", "published", "archived"] = "draft"
     # Story fields (services/magazine). `content` is `{"blocks": [...]}`;
     # sending it (or format="blocks") makes the post a block story.
-    format: Optional[Literal["markdown", "blocks"]] = None
+    # format="pages" makes a paged story (the Studio's), with its first pages
+    # or the document sent as `content = {"doc": ...}`.
+    format: Optional[Literal["markdown", "blocks", "pages"]] = None
     content: Optional[dict[str, Any]] = None
     kicker: Optional[str] = Field(default=None, max_length=60)
     topic: Optional[str] = Field(default=None, max_length=40)
@@ -256,7 +258,7 @@ class CappePostUpdate(BaseModel):
     body: Optional[str] = None
     cover_image_url: Optional[str] = None
     status: Optional[Literal["draft", "published", "archived"]] = None
-    format: Optional[Literal["markdown", "blocks"]] = None
+    format: Optional[Literal["markdown", "blocks", "pages"]] = None
     content: Optional[dict[str, Any]] = None
     kicker: Optional[str] = Field(default=None, max_length=60)
     topic: Optional[str] = Field(default=None, max_length=40)
@@ -289,6 +291,8 @@ class CappePost(BaseModel):
     word_count: int = 0
     reading_minutes: int = 0
     hidden: bool = False
+    # How many times its content has been saved (a paged story's saves name it).
+    rev: int = 0
 
 
 # ===========================================================================

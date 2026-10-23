@@ -115,7 +115,7 @@ export function NumberField({ label, short, value, onChange, min = -Infinity, ma
         onChange={(e) => setText(e.target.value)} onFocus={(e) => e.target.select()}
         onBlur={() => commit(text)}
         onKeyDown={(e) => {
-          if (e.key === 'Enter') commit(text)
+          if (e.key === 'Enter') { e.preventDefault(); commit(text) }
           else if (e.key === 'Escape') { setText(null); (e.target as HTMLInputElement).blur() }
           else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
             e.preventDefault()
@@ -222,7 +222,7 @@ export function ColorPicker({ value, onChange, accent }: { value: string; onChan
       <div className="flex items-center gap-1.5">
         <input aria-label="Colour, as hex" value={hex ?? (value === 'accent' ? 'accent' : value)} onChange={(e) => setHex(e.target.value)}
           onBlur={(e) => { const c = readColour(e.target.value); if (c) pick(c); setHex(null) }}
-          onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLInputElement).blur() } }}
           className={`${BOX} min-w-0 flex-1 px-2 font-mono`} />
         <span className="w-9 text-right text-[11px] tabular-nums text-zinc-400">{Math.round(alphaOf(value === 'accent' ? accent : value) * 100)}%</span>
         {dropper && (

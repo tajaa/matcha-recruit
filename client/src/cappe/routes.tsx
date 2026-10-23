@@ -63,6 +63,8 @@ const Shelf = lazy(() => import('./magazine/shelf/Shelf'))
 const ShelfMagazine = lazy(() => import('./magazine/shelf/ShelfMagazine'))
 const ShelfStory = lazy(() => import('./magazine/shelf/ShelfStory'))
 const ReaderFeed = lazy(() => import('./magazine/shelf/Feed'))
+// Gummfit Studio: full screen, outside the dashboard's chrome (it checks the session itself).
+const StudioPage = lazy(() => import('./studio/StudioPage'))
 
 // The Blog page became the magazine's Stories (cappemag02); old links land there.
 function BlogRedirect() {
@@ -111,6 +113,7 @@ export default function CappeRoutes() {
           <Route path="m/:slug" element={<ShelfMagazine />} />
           <Route path="m/:slug/:story" element={<ShelfStory />} />
         </Route>
+        <Route path="studio/:siteId/story/:postId" element={<StudioPage />} />
         <Route path="website-setup" element={<CappeSignup />} />
         {/* The address people type. */}
         <Route path="signup" element={<CappeSignup />} />

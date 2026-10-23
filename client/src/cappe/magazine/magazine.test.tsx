@@ -113,8 +113,25 @@ describe('Stories', () => {
     expect(screen.getByRole('link', { name: /Magazine settings/ })).toHaveAttribute('href', '/cappe/sites/s-1/magazine')
     fireEvent.click(screen.getByRole('tab', { name: 'draft' }))
     expect(screen.queryByText('Hidden one')).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: /New story/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Flowing story/ }))
     await waitFor(() => expect(api.post).toHaveBeenCalledWith('/sites/s-1/posts', { title: 'Untitled story', format: 'blocks', layout: 'standard' }))
+  })
+
+  it('opens a paged story in the Studio and starts one there', async () => {
+    answer({ '/posts': [post({ format: 'pages', title: 'Designed' })], '/magazine': magazine(), '/stories/options': OPTIONS })
+    api.post.mockResolvedValue(post({ id: 'p-new', format: 'pages' }))
+    render(
+      <MemoryRouter initialEntries={['/cappe/sites/s-1/stories']}>
+        <Routes>
+          <Route path="/cappe/sites/:siteId/stories" element={<Stories />} />
+          <Route path="/cappe/studio/:siteId/story/:postId" element={<p>the studio</p>} />
+        </Routes>
+      </MemoryRouter>,
+    )
+    expect((await screen.findByText('Designed')).closest('a')).toHaveAttribute('href', '/cappe/studio/s-1/story/p-1')
+    fireEvent.click(screen.getByRole('button', { name: /New story in Studio/ }))
+    expect(await screen.findByText('the studio')).toBeInTheDocument()
+    expect(api.post).toHaveBeenCalledWith('/sites/s-1/posts', { title: 'Untitled story', format: 'pages' })
   })
 
   it('says when the plan has no magazine and shows an empty state', async () => {
@@ -156,6 +173,19 @@ const openStory = () => mount('/cappe/sites/s-1/stories/p-1', <StoryEditor />, '
 describe('StoryEditor', () => {
   beforeEach(() => {
     answer({ '/posts/p-1': post(), '/stories/options': OPTIONS, '/assets': { assets: [ASSET] } })
+  })
+
+  it('hands a story made of pages to the Studio', async () => {
+    answer({ '/posts/p-1': post({ format: 'pages' }), '/stories/options': OPTIONS, '/assets': { assets: [ASSET] } })
+    render(
+      <MemoryRouter initialEntries={['/cappe/sites/s-1/stories/p-1']}>
+        <Routes>
+          <Route path="/cappe/sites/:siteId/stories/:postId" element={<StoryEditor />} />
+          <Route path="/cappe/studio/:siteId/story/:postId" element={<p>the studio</p>} />
+        </Routes>
+      </MemoryRouter>,
+    )
+    expect(await screen.findByText('the studio')).toBeInTheDocument()
   })
 
   it('edits on the page, sets the page again, and saves the content with the cover', async () => {

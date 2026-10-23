@@ -22,6 +22,7 @@ from uuid import UUID
 from .design_schema import ASPECTS, DesignError, colour, design_asset_ids, normalize_design, num, overlays_to_layers
 from .fonts import font_name
 from .rt import RtError, md_to_rt, normalize_rt, rt_to_md
+from .studio.schema import doc_asset_ids
 
 MAX_BLOCKS = 120
 MAX_CONTENT_BYTES = 1_000_000  # a story's words are kept twice (the document and its Markdown), and its designs
@@ -302,10 +303,13 @@ def normalize_layout(value: Any) -> str:
 
 
 def referenced_asset_ids(content: dict, cover_asset_id: Any = None) -> set[str]:
-    """Every library picture the story shows (its cover included)."""
+    """Every library picture the story shows (its cover included), a paged
+    story's (`content["doc"]`) too."""
     ids: set[str] = set()
     if cover_asset_id:
         ids.add(str(cover_asset_id))
+    if isinstance(content.get("doc"), dict):
+        ids |= doc_asset_ids(content["doc"])
     for b in content.get("blocks") or []:
         if b.get("asset_id"):
             ids.add(b["asset_id"])

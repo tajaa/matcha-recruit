@@ -1,7 +1,9 @@
 """Saving a story: the stored shape, the text the iOS app sees, reading time,
 and the record of which library pictures a story uses.
 
-A story (`format='blocks'`) keeps its words in `content`. Its `body` — the
+A story (`format='blocks'`) keeps its words in `content`; a paged story
+(`format='pages'`, the Studio's) keeps its document there (`{"doc": ...}`)
+and is read here through its Text view (`studio/text_view.py`). Its `body` — the
 plain-text field the iOS app shows and edits — is DERIVED from the blocks on
 every save, so the app always has something to show; an app edit that changes
 `body` is refused with 409 `edit_on_web` (the route), because writing it back
@@ -20,11 +22,12 @@ from .design_schema import design_words
 from .richtext import md_to_text
 from .rt import md_to_rt
 from .story_schema import StoryError, count_words, referenced_asset_ids, with_designs
+from .studio.text_view import cover_image, text_blocks
 
 POST_COLS = (
     "id, site_id, title, slug, excerpt, body, cover_image_url, status, published_at, created_at, updated_at, "
     "format, content, kicker, topic, layout, access, cover_asset_id, byline, word_count, reading_minutes, "
-    "hidden_at"
+    "hidden_at, rev"
 )
 
 WORDS_PER_MINUTE = 230
@@ -61,6 +64,8 @@ def post_row(r) -> dict[str, Any]:
 def story_text(content: dict) -> str:
     """The story's words in reading order, as plain text: what `body` holds for
     a block story, what is counted, and what a feed or search reads."""
+    if isinstance(content.get("doc"), dict):
+        return story_text({"blocks": text_blocks(content["doc"])})
     parts: list[str] = []
     for b in content.get("blocks") or []:
         kind = b.get("type")
@@ -126,7 +131,11 @@ async def sync_post_assets(conn, post_id: UUID, site_id: UUID, ids: Iterable[str
 
 
 def cover_asset(content: dict, cover_asset_id: Optional[str]) -> Optional[str]:
-    """The picture on the cover: the cover block's, else the story's own."""
+    """The picture on the cover: the cover block's (a paged story's biggest
+    picture on its first page), else the story's own."""
+    if isinstance(content.get("doc"), dict):
+        pic = cover_image(content["doc"])
+        return pic["asset_id"] if pic else (str(cover_asset_id) if cover_asset_id else None)
     blocks = content.get("blocks") or []
     if blocks and blocks[0].get("type") == "cover" and blocks[0].get("asset_id"):
         return blocks[0]["asset_id"]

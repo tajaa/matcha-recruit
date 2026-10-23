@@ -1,0 +1,176 @@
+import { ArrowDownToLine, ArrowUpToLine, ChevronDown, ChevronUp, Eye, EyeOff, Image as ImageIcon, Link2Off, Lock, Unlock } from 'lucide-react'
+import { ColorField, IconBtn, NumberField, Row, Section, Seg, Slider } from '../../../magazine/workspace/controls'
+import { round } from '../../model/limits'
+import { arrange, patchItems, unlinkAfter, type Arrange } from '../../model/ops'
+import type { Fit, Item, Stroke, VAlign } from '../../model/types'
+import { useStudio } from '../../store/store'
+import { useCtx } from '../context'
+import { LengthField, Labeled } from '../fields'
+
+const FITS: { key: Fit; label: string }[] = [{ key: 'fill', label: 'Fill' }, { key: 'fit', label: 'Fit' }, { key: 'stretch', label: 'Stretch' }]
+const VALIGNS: { key: VAlign; label: string }[] = [
+  { key: 'top', label: 'Top' }, { key: 'center', label: 'Centre' }, { key: 'bottom', label: 'Bottom' }, { key: 'justify', label: 'Justify' },
+]
+
+/** What the selection is and how it sits: place, size, turn, and its own
+ *  options (a text frame's columns, a picture's fit, fills and strokes). */
+export function ObjectPanel() {
+  const { store } = useCtx()
+  const doc = useStudio(store, (s) => s.doc)
+  const selection = useStudio(store, (s) => s.selection)
+  const overset = useStudio(store, (s) => s.overset)
+  const assets = useStudio(store, (s) => s.assets)
+  const items = doc.items.filter((i) => selection.includes(i.id))
+  if (!items.length) {
+    return (
+      <Section title="Object">
+        <p className="text-xs leading-relaxed text-zinc-500">Nothing selected. Draw a frame with a tool, or click something on a page.</p>
+      </Section>
+    )
+  }
+  const one = items[0]
+  const ids = items.map((i) => i.id)
+  const set = (patch: Record<string, unknown>, key?: string) => store.edit((d) => patchItems(d, ids, patch), { key: key ?? null })
+  const same = <K extends keyof Item>(k: K) => items.every((i) => i[k] === one[k])
+  const units = doc.units
+  const kinds = new Set(items.map((i) => i.kind))
+  const only = kinds.size === 1 ? one.kind : null
+  return (
+    <>
+      <Section title={items.length > 1 ? `${items.length} selected` : KIND_LABEL[one.kind]} right={
+        <div className="flex">
+          <IconBtn title={items.every((i) => i.locked) ? 'Unlock' : 'Lock'} onClick={() => set({ locked: !items.every((i) => i.locked) })}>
+            {items.every((i) => i.locked) ? <Lock className="h-3.5 w-3.5" /> : <Unlock className="h-3.5 w-3.5" />}
+          </IconBtn>
+          <IconBtn title="Hide" onClick={() => store.edit((d) => patchItems(d, ids, { hidden: true }), { extra: { selection: [] } })}>
+            {one.hidden ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+          </IconBtn>
+        </div>
+      }>
+        <Row>
+          <LengthField label="X" units={units} value={one.x} mixed={!same('x')} onChange={(x) => set({ x: round(x) })} />
+          <LengthField label="Y" units={units} value={one.y} mixed={!same('y')} onChange={(y) => set({ y: round(y) })} />
+        </Row>
+        <Row>
+          <LengthField label="Width" short="W" units={units} value={one.w} min={0} mixed={!same('w')} onChange={(w) => set({ w })} />
+          <LengthField label="Height" short="H" units={units} value={one.h} min={0} mixed={!same('h')} onChange={(h) => set({ h })} />
+        </Row>
+        <Row>
+          <NumberField label="Turn" short="↻" value={one.rot} min={-180} max={180} places={2} unit="°" mixed={!same('rot')}
+            onChange={(rot) => set({ rot })} />
+          <NumberField label="Opacity" short="α" value={one.opacity} min={0} max={100} places={0} unit="%" mixed={!same('opacity')}
+            onChange={(opacity) => set({ opacity })} />
+        </Row>
+        <div className="flex gap-1" role="group" aria-label="Arrange">
+          {(['front', 'forward', 'backward', 'back'] as Arrange[]).map((a) => (
+            <IconBtn key={a} title={ARRANGE[a]} onClick={() => store.edit((d) => arrange(d, ids, a))}>
+              {a === 'front' ? <ArrowUpToLine className="h-3.5 w-3.5" /> : a === 'forward' ? <ChevronUp className="h-3.5 w-3.5" />
+                : a === 'backward' ? <ChevronDown className="h-3.5 w-3.5" /> : <ArrowDownToLine className="h-3.5 w-3.5" />}
+            </IconBtn>
+          ))}
+        </div>
+      </Section>
+
+      {only === 'text' && one.kind === 'text' && (
+        <Section title="Text frame">
+          <Row>
+            <NumberField label="Columns" short="▥" value={one.cols} min={1} max={12} places={0} onChange={(cols) => set({ cols })} />
+            <LengthField label="Gutter" short="↔" units={units} value={one.gutter} min={0} max={288} onChange={(gutter) => set({ gutter })} />
+          </Row>
+          <Row>
+            <LengthField label="Inset" short="⊡" units={units} value={one.inset} min={0} max={288} onChange={(inset) => set({ inset })} />
+            <span />
+          </Row>
+          <Seg label="Vertical alignment" value={one.valign} options={VALIGNS} onChange={(valign) => set({ valign })} />
+          <ThreadInfo frame={one.id} overset={overset} />
+        </Section>
+      )}
+
+      {only === 'image' && one.kind === 'image' && (
+        <Section title="Picture">
+          <button type="button" onClick={() => store.set({ dialog: 'library' })}
+            className="flex w-full items-center justify-center gap-2 rounded-md border border-zinc-700 py-1.5 text-xs text-zinc-200 hover:border-emerald-500">
+            <ImageIcon className="h-3.5 w-3.5" />{one.asset_id ? 'Replace picture…' : 'Choose a picture…'}
+          </button>
+          {one.asset_id && assets[one.asset_id] && (
+            <p className="truncate text-[11px] text-zinc-500" title={assets[one.asset_id].credit_line ?? ''}>
+              {assets[one.asset_id].ai_generated ? 'AI illustration' : assets[one.asset_id].credit_line || 'No credit'}
+            </p>
+          )}
+          <Seg label="Fit" value={one.fit} options={FITS} onChange={(fit) => set({ fit })} />
+          <Slider label="Focus left" value={one.fx} min={0} max={100} unit="%" onChange={(fx) => set({ fx }, `fx:${one.id}`)} />
+          <Slider label="Focus top" value={one.fy} min={0} max={100} unit="%" onChange={(fy) => set({ fy }, `fy:${one.id}`)} />
+          <Slider label="Zoom" value={one.zoom} min={100} max={400} unit="%" onChange={(zoom) => set({ zoom }, `zoom:${one.id}`)} />
+          <Labeled label="Caption (for the Text view)">
+            <textarea value={one.caption} maxLength={500} rows={2} onChange={(e) => set({ caption: e.target.value }, `cap:${one.id}`)}
+              className="w-full resize-none rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1 text-xs text-zinc-100 outline-none focus:border-emerald-500" />
+          </Labeled>
+        </Section>
+      )}
+
+      {(only === 'image' || only === 'rect') && 'radius' in one && (
+        <Section title="Corners">
+          <LengthField label="Corner radius" short="◜" units={units} value={one.radius} min={0} max={1000} onChange={(radius) => set({ radius })} />
+        </Section>
+      )}
+
+      {only && only !== 'line' && 'fill' in one && (
+        <Section title="Fill">
+          <ColorField label="Fill" value={one.fill ?? ''} auto="None" onChange={(fill) => set({ fill: fill || null })} />
+        </Section>
+      )}
+
+      {only && 'stroke' in one && (
+        <StrokeSection stroke={one.stroke} line={only === 'line'} units={units}
+          onChange={(stroke) => set({ stroke })} flip={one.kind === 'line' ? one.flip : undefined}
+          onFlip={() => set({ flip: one.kind === 'line' && !one.flip })} />
+      )}
+    </>
+  )
+}
+
+function StrokeSection({ stroke, line, onChange, units, flip, onFlip }: {
+  stroke: Stroke | null; line: boolean; onChange: (s: Stroke | null) => void; units: import('../../model/types').Units
+  flip?: boolean; onFlip: () => void
+}) {
+  const s = stroke ?? { c: '#1a1a1a', w: 0 }
+  return (
+    <Section title="Stroke">
+      <ColorField label="Stroke colour" value={s.c} onChange={(c) => c && onChange({ c, w: s.w || 1 })} />
+      <Row>
+        <LengthField label="Stroke weight" short="≡" units={units} value={s.w} min={line ? 0.25 : 0} max={144}
+          onChange={(w) => onChange(w > 0 ? { c: s.c, w } : line ? { c: s.c, w: 0.25 } : null)} />
+        {flip !== undefined ? (
+          <button type="button" onClick={onFlip} aria-pressed={flip}
+            className="rounded-md border border-zinc-800 text-[11px] text-zinc-300 hover:border-zinc-600">Flip ⤢</button>
+        ) : <span />}
+      </Row>
+    </Section>
+  )
+}
+
+function ThreadInfo({ frame, overset }: { frame: string; overset: Set<string> }) {
+  const { store } = useCtx()
+  const doc = useStudio(store, (s) => s.doc)
+  const t = doc.threads.find((x) => x.frames.includes(frame))
+  if (!t) return <p className="text-[11px] text-zinc-500">Empty. Double-click it to type, or click its out port ▸ to thread text into it from another frame.</p>
+  const at = t.frames.indexOf(frame)
+  const last = at === t.frames.length - 1
+  return (
+    <div className="space-y-1.5 text-[11px] text-zinc-400">
+      <p>Frame {at + 1} of {t.frames.length} in this text.</p>
+      {last && overset.has(t.id) && (
+        <p className="rounded-md bg-red-500/10 px-2 py-1 text-red-300">
+          Some text doesn't fit (overset). Make the frame bigger, or click its red ⊞ port and then another frame to flow it on.
+        </p>
+      )}
+      {!last && (
+        <button type="button" onClick={() => store.edit((d) => unlinkAfter(d, frame))}
+          className="flex items-center gap-1.5 text-zinc-300 hover:text-white"><Link2Off className="h-3.5 w-3.5" />Stop the text flowing on from here</button>
+      )}
+    </div>
+  )
+}
+
+const KIND_LABEL: Record<Item['kind'], string> = { text: 'Text frame', image: 'Picture frame', rect: 'Rectangle', ellipse: 'Ellipse', line: 'Line' }
+const ARRANGE: Record<Arrange, string> = { front: 'Bring to front', forward: 'Bring forward', backward: 'Send backward', back: 'Send to back' }

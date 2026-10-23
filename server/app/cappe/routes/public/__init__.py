@@ -18,6 +18,7 @@ from . import (
     bookings,
     creators,
     directory,
+    fonts,
     forms,
     magazine,
     messages,
@@ -57,3 +58,4 @@ router.include_router(blog.router)
 router.include_router(social_meta.router)
 router.include_router(stock.router)
 router.include_router(magazine.router)
+router.include_router(fonts.router)

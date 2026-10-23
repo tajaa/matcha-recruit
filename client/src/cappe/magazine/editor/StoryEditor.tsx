@@ -151,13 +151,15 @@ export default function StoryEditor() {
       cappeApi.get<{ assets: CappeAsset[] }>(`/sites/${siteId}/assets`),
     ]).then(([p, o, a]) => {
       if (cancelled) return
+      // A story made of pages is designed in the Studio.
+      if (p.format === 'pages') { navigate(`/cappe/studio/${siteId}/story/${p.id}`, { replace: true }); return }
       setPost(p)
       resetDoc(storyDocOf(p))
       setOptions(o)
       setAssets(new Map(a.assets.map((x) => [x.id, x])))
     }).catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : 'Failed to load the story') })
     return () => { cancelled = true }
-  }, [siteId, postId, resetDoc])
+  }, [siteId, postId, resetDoc, navigate])
 
   const isStory = post?.format === 'blocks'
   const dirty = useMemo(() => !!post && !!doc.value && JSON.stringify(doc.value) !== JSON.stringify(storyDocOf(post)),
