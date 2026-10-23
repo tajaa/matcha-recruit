@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import manifest from '../../../../../../server/app/cappe/services/magazine/studio/fonts_manifest.json'
 import { cappeApi } from '../../../api'
@@ -17,6 +17,7 @@ import type { BankPhoto } from './bank'
 import { ObjectPanel } from '../panels/ObjectPanel'
 import { describeStudio } from '../ask/describe'
 import { dropInto, dropOn, importStock } from './drag'
+import { useGraphicSearch } from './graphicSearch'
 import { addElement, addGraphic, addPicture, addText, landing } from './place'
 
 const mono: Measure = { width: (c, t) => [...t].length * 0.5 * c.size, metrics: (c) => ({ asc: 0.8 * c.size, desc: 0.2 * c.size }) }
@@ -297,6 +298,27 @@ describe('graphics from the bank', () => {
     expect(screen.getByText('A colourful graphic keeps its own colours.')).toBeInTheDocument()
   })
 
+  it('recolours only the one-colour graphics of a mixed selection, whichever comes first', () => {
+    for (const stickerFirst of [false, true]) {
+      const { store, ctx } = studio()
+      const sticker = () => addGraphic(ctx, card({ sha: 'b'.repeat(64), name: 'Red heart', group: 'stickers', mono: false }))
+      if (stickerFirst) sticker()
+      addGraphic(ctx, card({}))
+      if (!stickerFirst) sticker()
+      store.set({ selection: store.get().doc.items.map((i) => i.id) })
+      const { unmount } = render(<StudioContext.Provider value={ctx}><ObjectPanel /></StudioContext.Provider>)
+      expect(screen.getByText('The colourful graphics keep their own colours.')).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: 'Colour: #1a1a1a' }))
+      const hex = screen.getByLabelText('Colour, as hex')
+      fireEvent.change(hex, { target: { value: '#aa0000' } })
+      fireEvent.blur(hex)
+      const byName = Object.fromEntries(store.get().doc.items.map((i) => [i.name, i]))
+      expect(byName['Heart']).toMatchObject({ color: '#aa0000' })
+      expect(byName['Red heart']).toMatchObject({ color: null })
+      unmount()
+    }
+  })
+
   it('browses the bank in the Elements tab, opens a group and searches it all', async () => {
     const icons = Array.from({ length: 24 }, (_, k) => card({ sha: k.toString(16).padStart(64, '0'), name: `Icon ${k}` }))
     const browse: GraphicBrowse = { version: 'v', sets: [], groups: [
@@ -373,5 +395,78 @@ describe('Gummfit’s picks and photos', () => {
     vi.spyOn(cappeApi, 'post').mockResolvedValue(asset({ id: 'bank1', kind: 'stock' }))
     await dropInto(ctx, { kind: 'bank', photo: photo() }, landing(ctx))
     expect(only(store)).toMatchObject({ kind: 'image', asset_id: 'bank1' })
+  })
+})
+
+describe('searching the graphics bank', () => {
+  type Page = { total: number; items: GraphicCard[] }
+  const page = (n: number, name: string, total = 120): Page =>
+    ({ total, items: Array.from({ length: n }, (_, k) => card({ sha: `${name}${k}`.padStart(64, '0'), name: `${name} ${k}` })) })
+  const deferred = () => {
+    let resolve!: (p: Page) => void, reject!: (e: Error) => void
+    const promise = new Promise<Page>((res, rej) => { resolve = res; reject = rej })
+    return { promise, resolve, reject }
+  }
+
+  it('never asks a changed search for the old one’s next page, nor keeps an old answer', async () => {
+    vi.useFakeTimers()
+    try {
+      const calls: { args: unknown[]; d: ReturnType<typeof deferred> }[] = []
+      vi.spyOn(graphicsApi, 'search').mockImplementation((...args: unknown[]) => {
+        const d = deferred()
+        calls.push({ args, d })
+        return d.promise
+      })
+      const { result, rerender } = renderHook(({ q }) => useGraphicSearch(q), { initialProps: { q: 'dog' } })
+      await act(async () => { vi.advanceTimersByTime(250) })
+      await act(async () => { calls[0].d.resolve(page(60, 'dog')) })
+      expect(result.current.items).toHaveLength(60)
+      expect(result.current.total).toBe(120)
+
+      // A new search, still in its pause: the dog list has no total, so no More, and More does nothing.
+      rerender({ q: 'cat' })
+      expect(result.current.total).toBeNull()
+      expect(result.current.busy).toBe(true)
+      act(() => result.current.more())
+      expect(calls).toHaveLength(1)
+
+      // The new search fails: its error shows, and still no old page is asked for.
+      await act(async () => { vi.advanceTimersByTime(250) })
+      expect(calls[1].args).toEqual(['cat', undefined, undefined, 0, 60])
+      await act(async () => { calls[1].d.reject(new Error('The graphics didn’t load.')) })
+      expect(result.current.error).toBe('The graphics didn’t load.')
+      expect(result.current.total).toBeNull()
+      expect(result.current.busy).toBe(false)
+      act(() => result.current.more())
+      expect(calls).toHaveLength(2)
+
+      rerender({ q: 'cow' })
+      await act(async () => { vi.advanceTimersByTime(250) })
+      await act(async () => { calls[2].d.resolve(page(60, 'cow')) })
+      expect(result.current.items.map((c) => c.name)).toEqual(page(60, 'cow').items.map((c) => c.name))
+      act(() => result.current.more())
+      expect(calls[3].args).toEqual(['cow', undefined, undefined, 60, 60])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('drops a first page that comes back after the search changed', async () => {
+    vi.useFakeTimers()
+    try {
+      const calls: ReturnType<typeof deferred>[] = []
+      vi.spyOn(graphicsApi, 'search').mockImplementation(() => { const d = deferred(); calls.push(d); return d.promise })
+      const { result, rerender } = renderHook(({ q }) => useGraphicSearch(q), { initialProps: { q: 'dog' } })
+      await act(async () => { vi.advanceTimersByTime(250) })
+      rerender({ q: 'cat' })
+      await act(async () => { calls[0].resolve(page(60, 'dog')) })
+      expect(result.current.items).toHaveLength(0)
+      await act(async () => { vi.advanceTimersByTime(250) })
+      await act(async () => { calls[1].resolve(page(3, 'cat', 3)) })
+      expect(result.current.items.map((c) => c.name)).toEqual(['cat 0', 'cat 1', 'cat 2'])
+      expect(result.current.total).toBe(3)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
