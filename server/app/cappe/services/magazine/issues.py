@@ -120,6 +120,18 @@ async def issue_stories(conn, issue_id: UUID, *, live: bool = False) -> list[dic
     return [post_row(r) for r in rows]
 
 
+async def issue_headlines(conn, issue_id: UUID, *, limit: int) -> list[dict[str, Any]]:
+    """The first `limit` stories a reader can reach, in order, by title and
+    slug only: the front page's list, without reading every story's words."""
+    rows = await conn.fetch(
+        "SELECT p.title, p.slug FROM cappe_magazine_issue_stories s JOIN cappe_posts p "
+        "ON p.id = s.post_id AND p.site_id = s.site_id "
+        "WHERE s.issue_id = $1 AND p.status = 'published' AND p.hidden_at IS NULL ORDER BY s.position LIMIT $2",
+        issue_id, limit,
+    )
+    return [dict(r) for r in rows]
+
+
 def _clean_stories(stories: list[dict]) -> list[dict]:
     """The stories as sent: each once, in the order given, at most 40."""
     seen: set[str] = set()

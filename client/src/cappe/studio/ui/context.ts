@@ -3,6 +3,7 @@
 
 import { createContext, useContext } from 'react'
 import type { FontLoader } from '../fonts/loader'
+import type { SaveOptions } from '../store/saver'
 import type { Store } from '../store/store'
 import type { TextEditor } from '../text/editor'
 import type { StudioPost } from '../api'
@@ -16,8 +17,9 @@ export type StudioCtx = {
   /** The story's own fields (title, access…), kept beside its document. */
   post: StudioPost
   setPost: (post: StudioPost) => void
-  /** Save now (`keep`: as a version to go back to; `publish`: update the live story). */
-  save: (opts?: { keep?: boolean; publish?: boolean }) => Promise<void>
+  /** Save now (`keep`: as a version to go back to; `publish`: update the live
+   *  story; `strict`: throw when it isn't saved). */
+  save: (opts?: SaveOptions) => Promise<void>
   /** The board's element (pages and their lines), for the caret to read. */
   board: () => HTMLElement | null
   /** Scroll and zoom so a page fits (null: the spread showing). */

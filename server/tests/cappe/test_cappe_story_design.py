@@ -103,3 +103,37 @@ def test_words_on_a_photo_are_story_text_and_go_under_it_in_email():
     assert story_text({"blocks": [p]}) == "Dawn\n\n6 a.m.\n\nThe bay."
     row = issue_email._block(p, {A: {**ASSET, "variants": {}}})
     assert "Dawn · 6 a.m. — The bay." in row
+
+
+def test_an_email_keeps_the_words_on_photo_groups_and_designed_pages():
+    def words(text, lid="t1"):
+        para = {"type": "paragraph", "content": [{"type": "text", "text": text}]}
+        return {"kind": "text", "id": lid, "rt": {"type": "doc", "content": [para]}}
+    blocks = story_schema.normalize_story({"blocks": [
+        {"type": "photos", "items": [{"asset_id": A, "caption": "Gulls.", "design": {"layers": [words("At sea")]}},
+                                     {"asset_id": A}]},
+        {"type": "page", "design": {"layers": [{"kind": "image", "id": "p1", "asset_id": A}, words("The end", "t2")]}},
+        {"type": "page", "design": {"layers": [words("Fin <3", "t3")]}},
+    ]})["blocks"]
+    assets = {A: {**ASSET, "variants": {}}}
+    group, pictured, plain = (issue_email._block(b, assets) for b in blocks)
+    assert "At sea — Gulls." in group
+    assert pictured.count("<img") == 1 and "The end" in pictured
+    assert "<img" not in plain and "Fin &lt;3" in plain
+
+
+def test_a_whole_story_email_carries_design_words_in_both_bodies():
+    def words(text, lid):
+        para = {"type": "paragraph", "content": [{"type": "text", "text": text}]}
+        return {"kind": "text", "id": lid, "rt": {"type": "doc", "content": [para]}}
+    content = story_schema.normalize_story({"blocks": [
+        {"type": "cover", "asset_id": A, "design": {"layers": [words("On the cover", "c1")]}},
+        {"type": "text", "md": "Body words."},
+        {"type": "page", "design": {"layers": [words("Page words", "p1")]}},
+        {"type": "photos", "items": [{"asset_id": A, "design": {"layers": [words("Group words", "g1")]}}, {"asset_id": A}]},
+    ]})
+    post = {"slug": "s", "title": "S", "access": "free", "format": "blocks", "content": content}
+    _, html, text = issue_email.build_issue(site_name="Salt", mag={"name": "Salt"}, post=post,
+                                           assets={A: {**ASSET, "variants": {}}}, origin="https://x.test", include_body=True)
+    for w in ("On the cover", "Page words", "Group words", "Body words."):
+        assert w in html and w in text

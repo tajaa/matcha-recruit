@@ -264,8 +264,10 @@ def test_a_taken_handle_is_a_409_never_a_new_suffix(mag_routes):
 class ReadyConn:
     def __init__(self, *, story=True, about=False, plan="writer"):
         self.story, self.about, self.plan = story, about, plan
+        self.sql = []
 
     async def fetchrow(self, sql, *args):
+        self.sql.append(sql)
         return {"has_story": self.story, "has_about": self.about}
 
     async def fetchval(self, sql, *args):
@@ -277,8 +279,11 @@ def test_a_magazine_sites_checklist(monkeypatch):
         return SimpleNamespace(has=lambda f: plan == "writer")
 
     monkeypatch.setattr(readiness, "resolve_entitlements", entitlements)
-    result = run(readiness.compute_readiness(ReadyConn(), SITE_ID, _site_row()))
+    conn = ReadyConn()
+    result = run(readiness.compute_readiness(conn, SITE_ID, _site_row()))
     assert [i["key"] for i in result["items"]] == ["story", "magazine_plan", "about", "branding"]
+    # A story made in Studio counts as much as a flowing one.
+    assert "format IN ('blocks', 'pages')" in conn.sql[0]
     assert result["ready"] is True
     assert run(readiness.compute_readiness(ReadyConn(story=False), SITE_ID, _site_row()))["ready"] is False
     assert run(readiness.compute_readiness(ReadyConn(plan="free"), SITE_ID, _site_row()))["ready"] is False

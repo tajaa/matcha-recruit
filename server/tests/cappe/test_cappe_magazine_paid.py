@@ -255,11 +255,17 @@ class WebhookStripe:
         return {"id": sid, "status": "active", "cancel_at_period_end": False, "current_period_end": 1_800_000_000,
                 "metadata": {"cappe_shopper_subscription_id": str(SUB)}}
 
+    charge_fee = None
+
     async def connected_invoice_payment_intent(self, account_id, invoice):
         return "pi_1"
 
+    async def connected_charge_fee(self, account_id, payment_intent):
+        assert (account_id, payment_intent) == ("acct_w", "pi_1")
+        return self.charge_fee
 
-def _webhook(monkeypatch, *, recorded):
+
+def _webhook(monkeypatch, *, recorded, stripe=None):
     row = {"id": SUB, "site_id": SITE, "shopper_id": SHOPPER, "stripe_account_id": "acct_w", "kind": "magazine",
            "stripe_subscription_id": "sub_1", "status": "active", "total_cents": 500, "currency": "USD",
            "interval": "month", "items": json.dumps([{"title": "Salt & Light subscription", "quantity": 1}])}
@@ -276,7 +282,7 @@ def _webhook(monkeypatch, *, recorded):
         raise AssertionError("a magazine invoice must never become an order")
 
     monkeypatch.setattr(recurring, "get_connection", lambda: conn)
-    monkeypatch.setattr(recurring, "get_cappe_stripe", lambda: WebhookStripe())
+    monkeypatch.setattr(recurring, "get_cappe_stripe", lambda: stripe or WebhookStripe())
     monkeypatch.setattr(recurring, "record_invoice_order", no_order)
     return conn
 
@@ -298,6 +304,18 @@ def test_a_first_invoice_is_a_ledger_row_and_a_welcome(monkeypatch):
     assert sorted(bg.names()) == ["send_cappe_magazine_new_reader_email", "send_cappe_magazine_welcome_email"]
     welcome = next(t for t in bg.tasks if t[0].__name__ == "send_cappe_magazine_welcome_email")
     assert welcome[1][3] == "Salt & Light subscription" and welcome[1][6] == ORIGIN
+
+
+def test_the_fee_is_read_from_the_charge_when_the_invoice_has_none(monkeypatch):
+    # Stripe API 2025-08-27.basil dropped `application_fee_amount` from invoices.
+    stripe = WebhookStripe()
+    stripe.charge_fee = 150
+    conn = _webhook(monkeypatch, recorded=uuid4(), stripe=stripe)
+    invoice = _invoice("subscription_create")
+    del invoice["application_fee_amount"]
+    asyncio.run(recurring.handle_event("invoice.paid", invoice, {"account": "acct_w", "created": 1_790_000_000},
+                                       Background()))
+    assert conn.args_for("INSERT INTO cappe_magazine_payments")[5:8] == ("pi_1", 500, 150)
 
 
 def test_a_renewal_or_a_replay_emails_nobody(monkeypatch):

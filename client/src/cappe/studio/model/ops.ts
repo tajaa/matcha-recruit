@@ -74,22 +74,26 @@ export function arrange(doc: Doc, ids: Iterable<string>, how: Arrange): Doc {
   return { ...doc, items }
 }
 
-/** Copies of items, offset; a copied text frame takes its text along when it
- *  holds all of its thread. Returns the copies' ids. */
+/** Copies of items, offset; copied text frames take their text along when
+ *  they hold all of their thread (linked frames copied together stay linked).
+ *  Returns the copies' ids. */
 export function duplicate(doc: Doc, ids: string[], dx = 12, dy = 12, page?: string): { doc: Doc; ids: string[] } {
   let next = doc
   const made: string[] = []
+  const copies = new Map<string, string>()
   for (const id of ids) {
     const item = byId(next).get(id)
-    if (!item) continue
+    if (!item || copies.has(id)) continue
     const copyId = newId(item.kind === 'text' ? 't' : item.kind[0], allIds(next))
     const copy = { ...item, id: copyId, page: page ?? item.page, x: round(item.x + dx), y: round(item.y + dy), locked: false } as Item
     next = { ...next, items: [...next.items, copy] }
-    const thread = next.threads.find((t) => t.frames.includes(id))
-    if (thread && thread.frames.length === 1) {
-      next = { ...next, threads: [...next.threads, { id: newId('s', allIds(next)), frames: [copyId], paras: thread.paras }] }
-    }
+    copies.set(id, copyId)
     made.push(copyId)
+  }
+  for (const thread of doc.threads) {
+    if (!thread.frames.every((f) => copies.has(f))) continue
+    const frames = thread.frames.map((f) => copies.get(f)!)
+    next = { ...next, threads: [...next.threads, { id: newId('s', allIds(next)), frames, paras: thread.paras }] }
   }
   return { doc: next, ids: made }
 }
