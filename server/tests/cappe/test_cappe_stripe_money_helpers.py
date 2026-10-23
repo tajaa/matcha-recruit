@@ -312,3 +312,28 @@ def test_increasing_an_add_on_waits_for_its_invoice_and_a_decrease_does_not(stri
     run(cs.set_item_quantity(item_id="si_1", quantity=1, invoice_now=False))
     decrease = stripe.SubscriptionItem.calls[1][2]
     assert decrease["proration_behavior"] == "create_prorations" and "payment_behavior" not in decrease
+
+
+# ── the platform fee on a connected charge ───────────────────────────────────
+
+def test_the_charge_fee_is_read_from_the_latest_charge(stripe, cs):
+    stripe.PaymentIntent.result = {"id": "pi_1", "latest_charge": {"id": "ch_1", "application_fee_amount": 150}}
+    assert run(cs.connected_charge_fee("acct_1", "pi_1")) == 150
+    name, args, kwargs = stripe.PaymentIntent.calls[-1]
+    assert (name, args) == ("retrieve", ("pi_1",))
+    assert kwargs == {"expand": ["latest_charge"], "stripe_account": "acct_1"}
+
+
+@pytest.mark.parametrize("result", [
+    {"id": "pi_1", "latest_charge": "ch_1"},  # not expanded
+    {"id": "pi_1", "latest_charge": {"id": "ch_1"}},  # no fee taken
+    {"id": "pi_1", "latest_charge": None},
+])
+def test_no_readable_charge_fee_is_none(stripe, cs, result):
+    stripe.PaymentIntent.result = result
+    assert run(cs.connected_charge_fee("acct_1", "pi_1")) is None
+
+
+def test_a_failed_charge_fee_lookup_is_none_not_an_error(stripe, cs):
+    stripe.PaymentIntent.exc = RuntimeError("stripe down")
+    assert run(cs.connected_charge_fee("acct_1", "pi_1")) is None

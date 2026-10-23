@@ -93,6 +93,7 @@ def test_a_paged_story_can_be_made_from_a_document(monkeypatch, invalidated):
     ({"content": {"doc": {}}}, 422),
     ({"format": "blocks"}, 422),
     ({"cover_asset_id": str(uuid4())}, 422),
+    ({"cover_image_url": "https://cdn.example.test/other.jpg"}, 422),
     ({"body": "Rewritten"}, 409),
 ])
 def test_the_story_api_leaves_a_paged_storys_pages_alone(monkeypatch, invalidated, change, code):
@@ -103,9 +104,13 @@ def test_the_story_api_leaves_a_paged_storys_pages_alone(monkeypatch, invalidate
 
 
 def test_the_story_api_still_titles_and_publishes_a_paged_story(monkeypatch, invalidated):
-    conn = _owner_conn(fetchrow={"FOR UPDATE": paged_row(), "UPDATE cappe_posts SET": paged_row(title="New")})
+    row = paged_row()
+    conn = _owner_conn(fetchrow={"FOR UPDATE": row, "UPDATE cappe_posts SET": paged_row(title="New")})
+    # The iOS app sends the cover it was given back with every save: no change.
     with _blog_client(monkeypatch, conn) as client:
-        res = client.put(f"/sites/{SITE}/posts/{POST}", json={"title": "New", "status": "published", "body": WORDS})
+        res = client.put(f"/sites/{SITE}/posts/{POST}", json={"title": "New", "status": "published", "body": WORDS,
+                                                             "cover_image_url": row["cover_image_url"],
+                                                             "cover_asset_id": str(row["cover_asset_id"])})
     assert res.status_code == 200, res.text
     sql = conn.sql_for("fetchrow")[-1]
     assert "title = $1" in sql and "content" not in sql.split("RETURNING")[0]
@@ -411,6 +416,12 @@ def test_fixed_keys_on_local_storage(tmp_path):
     for bad in ("../escape", "/abs", ""):
         with pytest.raises(RuntimeError):
             asyncio.run(s.get_key(bad))
+    # A link inside uploads that leads out of it is refused too.
+    (tmp_path / "outside").mkdir()
+    (tmp_path / "outside" / "secret").write_bytes(b"no")
+    (tmp_path / "uploads" / "link").symlink_to(tmp_path / "outside")
+    with pytest.raises(RuntimeError):
+        asyncio.run(s.get_key("link/secret"))
 
 
 def test_fixed_keys_on_s3(tmp_path):

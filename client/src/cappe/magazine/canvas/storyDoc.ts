@@ -127,13 +127,16 @@ export function changeDesign(doc: StoryDoc, block: number, item: number | null, 
 function editLayerWords(doc: StoryDoc, block: number, item: number | null, id: string, value: RtDoc): StoryDoc | null {
   const rt = cleanRt(value, FIELD_MAX.design)
   if (!rt) return null
-  let found = false
+  let found = false, changed = false
   const next = changeDesign(doc, block, item, (d) => mapLayers(d, [id], (l) => {
     if (l.kind !== 'text') return l
     found = true
-    return JSON.stringify(l.rt) === JSON.stringify(rt) ? l : { ...l, rt }
+    if (JSON.stringify(l.rt) === JSON.stringify(rt)) return l
+    changed = true
+    return { ...l, rt }
   }))
-  return found ? next ?? doc : null
+  // The same words again (a field left as it was) leave the story as it is.
+  return found ? (changed && next) || doc : null
 }
 
 /** Layers moved, sized or turned on the page. */

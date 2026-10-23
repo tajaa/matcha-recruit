@@ -101,6 +101,19 @@ describe('items', () => {
     expect(r.doc.threads.map((t) => [t.frames, text(t.paras)])).toEqual([[['t1'], ['Hello']], [['t2'], ['Hello']]])
   })
 
+  it('duplicates linked frames together as a thread of their own, and one of them alone without its words', () => {
+    let d = addItem(doc(), 'text', 'p1', box).doc
+    d = addItem(d, 'text', 'p2', box).doc
+    d = link(d, 't1', 't2')
+    d = { ...d, threads: [{ ...d.threads[0], paras: [{ runs: [{ t: 'A long story' }] }] }] }
+    const both = duplicate(d, ['t2', 't1'])
+    expect(both.ids).toEqual(['t3', 't4'])
+    // In the thread's own order (t1's copy first), not the selection's.
+    expect(both.doc.threads.map((t) => [t.frames, text(t.paras)])).toEqual([[['t1', 't2'], ['A long story']], [['t4', 't3'], ['A long story']]])
+    const one = duplicate(d, ['t2'])
+    expect(one.doc.threads).toHaveLength(1)
+  })
+
   it('deleting a frame takes it out of its thread; the last frame takes the thread', () => {
     let d = addItem(doc(), 'text', 'p1', box).doc
     d = addItem(d, 'text', 'p2', box).doc

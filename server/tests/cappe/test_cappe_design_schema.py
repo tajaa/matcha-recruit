@@ -116,11 +116,41 @@ def test_groups_nest_four_deep_and_an_empty_one_is_dropped():
     assert norm({"kind": "group", "children": [{"kind": "image"}]}) is None
 
 
+def test_a_group_too_deep_hands_its_look_to_its_children():
+    deep = {"kind": "group", "id": "g4", "hidden": True, "opacity": 50, "blend": "multiply",
+            "children": [{"kind": "text", "id": "w", "rt": doc("Secret"), "opacity": 80}]}
+    for i in range(4):
+        deep = {"kind": "group", "id": f"g{i}", "children": [deep]}
+    design = norm(deep)
+    leaf = design["layers"][0]
+    while leaf["kind"] == "group":
+        leaf = leaf["children"][0]
+    assert leaf["id"] == "w" and leaf["hidden"] is True and leaf["opacity"] == 40 and leaf["blend"] == "multiply"
+    assert "Secret" not in design_render.design_html(design, {})
+
+
+def test_words_in_a_hidden_group_are_not_the_story_s():
+    shown = {**TEXT, "id": "a", "rt": doc("Shown")}
+    group = {"kind": "group", "id": "g", "hidden": True, "children": [{**TEXT, "id": "b", "rt": doc("Hidden words")}]}
+    design = norm(shown, group)
+    assert design_schema.design_words(design) == ["Shown"]
+    assert "Hidden words" not in design_render.design_html(design, {})
+
+
 def test_the_limits_an_owner_is_told_about():
     with pytest.raises(design_schema.DesignError, match="at most 200"):
         norm(*[{"kind": "shape"}] * 201)
     with pytest.raises(design_schema.DesignError, match="too much"):
         norm(*[{"kind": "text", "rt": doc("x" * 1900)}] * 60)
+
+
+def test_a_list_sent_as_something_else_is_no_list():
+    # A dict or a number where a list goes is taken as none, never a 500.
+    assert design_schema.normalize_design({"layers": {}}) is None
+    assert design_schema.normalize_design({"layers": 5}) is None
+    assert norm({"kind": "group", "children": {"a": 1}}) is None
+    fill = norm({"kind": "shape", "shape": "rect", "fill": {"kind": "linear", "stops": 5}})["layers"][0]["fill"]
+    assert fill["stops"] == []
 
 
 def test_a_designed_page_always_has_its_background():
@@ -211,6 +241,14 @@ def test_the_page_draws_designs_with_their_credits_and_asks_for_their_faces():
     assert '<section class="mz-page"><div class="mz-page__art" style="--ar:0.8;background:#0e0e0e">' in html
     assert "family=Lora:ital,wght@0,400;0,700&amp;display=swap" in html and "family=Inter:" in html
     assert 'data-mzd' not in html and 'data-mz-f="' not in html  # nothing of the editor's for readers
+
+
+def test_a_picture_laid_on_itself_is_credited_once():
+    # The library row's id is a UUID (asyncpg), the design's a string.
+    from uuid import UUID
+    rows = {k: {**v, "id": UUID(k)} for k, v in ASSETS.items()}
+    blocks = _story({"type": "photo", "asset_id": A, "design": {"layers": [{**PIC, "asset_id": A}]}})["blocks"]
+    assert story_render.render_blocks(blocks, rows).count("Photo: Ana") == 1
 
 
 def test_the_editor_marks_each_layer_and_opens_its_words_exactly():

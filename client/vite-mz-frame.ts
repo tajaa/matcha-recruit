@@ -35,8 +35,10 @@ async function bundle(root: string, minify: boolean): Promise<Bundle> {
   const outputs = (Array.isArray(out) ? out : [out]).flatMap((o) => ('output' in o ? o.output : []))
   const chunk = outputs.find((o) => o.type === 'chunk')
   if (!chunk || chunk.type !== 'chunk') throw new Error('mz-frame: no script was built')
-  // Written into a <script> element: nothing in it may end that element.
-  const script = chunk.code.replace(/<\/(script)/gi, '<\\/$1')
+  // Written into a <script> element: nothing in it may end that element, or
+  // open a comment there (DOMPurify holds '<!-->' in a string; '<\!--' reads
+  // the same in any string or pattern).
+  const script = chunk.code.replace(/<\/(script)/gi, '<\\/$1').replace(/<!--/g, '<\\!--')
   if (/<!--|<script/i.test(script)) throw new Error('mz-frame: the script holds markup that would break the page it is written into')
   const style = (await readFile(path.resolve(root, DIR, 'frame.css'), 'utf-8')).replace(/<\/(style)/gi, '')
   return { script, style }
