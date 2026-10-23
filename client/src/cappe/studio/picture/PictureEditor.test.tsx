@@ -10,6 +10,7 @@ const h = vi.hoisted(() => ({
   masks: [] as (Uint8Array | null)[],
   pixels: ((): Promise<Blob> => Promise.reject(new Error('unset'))) as (...a: unknown[]) => Promise<Blob>,
   saveEdit: ((): Promise<unknown> => Promise.reject(new Error('unset'))) as (...a: unknown[]) => Promise<unknown>,
+  assets: ((): Promise<unknown> => Promise.resolve({ assets: [] })) as (...a: unknown[]) => Promise<unknown>,
   load: ((): Promise<void> => Promise.resolve()) as (...a: unknown[]) => Promise<void>,
   maskFails: false,
   calls: { pixels: [] as unknown[][], saveEdit: [] as unknown[][], mask: [] as unknown[][], load: 0, encode: 0 },
@@ -42,6 +43,7 @@ vi.mock('../api', () => ({
   studioApi: {
     pixels: (...a: unknown[]) => { h.calls.pixels.push(a); return h.pixels(...a) },
     saveEdit: (...a: unknown[]) => { h.calls.saveEdit.push(a); return h.saveEdit(...a) },
+    assets: (...a: unknown[]) => h.assets(...a),
   },
 }))
 
@@ -56,6 +58,7 @@ beforeEach(() => {
   h.calls = { pixels: [], saveEdit: [], mask: [], load: 0, encode: 0 }
   h.pixels = () => Promise.resolve(new Blob(['x'], { type: 'image/jpeg' }))
   h.saveEdit = () => Promise.resolve(SAVED)
+  h.assets = () => Promise.resolve({ assets: [] })
   h.load = () => Promise.resolve()
   h.maskFails = false
   vi.stubGlobal('createImageBitmap', vi.fn(async () => ({ width: 400, height: 300, close: () => {} })))
@@ -119,6 +122,53 @@ describe('the Picture Editor', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Done' }))
     await waitFor(() => expect(h.calls.saveEdit).toHaveLength(1))
     expect(h.calls.saveEdit[0].slice(0, 2)).toEqual(['s1', 'a1'])
+  })
+
+  it('puts an edit all the way back as its source', async () => {
+    const source = { id: 'a1', url: 'https://cdn.example.test/a.jpg' }
+    h.assets = () => Promise.resolve({ assets: [{ id: 'x9' }, source] })
+    const { onDone, onClose } = open({ asset: { ...ASSET, id: 'e0', kind: 'edit', parent: 'a1', recipe: { exposure: 1 } } })
+    await ready()
+    fireEvent.click(screen.getByRole('button', { name: 'Reset all' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }))
+    await waitFor(() => expect(onDone).toHaveBeenCalledWith(source))
+    expect(h.calls.saveEdit).toEqual([])
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('changes nothing while Done’s picture is saving', async () => {
+    let finish: (v: unknown) => void = () => {}
+    h.saveEdit = () => new Promise((resolve) => { finish = resolve })
+    const { onDone } = open()
+    await ready()
+    const exposure = () => screen.getByRole('slider', { name: 'Exposure' }) as HTMLInputElement
+    fireEvent.change(exposure(), { target: { value: '1' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }))
+    await waitFor(() => expect(h.calls.saveEdit).toHaveLength(1))
+    expect(exposure()).toBeDisabled()
+    fireEvent.change(exposure(), { target: { value: '2' } })
+    fireEvent.keyDown(window, { key: 'z', metaKey: true })
+    expect(lastDraw().recipe).toMatchObject({ exposure: 1 })
+    await act(async () => { finish(SAVED) })
+    expect(onDone).toHaveBeenCalledWith(SAVED)
+    expect((h.calls.saveEdit[0] as [string, string, Blob, { exposure: number }])[3].exposure).toBe(1)
+  })
+
+  it('drags a crop’s top or bottom under a fixed shape', async () => {
+    HTMLElement.prototype.setPointerCapture ??= () => {}
+    open()
+    await ready()
+    fireEvent.click(screen.getByRole('tab', { name: 'Crop' }))
+    fireEvent.click(screen.getByRole('button', { name: '1:1' }))
+    const before = lastDraw().recipe.crop as { w: number; h: number }
+    const handle = document.querySelector('[data-crop-handle="s"]') as HTMLElement
+    fireEvent.pointerDown(handle, { clientX: 300, clientY: 300, pointerId: 1 })
+    await act(async () => { handle.dispatchEvent(new MouseEvent('pointermove', { clientX: 300, clientY: 150 })) })
+    await act(async () => { handle.dispatchEvent(new MouseEvent('pointerup')) })
+    const after = lastDraw().recipe.crop as { w: number; h: number }
+    expect(after.h).toBeLessThan(before.h)
+    // Still square: 300 wide by 300 high of a 400 × 300 picture.
+    expect((after.w * 400) / (after.h * 300)).toBeCloseTo(1)
   })
 
   it('edits the picture as it is when its source has left the library', async () => {
