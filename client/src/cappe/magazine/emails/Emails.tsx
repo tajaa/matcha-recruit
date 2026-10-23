@@ -30,7 +30,8 @@ export default function Emails() {
     ]).then(([i, p, s]) => {
       if (!live) return
       setIssues(i)
-      setStories(p.filter((x) => x.status === 'published' && x.format === 'blocks' && !x.hidden))
+      // Magazine stories, flowing or made in Studio (the send takes either).
+      setStories(p.filter((x) => x.status === 'published' && x.format !== 'markdown' && !x.hidden))
       setFollowers(s.filter((x) => x.status === 'subscribed').length)
     }).catch((e) => { if (live) setError(e instanceof Error ? e.message : 'Could not load your emails') })
     return () => { live = false }

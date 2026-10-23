@@ -27,24 +27,30 @@ from .stories import POST_COLS, post_row
 # list read. A cap keeps the feed one bounded query.
 FOLLOW_LIMIT = 500
 FEED_PAGE = 12
+# The feed goes back this many pages (600 stories); the route refuses later
+# ones, so the last says there is no more.
+FEED_MAX_PAGE = 50
 
 _SITE_COLS = "s.id, s.slug, s.name, s.subdomain, s.custom_domain, s.account_id, s.status"
 
 
 async def follow(conn, account_id: UUID, site: dict) -> None:
     """Follow a live magazine (the caller has checked it is). Following again
-    changes nothing."""
-    count = await conn.fetchval("SELECT COUNT(*) FROM cappe_magazine_follows WHERE account_id = $1", account_id)
-    if count >= FOLLOW_LIMIT:
-        exists = await conn.fetchval(
-            "SELECT 1 FROM cappe_magazine_follows WHERE account_id = $1 AND site_id = $2", account_id, site["id"])
-        if not exists:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={
-                "code": "follow_limit", "message": f"You can follow up to {FOLLOW_LIMIT} magazines."})
-    await conn.execute(
-        "INSERT INTO cappe_magazine_follows (account_id, site_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
-        account_id, site["id"],
-    )
+    changes nothing. The count and the insert hold the account's lock, so two
+    follows at once can't both pass the limit."""
+    async with conn.transaction():
+        await conn.execute("SELECT pg_advisory_xact_lock(hashtext($1))", f"cappe_follow:{account_id}")
+        count = await conn.fetchval("SELECT COUNT(*) FROM cappe_magazine_follows WHERE account_id = $1", account_id)
+        if count >= FOLLOW_LIMIT:
+            exists = await conn.fetchval(
+                "SELECT 1 FROM cappe_magazine_follows WHERE account_id = $1 AND site_id = $2", account_id, site["id"])
+            if not exists:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={
+                    "code": "follow_limit", "message": f"You can follow up to {FOLLOW_LIMIT} magazines."})
+        await conn.execute(
+            "INSERT INTO cappe_magazine_follows (account_id, site_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+            account_id, site["id"],
+        )
 
 
 async def unfollow(conn, account_id: UUID, site_id: UUID) -> None:
@@ -111,4 +117,4 @@ async def feed(conn, account_id: UUID, *, page: int = 1) -> dict[str, Any]:
         stories.append({**story_card(p, found.get(str(p["id"]))),
                         "magazine": {"slug": site["slug"], "name": mag.get("name") or site["name"],
                                      "accent": mag.get("accent")}})
-    return {"stories": stories, "has_more": len(posts) > FEED_PAGE, "page": page}
+    return {"stories": stories, "has_more": len(posts) > FEED_PAGE and page < FEED_MAX_PAGE, "page": page}

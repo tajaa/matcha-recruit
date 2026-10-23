@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState, type RefObject } from 'react'
 import { X } from 'lucide-react'
+import BookFrame from '../../magazine/reader/BookFrame'
 import Canvas from '../canvas/Canvas'
 import './studio.css'
 import { moveItems } from '../model/ops'
@@ -31,7 +32,10 @@ function Shell() {
   const conflict = useStudio(c.store, (s) => s.save.state === 'conflict')
   const [preview, setPreview] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
-  useKeys(c)
+  // While the preview is up its keys turn its pages: none reach the Studio.
+  const previewing = useRef(false)
+  useEffect(() => { previewing.current = preview !== null }, [preview])
+  useKeys(c, previewing)
 
   const openPreview = async () => {
     try {
@@ -44,7 +48,8 @@ function Shell() {
     try {
       if (c.post.status === 'published') await c.save({ publish: true })
       else {
-        await c.save()
+        // Only pages that saved go live: a failed save stops here.
+        await c.save({ strict: true })
         c.setPost({ ...c.post, ...(await studioApi.updatePost(c.siteId, c.postId, { status: 'published' })) })
         c.store.set((s) => ({ save: { ...s.save, live: true, draft: false } }))
       }
@@ -103,7 +108,8 @@ function Preview({ html, onClose }: { html: string; onClose: () => void }) {
         <span>Preview — as readers will see it</span>
         <button type="button" onClick={onClose} aria-label="Close the preview" className="rounded p-1 hover:bg-zinc-800"><X className="h-4 w-4" /></button>
       </div>
-      <iframe title="Preview" srcDoc={html} sandbox="allow-same-origin" className="min-h-0 flex-1 rounded-lg bg-white" />
+      {/* Scripts don't run in it: its pages turn from out here (the arrows, the keys). */}
+      <BookFrame html={html} title="Preview" keys className="min-h-0 flex-1 rounded-lg bg-white" />
     </div>
   )
 }
@@ -112,9 +118,10 @@ const TEXTY = new Set(['undo', 'redo', 'cut', 'copy', 'paste', 'select-all', 'de
 
 /** The Studio's keys: every command's shortcut, the tools' letters, arrows to
  *  nudge (Shift: ten points), Esc to let go. Typing keeps its own keys. */
-function useKeys(c: StudioCtx) {
+function useKeys(c: StudioCtx, paused: RefObject<boolean>) {
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
+      if (paused.current) return
       const t = e.target as HTMLElement | null
       const s = c.store.get()
       const typing = !!s.editing && !!t && c.editor.view?.dom.contains(t)
@@ -145,5 +152,5 @@ function useKeys(c: StudioCtx) {
     }
     window.addEventListener('keydown', down)
     return () => window.removeEventListener('keydown', down)
-  }, [c])
+  }, [c, paused])
 }

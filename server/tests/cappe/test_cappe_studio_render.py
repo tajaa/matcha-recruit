@@ -196,6 +196,18 @@ def test_the_text_view_reads_the_pages_in_order():
     assert blocks[4]["rt"]["content"][0]["content"][1] == {"type": "hardBreak"}
 
 
+def test_a_long_pull_quote_is_read_whole():
+    long = "A quotation that goes on. " * 23 + "Fin."
+    short = "Every bell rings."
+    doc = _doc([{"runs": [{"t": long}], "role": "quote"}, {"runs": [{"t": short}], "role": "quote"}],
+               comp=[[0, 0, 0, len(long), 0, 20, 240, 0], [0, 1, 0, len(short), 0, 40, 240, 0]])
+    blocks = T.text_blocks(doc)
+    assert [b["type"] for b in blocks] == ["text", "quote"]
+    assert blocks[0]["rt"]["content"][0]["type"] == "blockquote"
+    assert blocks[0]["md"].endswith("Fin.") and len(long) > 400
+    assert blocks[1]["text"] == short
+
+
 def test_overset_text_isnt_read():
     doc = _doc([{"runs": [{"t": "Shown words"}]}, {"runs": [{"t": "Never set"}]}],
                comp=[[0, 0, 0, 5, 0, 20, 240, 0]])

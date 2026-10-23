@@ -8,7 +8,7 @@ import { FaceBook, loadManifest } from './fonts/faces'
 import { FontLoader, browserWidth } from './fonts/loader'
 import { DEFAULT_VIEW, Store } from './store/store'
 import { TextEditor } from './text/editor'
-import { Saver } from './store/saver'
+import { Saver, type SaveOptions } from './store/saver'
 import { boardOffset, layout } from './canvas/geometry'
 import type { StudioCtx } from './ui/context'
 import Studio from './ui/Studio'
@@ -56,7 +56,7 @@ export default function StudioPage() {
     return () => { gone = true; made?.editor.destroy(); made?.saver.dispose() }
   }, [account, siteId, postId])
 
-  const save = useCallback((opts?: { keep?: boolean; publish?: boolean }) => loaded ? loaded.saver.save(opts) : Promise.resolve(),
+  const save = useCallback((opts?: SaveOptions) => loaded ? loaded.saver.save(opts) : Promise.resolve(),
     [loaded])
 
   // Warn before leaving with changes unsaved.
@@ -92,7 +92,13 @@ export default function StudioPage() {
   const ctx = useMemo<StudioCtx | null>(() => (loaded && post ? {
     store: loaded.store, fonts: loaded.fonts, editor: loaded.editor, siteId, postId, post, setPost, save, fit,
     board: () => document.querySelector('[data-studio-board]'),
-    close: () => { void save().finally(() => navigate(`/cappe/sites/${siteId}/stories`)) },
+    // Leaves once the story is saved; if it can't be, only when told to.
+    close: () => {
+      const leave = () => navigate(`/cappe/sites/${siteId}/stories`)
+      save({ strict: true }).then(leave, () => {
+        if (window.confirm('Your latest changes couldn’t be saved. Leave anyway and lose them?')) leave()
+      })
+    },
   } : null), [loaded, post, siteId, postId, save, fit, navigate])
 
   if (!loading && !account) return <Navigate replace to={`/cappe/login?next=${encodeURIComponent(`/cappe/studio/${siteId}/story/${postId}`)}`} />
