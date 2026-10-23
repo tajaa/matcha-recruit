@@ -109,6 +109,48 @@ describe('wireBook', () => {
   })
 })
 
+/** A story made in the Studio: three spreads 1000 wide (pages 1–2, 3–4, 5). */
+function stripDoc() {
+  const frame = document.createElement('iframe')
+  document.body.appendChild(frame)
+  const doc = frame.contentDocument!
+  const slot = (ns: number[]) => `<div class="lyt-slot"><div class="lyt-spread">${ns.map((n) => `<div class="lyt-paper" data-lyt-n="${n}"></div>`).join('')}</div></div>`
+  doc.body.innerHTML = '<div class="lyt" data-lyt><div class="lyt-strip" data-lyt-strip>'
+    + slot([1, 2]) + slot([3, 4]) + slot([5]) + '</div></div><button class="lyt-turn" data-lyt-next hidden></button><p data-lyt-folio></p>'
+  const strip = doc.querySelector<HTMLElement>('[data-lyt-strip]')!
+  let left = 0
+  Object.defineProperty(strip, 'scrollLeft', { get: () => left, set: (v: number) => { left = v } })
+  Object.defineProperty(strip, 'scrollTo', { value: undefined })
+  strip.getBoundingClientRect = () => ({ left: 0 }) as DOMRect
+  doc.querySelectorAll<HTMLElement>('.lyt-slot').forEach((el, i) => {
+    el.getBoundingClientRect = () => ({ left: i * 1000 - left }) as DOMRect
+  })
+  return { doc, strip }
+}
+
+describe('a story made in the Studio', () => {
+  it('turns its spreads from outside the frame and says which pages show', () => {
+    vi.useFakeTimers()
+    const { doc, strip } = stripDoc()
+    const seen: BookState[] = []
+    const ctl = wireBook(doc, { start: 1, onState: (s) => seen.push(s) })!
+    expect(strip.scrollLeft).toBe(1000)
+    expect(ctl.state()).toEqual({ spread: 1, spreads: 3, folio: 'Pages 3–4 of 5' })
+    ctl.turn(1)
+    expect(ctl.state()).toEqual({ spread: 2, spreads: 3, folio: 'Page 5 of 5' })
+    ctl.turn(1)
+    expect(strip.scrollLeft).toBe(2000)
+    // A swipe in the frame is noticed.
+    strip.scrollLeft = 0
+    settle()
+    expect(seen.map((s) => s.spread)).toEqual([1, 2, 0])
+    ctl.dispose()
+    // Its own arrows and folio are hidden: the controls are outside.
+    prepareFrame(doc, { follow: false })
+    expect(doc.head.querySelector('style')!.textContent).toContain('.lyt-turn,[data-lyt-folio]')
+  })
+})
+
 const ISSUE = '<div class="mz-reader" data-mz-book data-mz-issue><button class="mz-turn" data-mz-prev hidden></button>'
   + '<div class="mz-spread"><div class="mz-book"><div class="mz-pages">'
   + '<div class="mz-issue__face"><a class="mzc__link" href="#mz-s-two">Cover line</a></div>'
@@ -183,7 +225,7 @@ describe('prepareFrame and followedLink', () => {
   it('hides the page’s own controls and points its links out of the frame', () => {
     const { doc } = frameDoc(800, 800)
     prepareFrame(doc, { follow: true, openExternal: true })
-    expect(doc.head.textContent).toContain('.mz-turn,[data-mz-folio]{display:none!important}')
+    expect(doc.head.textContent).toContain('.mz-turn,[data-mz-folio],.lyt-turn,[data-lyt-folio]{display:none!important}')
     const [story, web, top] = Array.from(doc.querySelectorAll('a'))
     expect(story.getAttribute('href')).toBe(`${LINK_PREFIX}%2Fstories%2Fnext-one`)
     expect([web.getAttribute('target'), web.getAttribute('rel')]).toEqual(['_blank', 'noopener noreferrer'])

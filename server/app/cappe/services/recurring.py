@@ -317,7 +317,7 @@ async def sync_subscription(conn, row, subscription, event_at):
             "cancel_at_period_end=$4,current_period_end=to_timestamp($5),updated_at=NOW() "
             "WHERE id=$1 AND (status NOT IN ('canceled','incomplete_expired') "
             "OR $3 IN ('canceled','incomplete_expired') "
-            "OR (stripe_subscription_id IS NULL AND $2 IS NOT NULL))",
+            "OR (stripe_subscription_id IS NULL AND $2::varchar IS NOT NULL))",
             *values,
         )
     else:
@@ -327,7 +327,7 @@ async def sync_subscription(conn, row, subscription, event_at):
             "WHERE id=$1 AND (stripe_event_at IS NULL OR stripe_event_at<=$6) "
             "AND (status NOT IN ('canceled','incomplete_expired') "
             "OR $3 IN ('canceled','incomplete_expired') "
-            "OR (stripe_subscription_id IS NULL AND $2 IS NOT NULL))",
+            "OR (stripe_subscription_id IS NULL AND $2::varchar IS NOT NULL))",
             *values, event_at,
         )
 
@@ -433,6 +433,11 @@ async def handle_event(etype, obj, event, background):
     payment_intent = (
         await get_cappe_stripe().connected_invoice_payment_intent(account_id, obj) if records_order else None
     )
+    if payment_intent and not isinstance(obj.get("application_fee_amount"), int):
+        # Current API versions keep the platform fee on the charge, not the invoice.
+        fee = await get_cappe_stripe().connected_charge_fee(account_id, payment_intent)
+        if fee is not None:
+            obj = {**obj, "application_fee_amount": fee}
     async with get_connection() as conn, conn.transaction():
         row = await conn.fetchrow(
             "SELECT sub.* FROM cappe_shopper_subscriptions sub JOIN cappe_sites s ON s.id=sub.site_id "

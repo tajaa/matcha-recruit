@@ -88,7 +88,8 @@ describe('Emails', () => {
   it('sends a test, then the issue, and lists what went out', async () => {
     answer({
       '/issues': [sentIssue],
-      '/posts': [story(), story({ id: 'p-2', title: 'Low tide' }), story({ id: 'p-3', title: 'Draft', status: 'draft' })],
+      '/posts': [story(), story({ id: 'p-2', title: 'Low tide' }), story({ id: 'p-3', title: 'Draft', status: 'draft' }),
+        story({ id: 'p-4', title: 'Made in Studio', format: 'pages' }), story({ id: 'p-5', title: 'Plain post', format: 'markdown' })],
       '/subscribers': [{ status: 'subscribed' }, { status: 'subscribed' }, { status: 'pending_confirmation' }],
     })
     api.post.mockImplementation((path: string) => Promise.resolve(path.endsWith('/test') ? { to: 'ana@example.com' }
@@ -97,7 +98,8 @@ describe('Emails', () => {
     mount('/cappe/sites/s-1/emails', <Emails />, '/cappe/sites/:siteId/emails')
     expect(await screen.findByText(/Sent to 40 · 2 didn’t go/)).toBeInTheDocument()
     const select = screen.getByLabelText('Story')
-    expect(Array.from((select as HTMLSelectElement).options).map((o) => o.text)).toEqual(['Before the town wakes'])
+    // Stories made in Studio too; not plain posts.
+    expect(Array.from((select as HTMLSelectElement).options).map((o) => o.text)).toEqual(['Before the town wakes', 'Made in Studio'])
     fireEvent.change(screen.getByPlaceholderText('Before the town wakes'), { target: { value: 'Dawn' } })
     fireEvent.click(screen.getByRole('checkbox'))
     fireEvent.click(screen.getByRole('button', { name: /Send me a test/ }))

@@ -83,17 +83,25 @@ function fill(w){return call('GET','/stories/'+encodeURIComponent(w.slug)+'/paid
 if(w.el.hasAttribute('data-mz-pages')&&d.pages){d.pages.forEach(function(p){var box=document.querySelector('[data-lyt-lock="'+(+p.n)+'"]');
 if(!box)return;box.innerHTML=p.html;box.className='lyt-page';box.removeAttribute('data-lyt-lock');box.setAttribute('data-lyt-page',+p.n);});}
 else if(w.paid){w.paid.innerHTML=d.html;w.paid.hidden=false;}w.el.hidden=true;return null;},function(err){return err;});}
+// Whether the reader may read on: one question for the whole page. Each
+// paid part fetched counts against the reader's hourly allowance (an issue
+// can hold 40), so parts are fetched only once access is known.
+function access(){return call('GET','/magazine/me').then(function(d){return !!(d&&d.has_access);});}
 // Each paid part for a subscriber; otherwise what the reader can do. Back
-// from checkout, the subscription arrives by webhook a few seconds later.
+// from checkout, the subscription arrives by webhook a few seconds later:
+// asked again every two seconds, a while, before any part is fetched.
 // `from`: the wall whose "Subscribe" signed the reader in.
 function unlock(from,tries){
+return access().then(function(ok){
+if(!ok){
+if(back&&tries<6){sayAll('Confirming your subscription…');return wait(2000).then(function(){return unlock(null,tries+1);});}
+if(back){sayAll('Your payment went through. It can take a minute to show here: refresh the page shortly.');}
+if(from&&open)subscribe(from);else member();return;}
+sayAll('');
 var left=walls.filter(function(w){return !w.el.hidden;});
 return Promise.all(left.map(fill)).then(function(errs){errs=errs.filter(Boolean);if(!errs.length)return;
 if(errs.some(function(e){return e.status===401;})){token=null;offer();return;}
-var other=errs.filter(function(e){return e.status!==403;});
-if(other.length){sayAll(other[0].message,true);return;}
-if(back&&tries<6){sayAll('Confirming your subscription…');return wait(2000).then(function(){return unlock(null,tries+1);});}
-if(back){sayAll('Your payment went through. It can take a minute to show here: refresh the page shortly.');}
-if(from&&open)subscribe(from);else member();});}
+sayAll(errs[0].message,true);});
+},function(err){if(err.status===401){token=null;offer();return;}sayAll(err.message,true);});}
 refresh().then(function(ok){if(ok)unlock(null,0);else offer();});
 })();
