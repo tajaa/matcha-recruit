@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { ChevronsLeft, Image as ImageIcon, Images, Search, Shapes, Type } from 'lucide-react'
+import { ChevronsLeft, Image as ImageIcon, Images, LayoutTemplate, Search, Shapes, Type } from 'lucide-react'
 import { graphicsApi, type GraphicBrowse, type GraphicGroup } from '../../model/graphics'
 import { familyName } from '../../fonts/faces'
 import { CHAR_DEFAULTS } from '../../model/limits'
@@ -12,8 +12,10 @@ import { GROUP_TITLE } from './graphicSearch'
 import { GraphicGrid, GroupView, SearchResults } from './GraphicTiles'
 import { PhotosTab, YourPicturesTab } from './PictureTabs'
 import { addElement, addText } from './place'
+import TemplatesTab from './TemplatesTab'
 
 const TABS: { key: AddTab; label: string; title: string; icon: ReactNode }[] = [
+  { key: 'templates', label: 'Templates', title: 'Templates', icon: <LayoutTemplate className="h-5 w-5" /> },
   { key: 'elements', label: 'Elements', title: 'Elements', icon: <Shapes className="h-5 w-5" /> },
   { key: 'text', label: 'Text', title: 'Text', icon: <Type className="h-5 w-5" /> },
   { key: 'photos', label: 'Photos', title: 'Free photos', icon: <ImageIcon className="h-5 w-5" /> },
@@ -46,6 +48,7 @@ export default function AddPanel() {
               className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-white"><ChevronsLeft className="h-4 w-4" /></button>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
+            {tab === 'templates' && <TemplatesTab />}
             {tab === 'elements' && <ElementsTab />}
             {tab === 'text' && <TextTab />}
             {tab === 'photos' && <PhotosTab />}

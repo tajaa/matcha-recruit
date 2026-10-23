@@ -13,6 +13,7 @@ import { boardOffset, layout } from './canvas/geometry'
 import type { StudioCtx } from './ui/context'
 import Studio from './ui/Studio'
 import './ui/studio.css'
+import { blankPage } from './ui/add/applyTemplate'
 import { guideSeen } from './ui/guideContent'
 
 type Loaded = { store: Store; fonts: FontLoader; editor: TextEditor; saver: Saver; post: StudioPost }
@@ -41,7 +42,7 @@ export default function StudioPage() {
       const assets = Object.fromEntries(lib.assets.map((a) => [a.id, toAsset(a)]))
       const store = new Store({
         doc: opened.doc, selection: [], editing: null, page: 0, tool: 'select', view: { ...DEFAULT_VIEW },
-        panels: ['pages', 'props', 'character', 'paragraph'], drawer: 'elements', overset: new Set(), assets, dialog: null, threading: null,
+        panels: ['pages', 'props', 'character', 'paragraph'], drawer: opened.doc.pages.every((_, i) => blankPage(opened.doc, i)) ? 'templates' : 'elements', overset: new Set(), assets, dialog: null, threading: null,
         guide: guideSeen() ? null : 'start',
         snaps: null, marquee: null,
         save: { rev: opened.post.rev, state: 'saved', message: null, draft: opened.draft, live: opened.live },

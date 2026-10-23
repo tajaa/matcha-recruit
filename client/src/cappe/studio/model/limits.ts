@@ -2,6 +2,8 @@
 // the server's numbers (server/app/cappe/services/magazine/studio/limits.py),
 // held equal by server/tests/cappe/test_cappe_studio_limits.py.
 
+import type { Doc } from './types'
+
 export const LIMITS = {
   MAX_DOC_BYTES: 4_000_000,
   MAX_PAGES: 256,
@@ -55,4 +57,30 @@ export function round(n: number, places = 2): number {
 
 export function clamp(n: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, n))
+}
+
+/** Why the server would refuse to save `doc` for its size, in its words, or
+ *  null. Counts what normalize_doc counts; the byte limit is checked on the
+ *  document as it stands (the server's copy is compact JSON, much the same). */
+export function docProblem(doc: Doc): string | null {
+  if (doc.pages.length > LIMITS.MAX_PAGES) return `A story holds at most ${LIMITS.MAX_PAGES} pages.`
+  if (doc.items.length > LIMITS.MAX_ITEMS) return `A story holds at most ${LIMITS.MAX_ITEMS} frames and shapes.`
+  const perPage = new Map<string, number>()
+  for (const i of doc.items) {
+    const n = (perPage.get(i.page) ?? 0) + 1
+    if (n > LIMITS.MAX_ITEMS_PER_PAGE) return `A page holds at most ${LIMITS.MAX_ITEMS_PER_PAGE} frames and shapes.`
+    perPage.set(i.page, n)
+  }
+  if (doc.threads.length > LIMITS.MAX_THREADS) return `A story holds at most ${LIMITS.MAX_THREADS} separate texts.`
+  let chars = 0
+  for (const t of doc.threads) {
+    if (t.paras.length > LIMITS.MAX_PARAS) return 'A text has too many paragraphs. Split it into two.'
+    let mine = 0
+    for (const p of t.paras) for (const r of p.runs) mine += r.t.length
+    if (mine > LIMITS.MAX_THREAD_CHARS) return "A text frame's story is too long. Split it into two."
+    chars += mine
+  }
+  if (chars > LIMITS.MAX_DOC_CHARS) return 'This story holds too much text. Split it into two.'
+  if (JSON.stringify(doc).length > LIMITS.MAX_DOC_BYTES) return 'This story is too big to save. Split it into two.'
+  return null
 }

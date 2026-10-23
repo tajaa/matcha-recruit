@@ -671,11 +671,18 @@ normalized paragraphs itself; a thread with no valid composition prints its word
   `/public/graphics/stretch/<sha>.svg`, the file with `preserveAspectRatio="none"` on its root (`graphics.stretched`):
   CSS sizing alone never distorts an SVG with a viewBox, it centres it at its own shape. The schema refuses a
   `src` the manifest lacks, so **never take an entry out of the manifest**; the server forces `color` to null for a
-  colourful one. The side panel browses (`/public/graphics/browse`) and searches (`/public/graphics/search`) rather
+  colourful one, so the Object panel's Colour recolours only the one-colour graphics of a selection. The side panel browses (`/public/graphics/browse`) and searches (`/public/graphics/search`) rather
   than download the ~1 MB manifest. Files are served by sha with a no-script CSP from `CAPPE_GRAPHICS_DIR` or storage
   `cappe/graphics/<sha>.svg`. **Ops:** run `server/scripts/build_studio_graphics.py --out DIR --upload --dry-run`,
   then for real, once per environment (it rebuilds the manifest from pinned sources: commit any change); until then
   graphics show as empty boxes.
+- **Page templates** (client only: `ui/add/templates.ts`, `applyTemplate.ts`, `TemplatesTab.tsx`): 13 pages drawn on
+  Letter and fitted to the story's size when used (type scaled, edge items out to the bleed, linked frames one
+  thread). A blank page takes the template; any other gets a new page after it, so nothing is covered. One undo
+  step. The target is the page in view at the click (by id; its faces load first, one template at a time), and the
+  finished document is checked against the save limits (`limits.docProblem`, the server's counts) before it is
+  committed: a full story is told why and left unchanged, never made unsavable. `templates.test.tsx` holds every face and graphic to the bank and composes each frame at its face's real
+  ascent and descent: a display face can be far taller than its size, so size frames from that test, not by eye.
 - **Ask the Studio** (`studio/ask.py`, `POST …/studio/stories/{id}/ask`; client `ui/ask/`, `ui/panels/AskPanel.tsx`):
   one Claude Messages call per question (surface `gummfit.studio`, Haiku by default), no tools, nothing saved,
   nothing on the page changed. **The Studio sends the guide (`ui/guideContent.ts`) and the commands

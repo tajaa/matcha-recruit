@@ -16,7 +16,7 @@ export type Tool = 'select' | 'text' | 'frame' | 'rect' | 'ellipse' | 'line' | '
 export type SaveState = 'saved' | 'dirty' | 'saving' | 'error' | 'conflict'
 export type Panel = 'pages' | 'props' | 'character' | 'paragraph' | 'story' | 'ask'
 /** The side panel's tabs (ui/add/AddPanel.tsx). */
-export type AddTab = 'elements' | 'text' | 'photos' | 'uploads'
+export type AddTab = 'templates' | 'elements' | 'text' | 'photos' | 'uploads'
 
 export type View = {
   zoom: number // screen px per pt
