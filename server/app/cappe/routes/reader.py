@@ -176,7 +176,8 @@ async def following(account: CappeAccount = Depends(require_cappe_account)):
 
 
 @router.get("/reader/feed")
-async def feed(page: int = Query(default=1, ge=1, le=50), account: CappeAccount = Depends(require_cappe_account)):
+async def feed(page: int = Query(default=1, ge=1, le=follows.FEED_MAX_PAGE),
+               account: CappeAccount = Depends(require_cappe_account)):
     async with get_connection() as conn:
         return _private(await follows.feed(conn, account.id, page=page))
 

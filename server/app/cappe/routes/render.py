@@ -614,7 +614,7 @@ def _origin(site, host: str | None) -> str:
 
 async def _current_issue(conn, site, magazine: dict, issue: dict) -> tuple[str, str | None]:
     """The current issue's lead for the front page, and its picture."""
-    stories = await mag_issues.issue_stories(conn, issue["id"], live=True)
+    stories = await mag_issues.issue_headlines(conn, issue["id"], limit=issue_pages.CURRENT_LIST)
     assets = await site_assets(conn, site["id"], cover_asset_ids(issue["cover"]))
     return (issue_pages.current_issue_html(magazine, issue, stories, assets),
             issue_pages.current_issue_image(issue, assets))

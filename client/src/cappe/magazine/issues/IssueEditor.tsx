@@ -68,7 +68,7 @@ export default function IssueEditor() {
   const [params] = useSearchParams()
   const [issue, setIssue] = useState<CappeMagazineIssue | null>(null)
   const doc = useHistory<IssueDoc | null>(null)
-  const { set: setDoc, reset: resetDoc, replace: replaceDoc } = doc
+  const { set: setDoc, reset: resetDoc } = doc
   const current = doc.value
   const [options, setOptions] = useState<CappeMagazineIssueOptions | null>(null)
   const [posts, setPosts] = useState<CappePost[]>([])
@@ -184,11 +184,12 @@ export default function IssueEditor() {
       return next === s ? d : { ...d, drafts: { ...d.drafts, [id]: next } }
     }, { step })
 
-  /** What the server sent back after a save or release; drafts it published
-   *  are published here too. Story drafts still unsaved are kept. */
-  const took = (updated: CappeMagazineIssue, keep: Record<string, StoryDoc> = {}) => {
+  /** The issue as stored after a release or withdrawal: its publication
+   *  changes, the words and design being edited here don't (unsaved changes,
+   *  the issue's and its stories', stay unsaved); drafts it published are
+   *  published here too. */
+  const took = (updated: CappeMagazineIssue) => {
     setIssue(updated)
-    replaceDoc({ ...docOf(updated), ...(Object.keys(keep).length ? { drafts: keep } : {}) })
     published(updated)
   }
   /** Drafts the server published with the issue are published here too. */
@@ -279,7 +280,7 @@ export default function IssueEditor() {
     setBusy('withdraw')
     setError(null)
     try {
-      took(await cappeApi.post<CappeMagazineIssue>(`/sites/${siteId}/magazine/issues/${issueId}/withdraw`), current?.drafts)
+      took(await cappeApi.post<CappeMagazineIssue>(`/sites/${siteId}/magazine/issues/${issueId}/withdraw`))
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not withdraw the issue')
     } finally {
