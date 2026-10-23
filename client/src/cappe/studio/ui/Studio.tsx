@@ -9,6 +9,8 @@ import { MenuBar, StatusBar, ToolBar, TopBar } from './chrome'
 import { commandForKey } from './commands'
 import { StudioContext, useCtx, type StudioCtx } from './context'
 import { LibraryDialog, PictureDialog, RevisionsDialog, StoryDialog } from './dialogs'
+import { markGuideSeen } from './guideContent'
+import StudioGuide from './StudioGuide'
 import { ObjectPanel } from './panels/ObjectPanel'
 import { PagesPanel } from './panels/PagesPanel'
 import { StoryPanel } from './panels/StoryPanel'
@@ -27,6 +29,7 @@ export default function Studio({ ctx }: { ctx: StudioCtx }) {
 function Shell() {
   const c = useCtx()
   const dialog = useStudio(c.store, (s) => s.dialog)
+  const guide = useStudio(c.store, (s) => s.guide)
   const panels = useStudio(c.store, (s) => s.panels)
   const conflict = useStudio(c.store, (s) => s.save.state === 'conflict')
   const [preview, setPreview] = useState<string | null>(null)
@@ -86,6 +89,7 @@ function Shell() {
       {dialog === 'revisions' && <RevisionsDialog />}
       {(dialog === 'picture' || dialog === 'cutout') && <PictureDialog cutout={dialog === 'cutout'} />}
       {preview !== null && <Preview html={preview} onClose={() => setPreview(null)} />}
+      {guide && <StudioGuide section={guide} onClose={() => { markGuideSeen(); c.store.set({ guide: null }) }} />}
     </div>
   )
 }
@@ -128,7 +132,7 @@ function useKeys(c: StudioCtx) {
         if (cmd && (e.metaKey || e.ctrlKey) && !TEXTY.has(cmd.id) && !cmd.id.startsWith('tool-')) { e.preventDefault(); cmd.run(c) }
         return
       }
-      if (s.dialog) return
+      if (s.dialog || s.guide) return
       if (e.key === 'Escape') {
         // Esc puts a drawing tool down first, then lets go of the selection.
         c.store.set(s.tool !== 'select' && !s.threading ? { tool: 'select' } : { selection: [], threading: null })

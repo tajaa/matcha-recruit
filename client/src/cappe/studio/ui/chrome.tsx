@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Circle, Hand, Image as ImageIcon, Minus, MousePointer2, Square, Type, X, ZoomIn } from 'lucide-react'
+import { Circle, CircleHelp, Hand, Image as ImageIcon, Minus, MousePointer2, Square, Type, X, ZoomIn } from 'lucide-react'
 import type { Panel, Tool } from '../store/store'
 import { useStudio } from '../store/store'
 import { command, zoomTo, type Command } from './commands'
@@ -13,6 +13,7 @@ const MENUS: { label: string; items: (string | '-')[] }[] = [
   { label: 'Object', items: ['arrange-front', 'arrange-forward', 'arrange-backward', 'arrange-back', '-', 'lock', 'hide', 'show-all', '-', 'place', 'edit-picture', 'cut-out'] },
   { label: 'View', items: ['zoom-in', 'zoom-out', 'fit-page', 'fit-spread', 'actual', '-', 'view-rulers', 'view-guides', 'view-margins', 'view-baseline', 'view-grid', 'view-snap'] },
 ]
+const HELP = { label: 'Help', items: ['guide', 'shortcuts'] }
 
 /** The menus: every command with the key that does it too. */
 export function MenuBar() {
@@ -30,9 +31,7 @@ export function MenuBar() {
   }, [open])
   const run = (cmd: Command) => { setOpen(null); cmd.run(c) }
   const checked = (id: string) => id.startsWith('view-') && state.view[id.slice(5) as keyof typeof state.view] === true
-  return (
-    <div ref={bar} role="menubar" className="flex h-7 items-center gap-0.5 px-2 text-[12px] text-zinc-300">
-      {MENUS.map((m, k) => (
+  const menu = (m: { label: string; items: (string | '-')[] }, k: number) => (
         <div key={m.label} className="relative">
           <button type="button" role="menuitem" aria-haspopup="menu" aria-expanded={open === k}
             onClick={() => setOpen(open === k ? null : k)} onPointerEnter={() => open !== null && setOpen(k)}
@@ -53,8 +52,12 @@ export function MenuBar() {
             </div>
           )}
         </div>
-      ))}
+  )
+  return (
+    <div ref={bar} role="menubar" className="flex h-7 items-center gap-0.5 px-2 text-[12px] text-zinc-300">
+      {MENUS.map(menu)}
       <WindowMenu />
+      {menu(HELP, MENUS.length)}
     </div>
   )
 }
@@ -179,6 +182,8 @@ export function TopBar({ onPreview, onPublish }: { onPreview: () => void; onPubl
         <span className="text-[11px] text-zinc-500">{save.draft ? 'Changes not live yet' : 'Live'}</span>
       )}
       <div className="ml-auto flex items-center gap-2">
+        <button type="button" onClick={() => c.store.set({ guide: 'start' })} aria-label="How the Studio works" title="How the Studio works"
+          className="rounded-md p-1 text-zinc-400 hover:bg-zinc-800 hover:text-white"><CircleHelp className="h-4 w-4" /></button>
         <button type="button" onClick={onPreview} className="rounded-md border border-zinc-700 px-3 py-1 text-xs text-zinc-200 hover:border-zinc-500">Preview</button>
         {(!published || save.draft) && (
           <button type="button" onClick={onPublish}

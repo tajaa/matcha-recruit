@@ -42,6 +42,8 @@ export type State = {
   threading: { thread: string | null; frame: string } | null
   /** `picture`: the Picture Editor on the picture frame selected; `cutout`: it, open at the cut-out. */
   dialog: null | 'library' | 'story' | 'revisions' | 'preview' | 'picture' | 'cutout'
+  /** The guide, open at this section (`ui/guideContent.ts`); it can open over a dialog. */
+  guide: string | null
   /** While dragging: the lines an edge snapped to, and the marquee (pasteboard pt). */
   snaps: { x: number[]; y: number[] } | null
   marquee: { x: number; y: number; w: number; h: number } | null
