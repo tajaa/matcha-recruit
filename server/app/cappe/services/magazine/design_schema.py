@@ -88,6 +88,11 @@ def _int(value: Any, lo: int, hi: int, default: int) -> int:
     return int(max(lo, min(hi, math.floor(n + 0.5))))
 
 
+def _list(value: Any) -> list:
+    """A list as sent, or none (a dict or a number where a list goes)."""
+    return value if isinstance(value, list) else []
+
+
 def _choice(value: Any, choices: tuple[str, ...]) -> str:
     return value if value in choices else choices[0]
 
@@ -122,7 +127,7 @@ def paint(raw: Any, default: Optional[dict] = None) -> dict:
     out = {"kind": kind, "color": colour(raw.get("color"), base["color"]),
            "angle": _int(raw.get("angle"), 0, 360, 180), "stops": []}
     if kind in ("linear", "radial"):
-        stops = [s for s in (raw.get("stops") or []) if isinstance(s, dict)][:MAX_STOPS]
+        stops = [s for s in _list(raw.get("stops")) if isinstance(s, dict)][:MAX_STOPS]
         out["stops"] = sorted(({"color": colour(s.get("color"), "#000000"), "at": _int(s.get("at"), 0, 100, 0)}
                                for s in stops), key=lambda s: s["at"])
         if len(out["stops"]) < 2:
@@ -209,6 +214,18 @@ class _Walk:
         return lid
 
 
+def _inherit(child: dict, group: dict) -> dict:
+    """A child of a group flattened away, with the group's look on it."""
+    opacity = _int(group.get("opacity"), 0, 100, 100)
+    blend = _choice(group.get("blend"), BLENDS)
+    return {
+        **child,
+        "hidden": child["hidden"] or bool(group.get("hidden")),
+        "opacity": _int(child["opacity"] * opacity / 100, 0, 100, 100),
+        "blend": blend if child["blend"] == "normal" else child["blend"],
+    }
+
+
 def _layer(raw: Any, walk: _Walk, depth: int) -> list[dict]:
     """The layer as stored (a list: a group nested too deep gives up its
     children in its place; a layer that can't be kept gives nothing)."""
@@ -216,7 +233,10 @@ def _layer(raw: Any, walk: _Walk, depth: int) -> list[dict]:
         return []
     kind = raw["kind"]
     if kind == "group" and depth > MAX_DEPTH:
-        return [x for child in (raw.get("children") or [])[:MAX_LAYERS] for x in _layer(child, walk, depth)]
+        # Too deep to stay a group: its children take its place, as hidden,
+        # faded and blended as it made them (the editor no longer makes these).
+        kids = [x for child in _list(raw.get("children"))[:MAX_LAYERS] for x in _layer(child, walk, depth)]
+        return [_inherit(k, raw) for k in kids]
     walk.count += 1
     if walk.count > MAX_LAYERS:
         raise DesignError(f"A design holds at most {MAX_LAYERS} layers.")
@@ -230,7 +250,7 @@ def _layer(raw: Any, walk: _Walk, depth: int) -> list[dict]:
         "link": _link(raw.get("link")),
     }
     if kind == "group":
-        children = [x for child in (raw.get("children") or [])[:MAX_LAYERS] for x in _layer(child, walk, depth + 1)]
+        children = [x for child in _list(raw.get("children"))[:MAX_LAYERS] for x in _layer(child, walk, depth + 1)]
         if not children:
             walk.count -= 1
             walk.ids.discard(out["id"])
@@ -262,7 +282,7 @@ def normalize_design(raw: Any, *, page: bool = False) -> Optional[dict]:
             return None
         raw = {}
     walk = _Walk()
-    layers = [x for item in (raw.get("layers") or [])[: MAX_LAYERS * 2] for x in _layer(item, walk, 1)]
+    layers = [x for item in _list(raw.get("layers"))[: MAX_LAYERS * 2] for x in _layer(item, walk, 1)]
     out: dict[str, Any] = {"layers": layers}
     if page:
         out["background"] = paint(raw.get("background"), {"kind": "solid", "color": "#ffffff", "angle": 180, "stops": []})
@@ -281,6 +301,17 @@ def walk_layers(layers: Iterable[dict]) -> Iterable[dict]:
         yield layer
         if layer.get("kind") == "group":
             yield from walk_layers(layer.get("children") or [])
+
+
+def visible_layers(layers: Iterable[dict]) -> Iterable[dict]:
+    """The layers a reader sees: a hidden group hides everything in it. (Asset
+    references stay with `walk_layers`: a hidden picture is still in use.)"""
+    for layer in layers:
+        if layer.get("hidden"):
+            continue
+        yield layer
+        if layer.get("kind") == "group":
+            yield from visible_layers(layer.get("children") or [])
 
 
 def design_asset_ids(design: Optional[dict]) -> list[str]:
@@ -306,8 +337,8 @@ def design_fonts(design: Optional[dict], uses: Optional[Uses] = None) -> Uses:
     """The faces and styles a design sets, for the page's font links: each text
     layer's own, and bold and italic where its words are marked so."""
     uses = uses if uses is not None else {}
-    for lay in walk_layers((design or {}).get("layers") or []):
-        if lay.get("kind") != "text" or lay.get("hidden") or lay.get("font") in ROLES:
+    for lay in visible_layers((design or {}).get("layers") or []):
+        if lay.get("kind") != "text" or lay.get("font") in ROLES:
             continue
         face, weight, italic = lay["font"], int(lay.get("weight") or 400), bool(lay.get("italic"))
         add_use(uses, face, weight, italic)
@@ -322,8 +353,8 @@ def design_fonts(design: Optional[dict], uses: Optional[Uses] = None) -> Uses:
 def design_words(design: Optional[dict]) -> list[str]:
     """The words in a design's text layers, as plain text, bottom to top."""
     out = []
-    for lay in walk_layers((design or {}).get("layers") or []):
-        if lay.get("kind") == "text" and not lay.get("hidden"):
+    for lay in visible_layers((design or {}).get("layers") or []):
+        if lay.get("kind") == "text":
             words = md_to_text(rt_to_md(lay.get("rt"))).strip()
             if words:
                 out.append(words)

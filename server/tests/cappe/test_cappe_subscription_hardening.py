@@ -220,6 +220,9 @@ class _Stripe:
     async def connected_invoice_payment_intent(self, account, invoice):
         return "pi_new"
 
+    async def connected_charge_fee(self, account, payment_intent):
+        return None
+
 
 def _wire_events(monkeypatch, *, notify_update=SUB, stripe_status="active", row=None):
     conn = SqlConn([

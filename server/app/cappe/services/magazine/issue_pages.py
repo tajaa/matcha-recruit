@@ -138,13 +138,17 @@ def render_archive(site: dict, nav: list[dict], mag: dict, issues: list[dict], a
     })
 
 
+CURRENT_LIST = 8  # stories named beside the current issue's cover on the front
+
+
 def current_issue_html(mag: dict, issue: dict, stories: list[dict], assets: dict[str, dict]) -> str:
-    """The front page's lead: the current issue's cover beside what is in it."""
+    """The front page's lead: the current issue's cover beside what is in it
+    (`stories` need only a title and slug)."""
     href = issue_path(issue["number"])
     cover = cover_html(issue.get("cover") or {}, mag=mag, number=issue["number"], when=_when(issue),
                        asset=_cover_asset(issue, assets), size="half", eager=True, link_credit=False)
     items = "".join(
-        f'<li><a href="{href}#{story_anchor(s["slug"])}">{escape(s.get("title") or "")}</a></li>' for s in stories[:8]
+        f'<li><a href="{href}#{story_anchor(s["slug"])}">{escape(s.get("title") or "")}</a></li>' for s in stories[:CURRENT_LIST]
     )
     title = f'<h2 class="mz-current__title">{escape(issue_label(issue))}</h2>'
     when = escape(issue_line_text(issue.get("cover") or {}, issue["number"], _when(issue)))

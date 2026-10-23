@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Measure } from '../compose/compose'
-import { addItem, moveItems } from '../model/ops'
+import { addItem, deletePage, moveItems } from '../model/ops'
 import type { Doc } from '../model/types'
+import { CappeApiError } from '../../api'
+import { studioApi } from '../api'
+import { Saver } from './saver'
 import { DEFAULT_VIEW, Store, type State } from './store'
 
 const mono: Measure = { width: (c, t) => [...t].length * 0.5 * c.size, metrics: (c) => ({ asc: 0.8 * c.size, desc: 0.2 * c.size }) }
@@ -83,5 +86,78 @@ describe('the store', () => {
     expect(s.get().page).toBe(0) // a page that's gone isn't in view
     expect(listener).toHaveBeenCalledTimes(1)
     off()
+  })
+})
+
+describe('a page deleted', () => {
+  it('leaves the page in view and the selection within the document', () => {
+    const s = store()  // two pages, the second in view
+    s.edit((d) => addItem(d, 'rect', 'p2', { x: 0, y: 0, w: 10, h: 10 }).doc)
+    s.set({ selection: ['r1'] })
+    s.edit((d) => deletePage(d, 1))
+    expect(s.get().doc.pages).toHaveLength(1)
+    expect(s.get()).toMatchObject({ page: 0, selection: [] })
+  })
+})
+
+describe('a face that finishes loading', () => {
+  it('saves the lines it sets again, with no undo step', () => {
+    const s = store()
+    s.edit((d) => {
+      const r = addItem(d, 'text', 'p1', { x: 0, y: 0, w: 100, h: 100 })
+      return { ...r.doc, threads: [{ id: 's1', frames: [r.id], paras: [{ runs: [{ t: 'one two three four', size: 10 }] }] }] }
+    })
+    s.set((x) => ({ save: { ...x.save, state: 'saved' } }))
+    const before = s.get().doc.threads[0].comp!.lines.length
+    const changes: Doc[] = []
+    s.onDocChange = (d) => changes.push(d)
+    const undoable = s.canUndo()
+    s.measure = { ...mono, width: (c, t) => [...t].length * 1.5 * c.size }  // the real face is wider
+    s.recompose()
+    expect(s.get().doc.threads[0].comp!.lines.length).toBeGreaterThan(before)
+    expect(s.get().save.state).toBe('dirty')
+    expect(changes).toHaveLength(1)
+    expect(s.canUndo()).toBe(undoable)
+    s.recompose()  // nothing changed: nothing to save
+    expect(changes).toHaveLength(1)
+  })
+})
+
+describe('saving', () => {
+  const saved = { rev: 2, draft: false } as Awaited<ReturnType<typeof studioApi.save>>
+  const dirty = () => {
+    const s = store()
+    const saver = new Saver(s, 's-1', 'p-1')
+    s.edit((d) => addItem(d, 'rect', 'p1', { x: 0, y: 0, w: 10, h: 10 }).doc)
+    return { s, saver }
+  }
+
+  it('fails quietly for an autosave and out loud when asked strictly', async () => {
+    vi.spyOn(studioApi, 'save').mockRejectedValue(new Error('Network down'))
+    const { s, saver } = dirty()
+    await expect(saver.save()).resolves.toBeUndefined()
+    expect(s.get().save.state).toBe('error')
+    await expect(saver.save({ strict: true })).rejects.toThrow('Network down')
+    expect(saver.unsaved()).toBe(true)
+    saver.dispose()
+  })
+
+  it('counts a story saved elsewhere as unsaved here, and refuses a strict save of it', async () => {
+    vi.spyOn(studioApi, 'save').mockRejectedValue(new CappeApiError('Saved elsewhere', 'stale_rev', 409))
+    const { s, saver } = dirty()
+    await saver.save()
+    expect(s.get().save.state).toBe('conflict')
+    expect(saver.unsaved()).toBe(true)
+    await expect(saver.save({ strict: true })).rejects.toThrow('saved somewhere else')
+    saver.dispose()
+  })
+
+  it('resolves a strict save once the story is saved', async () => {
+    vi.spyOn(studioApi, 'save').mockResolvedValue(saved)
+    const { s, saver } = dirty()
+    await expect(saver.save({ strict: true })).resolves.toBeUndefined()
+    expect(s.get().save).toMatchObject({ state: 'saved', rev: 2 })
+    expect(saver.unsaved()).toBe(false)
+    saver.dispose()
   })
 })

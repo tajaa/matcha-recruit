@@ -291,6 +291,18 @@ describe('IssueEditor', () => {
     await waitFor(() => expect(api.post).toHaveBeenCalledWith('/sites/s-1/magazine/issues/i-1/withdraw'))
   })
 
+  it('withdraws without throwing away changes not yet saved', async () => {
+    editor({ status: 'released', released_at: '2026-10-21T10:00:00Z' })
+    fireEvent.change(await screen.findByLabelText('Issue title'), { target: { value: 'Autumn' } })
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    api.post.mockResolvedValue(issue())
+    fireEvent.click(screen.getByRole('button', { name: 'Withdraw' }))
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith('/sites/s-1/magazine/issues/i-1/withdraw'))
+    await waitFor(() => expect(screen.getByRole('button', { name: /Release No. 3/ })).toBeInTheDocument())
+    expect(screen.getByLabelText('Issue title')).toHaveValue('Autumn')
+    expect(screen.getByText('Unsaved')).toBeInTheDocument()
+  })
+
   it('shows what went wrong, and deletes a draft', async () => {
     editor()
     vi.spyOn(window, 'confirm').mockReturnValue(true)
