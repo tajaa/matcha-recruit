@@ -15,11 +15,15 @@ const NO_BUTTON = new Set(['cut', 'delete', 'page-delete', 'close'])
 const PICTURE_TYPES = ['image/jpeg', 'image/png', 'image/webp']
 
 /** An answer's Markdown, sized for the 300 px panel. Links show as text: a
- *  click in the Studio never leaves it. */
+ *  click in the Studio never leaves it. A picture shows as its words, never
+ *  loaded: an answer can't make the browser fetch an address it names. */
 function Answer({ text }: { text: string }) {
   return (
     <div className="space-y-1.5 text-xs leading-relaxed text-zinc-200 [&_code]:rounded [&_code]:bg-black/40 [&_code]:px-1 [&_h1]:font-semibold [&_h2]:font-semibold [&_h3]:font-semibold [&_ol]:list-decimal [&_ol]:space-y-1 [&_ol]:pl-4 [&_strong]:font-semibold [&_strong]:text-white [&_ul]:list-disc [&_ul]:space-y-1 [&_ul]:pl-4">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: ({ children }) => <span className="underline">{children}</span> }}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={{
+        a: ({ children }) => <span className="underline">{children}</span>,
+        img: ({ alt }) => (alt ? <span className="italic text-zinc-400">[{alt}]</span> : null),
+      }}>
         {text}
       </ReactMarkdown>
     </div>
@@ -95,6 +99,11 @@ export function AskPanel() {
   const [text, setText] = useState('')
   const [picture, setPicture] = useState<Picture | null>(null)
   const [pictureError, setPictureError] = useState<string | null>(null)
+  // A picture being read and made smaller: Ask waits for it. Each attach
+  // (and each send or removal) is a new generation; a late one is dropped.
+  const [preparing, setPreparing] = useState(false)
+  const generation = useRef(0)
+  useEffect(() => () => { generation.current++ }, [])
   const box = useRef<HTMLTextAreaElement>(null)
   const list = useRef<HTMLDivElement>(null)
   const file = useRef<HTMLInputElement>(null)
@@ -106,19 +115,31 @@ export function AskPanel() {
   }, [turns])
 
   const send = (q = text) => {
-    if (!q.trim() || busy) return
+    if (!q.trim() || busy || preparing) return
     void conv.ask(c, q, picture)
     setText('')
     setPicture(null)
+    generation.current++
+  }
+  const dropPicture = () => {
+    generation.current++
+    setPicture(null)
+    setPreparing(false)
   }
   const attach = async (f: File | null | undefined) => {
     setPictureError(null)
     if (!f) return
     if (!PICTURE_TYPES.includes(f.type)) { setPictureError('Attach a JPEG, PNG or WebP picture.'); return }
+    const mine = ++generation.current
+    setPicture(null)
+    setPreparing(true)
     try {
-      setPicture(await preparePicture(f))
+      const ready = await preparePicture(f)
+      if (generation.current === mine) setPicture(ready)
     } catch {
-      setPictureError('That picture couldn’t be read.')
+      if (generation.current === mine) setPictureError('That picture couldn’t be read.')
+    } finally {
+      if (generation.current === mine) setPreparing(false)
     }
   }
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -150,7 +171,7 @@ export function AskPanel() {
           <div className="space-y-2 text-xs text-zinc-400">
             <p>Ask how to do something in the Studio, or how to make this page look the way you want. Attach a picture to show the look you’re after.</p>
             {SUGGESTIONS.map((q) => (
-              <button key={q} type="button" onClick={() => send(q)} disabled={busy}
+              <button key={q} type="button" onClick={() => send(q)} disabled={busy || preparing}
                 className="block w-full rounded border border-zinc-800 px-2.5 py-1.5 text-left text-zinc-300 hover:border-emerald-500 hover:text-white">{q}</button>
             ))}
           </div>
@@ -160,9 +181,15 @@ export function AskPanel() {
         {picture && (
           <div className="mb-2 flex items-center gap-2">
             <img src={picture.preview} alt="The picture to send" className="h-10 rounded" />
-            <button type="button" onClick={() => setPicture(null)} aria-label="Remove the picture"
+            <button type="button" onClick={dropPicture} aria-label="Remove the picture"
               className="rounded p-0.5 text-zinc-400 hover:text-white"><X className="h-3.5 w-3.5" /></button>
           </div>
+        )}
+        {preparing && (
+          <p role="status" className="mb-1 flex items-center gap-1 text-[11px] text-zinc-400">
+            <Loader2 className="h-3 w-3 animate-spin" />Getting the picture ready…
+            <button type="button" onClick={dropPicture} className="ml-1 underline hover:text-white">Cancel</button>
+          </p>
         )}
         {pictureError && <p role="alert" className="mb-1 text-[11px] text-red-300">{pictureError}</p>}
         <div className="flex items-end gap-1.5 rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1.5 focus-within:border-emerald-500">
@@ -173,7 +200,7 @@ export function AskPanel() {
             onChange={(e) => { void attach(e.target.files?.[0]); e.target.value = '' }} />
           <button type="button" onClick={() => file.current?.click()} aria-label="Attach a picture" title="Attach a picture of the look you want"
             className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-white"><ImagePlus className="h-4 w-4" /></button>
-          <button type="button" onClick={() => send()} disabled={busy || !text.trim()} aria-label="Ask"
+          <button type="button" onClick={() => send()} disabled={busy || preparing || !text.trim()} aria-label="Ask"
             className="rounded bg-emerald-600 p-1 text-white hover:bg-emerald-500 disabled:opacity-40"><ArrowUp className="h-4 w-4" /></button>
         </div>
         <p className="mt-1 px-1 text-[10px] text-zinc-600">Answers come from AI and can be wrong. Nothing on your page changes until you change it.</p>
