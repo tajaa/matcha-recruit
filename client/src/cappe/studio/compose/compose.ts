@@ -11,6 +11,7 @@
 // lines down (center, bottom) or spreads them (justify).
 
 import { charOf, paraOf, type FullChar } from '../model/doc'
+import { parentDoc, resolveParas } from '../model/identity'
 import { round } from '../model/limits'
 import type { Comp, Doc, Line, Para, TextItem, Thread } from '../model/types'
 
@@ -238,11 +239,20 @@ export function composeDoc(doc: Doc, m: Measure, fresh = false): { doc: Doc; ove
   let changed = false
   const threads = doc.threads.map((t) => {
     const frames = threadFrames(doc, t)
-    const { comp, overset: over } = composeCached(t.paras, frames, m, fresh)
+    const { comp, overset: over } = composeCached(resolveParas(t.paras, doc.identity), frames, m, fresh)
     if (over) overset.add(t.id)
     if (sameLines(t.comp?.lines, comp.lines)) return t
     changed = true
     return { ...t, comp }
   })
-  return { doc: changed ? { ...doc, threads } : doc, overset }
+  let identity = doc.identity
+  if (identity?.parents.length) {
+    const parents = identity.parents.map((p) => {
+      const prepared = composeDoc(parentDoc(doc, p), m, fresh)
+      for (const id of prepared.overset) overset.add(`${p.id}:${id}`)
+      return prepared.doc.threads === p.threads ? p : { ...p, threads: prepared.doc.threads }
+    })
+    if (parents.some((p, k) => p !== identity!.parents[k])) { identity = { ...identity, parents }; changed = true }
+  }
+  return { doc: changed ? { ...doc, threads, ...(identity ? { identity } : {}) } : doc, overset }
 }

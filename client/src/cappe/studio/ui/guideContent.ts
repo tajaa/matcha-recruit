@@ -7,7 +7,7 @@
 
 import type { LucideIcon } from 'lucide-react'
 import {
-  Columns2, FileStack, Image, Keyboard, LayoutGrid, LayoutTemplate, Link2, MousePointer2, Move, PanelsTopLeft, Ruler, Save,
+  BookOpen, Columns2, FileStack, Image, Keyboard, LayoutGrid, LayoutTemplate, Link2, MousePointer2, Move, PanelsTopLeft, Ruler, Save,
   Scissors, Shapes, SlidersHorizontal, Smartphone, Sparkles, Type, ZoomIn,
 } from 'lucide-react'
 
@@ -42,7 +42,7 @@ export const GUIDE: GuideSection[] = [
       'The side panel, at the far left: Templates, Elements, Text, Photos and Yours (your pictures). Click anything there to add it, or drag it onto a page.',
       'Tools, beside it: what a click or a drag on the page makes or does.',
       'The pages, in the middle, on a grey pasteboard you can park things on.',
-      'Panels, down the right: Pages, Object, Character and Paragraph, plus the Story Editor. Window shows and hides each.',
+      'Panels, down the right: Pages, Magazine identity, Object, Character and Paragraph, plus the Story Editor. Window shows and hides each.',
       'Status bar, along the bottom: the zoom, the page you’re on, what the tool in hand does, a red note when text doesn’t fit, and whether everything is saved.',
     ],
   },
@@ -70,13 +70,37 @@ export const GUIDE: GuideSection[] = [
     id: 'add', group: 'Make', icon: Shapes, title: 'Add things from the side panel',
     body: 'The tabs at the far left hold what you can put on a page. Click a thing to add it to the middle of the page you’re on, or drag it to the spot you want. Click a tab again (or the « at its top) to fold the panel away.',
     points: [
-      'Templates: ready-made pages (covers, openers, story pages, photo pages, contents, an interview, a list, a back page). On a blank page a template lays out that page; otherwise it comes in as a new page after the one you’re on, so nothing is covered. It goes on the page you clicked it on, even if you turn the page while it sets up. A story that has no room for it (256 pages, or 200 separate texts) says so and stays as it was. Fill its picture frames and type over its words.',
+      'Templates opens on Collections: coordinated designs from cover to credits (see Editorial collections below). Single pages has individual covers, openers, story pages, photo pages, contents, an interview, a list and a back page. On a blank page a single template lays out that page; otherwise it adds a new page after it. Fill its picture frames and type over its words. One undo removes the layout.',
       'Elements: shapes, lines, picture frames and colour blocks, and over 3,500 graphics: icons, stickers, badges, dividers and patterns, with Gummfit’s own picks first (From Gummfit). Search them all at the top; See all opens a whole group. A colour block, a whole-page frame or a pattern goes behind everything, edge to edge.',
       'Select a one-colour graphic (a shape, icon, badge, divider or pattern) and its Look, in the Object panel, changes its colour and whether it keeps its shape, stretches or repeats. Stickers keep their own colours.',
       'Text: a heading, a subheading or body text, the small styles (kicker, pull quote, caption), and font pairings set together in one frame. Double-click it on the page to type your own words.',
       'Photos: opens on free photos, modern stock you may use any way you like (CC0, from StockSnap.io, WordPress and Nappy), with Gummfit’s own picks above them; search, or tap a topic. The archives (Openverse, the Smithsonian, The Met, NASA) are a tap away, each picture credited. The first click puts it in your library too. Make an AI picture is here too.',
       'Yours: everything in your library. Upload a picture here, then click it, or drag it onto a picture frame to fill the frame.',
       'Insert in the menus opens each tab too.',
+    ],
+  },
+  {
+    id: 'identity', group: 'Make', icon: LayoutTemplate, title: 'A reusable magazine identity',
+    body: 'Window → Magazine identity opens the magazine’s visual system: named paragraph and character styles, a palette, recurring parent layouts, page numbers and running headers. Each issue keeps its own editable copy.',
+    points: [
+      'Create identity starts with Body, Heading, Caption and Emphasis. Select text or a text frame, then Apply beside a named style. Paragraph styles set the whole paragraph’s type and spacing; character styles set selected words. The Character and Paragraph panels also offer the named styles.',
+      'Click a style’s name to edit its font, size, colour and spacing. Every linked paragraph or word in these pages updates together, including text on parents. Local formatting overrides the shared style; reapply the named style to clear overrides. Link all caption paragraphs connects existing captions to the Caption style. Semantic roles alone do not link visual styles.',
+      'The palette keeps named colours. Apply colour links selected text or frames; styles can also use a palette colour. Editing that swatch updates its linked uses. Choosing a custom colour in the normal panels makes that use local. Deleting a style or swatch keeps the current appearance.',
+      'Parent layouts repeat ordinary frames behind a page’s local content. Save local page as new parent moves that page’s frames into a shared parent; pictures become empty frames. Choose that parent on other pages. Detach parent to edit this page makes a local copy. Update from local page changes the shared parent for every linked page. Text linked to another page must be unlinked before capture.',
+      'Automatic page numbers follow the page order, starting at your chosen number. A running header repeats the magazine or section name. Skip the first page for a cover, hide both on an individual page, or give that page its own header. Reordering pages recalculates the numbers.',
+      'Save for this magazine stores a reusable template. New paged issues start with a copy. Use saved magazine identity merges definitions by name into an existing issue; matching styles and colours update, and other definitions remain. Saving the template does not change published issues. Publish the edited issue through the usual save/update controls. A conflicting template save asks you to reload instead of overwriting another editor.',
+    ],
+  },
+  {
+    id: 'collections', group: 'Make', icon: BookOpen, title: 'Editorial collections',
+    body: 'A complete editorial design, with typography, colour and spacing considered together across the whole publication. Open Templates → Collections to explore one.',
+    points: [
+      'Quiet Form is restrained fashion editorial; Off Register an experimental art zine; Still Light a photographic monograph; Maison a luxury lookbook. Each has ten editable pages: a cover, contents and editorial note, facing opening and photo-essay spreads, a two-page interview, and credits.',
+      'Explore a collection to see every page and its type pairing. Use all pages starts a blank story with the collection, or inserts it after the spread in view. Blank pages are added when needed to keep the cover on the right and preserve your existing facing spreads. Your page size is used. Existing pages and their text stay in the story.',
+      'Fill the picture frames from Photos or Yours, and type over the sample words. The layouts are ordinary frames: move them, change the type, link text, and make the design your own. One ⌘Z undoes adding the whole collection. If the story would exceed its save limits, nothing is added.',
+      'Save these pages stores your current pages as a named collection (up to 32 pages and 50 saved collections). It keeps type, spacing, words, shapes and guides. Photos become empty frames, and subscriber access settings stay with the source story. Saved collections are available across your account’s magazines.',
+      'Open one of Your collections to preview and reuse it, or remove it from the library. Removing it never removes pages already added to a story.',
+      'Saving and removing a collection keep running while you use another panel. Return to Collections to see the result. If a save loses its connection, retrying the same design completes that save without creating another copy.',
     ],
   },
   {

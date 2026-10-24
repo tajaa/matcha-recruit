@@ -31,12 +31,12 @@ const base = (siteId: string, postId: string) => `/sites/${siteId}/studio/storie
 export const studioApi = {
   open: (siteId: string, postId: string) => cappeApi.get<Opened>(base(siteId, postId)),
   save: (siteId: string, postId: string, body: { base_rev: number; doc: Doc; publish?: boolean; keep?: boolean }) =>
-    cappeApi.put<Saved>(base(siteId, postId), body),
+    cappeApi.put<Saved>(base(siteId, postId), { ...body, identity_version: 1 }),
   discard: (siteId: string, postId: string, baseRev: number) =>
-    cappeApi.post<Saved>(`${base(siteId, postId)}/discard`, { base_rev: baseRev }),
+    cappeApi.post<Saved>(`${base(siteId, postId)}/discard`, { base_rev: baseRev, identity_version: 1 }),
   revisions: (siteId: string, postId: string) => cappeApi.get<Revision[]>(`${base(siteId, postId)}/revisions`),
   restore: (siteId: string, postId: string, revisionId: string, baseRev: number) =>
-    cappeApi.post<Saved>(`${base(siteId, postId)}/revisions/${revisionId}/restore`, { base_rev: baseRev }),
+    cappeApi.post<Saved>(`${base(siteId, postId)}/revisions/${revisionId}/restore`, { base_rev: baseRev, identity_version: 1 }),
   /** A new paged story, with its first two pages. */
   create: (siteId: string, title: string) =>
     cappeApi.post<{ id: string }>(`/sites/${siteId}/posts`, { title, format: 'pages' }),

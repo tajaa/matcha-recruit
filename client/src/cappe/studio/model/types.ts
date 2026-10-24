@@ -12,6 +12,9 @@ export type Fit = 'fill' | 'fit' | 'stretch'
 
 /** Character attributes (stored only when not their default). */
 export type CharAttrs = {
+  /** A named character style; explicit attributes override it. */
+  style?: string
+  swatch?: string
   font?: string
   wt?: number
   it?: boolean
@@ -24,6 +27,8 @@ export type Run = CharAttrs & { t: string }
 
 /** Paragraph attributes (stored only when not their default). */
 export type ParaAttrs = {
+  /** Named visual style, independent of the semantic paragraph role. */
+  style?: string
   align?: Align
   li?: number
   ri?: number
@@ -44,6 +49,8 @@ export type Thread = { id: string; frames: string[]; paras: Para[]; comp?: Comp 
 export type Stroke = { c: string; w: number }
 
 type Base = {
+  fill_swatch?: string
+  stroke_swatch?: string
   id: string
   page: string
   x: number
@@ -91,12 +98,22 @@ export type Item = TextItem | ImageItem | RectItem | EllipseItem | LineItem | Gr
 export type Kind = Item['kind']
 
 export type Guide = { id: string; page: string; axis: 'v' | 'h'; at: number }
-export type Page = { id: string }
+export type Page = { id: string; parent?: string; hide_furniture?: boolean; header?: string }
+
+export type ParagraphStyle = { id: string; name: string; char: CharAttrs; para: ParaAttrs }
+export type CharacterStyle = { id: string; name: string; char: CharAttrs }
+export type Swatch = { id: string; name: string; color: string }
+export type ParentLayout = { id: string; name: string; size: { w: number; h: number }; items: Item[]; threads: Thread[] }
+export type MagazineIdentity = {
+  v: 1; name: string; paragraphs: ParagraphStyle[]; characters: CharacterStyle[]; swatches: Swatch[]; parents: ParentLayout[]
+  furniture: { numbers: boolean; header: string; start: number; skip_first: boolean; inset: number; char: CharAttrs }
+}
 /** A story in the issue (model/sections.ts): it starts at `page` and runs to
  *  the next one's first page. */
 export type Section = { id: string; page: string; name: string }
 
 export type Doc = {
+  identity?: MagazineIdentity
   v: 1
   size: { w: number; h: number }
   facing: boolean

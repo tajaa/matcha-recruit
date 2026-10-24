@@ -7,7 +7,7 @@ import type { Align, CharAttrs, Role } from '../../model/types'
 import { useStudio } from '../../store/store'
 import { useCtx, type StudioCtx } from '../context'
 import { LengthField, Labeled } from '../fields'
-import { currentType, hasTypeTarget, setChar, setPara } from '../typeTarget'
+import { currentType, hasTypeTarget, selectedThreads, setChar, setPara } from '../typeTarget'
 
 /** Character attributes, then the faces they need loaded before the text is
  *  set again in them. */
@@ -35,6 +35,9 @@ export function CharacterPanel() {
   ])
   return (
     <Section title="Character">
+      {s.doc.identity && <Select label="Character style" value={s.editing ? c.editor.currentChar().style ?? '' : s.doc.threads.find((t) => t.id === selectedThreads(s)[0])?.paras[0]?.runs[0]?.style ?? ''}
+        options={[{ key: '', label: 'No character style (reset)' }, ...s.doc.identity.characters.map((r) => ({ key: r.id, label: r.name }))]}
+        onChange={(style) => set({ style })} />}
       <FontField value={char.font} roles={false} onChange={(font) => set({ font })} />
       <Select label="Style" value={styleKey(char.wt, char.it)} options={styles}
         onChange={(k) => { const [wt, it] = k.split('|'); set({ wt: Number(wt), it: it === '1' }) }} />
@@ -78,6 +81,9 @@ export function ParagraphPanel() {
   const units = s.doc.units
   return (
     <Section title="Paragraph">
+      {s.doc.identity && <Select label="Paragraph style" value={s.editing ? c.editor.currentPara().style ?? '' : s.doc.threads.find((t) => t.id === selectedThreads(s)[0])?.paras[0]?.style ?? ''}
+        options={[{ key: '', label: 'No paragraph style (reset)' }, ...s.doc.identity.paragraphs.map((r) => ({ key: r.id, label: r.name }))]}
+        onChange={(style) => { setPara(c, { style }); void c.fonts.ensureDoc(c.store.get().doc).then(() => c.store.recompose(), () => {}) }} />}
       <Seg label="Alignment" value={para.align} options={ALIGNS} onChange={(align) => setPara(c, { align })} />
       <Row>
         <Labeled label="Left indent"><LengthField label="Left indent" short="→" units={units} value={para.li} min={0} max={1000}

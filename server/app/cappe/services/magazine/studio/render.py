@@ -36,6 +36,7 @@ from ..figures import _variants, credit_html
 from ..fonts import Uses, add_use, font_stack
 from . import fonts as faces
 from . import graphics
+from .identity import parent_doc, resolve_char, resolve_item, resolved_threads
 from .limits import CHAR_DEFAULTS, PARA_DEFAULTS
 from .schema import flow_frame, len16, para_text, slice16, spreads
 
@@ -266,6 +267,7 @@ def _graphic_html(item: dict) -> str:
 
 def item_html(item: dict, doc: dict, assets: dict[str, dict], threads: Threads, used: Uses,
               *, eager: bool = False) -> str:
+    item = resolve_item(item, doc.get("identity"))
     kind = item["kind"]
     if kind == "text":
         return _text_html(item, threads, used)
@@ -282,7 +284,7 @@ def frame_threads(doc: dict, locked_from: Optional[int] = None) -> Threads:
     """Each threaded text frame's thread, its place in it, and the place of
     the frame its words flow into while it has no composition."""
     out: Threads = {}
-    for t in doc.get("threads") or []:
+    for t in resolved_threads(doc):
         flow = flow_frame(doc, t, locked_from)
         for i, f in enumerate(t["frames"]):
             out[f] = (t, i, flow)
@@ -294,9 +296,34 @@ def page_items_html(doc: dict, index: int, assets: dict[str, dict], used: Option
     """What sits on one page, bottom to top (hidden items left out)."""
     used = used if used is not None else {}
     threads = threads if threads is not None else frame_threads(doc)
-    page_id = doc["pages"][index]["id"]
-    return "".join(item_html(i, doc, assets, threads, used, eager=index == 0)
-                   for i in doc["items"] if i["page"] == page_id and not i.get("hidden"))
+    page = doc["pages"][index]
+    parent = next((p for p in doc.get("identity", {}).get("parents", []) if p["id"] == page.get("parent")), None)
+    inherited = ""
+    if parent:
+        pd = parent_doc(doc, parent)
+        pt = frame_threads(pd)
+        inherited = (f'<div class="lyt-parent" style="position:absolute;inset:0;transform-origin:top left;transform:scale(min(calc({n(doc["size"]["w"])} / {n(parent["size"]["w"])}),calc({n(doc["size"]["h"])} / {n(parent["size"]["h"])})))">'
+                     + "".join(item_html(i, pd, assets, pt, used) for i in parent["items"] if not i.get("hidden")) + '</div>')
+    return (inherited + "".join(item_html(i, doc, assets, threads, used, eager=index == 0)
+                               for i in doc["items"] if i["page"] == page["id"] and not i.get("hidden"))
+            + _furniture_html(doc, index, used))
+
+
+def _furniture_html(doc, index, used):
+    f = doc.get("identity", {}).get("furniture")
+    page = doc["pages"][index]
+    if not f or page.get("hide_furniture") or (f["skip_first"] and index == 0):
+        return ""
+    c = resolve_char(f["char"], identity=doc["identity"])
+    inset = min(f["inset"], max(0, min(doc["size"]["w"], doc["size"]["h"]) / 2 - 8))
+    align = "left" if doc.get("facing") and index % 2 == 1 else "right"
+
+    def label(text, y):
+        return (f'<div class="lyt-item lyt-furniture" style="left:{u(inset)};top:{u(y)};width:{u(doc["size"]["w"] - 2 * inset)};height:{u(c["size"] * 1.3)};'
+                f'{run_style(c, used)};text-align:{align};line-height:1;white-space:nowrap">{escape(text, quote=False)}</div>')
+
+    header = page.get("header", f["header"])
+    return (label(header, inset) if header else "") + (label(str(index + f["start"]), doc["size"]["h"] - inset - c["size"]) if f["numbers"] else "")
 
 
 # ── pages and spreads ────────────────────────────────────────────────────────
@@ -356,8 +383,11 @@ def locked_pages(doc: dict, assets: dict[str, dict], from_page: int) -> list[dic
 
 def faces_css(doc: dict) -> str:
     """An @font-face for each of the Studio's faces the story sets."""
-    shas = sorted({f["sha"] for f in (_run_face(r) for t in doc.get("threads") or []
-                                       for p in t["paras"] for r in p["runs"]) if f})
+    documents = [doc] + [parent_doc(doc, p) for p in doc.get("identity", {}).get("parents", [])]
+    runs = [r for d in documents for t in resolved_threads(d) for p in t["paras"] for r in p["runs"]]
+    if doc.get("identity"):
+        runs.append(resolve_char(doc["identity"]["furniture"]["char"], identity=doc["identity"]))
+    shas = sorted({f["sha"] for f in (_run_face(r) for r in runs) if f})
     return "".join(
         f"@font-face{{font-family:'{faces.family(sha)}';src:url({faces.url(sha)}) format('truetype');"
         "font-display:block}" for sha in shas

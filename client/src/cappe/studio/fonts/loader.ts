@@ -3,6 +3,7 @@
 // what is drawn.
 
 import { charOf, type FullChar } from '../model/doc'
+import { parentDoc, resolveChar, resolvedThreads } from '../model/identity'
 import type { Doc, Face } from '../model/types'
 import type { Measure } from '../compose/compose'
 import { Shaper } from '../compose/shaper'
@@ -45,7 +46,10 @@ export class FontLoader {
     const faces = new Map<string, Face>()
     const add = (c: FullChar) => { const f = this.faceOf(c); if (f) faces.set(f.sha, f) }
     add(charOf({}))
-    for (const t of doc.threads) for (const p of t.paras) for (const r of p.runs) add(charOf(r))
+    for (const d of [doc, ...(doc.identity?.parents.map((p) => parentDoc(doc, p)) ?? [])]) {
+      for (const t of resolvedThreads(d)) for (const p of t.paras) for (const r of p.runs) add(charOf(r))
+    }
+    if (doc.identity) add(resolveChar(doc.identity.furniture.char, {}, doc.identity))
     await Promise.all([...faces.values()].map((f) => this.ensure(f)))
   }
 

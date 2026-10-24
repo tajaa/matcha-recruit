@@ -19,6 +19,7 @@ import { ObjectPanel } from './panels/ObjectPanel'
 import { PagesPanel } from './panels/PagesPanel'
 import { StoryPanel } from './panels/StoryPanel'
 import { CharacterPanel, ParagraphPanel } from './panels/TypePanels'
+import { IdentityPanel } from './panels/IdentityPanel'
 
 /** Gummfit Studio: menus and a control strip across the top, tools down the
  *  left, the pasteboard of pages in the middle, panels down the right. */
@@ -87,6 +88,7 @@ function Shell() {
         <Canvas />
         <aside aria-label="Panels" className="flex w-[300px] shrink-0 flex-col overflow-y-auto border-l border-zinc-800 bg-zinc-900">
           {panels.includes('pages') && <PagesPanel />}
+          {panels.includes('identity') && <IdentityPanel />}
           {panels.includes('props') && <ObjectPanel />}
           {panels.includes('character') && <CharacterPanel />}
           {panels.includes('paragraph') && <ParagraphPanel />}

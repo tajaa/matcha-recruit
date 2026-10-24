@@ -5,9 +5,10 @@ import { boardOffset } from '../canvas/geometry'
 import { acrossSpread, facingPage, groupOf, linkFrames, linkProblem, unlinkFrames } from '../model/crops'
 import { allIds, newId } from '../model/doc'
 import { SPINE_CLEAR } from '../model/gutter'
+import { resolveItem, resolveParas } from '../model/identity'
 import { addPages, arrange, deleteItems, deletePage, duplicate, movePage, patchItems, type Arrange } from '../model/ops'
 import type { Doc, Item, Thread } from '../model/types'
-import type { AddTab, State, Tool } from '../store/store'
+import type { AddTab, State, Store, Tool } from '../store/store'
 import { conversation } from './ask/conversation'
 import type { StudioCtx } from './context'
 
@@ -58,27 +59,42 @@ export function zoomTo(c: StudioCtx, z: number): void {
 }
 
 // Copied items (and the whole threads among them), kept for Paste.
-let clip: { items: Item[]; threads: Thread[] } | null = null
+let clip: { items: Item[]; threads: Thread[]; origin: object; flatItems: Item[]; flatThreads: Thread[] } | null = null
+const scopes = new WeakMap<Store, object>()
+const scope = (store: Store) => {
+  let token = scopes.get(store)
+  if (!token) { token = {}; scopes.set(store, token) }
+  return token
+}
 
-function copy(s: State): void {
+function copy(origin: Store): void {
+  const s = origin.get()
   const items = s.doc.items.filter((i) => s.selection.includes(i.id))
   const ids = new Set(items.map((i) => i.id))
-  clip = { items, threads: s.doc.threads.filter((t) => t.frames.every((f) => ids.has(f))) }
+  const threads = s.doc.threads.filter((t) => t.frames.every((f) => ids.has(f)))
+  clip = { items, threads, origin: scope(origin),
+    flatItems: items.map((i) => { const out = { ...resolveItem(i, s.doc.identity) }; delete out.fill_swatch; delete out.stroke_swatch; return out }),
+    flatThreads: threads.map((t) => ({ ...t, paras: resolveParas(t.paras, s.doc.identity) })) }
 }
 
 /** The copied items, on the page in view (offset when it is where they came from). */
-export function paste(doc: Doc, page: string): { doc: Doc; ids: string[] } {
+export function paste(doc: Doc, page: string, origin?: Store): { doc: Doc; ids: string[] } {
   if (!clip) return { doc, ids: [] }
   const map = new Map<string, string>()
   let taken = allIds(doc)
   const same = clip.items.every((i) => i.page === page && doc.items.some((d) => d.id === i.id))
-  const items = clip.items.map((i) => {
+  // Edits replace identity objects. Ownership remains the same, but a
+  // definition deleted since Copy must fall back to its copied appearance.
+  const has = (kind: 'paragraphs' | 'characters' | 'swatches', id?: string) => !id || !!doc.identity?.[kind].some((r) => r.id === id)
+  const linked = !!origin && scope(origin) === clip.origin && clip.items.every((i) => has('swatches', i.fill_swatch) && has('swatches', i.stroke_swatch))
+    && clip.threads.every((t) => t.paras.every((p) => has('paragraphs', p.style) && p.runs.every((r) => has('characters', r.style) && has('swatches', r.swatch))))
+  const items = (linked ? clip.items : clip.flatItems).map((i) => {
     const id = newId(i.kind === 'text' ? 't' : i.kind[0], taken)
     taken = [...taken, id]
     map.set(i.id, id)
     return { ...i, id, page, x: i.x + (same ? 12 : 0), y: i.y + (same ? 12 : 0), locked: false }
   })
-  const threads = clip.threads.map((t) => {
+  const threads = (linked ? clip.threads : clip.flatThreads).map((t) => {
     const id = newId('s', taken)
     taken = [...taken, id]
     return { id, frames: t.frames.map((f) => map.get(f)!), paras: t.paras }
@@ -114,13 +130,13 @@ export const COMMANDS: Command[] = [
   { id: 'undo', label: 'Undo', keys: '⌘Z', run: ({ store }) => store.undo(), enabled: () => true },
   { id: 'redo', label: 'Redo', keys: '⇧⌘Z', run: ({ store }) => store.redo(), enabled: () => true },
   { id: 'cut', label: 'Cut', keys: '⌘X', enabled: selected,
-    run: ({ store }) => { copy(store.get()); store.edit((d) => deleteItems(d, store.get().selection), { extra: { selection: [] } }) } },
-  { id: 'copy', label: 'Copy', keys: '⌘C', enabled: selected, run: ({ store }) => copy(store.get()) },
+    run: ({ store }) => { copy(store); store.edit((d) => deleteItems(d, store.get().selection), { extra: { selection: [] } }) } },
+  { id: 'copy', label: 'Copy', keys: '⌘C', enabled: selected, run: ({ store }) => copy(store) },
   { id: 'paste', label: 'Paste', keys: '⌘V', enabled: () => !!clip,
     run: ({ store }) => {
       const s = store.get()
       let ids: string[] = []
-      store.edit((d) => { const r = paste(d, d.pages[s.page].id); ids = r.ids; return r.doc })
+      store.edit((d) => { const r = paste(d, d.pages[s.page].id, store); ids = r.ids; return r.doc })
       store.set({ selection: ids })
     } },
   { id: 'duplicate', label: 'Duplicate', keys: '⌘D', enabled: selected,

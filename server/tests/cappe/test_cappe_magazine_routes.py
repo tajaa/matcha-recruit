@@ -284,6 +284,7 @@ def test_a_cached_magazine_goes_down_with_the_plan(monkeypatch, path):
 
 def _owner_conn(**tables):
     fetchrow = {"FROM cappe_sites": SITE_ROW, "FROM cappe_magazines": MAG_ROW,
+                "FROM cappe_studio_identities": None,
                 "stripe_charges_enabled FROM cappe_accounts": {"stripe_account_id": None, "stripe_charges_enabled": False}}
     fetchrow.update(tables.pop("fetchrow", {}))
     fetch = {"FROM cappe_assets WHERE site_id = $1 AND id = ANY": [ASSET_ROW], "FROM cappe_pages": []}

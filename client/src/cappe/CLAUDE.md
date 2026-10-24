@@ -142,6 +142,29 @@ Website-builder frontend for the consumer brand **Gummfit**, host-routed on gumm
   opens on a first visit (localStorage `cappe-studio-guide-seen`), from Help, the top bar's ? and the
   Picture Editor's ?. **A change to a tool, panel, menu or key changes its section in the same PR**; the
   shortcuts section is built from `COMMANDS`, and a test holds the tool keys to the commands.
+  **Editorial collections** (`ui/add/collections.ts`, `CollectionsTab.tsx`, `applyCollection.ts`): Templates opens
+  on four ten-page art directions; Single pages keeps the original templates. A collection starts a blank
+  story or inserts after the current spread (padding keeps its cover on the right and preserves original page sides), fitted to the story's
+  size, with fresh ids and linked text preserved, in one undo step. Existing paywall pages follow their
+  original pages. ASCII-escaped size and composed-line limits are checked after composition, before committing.
+  Saved collections use `collectionsApi.ts`
+  and `/api/cappe/studio/collections`: account-wide, max 50, each up to 32 pages / 1 MB. `model/collections.ts`
+  strips library photo ids, image captions, compositions and reader access; type, words and guides remain.
+  Page templates and collections share `ui/add/preparation.ts` so switching tabs cannot overlap placement.
+  `collectionLibrary.ts` holds pending library writes and feedback per Studio store across panel remounts,
+  invalidates stale reads, and reuses a save request UUID for an unchanged retry. `collectionPreview.ts`
+  shares one composition across a collection's thumbnails; failed preparation can be retried.
+  **Magazine identity** (`studio/model/identity.ts`, `ui/panels/IdentityPanel.tsx`): named paragraph/character
+  styles and swatches are references, with local attributes as overrides. `resolveParas` supplies effective
+  type to composition/rendering/font loading; editable paragraphs and ProseMirror keep sparse references,
+  including explicit default/false overrides. A style change recomposes every linked use in the document.
+  Parent layouts are portable page snapshots (no site photos or cross-page threads), drawn behind local
+  content and composed once per definition. Detach creates fresh local IDs; scaled copies preserve appearance.
+  Page furniture is generated from page order with per-page hiding/header overrides. All reader/print rendering
+  uses the same resolver. `identityLibrary.ts` retains pending writes/errors across panel mounts, refreshes
+  saved templates and rejects stale read results. `/sites/:id/studio/identity` stores a versioned magazine
+  template; document snapshots keep published issues stable until explicitly updated. New paged stories copy
+  the saved identity. Import merges by name with ID remapping. See the Studio guide's `identity` section.
 
 ## Backend pairing
 

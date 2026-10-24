@@ -23,17 +23,25 @@ import json
 from typing import Annotated, Any, Literal, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
+from fastapi.routing import APIRoute
 from pydantic import BaseModel, Field
 
 from ...core.services.redis_cache import check_rate_limit
 from ...database import get_connection
 from ..dependencies import require_cappe_account
 from ..models.cappe import CappeAccount
+from ..models.studio import StudioCollectionCreate
 from ..services.entitlements import resolve_entitlements
 from ..services.magazine.stories import POST_COLS, post_row, sync_post_assets
 from ..services.magazine.story_schema import referenced_asset_ids
 from ..services.magazine.studio import ask
+from ..services.magazine.studio import bank as studio_bank
+from ..services.magazine.studio.identity import portable_identity
+from ..services.magazine.studio.collections import MAX_COLLECTION_BYTES, MAX_COLLECTIONS, collection_doc
+from ..services.magazine.studio.schema import DocError
 from ..services.magazine.studio.fonts import manifest
 from ..services.magazine.studio.limits import limits
 from ._shared import get_owned_site
@@ -42,8 +50,174 @@ from .render import invalidate_render_cache
 
 router = APIRouter()
 
+
+class _CollectionRoute(APIRoute):
+    def get_route_handler(self):
+        handle = super().get_route_handler()
+
+        async def validated(request: Request) -> Response:
+            try:
+                return await handle(request)
+            except RequestValidationError as exc:
+                # Escaped lone surrogates are legal JSON but invalid names. The
+                # default UTF-8 error response cannot echo them; ASCII JSON can.
+                return Response(json.dumps(jsonable_encoder({"detail": exc.errors()})),
+                                status_code=422, media_type="application/json")
+
+        return validated
+
+
+_collections = APIRouter(route_class=_CollectionRoute)
+
+
+async def _designer(account: CappeAccount = Depends(require_cappe_account)) -> CappeAccount:
+    """Collections belong to accounts that design pages. A reader account has
+    no sites, so no Studio, and keeps no collections (sites.py refuses it a
+    site the same way)."""
+    if account.account_type == "reader":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail={"code": "reader_account", "message": "A reader account doesn't design pages."})
+    return account
+
 KEEP_REVISIONS = 50
 NOT_PAGES = "This story isn't made of pages. Open it in the story editor."
+
+
+class _IdentityRoute(APIRoute):
+    def get_route_handler(self):
+        handler = super().get_route_handler()
+
+        async def safe_validation(request):
+            try:
+                return await handler(request)
+            except RequestValidationError as exc:
+                # Invalid JSON values may contain lone UTF-16 surrogates.
+                # Echoing their Pydantic input in JSONResponse can itself fail.
+                raise HTTPException(status_code=422, detail="Invalid magazine identity request.") from exc
+
+        return safe_validation
+
+
+identity_router = APIRouter(route_class=_IdentityRoute)
+
+
+class StudioIdentitySave(BaseModel):
+    base_rev: int = Field(ge=0)
+    identity: dict[str, Any]
+
+
+def _identity_record(row):
+    if row is None:
+        return {"rev": 0, "identity": None}
+    return {"rev": row["rev"], "identity": json.loads(row["identity"]) if isinstance(row["identity"], str) else row["identity"]}
+
+
+@identity_router.get("/sites/{site_id}/studio/identity")
+async def open_identity(site_id: UUID, account: CappeAccount = Depends(require_cappe_account)):
+    async with get_connection() as conn:
+        await get_owned_site(conn, site_id, account.id)
+        row = await conn.fetchrow("SELECT rev, identity FROM cappe_studio_identities WHERE site_id = $1", site_id)
+    return _identity_record(row)
+
+
+@identity_router.put("/sites/{site_id}/studio/identity")
+async def save_identity(site_id: UUID, body: StudioIdentitySave, account: CappeAccount = Depends(require_cappe_account)):
+    async with get_connection() as conn:
+        await get_owned_site(conn, site_id, account.id)
+        try:
+            bank = await studio_bank.doc_graphics(conn, {"identity": body.identity})
+            identity = portable_identity(body.identity, bank)
+        except DocError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        async with conn.transaction():
+            # Serialize first saves too, and recheck ownership after any wait.
+            owned = await conn.fetchval("SELECT id FROM cappe_sites WHERE id = $1 AND account_id = $2 FOR UPDATE", site_id, account.id)
+            if owned is None:
+                raise HTTPException(status_code=404, detail="Site not found")
+            previous = _identity_record(await conn.fetchrow("SELECT rev, identity FROM cappe_studio_identities WHERE site_id = $1", site_id))
+            if body.base_rev != previous["rev"]:
+                if body.base_rev + 1 == previous["rev"] and identity == previous["identity"]:
+                    return previous  # lost successful response: the same snapshot
+                raise HTTPException(status_code=409, detail="The magazine identity changed elsewhere. Reload it before saving.")
+            saved = {"rev": previous["rev"] + 1, "identity": identity}
+            await conn.execute(
+                "INSERT INTO cappe_studio_identities (site_id, rev, identity) VALUES ($1, $2, $3::jsonb) "
+                "ON CONFLICT (site_id) DO UPDATE SET rev = EXCLUDED.rev, identity = EXCLUDED.identity, updated_at = NOW()",
+                site_id, saved["rev"], json.dumps(identity),
+            )
+    return saved
+
+
+router.include_router(identity_router)
+@_collections.get("/studio/collections")
+async def list_collections(account: CappeAccount = Depends(_designer)):
+    """Small library cards; fetch a document only when it is opened."""
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            "SELECT id, name, page_count, created_at FROM cappe_studio_collections "
+            "WHERE account_id = $1 ORDER BY created_at DESC, id LIMIT $2", account.id, MAX_COLLECTIONS,
+        )
+    return [dict(row) for row in rows]
+
+
+@_collections.get("/studio/collections/{collection_id}")
+async def open_collection(collection_id: UUID, account: CappeAccount = Depends(_designer)):
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT id, name, page_count, created_at, doc FROM cappe_studio_collections "
+            "WHERE id = $1 AND account_id = $2", collection_id, account.id,
+        )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Collection not found")
+    out = dict(row)
+    out["doc"] = json.loads(out["doc"]) if isinstance(out["doc"], str) else out["doc"]
+    return out
+
+
+@_collections.post("/studio/collections", status_code=201)
+async def save_collection(body: StudioCollectionCreate, account: CappeAccount = Depends(_designer)):
+    async with get_connection() as conn:
+        try:
+            # Check the size before resolving the bank, then validate its custom graphics.
+            if len(json.dumps(body.doc, separators=(",", ":"))) > MAX_COLLECTION_BYTES:
+                raise DocError("A collection is too big to save. Use fewer pages or less text.")
+            doc = collection_doc(body.doc, await studio_bank.doc_graphics(conn, body.doc))
+        except DocError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        async with conn.transaction():
+            # Serialize saves for this account so concurrent tabs cannot exceed the cap.
+            await conn.fetchval("SELECT id FROM cappe_accounts WHERE id = $1 FOR UPDATE", account.id)
+            if body.request_id is not None:
+                replay = await conn.fetchrow(
+                    "SELECT id, name, page_count, created_at, doc FROM cappe_studio_collections "
+                    "WHERE account_id = $1 AND request_id = $2", account.id, body.request_id,
+                )
+                if replay is not None:
+                    kept = json.loads(replay["doc"]) if isinstance(replay["doc"], str) else replay["doc"]
+                    if replay["name"] != body.name or kept != doc:
+                        raise HTTPException(status_code=409, detail="That save request already belongs to another collection. Start a new save.")
+                    return {k: replay[k] for k in ("id", "name", "page_count", "created_at")}
+            count = await conn.fetchval("SELECT count(*) FROM cappe_studio_collections WHERE account_id = $1", account.id)
+            if count >= MAX_COLLECTIONS:
+                raise HTTPException(status_code=409, detail=f"You can save {MAX_COLLECTIONS} collections. Remove one to save another.")
+            row = await conn.fetchrow(
+                "INSERT INTO cappe_studio_collections (account_id, name, doc, page_count, request_id) "
+                "VALUES ($1, $2, $3::jsonb, $4, $5) RETURNING id, name, page_count, created_at",
+                account.id, body.name, json.dumps(doc), len(doc["pages"]), body.request_id,
+            )
+    return dict(row)
+
+
+@_collections.delete("/studio/collections/{collection_id}", status_code=204)
+async def delete_collection(collection_id: UUID, account: CappeAccount = Depends(_designer)):
+    async with get_connection() as conn:
+        await conn.execute(
+            "DELETE FROM cappe_studio_collections WHERE id = $1 AND account_id = $2",
+            collection_id, account.id,
+        )
+
+
+router.include_router(_collections)
 
 
 class StudioSave(BaseModel):
@@ -53,10 +227,12 @@ class StudioSave(BaseModel):
     publish: bool = False
     # Keep this save as a revision to go back to (autosaves aren't).
     keep: bool = False
+    identity_version: Optional[Literal[1]] = None
 
 
 class StudioRestore(BaseModel):
     base_rev: int = Field(ge=0)
+    identity_version: Optional[Literal[1]] = None
 
 
 _Id = Annotated[str, Field(max_length=40, pattern=r"^[a-z0-9-]+$")]
@@ -136,6 +312,11 @@ async def _locked_story(conn, site_id: UUID, post_id: UUID):
     return row
 
 
+def _identity_supported(version, *docs):
+    if version != 1 and any(isinstance(doc, dict) and doc.get("identity") is not None for doc in docs):
+        raise HTTPException(status_code=409, detail={"code": "studio_upgrade", "message": "This issue uses a magazine identity. Reload the Studio before editing it."})
+
+
 async def _keep(conn, row, kind: str, content: dict, rev: int) -> None:
     await conn.execute(
         "INSERT INTO cappe_post_revisions (post_id, site_id, rev, kind, title, content) VALUES ($1, $2, $3, $4, $5, $6::jsonb)",
@@ -205,6 +386,7 @@ async def save_story(site_id: UUID, post_id: UUID, body: StudioSave,
             row = await _locked_story(conn, site_id, post_id)
             if body.base_rev != row["rev"]:
                 raise _stale(row["rev"])
+            _identity_supported(body.identity_version, body.doc, _doc_of(row["draft"]), _doc_of(row["content"]))
             published = row["status"] == "published"
             keep = "publish" if (published and body.publish) else ("save" if body.keep else None)
             saved = await _write(conn, row, body.doc, publish=body.publish, keep=keep)
@@ -223,6 +405,7 @@ async def discard_draft(site_id: UUID, post_id: UUID, body: StudioRestore,
             row = await _locked_story(conn, site_id, post_id)
             if body.base_rev != row["rev"]:
                 raise _stale(row["rev"])
+            _identity_supported(body.identity_version, _doc_of(row["draft"]), _doc_of(row["content"]))
             rev = row["rev"] + 1
             await conn.execute("UPDATE cappe_posts SET draft = NULL, rev = $1, updated_at = NOW() WHERE id = $2",
                                rev, post_id)
@@ -258,6 +441,7 @@ async def restore_revision(site_id: UUID, post_id: UUID, revision_id: UUID, body
                 revision_id, post_id, site_id,
             )
             doc = _doc_of(kept)
+            _identity_supported(body.identity_version, doc, _doc_of(row["draft"]), _doc_of(row["content"]))
             if doc is None:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Version not found")
             saved = await _write(conn, row, doc, publish=False, keep="restore")
