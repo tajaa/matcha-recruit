@@ -11,12 +11,13 @@ import { baseKeymap } from '@tiptap/pm/commands'
 import { keymap } from '@tiptap/pm/keymap'
 import { EditorState, TextSelection, type Command } from '@tiptap/pm/state'
 import { EditorView } from '@tiptap/pm/view'
-import { charOf, paraText } from '../model/doc'
+import { paraText } from '../model/doc'
+import { resolveChar } from '../model/identity'
 import { applyChar, applyPara, charAt, order, setParas, type Pos } from '../model/ops'
 import type { CharAttrs, Para, ParaAttrs, Thread } from '../model/types'
 import type { Store } from '../store/store'
 import { caretAt, lineEls, offsetAtX } from './caret'
-import { attrsOf, emptyAttrsOf, fromPM, locOf, markFor, posOf, schema, toPM } from './pm'
+import { attrsOf, emptyAttrsOf, fromPM, locOf, markFor, portableSlice, posOf, schema, toPM } from './pm'
 
 const HIDDEN = 'position:fixed;left:0;top:0;width:1px;height:1em;opacity:0;overflow:hidden;white-space:pre-wrap;z-index:-1;pointer-events:none'
 const SHOWN = 'white-space:pre-wrap;outline:none;min-height:100%;padding:12px 14px;font:15px/1.6 Georgia,serif;color:#e4e4e7'
@@ -66,6 +67,7 @@ export class TextEditor {
       this.view = new EditorView(this.host, {
         state: state.apply(state.tr.setSelection(sel)),
         dispatchTransaction: (tr) => this.dispatch(tr),
+        transformCopied: (slice) => portableSlice(slice, this.store.get().doc.identity),
         attributes: { spellcheck: 'true', autocorrect: 'on' },
       })
     } else this.view.updateState(state.apply(state.tr.setSelection(sel)))
@@ -113,7 +115,7 @@ export class TextEditor {
     const { $from, empty } = next.selection
     if (empty && !$from.parent.content.size && !next.storedMarks) {
       const ec = emptyAttrsOf($from.parent)
-      if (Object.keys(ec).length) next = next.apply(next.tr.setStoredMarks(markFor(ec)))
+      if (Object.keys(ec).length) next = next.apply(next.tr.setStoredMarks(markFor(ec, !!this.currentPara().style)))
     }
     view.updateState(next)
     if (!tr.getMeta('keepGoal')) this.goal = null
@@ -180,8 +182,9 @@ export class TextEditor {
     const [a, b] = order(sel.anchor, sel.head)
     if (a[0] === b[0] && a[1] === b[1] && paraText(t.paras[a[0]]).length) {
       // Nothing selected: the next characters typed take it.
-      const merged = { ...charOf(this.currentChar()), ...attrs }
-      this.view.dispatch(this.view.state.tr.setStoredMarks(markFor(merged)))
+      const merged = { ...('style' in attrs ? {} : this.currentChar()), ...attrs }
+      if ('color' in attrs && !('swatch' in attrs)) delete merged.swatch
+      this.view.dispatch(this.view.state.tr.setStoredMarks(markFor(merged, !!this.currentPara().style)))
       return
     }
     const thread = t.id
@@ -202,7 +205,9 @@ export class TextEditor {
 
   private keys(): Record<string, Command> {
     const toggle = (key: keyof CharAttrs, on: unknown, off: unknown): Command => () => {
-      const cur = charOf(this.currentChar())
+      const identity = this.store.get().doc.identity
+      const base = identity?.paragraphs.find((p) => p.id === this.currentPara().style)?.char
+      const cur = resolveChar(this.currentChar(), base, identity)
       this.applyChar({ [key]: cur[key as keyof typeof cur] === on ? off : on } as CharAttrs)
       return true
     }

@@ -42,7 +42,7 @@ export const GUIDE: GuideSection[] = [
       'The side panel, at the far left: Templates, Elements, Text, Photos and Yours (your pictures). Click anything there to add it, or drag it onto a page.',
       'Tools, beside it: what a click or a drag on the page makes or does.',
       'The pages, in the middle, on a grey pasteboard you can park things on.',
-      'Panels, down the right: Pages, Object, Character and Paragraph, plus the Story Editor. Window shows and hides each.',
+      'Panels, down the right: Pages, Magazine identity, Object, Character and Paragraph, plus the Story Editor. Window shows and hides each.',
       'Status bar, along the bottom: the zoom, the page you’re on, what the tool in hand does, a red note when text doesn’t fit, and whether everything is saved.',
     ],
   },
@@ -77,6 +77,18 @@ export const GUIDE: GuideSection[] = [
       'Photos: opens on free photos, modern stock you may use any way you like (CC0, from StockSnap.io, WordPress and Nappy), with Gummfit’s own picks above them; search, or tap a topic. The archives (Openverse, the Smithsonian, The Met, NASA) are a tap away, each picture credited. The first click puts it in your library too. Make an AI picture is here too.',
       'Yours: everything in your library. Upload a picture here, then click it, or drag it onto a picture frame to fill the frame.',
       'Insert in the menus opens each tab too.',
+    ],
+  },
+  {
+    id: 'identity', group: 'Make', icon: LayoutTemplate, title: 'A reusable magazine identity',
+    body: 'Window → Magazine identity opens the magazine’s visual system: named paragraph and character styles, a palette, recurring parent layouts, page numbers and running headers. Each issue keeps its own editable copy.',
+    points: [
+      'Create identity starts with Body, Heading, Caption and Emphasis. Select text or a text frame, then Apply beside a named style. Paragraph styles set the whole paragraph’s type and spacing; character styles set selected words. The Character and Paragraph panels also offer the named styles.',
+      'Click a style’s name to edit its font, size, colour and spacing. Every linked paragraph or word in these pages updates together, including text on parents. Local formatting overrides the shared style; reapply the named style to clear overrides. Link all caption paragraphs connects existing captions to the Caption style. Semantic roles alone do not link visual styles.',
+      'The palette keeps named colours. Apply colour links selected text or frames; styles can also use a palette colour. Editing that swatch updates its linked uses. Choosing a custom colour in the normal panels makes that use local. Deleting a style or swatch keeps the current appearance.',
+      'Parent layouts repeat ordinary frames behind a page’s local content. Save local page as new parent moves that page’s frames into a shared parent; pictures become empty frames. Choose that parent on other pages. Detach parent to edit this page makes a local copy. Update from local page changes the shared parent for every linked page. Text linked to another page must be unlinked before capture.',
+      'Automatic page numbers follow the page order, starting at your chosen number. A running header repeats the magazine or section name. Skip the first page for a cover, hide both on an individual page, or give that page its own header. Reordering pages recalculates the numbers.',
+      'Save for this magazine stores a reusable template. New paged issues start with a copy. Use saved magazine identity merges definitions by name into an existing issue; matching styles and colours update, and other definitions remain. Saving the template does not change published issues. Publish the edited issue through the usual save/update controls. A conflicting template save asks you to reload instead of overwriting another editor.',
     ],
   },
   {

@@ -34,6 +34,9 @@ from ..services.entitlements import resolve_entitlements
 from ..services.magazine.stories import POST_COLS, post_row, sync_post_assets
 from ..services.magazine.story_schema import referenced_asset_ids
 from ..services.magazine.studio import ask
+from ..services.magazine.studio import bank as studio_bank
+from ..services.magazine.studio.identity import portable_identity
+from ..services.magazine.studio.schema import DocError
 from ..services.magazine.studio.fonts import manifest
 from ..services.magazine.studio.limits import limits
 from ._shared import get_owned_site
@@ -46,6 +49,53 @@ KEEP_REVISIONS = 50
 NOT_PAGES = "This story isn't made of pages. Open it in the story editor."
 
 
+class StudioIdentitySave(BaseModel):
+    base_rev: int = Field(ge=0)
+    identity: dict[str, Any]
+
+
+def _identity_record(row):
+    if row is None:
+        return {"rev": 0, "identity": None}
+    return {"rev": row["rev"], "identity": json.loads(row["identity"]) if isinstance(row["identity"], str) else row["identity"]}
+
+
+@router.get("/sites/{site_id}/studio/identity")
+async def open_identity(site_id: UUID, account: CappeAccount = Depends(require_cappe_account)):
+    async with get_connection() as conn:
+        await get_owned_site(conn, site_id, account.id)
+        row = await conn.fetchrow("SELECT rev, identity FROM cappe_studio_identities WHERE site_id = $1", site_id)
+    return _identity_record(row)
+
+
+@router.put("/sites/{site_id}/studio/identity")
+async def save_identity(site_id: UUID, body: StudioIdentitySave, account: CappeAccount = Depends(require_cappe_account)):
+    async with get_connection() as conn:
+        await get_owned_site(conn, site_id, account.id)
+        try:
+            bank = await studio_bank.doc_graphics(conn, {"identity": body.identity})
+            identity = portable_identity(body.identity, bank)
+        except DocError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        async with conn.transaction():
+            # Serialize first saves too, and recheck ownership after any wait.
+            owned = await conn.fetchval("SELECT id FROM cappe_sites WHERE id = $1 AND account_id = $2 FOR UPDATE", site_id, account.id)
+            if owned is None:
+                raise HTTPException(status_code=404, detail="Site not found")
+            previous = _identity_record(await conn.fetchrow("SELECT rev, identity FROM cappe_studio_identities WHERE site_id = $1", site_id))
+            if body.base_rev != previous["rev"]:
+                if body.base_rev + 1 == previous["rev"] and identity == previous["identity"]:
+                    return previous  # lost successful response: the same snapshot
+                raise HTTPException(status_code=409, detail="The magazine identity changed elsewhere. Reload it before saving.")
+            saved = {"rev": previous["rev"] + 1, "identity": identity}
+            await conn.execute(
+                "INSERT INTO cappe_studio_identities (site_id, rev, identity) VALUES ($1, $2, $3::jsonb) "
+                "ON CONFLICT (site_id) DO UPDATE SET rev = EXCLUDED.rev, identity = EXCLUDED.identity, updated_at = NOW()",
+                site_id, saved["rev"], json.dumps(identity),
+            )
+    return saved
+
+
 class StudioSave(BaseModel):
     base_rev: int = Field(ge=0)
     doc: dict[str, Any]
@@ -53,10 +103,12 @@ class StudioSave(BaseModel):
     publish: bool = False
     # Keep this save as a revision to go back to (autosaves aren't).
     keep: bool = False
+    identity_version: Optional[Literal[1]] = None
 
 
 class StudioRestore(BaseModel):
     base_rev: int = Field(ge=0)
+    identity_version: Optional[Literal[1]] = None
 
 
 _Id = Annotated[str, Field(max_length=40, pattern=r"^[a-z0-9-]+$")]
@@ -136,6 +188,11 @@ async def _locked_story(conn, site_id: UUID, post_id: UUID):
     return row
 
 
+def _identity_supported(version, *docs):
+    if version != 1 and any(isinstance(doc, dict) and doc.get("identity") is not None for doc in docs):
+        raise HTTPException(status_code=409, detail={"code": "studio_upgrade", "message": "This issue uses a magazine identity. Reload the Studio before editing it."})
+
+
 async def _keep(conn, row, kind: str, content: dict, rev: int) -> None:
     await conn.execute(
         "INSERT INTO cappe_post_revisions (post_id, site_id, rev, kind, title, content) VALUES ($1, $2, $3, $4, $5, $6::jsonb)",
@@ -205,6 +262,7 @@ async def save_story(site_id: UUID, post_id: UUID, body: StudioSave,
             row = await _locked_story(conn, site_id, post_id)
             if body.base_rev != row["rev"]:
                 raise _stale(row["rev"])
+            _identity_supported(body.identity_version, body.doc, _doc_of(row["draft"]), _doc_of(row["content"]))
             published = row["status"] == "published"
             keep = "publish" if (published and body.publish) else ("save" if body.keep else None)
             saved = await _write(conn, row, body.doc, publish=body.publish, keep=keep)
@@ -223,6 +281,7 @@ async def discard_draft(site_id: UUID, post_id: UUID, body: StudioRestore,
             row = await _locked_story(conn, site_id, post_id)
             if body.base_rev != row["rev"]:
                 raise _stale(row["rev"])
+            _identity_supported(body.identity_version, _doc_of(row["draft"]), _doc_of(row["content"]))
             rev = row["rev"] + 1
             await conn.execute("UPDATE cappe_posts SET draft = NULL, rev = $1, updated_at = NOW() WHERE id = $2",
                                rev, post_id)
@@ -258,6 +317,7 @@ async def restore_revision(site_id: UUID, post_id: UUID, revision_id: UUID, body
                 revision_id, post_id, site_id,
             )
             doc = _doc_of(kept)
+            _identity_supported(body.identity_version, doc, _doc_of(row["draft"]), _doc_of(row["content"]))
             if doc is None:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Version not found")
             saved = await _write(conn, row, doc, publish=False, keep="restore")

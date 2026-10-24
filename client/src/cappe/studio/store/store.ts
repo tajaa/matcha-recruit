@@ -10,11 +10,12 @@
 
 import { useSyncExternalStore } from 'react'
 import { composeDoc, type Measure } from '../compose/compose'
+import { docProblem } from '../model/limits'
 import type { Asset, Doc } from '../model/types'
 
 export type Tool = 'select' | 'text' | 'frame' | 'rect' | 'ellipse' | 'line' | 'hand' | 'zoom'
 export type SaveState = 'saved' | 'dirty' | 'saving' | 'error' | 'conflict'
-export type Panel = 'pages' | 'props' | 'character' | 'paragraph' | 'story' | 'ask'
+export type Panel = 'pages' | 'props' | 'character' | 'paragraph' | 'story' | 'ask' | 'identity'
 /** The side panel's tabs (ui/add/AddPanel.tsx). */
 export type AddTab = 'templates' | 'elements' | 'text' | 'photos' | 'uploads'
 
@@ -114,6 +115,8 @@ export class Store {
       return
     }
     const { doc, overset } = composeDoc(changed, this.measure)
+    const problem = doc.identity ? docProblem(doc) : null
+    if (problem) { this.set({ notice: problem }); return }
     const now = Date.now()
     if (!(key && key === this.lastKey && now - this.lastAt < COALESCE_MS)) {
       this.past.push(before)

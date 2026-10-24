@@ -1260,6 +1260,478 @@
    "html": "<div class=\"lyt\" data-lyt style=\"--pw:612;--ph:792;--sw:1224;--paper:#ffffff\"><div class=\"lyt-strip\" data-lyt-strip tabindex=\"0\" role=\"region\" aria-label=\"Pages of &#x27;Tide&#x27;\"><div class=\"lyt-slot\" data-lyt-spread=\"0\"><div class=\"lyt-spread\" style=\"width:calc(612 * var(--u));height:calc(792 * var(--u))\"><div class=\"lyt-paper\" data-lyt-n=\"1\" style=\"left:calc(0 * var(--u));width:calc(612 * var(--u))\"></div><div class=\"lyt-page\" data-lyt-page=\"1\" style=\"left:calc(0 * var(--u));width:calc(612 * var(--u))\"><div class=\"lyt-item lyt-g\" style=\"left:calc(20 * var(--u));top:calc(30 * var(--u));width:calc(144 * var(--u));height:calc(120 * var(--u));transform:rotate(15deg);opacity:0.7;background:#b4532a;-webkit-mask:url(/api/cappe/public/graphics/stretch/f9b482c91efd96ccd224b33b69e44dbec593d6925a49ad2afbc5ad49af70fc89.svg) center/100% 100% no-repeat;mask:url(/api/cappe/public/graphics/stretch/f9b482c91efd96ccd224b33b69e44dbec593d6925a49ad2afbc5ad49af70fc89.svg) center/100% 100% no-repeat\"></div><div class=\"lyt-item lyt-g\" style=\"left:calc(200 * var(--u));top:calc(30 * var(--u));width:calc(96 * var(--u));height:calc(96 * var(--u));background:url(/api/cappe/public/graphics/c9cd3f4910105f7758bfd62ce694a4683f8d06b7abd12e147c92e04795ff86f5.svg) center/contain no-repeat\"></div><div class=\"lyt-item lyt-g\" style=\"left:calc(-9 * var(--u));top:calc(-9 * var(--u));width:calc(630 * var(--u));height:calc(810 * var(--u));background:#d9d4cc;-webkit-mask:url(/api/cappe/public/graphics/222e0ccd5dd7cdb38404a53abe8a06008cae9ddddb33ddb545f204dafcd1701b.svg) 0 0/calc(18.5 * var(--u)) auto repeat;mask:url(/api/cappe/public/graphics/222e0ccd5dd7cdb38404a53abe8a06008cae9ddddb33ddb545f204dafcd1701b.svg) 0 0/calc(18.5 * var(--u)) auto repeat\"></div><div class=\"lyt-item lyt-g\" style=\"left:calc(300 * var(--u));top:calc(300 * var(--u));width:calc(72 * var(--u));height:calc(72 * var(--u));background:#1a1a1a;-webkit-mask:url(/api/cappe/public/graphics/24a1ab9bf17584c896b2f87501a882b9b5b9503e663ad66598e0e2b9f3a44889.svg) center/contain no-repeat;mask:url(/api/cappe/public/graphics/24a1ab9bf17584c896b2f87501a882b9b5b9503e663ad66598e0e2b9f3a44889.svg) center/contain no-repeat\"></div></div></div></div></div></div>",
    "used": {},
    "faces_css": ""
+  },
+  {
+   "name": "magazine identity",
+   "doc": {
+    "v": 1,
+    "size": {
+     "w": 612,
+     "h": 792
+    },
+    "facing": true,
+    "margins": {
+     "t": 36,
+     "b": 36,
+     "i": 36,
+     "o": 36
+    },
+    "cols": {
+     "n": 1,
+     "g": 12
+    },
+    "baseline": {
+     "start": 36,
+     "step": 12
+    },
+    "grid": {
+     "step": 12
+    },
+    "bleed": 9,
+    "units": "in",
+    "paper": "#ffffff",
+    "pages": [
+     {
+      "id": "p1"
+     },
+     {
+      "id": "p2",
+      "parent": "pl1",
+      "header": "Feature & profile"
+     }
+    ],
+    "guides": [],
+    "items": [
+     {
+      "id": "t1",
+      "kind": "text",
+      "page": "p1",
+      "x": 54,
+      "y": 54,
+      "w": 240,
+      "h": 300,
+      "rot": 0,
+      "opacity": 100,
+      "locked": false,
+      "hidden": false,
+      "name": "",
+      "cols": 1,
+      "gutter": 12,
+      "inset": 0,
+      "valign": "top",
+      "fill": null,
+      "stroke": null
+     }
+    ],
+    "threads": [
+     {
+      "id": "s1",
+      "frames": [
+       "t1"
+      ],
+      "paras": [
+       {
+        "runs": [
+         {
+          "t": "Named caption"
+         },
+         {
+          "t": " emphasis",
+          "style": "cs1"
+         },
+         {
+          "t": " local",
+          "it": false,
+          "color": "#1a1a1a"
+         }
+        ],
+        "style": "ps1"
+       }
+      ]
+     }
+    ],
+    "paywall_page": null,
+    "identity": {
+     "v": 1,
+     "name": "Tide identity",
+     "paragraphs": [
+      {
+       "id": "ps1",
+       "name": "Caption",
+       "char": {
+        "font": "Inter",
+        "wt": 400,
+        "it": false,
+        "size": 8,
+        "track": 0,
+        "color": "#1a1a1a",
+        "u": false,
+        "swatch": "sw1"
+       },
+       "para": {
+        "align": "l",
+        "li": 0.0,
+        "ri": 0.0,
+        "fi": 0.0,
+        "sb": 0.0,
+        "sa": 4,
+        "lead": 0.0,
+        "role": "caption"
+       }
+      }
+     ],
+     "characters": [
+      {
+       "id": "cs1",
+       "name": "Emphasis",
+       "char": {
+        "it": true
+       }
+      }
+     ],
+     "swatches": [
+      {
+       "id": "sw1",
+       "name": "Editorial red",
+       "color": "#ab3322"
+      }
+     ],
+     "parents": [
+      {
+       "id": "pl1",
+       "name": "Feature",
+       "size": {
+        "w": 612,
+        "h": 792
+       },
+       "items": [
+        {
+         "id": "t1",
+         "kind": "text",
+         "page": "p1",
+         "x": 54,
+         "y": 25,
+         "w": 200,
+         "h": 30,
+         "rot": 0,
+         "opacity": 100,
+         "locked": false,
+         "hidden": false,
+         "name": "",
+         "cols": 1,
+         "gutter": 12,
+         "inset": 0,
+         "valign": "top",
+         "fill": null,
+         "stroke": null
+        },
+        {
+         "id": "i1",
+         "kind": "image",
+         "page": "p1",
+         "x": 300,
+         "y": 25,
+         "w": 40,
+         "h": 40,
+         "rot": 0,
+         "opacity": 100,
+         "locked": false,
+         "hidden": false,
+         "name": "",
+         "asset_id": null,
+         "fit": "fill",
+         "fx": 50,
+         "fy": 50,
+         "zoom": 100,
+         "fill": null,
+         "stroke": null,
+         "radius": 0,
+         "caption": ""
+        }
+       ],
+       "threads": [
+        {
+         "id": "s1",
+         "frames": [
+          "t1"
+         ],
+         "paras": [
+          {
+           "runs": [
+            {
+             "t": "TIDE & LIGHT"
+            }
+           ],
+           "style": "ps1"
+          }
+         ]
+        }
+       ]
+      }
+     ],
+     "furniture": {
+      "numbers": true,
+      "header": "Tide <issue>",
+      "start": 4,
+      "skip_first": false,
+      "inset": 24,
+      "char": {
+       "font": "Inter",
+       "wt": 400,
+       "it": false,
+       "size": 8,
+       "track": 0,
+       "color": "#1a1a1a",
+       "u": false,
+       "swatch": "sw1"
+      }
+     }
+    }
+   },
+   "locked_from": null,
+   "html": "<div class=\"lyt\" data-lyt style=\"--pw:612;--ph:792;--sw:1224;--paper:#ffffff\"><div class=\"lyt-strip\" data-lyt-strip tabindex=\"0\" role=\"region\" aria-label=\"Pages of &#x27;Tide&#x27;\"><div class=\"lyt-slot\" data-lyt-spread=\"0\"><div class=\"lyt-spread\" style=\"width:calc(612 * var(--u));height:calc(792 * var(--u))\"><div class=\"lyt-paper\" data-lyt-n=\"1\" style=\"left:calc(0 * var(--u));width:calc(612 * var(--u))\"></div><div class=\"lyt-page\" data-lyt-page=\"1\" style=\"left:calc(0 * var(--u));width:calc(612 * var(--u))\"><div class=\"lyt-item lyt-text\" style=\"left:calc(54 * var(--u));top:calc(54 * var(--u));width:calc(240 * var(--u));height:calc(300 * var(--u))\"><div class=\"lyt-flow\" style=\"padding:calc(0 * var(--u))\"><p style=\"text-align:left;margin-bottom:calc(4 * var(--u))\"><span style=\"font-family:'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;font-weight:400;font-size:calc(8 * var(--u));color:#ab3322\">Named caption</span><span style=\"font-family:'f-3333333333333333';font-size:calc(8 * var(--u));color:#ab3322\"> emphasis</span><span style=\"font-family:'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;font-weight:400;font-size:calc(8 * var(--u))\"> local</span></p></div></div><div class=\"lyt-item lyt-furniture\" style=\"left:calc(24 * var(--u));top:calc(24 * var(--u));width:calc(564 * var(--u));height:calc(10.4 * var(--u));font-family:'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;font-weight:400;font-size:calc(8 * var(--u));color:#ab3322;text-align:right;line-height:1;white-space:nowrap\">Tide &lt;issue&gt;</div><div class=\"lyt-item lyt-furniture\" style=\"left:calc(24 * var(--u));top:calc(760 * var(--u));width:calc(564 * var(--u));height:calc(10.4 * var(--u));font-family:'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;font-weight:400;font-size:calc(8 * var(--u));color:#ab3322;text-align:right;line-height:1;white-space:nowrap\">4</div></div></div></div><div class=\"lyt-slot\" data-lyt-spread=\"1\"><div class=\"lyt-spread\" style=\"width:calc(612 * var(--u));height:calc(792 * var(--u))\"><div class=\"lyt-paper\" data-lyt-n=\"2\" style=\"left:calc(0 * var(--u));width:calc(612 * var(--u))\"></div><div class=\"lyt-page\" data-lyt-page=\"2\" style=\"left:calc(0 * var(--u));width:calc(612 * var(--u))\"><div class=\"lyt-parent\" style=\"position:absolute;inset:0;transform-origin:top left;transform:scale(min(calc(612 / 612),calc(792 / 792)))\"><div class=\"lyt-item lyt-text\" style=\"left:calc(54 * var(--u));top:calc(25 * var(--u));width:calc(200 * var(--u));height:calc(30 * var(--u))\"><div class=\"lyt-flow\" style=\"padding:calc(0 * var(--u))\"><p style=\"text-align:left;margin-bottom:calc(4 * var(--u))\"><span style=\"font-family:'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;font-weight:400;font-size:calc(8 * var(--u));color:#ab3322\">TIDE &amp; LIGHT</span></p></div></div><figure class=\"lyt-item lyt-img\" style=\"left:calc(300 * var(--u));top:calc(25 * var(--u));width:calc(40 * var(--u));height:calc(40 * var(--u))\"></figure></div><div class=\"lyt-item lyt-furniture\" style=\"left:calc(24 * var(--u));top:calc(24 * var(--u));width:calc(564 * var(--u));height:calc(10.4 * var(--u));font-family:'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;font-weight:400;font-size:calc(8 * var(--u));color:#ab3322;text-align:left;line-height:1;white-space:nowrap\">Feature &amp; profile</div><div class=\"lyt-item lyt-furniture\" style=\"left:calc(24 * var(--u));top:calc(760 * var(--u));width:calc(564 * var(--u));height:calc(10.4 * var(--u));font-family:'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;font-weight:400;font-size:calc(8 * var(--u));color:#ab3322;text-align:left;line-height:1;white-space:nowrap\">5</div></div></div></div></div></div>",
+   "used": {
+    "Inter": [
+     "400|0"
+    ]
+   },
+   "faces_css": "@font-face{font-family:'f-3333333333333333';src:url(/api/cappe/public/fonts/3333333333333333333333333333333333333333333333333333333333333333.ttf) format('truetype');font-display:block}"
+  },
+  {
+   "name": "identity locked pages",
+   "doc": {
+    "v": 1,
+    "size": {
+     "w": 612,
+     "h": 792
+    },
+    "facing": true,
+    "margins": {
+     "t": 36,
+     "b": 36,
+     "i": 36,
+     "o": 36
+    },
+    "cols": {
+     "n": 1,
+     "g": 12
+    },
+    "baseline": {
+     "start": 36,
+     "step": 12
+    },
+    "grid": {
+     "step": 12
+    },
+    "bleed": 9,
+    "units": "in",
+    "paper": "#ffffff",
+    "pages": [
+     {
+      "id": "p1"
+     },
+     {
+      "id": "p2",
+      "parent": "pl1",
+      "header": "Feature & profile"
+     }
+    ],
+    "guides": [],
+    "items": [
+     {
+      "id": "t1",
+      "kind": "text",
+      "page": "p1",
+      "x": 54,
+      "y": 54,
+      "w": 240,
+      "h": 300,
+      "rot": 0,
+      "opacity": 100,
+      "locked": false,
+      "hidden": false,
+      "name": "",
+      "cols": 1,
+      "gutter": 12,
+      "inset": 0,
+      "valign": "top",
+      "fill": null,
+      "stroke": null
+     }
+    ],
+    "threads": [
+     {
+      "id": "s1",
+      "frames": [
+       "t1"
+      ],
+      "paras": [
+       {
+        "runs": [
+         {
+          "t": "Named caption"
+         },
+         {
+          "t": " emphasis",
+          "style": "cs1"
+         },
+         {
+          "t": " local",
+          "it": false,
+          "color": "#1a1a1a"
+         }
+        ],
+        "style": "ps1"
+       }
+      ]
+     }
+    ],
+    "paywall_page": null,
+    "identity": {
+     "v": 1,
+     "name": "Tide identity",
+     "paragraphs": [
+      {
+       "id": "ps1",
+       "name": "Caption",
+       "char": {
+        "font": "Inter",
+        "wt": 400,
+        "it": false,
+        "size": 8,
+        "track": 0,
+        "color": "#1a1a1a",
+        "u": false,
+        "swatch": "sw1"
+       },
+       "para": {
+        "align": "l",
+        "li": 0.0,
+        "ri": 0.0,
+        "fi": 0.0,
+        "sb": 0.0,
+        "sa": 4,
+        "lead": 0.0,
+        "role": "caption"
+       }
+      }
+     ],
+     "characters": [
+      {
+       "id": "cs1",
+       "name": "Emphasis",
+       "char": {
+        "it": true
+       }
+      }
+     ],
+     "swatches": [
+      {
+       "id": "sw1",
+       "name": "Editorial red",
+       "color": "#ab3322"
+      }
+     ],
+     "parents": [
+      {
+       "id": "pl1",
+       "name": "Feature",
+       "size": {
+        "w": 612,
+        "h": 792
+       },
+       "items": [
+        {
+         "id": "t1",
+         "kind": "text",
+         "page": "p1",
+         "x": 54,
+         "y": 25,
+         "w": 200,
+         "h": 30,
+         "rot": 0,
+         "opacity": 100,
+         "locked": false,
+         "hidden": false,
+         "name": "",
+         "cols": 1,
+         "gutter": 12,
+         "inset": 0,
+         "valign": "top",
+         "fill": null,
+         "stroke": null
+        },
+        {
+         "id": "i1",
+         "kind": "image",
+         "page": "p1",
+         "x": 300,
+         "y": 25,
+         "w": 40,
+         "h": 40,
+         "rot": 0,
+         "opacity": 100,
+         "locked": false,
+         "hidden": false,
+         "name": "",
+         "asset_id": null,
+         "fit": "fill",
+         "fx": 50,
+         "fy": 50,
+         "zoom": 100,
+         "fill": null,
+         "stroke": null,
+         "radius": 0,
+         "caption": ""
+        }
+       ],
+       "threads": [
+        {
+         "id": "s1",
+         "frames": [
+          "t1"
+         ],
+         "paras": [
+          {
+           "runs": [
+            {
+             "t": "TIDE & LIGHT"
+            }
+           ],
+           "style": "ps1"
+          }
+         ]
+        }
+       ]
+      }
+     ],
+     "furniture": {
+      "numbers": true,
+      "header": "Tide <issue>",
+      "start": 4,
+      "skip_first": false,
+      "inset": 24,
+      "char": {
+       "font": "Inter",
+       "wt": 400,
+       "it": false,
+       "size": 8,
+       "track": 0,
+       "color": "#1a1a1a",
+       "u": false,
+       "swatch": "sw1"
+      }
+     }
+    }
+   },
+   "locked_from": 2,
+   "html": "<div class=\"lyt\" data-lyt style=\"--pw:612;--ph:792;--sw:1224;--paper:#ffffff\"><div class=\"lyt-strip\" data-lyt-strip tabindex=\"0\" role=\"region\" aria-label=\"Pages of &#x27;Tide&#x27;\"><div class=\"lyt-slot\" data-lyt-spread=\"0\"><div class=\"lyt-spread\" style=\"width:calc(612 * var(--u));height:calc(792 * var(--u))\"><div class=\"lyt-paper\" data-lyt-n=\"1\" style=\"left:calc(0 * var(--u));width:calc(612 * var(--u))\"></div><div class=\"lyt-page\" data-lyt-page=\"1\" style=\"left:calc(0 * var(--u));width:calc(612 * var(--u))\"><div class=\"lyt-item lyt-text\" style=\"left:calc(54 * var(--u));top:calc(54 * var(--u));width:calc(240 * var(--u));height:calc(300 * var(--u))\"><div class=\"lyt-flow\" style=\"padding:calc(0 * var(--u))\"><p style=\"text-align:left;margin-bottom:calc(4 * var(--u))\"><span style=\"font-family:'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;font-weight:400;font-size:calc(8 * var(--u));color:#ab3322\">Named caption</span><span style=\"font-family:'f-3333333333333333';font-size:calc(8 * var(--u));color:#ab3322\"> emphasis</span><span style=\"font-family:'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;font-weight:400;font-size:calc(8 * var(--u))\"> local</span></p></div></div><div class=\"lyt-item lyt-furniture\" style=\"left:calc(24 * var(--u));top:calc(24 * var(--u));width:calc(564 * var(--u));height:calc(10.4 * var(--u));font-family:'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;font-weight:400;font-size:calc(8 * var(--u));color:#ab3322;text-align:right;line-height:1;white-space:nowrap\">Tide &lt;issue&gt;</div><div class=\"lyt-item lyt-furniture\" style=\"left:calc(24 * var(--u));top:calc(760 * var(--u));width:calc(564 * var(--u));height:calc(10.4 * var(--u));font-family:'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;font-weight:400;font-size:calc(8 * var(--u));color:#ab3322;text-align:right;line-height:1;white-space:nowrap\">4</div></div></div></div><div class=\"lyt-slot\" data-lyt-spread=\"1\"><div class=\"lyt-spread\" style=\"width:calc(612 * var(--u));height:calc(792 * var(--u))\"><div class=\"lyt-paper\" data-lyt-n=\"2\" style=\"left:calc(0 * var(--u));width:calc(612 * var(--u))\"></div><div class=\"lyt-page lyt-page--locked\" data-lyt-lock=\"2\" style=\"left:calc(0 * var(--u));width:calc(612 * var(--u))\"><p class=\"lyt-lock\">For subscribers</p><a class=\"lyt-lock-go\" href=\"#mz-paywall\">Subscribe or sign in to read on</a></div></div></div></div></div>",
+   "used": {
+    "Inter": [
+     "400|0"
+    ]
+   },
+   "faces_css": "@font-face{font-family:'f-3333333333333333';src:url(/api/cappe/public/fonts/3333333333333333333333333333333333333333333333333333333333333333.ttf) format('truetype');font-display:block}"
   }
  ]
 }

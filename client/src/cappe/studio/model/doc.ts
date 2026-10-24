@@ -41,29 +41,32 @@ export function paraOf(p: ParaAttrs): FullPara {
 }
 
 /** Only what differs from the defaults (the stored form). */
-export function sparseChar(full: CharAttrs): CharAttrs {
+export function sparseChar(full: CharAttrs, inherited = false): CharAttrs {
   const c = charOf(full)
   const out: CharAttrs = {}
-  for (const k of CHAR_KEYS) if (c[k] !== CHAR_DEFAULTS[k]) (out as Record<string, unknown>)[k] = c[k]
+  for (const k of CHAR_KEYS) if (full[k] !== undefined && (inherited || full.style || c[k] !== CHAR_DEFAULTS[k])) (out as Record<string, unknown>)[k] = c[k]
+  if (full.style) out.style = full.style
+  if (full.swatch) out.swatch = full.swatch
   return out
 }
 
 export function sparsePara(full: ParaAttrs): ParaAttrs {
   const p = paraOf(full)
   const out: ParaAttrs = {}
-  for (const k of PARA_KEYS) if (p[k] !== PARA_DEFAULTS[k]) (out as Record<string, unknown>)[k] = p[k]
+  for (const k of PARA_KEYS) if (full[k] !== undefined && (full.style || p[k] !== PARA_DEFAULTS[k])) (out as Record<string, unknown>)[k] = p[k]
+  if (full.style) out.style = full.style
   return out
 }
 
-const sameAttrs = (a: CharAttrs, b: CharAttrs) => CHAR_KEYS.every((k) => a[k] === b[k])
+const sameAttrs = (a: CharAttrs, b: CharAttrs) => [...CHAR_KEYS, 'style', 'swatch' as const].every((k) => a[k as keyof CharAttrs] === b[k as keyof CharAttrs])
 
 /** Runs as the server keeps them: neighbours with the same type merged,
  *  empty ones gone (an empty paragraph keeps one, for its line's height). */
-export function mergeRuns(runs: Run[]): Run[] {
+export function mergeRuns(runs: Run[], inherited = false): Run[] {
   const out: Run[] = []
   let last: CharAttrs | null = null
   for (const r of runs) {
-    const attrs = sparseChar(r)
+    const attrs = sparseChar(r, inherited)
     last = attrs
     if (!r.t) continue
     const prev = out[out.length - 1]

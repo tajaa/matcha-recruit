@@ -63,6 +63,26 @@ export function clamp(n: number, lo: number, hi: number): number {
  *  null. Counts what normalize_doc counts; the byte limit is checked on the
  *  document as it stands (the server's copy is compact JSON, much the same). */
 export function docProblem(doc: Doc): string | null {
+  if (doc.identity) {
+    const i = doc.identity
+    if (!i.name.trim() || [...i.paragraphs, ...i.characters, ...i.swatches, ...i.parents].some((r) => !r.name.trim())) return 'Give each identity, style, swatch and parent a name.'
+    for (const rows of [i.paragraphs, i.characters, i.swatches, i.parents]) if (new Set(rows.map((r) => r.name.toLowerCase())).size !== rows.length) return 'Use distinct names in each identity list.'
+    if (i.paragraphs.length > 32 || i.characters.length > 32 || i.swatches.length > 24 || i.parents.length > 8) return 'This magazine identity has too many styles, swatches or parents.'
+    if (JSON.stringify(i).replace(/[\u007f-\uffff]/g, () => 'xxxxxx').length > 500_000) return 'This magazine identity is too big. Use fewer parent frames or less text.'
+    let items = doc.items.length, threads = doc.threads.length, chars = 0
+    for (const page of doc.pages) {
+      const parent = i.parents.find((p) => p.id === page.parent)
+      if (!parent) continue
+      items += parent.items.length; threads += parent.threads.length
+      chars += parent.threads.reduce((n, t) => n + t.paras.reduce((n, p) => n + p.runs.reduce((n, r) => n + r.t.length, 0), 0), 0)
+      if (parent.items.length + doc.items.filter((item) => item.page === page.id).length > LIMITS.MAX_ITEMS_PER_PAGE) return 'This page and its parent hold too many frames.'
+    }
+    if (items > LIMITS.MAX_ITEMS || threads > LIMITS.MAX_THREADS) return 'This story and its parents hold too many frames or separate texts.'
+    chars += doc.threads.reduce((n, t) => n + t.paras.reduce((n, p) => n + p.runs.reduce((n, r) => n + r.t.length, 0), 0), 0)
+    if (chars > LIMITS.MAX_DOC_CHARS) return 'This story and its parents hold too much text.'
+    if ([...doc.threads, ...i.parents.flatMap((p) => p.threads)].some((t) => (t.comp?.lines.length ?? 0) > LIMITS.MAX_LINES)) return 'A text has too many composed lines.'
+    if (JSON.stringify(doc).replace(/[\u007f-\uffff]/g, () => 'xxxxxx').length > LIMITS.MAX_DOC_BYTES) return 'This story is too big to save. Split it into two.'
+  }
   if (doc.pages.length > LIMITS.MAX_PAGES) return `A story holds at most ${LIMITS.MAX_PAGES} pages.`
   if (doc.items.length > LIMITS.MAX_ITEMS) return `A story holds at most ${LIMITS.MAX_ITEMS} frames and shapes.`
   const perPage = new Map<string, number>()

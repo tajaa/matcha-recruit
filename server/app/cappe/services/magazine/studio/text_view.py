@@ -20,6 +20,7 @@ from ..rt import RtError, md_to_rt, normalize_rt, rt_to_md
 from ..story_schema import MAX_BLOCKS
 from .limits import CHAR_DEFAULTS, MAX_DOC_CHARS, PARA_DEFAULTS
 from .schema import flow_frame, len16, para_text, slice16
+from .identity import resolved_threads
 
 _HEADING = {"h1": 2, "h2": 2, "h3": 3}
 
@@ -133,6 +134,7 @@ def text_blocks(doc: dict, paywall: Optional[int] = None) -> list[dict]:
     first page for subscribers (`schema.paywall_from`), marked where its
     words start; None reads every page through (the story's word count and
     `body`)."""
+    doc = {**doc, "threads": resolved_threads(doc)}
     blocks: list[dict] = []
     cover = cover_image(doc)
     if cover:

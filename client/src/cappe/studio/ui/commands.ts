@@ -3,6 +3,7 @@
 
 import { boardOffset } from '../canvas/geometry'
 import { allIds, newId } from '../model/doc'
+import { resolveItem, resolveParas } from '../model/identity'
 import { addPages, arrange, deleteItems, deletePage, duplicate, movePage, patchItems, type Arrange } from '../model/ops'
 import type { Doc, Item, Thread } from '../model/types'
 import type { AddTab, State, Tool } from '../store/store'
@@ -38,12 +39,15 @@ export function zoomTo(c: StudioCtx, z: number): void {
 }
 
 // Copied items (and the whole threads among them), kept for Paste.
-let clip: { items: Item[]; threads: Thread[] } | null = null
+let clip: { items: Item[]; threads: Thread[]; identity: Doc['identity']; flatItems: Item[]; flatThreads: Thread[] } | null = null
 
 function copy(s: State): void {
   const items = s.doc.items.filter((i) => s.selection.includes(i.id))
   const ids = new Set(items.map((i) => i.id))
-  clip = { items, threads: s.doc.threads.filter((t) => t.frames.every((f) => ids.has(f))) }
+  const threads = s.doc.threads.filter((t) => t.frames.every((f) => ids.has(f)))
+  clip = { items, threads, identity: s.doc.identity,
+    flatItems: items.map((i) => { const out = { ...resolveItem(i, s.doc.identity) }; delete out.fill_swatch; delete out.stroke_swatch; return out }),
+    flatThreads: threads.map((t) => ({ ...t, paras: resolveParas(t.paras, s.doc.identity) })) }
 }
 
 /** The copied items, on the page in view (offset when it is where they came from). */
@@ -52,13 +56,13 @@ export function paste(doc: Doc, page: string): { doc: Doc; ids: string[] } {
   const map = new Map<string, string>()
   let taken = allIds(doc)
   const same = clip.items.every((i) => i.page === page && doc.items.some((d) => d.id === i.id))
-  const items = clip.items.map((i) => {
+  const items = (clip.identity === doc.identity ? clip.items : clip.flatItems).map((i) => {
     const id = newId(i.kind === 'text' ? 't' : i.kind[0], taken)
     taken = [...taken, id]
     map.set(i.id, id)
     return { ...i, id, page, x: i.x + (same ? 12 : 0), y: i.y + (same ? 12 : 0), locked: false }
   })
-  const threads = clip.threads.map((t) => {
+  const threads = (clip.identity === doc.identity ? clip.threads : clip.flatThreads).map((t) => {
     const id = newId('s', taken)
     taken = [...taken, id]
     return { id, frames: t.frames.map((f) => map.get(f)!), paras: t.paras }

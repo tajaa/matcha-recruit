@@ -64,6 +64,7 @@ export function MenuBar() {
 }
 
 const PANELS: { key: Panel; label: string }[] = [
+  { key: 'identity', label: 'Magazine identity' },
   { key: 'pages', label: 'Pages' }, { key: 'props', label: 'Object' }, { key: 'character', label: 'Character' },
   { key: 'paragraph', label: 'Paragraph' }, { key: 'story', label: 'Story Editor' }, { key: 'ask', label: 'Ask the Studio' },
 ]

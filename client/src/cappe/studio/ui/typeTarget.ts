@@ -3,6 +3,7 @@
 // frames selected.
 
 import { charOf, paraOf, paraText, type FullChar, type FullPara } from '../model/doc'
+import { resolveChar, resolveParas } from '../model/identity'
 import { applyChar, applyPara, setParas } from '../model/ops'
 import type { CharAttrs, Doc, ParaAttrs } from '../model/types'
 import type { State } from '../store/store'
@@ -20,9 +21,12 @@ export function hasTypeTarget(s: State): boolean {
 
 /** The type shown in the panels: at the caret, or the first word of the frames. */
 export function currentType(c: StudioCtx, s: State): { char: FullChar; para: FullPara } {
-  if (s.editing) return { char: charOf(c.editor.currentChar()), para: paraOf(c.editor.currentPara()) }
+  if (s.editing) {
+    const raw = c.editor.currentPara(), named = s.doc.identity?.paragraphs.find((p) => p.id === raw.style)
+    return { char: resolveChar(c.editor.currentChar(), named?.char, s.doc.identity), para: paraOf({ ...named?.para, ...raw }) }
+  }
   const t = s.doc.threads.find((x) => x.id === selectedThreads(s)[0])
-  const p = t?.paras[0]
+  const p = t ? resolveParas(t.paras, s.doc.identity)[0] : undefined
   return { char: charOf(p?.runs[0] ?? { t: '' }), para: paraOf(p ?? { runs: [] }) }
 }
 
@@ -34,6 +38,15 @@ const everywhere = (doc: Doc, threads: string[], fn: (paras: Doc['threads'][numb
 
 export function setChar(c: StudioCtx, attrs: CharAttrs): void {
   const s = c.store.get()
+  const first = s.doc.threads.find((t) => t.id === selectedThreads(s)[0])?.paras[0]
+  const paragraph = s.editing ? c.editor.currentPara() : first
+  const raw = s.editing ? c.editor.currentChar() : first?.runs[0]
+  const named = s.doc.identity?.paragraphs.find((p) => p.id === paragraph?.style)
+  const char = resolveChar({ ...('style' in attrs ? {} : raw), ...attrs }, named?.char, s.doc.identity)
+  // A caret's stored marks are not in the document yet. Include their face
+  // in font preparation so the first typed character uses the real font.
+  void c.fonts.ensureDoc({ ...s.doc, threads: [...s.doc.threads, { id: 'font', frames: [], paras: [{ runs: [{ t: '', ...char }] }] }] })
+    .then(() => c.store.recompose(), () => c.store.set({ notice: 'The typeface could not load. Reopen the Studio to retry.' }))
   if (s.editing) { c.editor.applyChar(attrs); return }
   const threads = selectedThreads(s)
   if (!threads.length) return

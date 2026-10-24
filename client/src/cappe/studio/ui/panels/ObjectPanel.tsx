@@ -1,6 +1,7 @@
 import { ArrowDownToLine, ArrowUpToLine, ChevronDown, ChevronUp, Eye, EyeOff, Image as ImageIcon, Link2Off, Lock, Scissors, SlidersHorizontal, Unlock } from 'lucide-react'
 import { ColorField, IconBtn, NumberField, Row, Section, Seg, Slider } from '../../../magazine/workspace/controls'
 import { round } from '../../model/limits'
+import { resolveItem } from '../../model/identity'
 import { arrange, patchItems, unlinkAfter, type Arrange } from '../../model/ops'
 import type { Fit, GraphicFit, GraphicItem, Item, Stroke, VAlign } from '../../model/types'
 import { useStudio } from '../../store/store'
@@ -23,7 +24,7 @@ export function ObjectPanel() {
   const selection = useStudio(store, (s) => s.selection)
   const overset = useStudio(store, (s) => s.overset)
   const assets = useStudio(store, (s) => s.assets)
-  const items = doc.items.filter((i) => selection.includes(i.id))
+  const items = doc.items.filter((i) => selection.includes(i.id)).map((i) => resolveItem(i, doc.identity))
   if (!items.length) {
     return (
       <Section title="Object">
