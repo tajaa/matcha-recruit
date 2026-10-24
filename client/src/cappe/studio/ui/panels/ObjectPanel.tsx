@@ -1,10 +1,13 @@
-import { ArrowDownToLine, ArrowUpToLine, ChevronDown, ChevronUp, Eye, EyeOff, Image as ImageIcon, Link2Off, Lock, Scissors, SlidersHorizontal, Unlock } from 'lucide-react'
+import { ArrowDownToLine, ArrowUpToLine, ChevronDown, ChevronUp, Columns2, Eye, EyeOff, Image as ImageIcon, Link2, Link2Off, Lock, Scissors, SeparatorVertical,
+  SlidersHorizontal, Unlock } from 'lucide-react'
 import { ColorField, IconBtn, NumberField, Row, Section, Seg, Slider } from '../../../magazine/workspace/controls'
+import { groupOf, linkProblem } from '../../model/crops'
 import { round } from '../../model/limits'
 import { resolveItem } from '../../model/identity'
 import { arrange, patchItems, unlinkAfter, type Arrange } from '../../model/ops'
 import type { Fit, GraphicFit, GraphicItem, Item, Stroke, VAlign } from '../../model/types'
 import { useStudio } from '../../store/store'
+import { command } from '../commands'
 import { useCtx } from '../context'
 import { LengthField, Labeled } from '../fields'
 
@@ -125,6 +128,8 @@ export function ObjectPanel() {
         </Section>
       )}
 
+      {only === 'image' && <SpreadSection ids={ids} />}
+
       {only === 'graphic' && one.kind === 'graphic' && (
         <Section title="Look">
           {/* Only the one-colour graphics take a colour: the server drops one on a colourful graphic,
@@ -163,6 +168,52 @@ export function ObjectPanel() {
           onFlip={() => set({ flip: one.kind === 'line' && !one.flip })} />
       )}
     </>
+  )
+}
+
+/** Pictures and the spread: one picture across both pages (or either side of
+ *  the spine), and frames linked to show one picture between them. */
+function SpreadSection({ ids }: { ids: string[] }) {
+  const c = useCtx()
+  // Only the document: the selection comes in as `ids` (a panel that took the
+  // whole store would draw again on every zoom and hover).
+  const doc = useStudio(c.store, (s) => s.doc)
+  const group = ids.length === 1 ? groupOf(doc, ids[0]) : null
+  const anyLinked = ids.some((id) => !!groupOf(doc, id))
+  const can = (id: string) => { const cmd = command(id); return !cmd.enabled || cmd.enabled(c.store.get()) }
+  const btn = 'flex items-center justify-center gap-1.5 rounded-md border border-zinc-700 py-1.5 text-xs text-zinc-200 hover:border-emerald-500 disabled:border-zinc-800 disabled:text-zinc-600'
+  const problem = ids.length > 1 ? linkProblem(doc, ids) : null
+  if (ids.length === 1 && !group && !can('across-spread')) return null
+  return (
+    <Section title="Across the spread">
+      {group ? (
+        <p className="text-[11px] leading-relaxed text-zinc-400">
+          <Link2 className="mr-1 inline h-3 w-3 text-emerald-400" />
+          Shows one picture with {group.members.length - 1 === 1 ? 'another frame' : `${group.members.length - 1} other frames`}. Move or resize this
+          frame to show a different part; change its focus or zoom to move the picture in all of them.
+        </p>
+      ) : ids.length === 1 ? (
+        <Row>
+          <button type="button" className={btn} onClick={() => command('across-spread').run(c)} title="Two frames, one on each page, out to the edges, showing one picture">
+            <Columns2 className="h-3.5 w-3.5" />Across
+          </button>
+          <button type="button" className={btn} onClick={() => command('spine-clear').run(c)} title="One picture in two frames, the fold left white">
+            <SeparatorVertical className="h-3.5 w-3.5" />Clear of spine
+          </button>
+        </Row>
+      ) : (
+        <button type="button" className={`${btn} w-full`} disabled={!!problem} title={problem ?? 'Show one picture through these frames'}
+          onClick={() => command('link-crops').run(c)}>
+          <Link2 className="h-3.5 w-3.5" />Link crops
+        </button>
+      )}
+      {problem && ids.length > 1 && !anyLinked && <p className="text-[11px] text-zinc-500">{problem}</p>}
+      {anyLinked && (
+        <button type="button" className={`${btn} w-full`} onClick={() => command('unlink-crops').run(c)}>
+          <Link2Off className="h-3.5 w-3.5" />Unlink crops
+        </button>
+      )}
+    </Section>
   )
 }
 

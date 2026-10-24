@@ -13,7 +13,9 @@ What each block pins:
     leaving out only the spaces and line breaks they break at, never half a
     character, each frame after the last; overset is allowed;
   * spreads, the first locked page of a paid story, and where uncomposed
-    text flows (never onto a free page when it reaches a locked one).
+    text flows (never onto a free page when it reaches a locked one);
+  * the issue board's stories (one per page, in page order, named as the
+    client cleans names) and linked picture frames, both stored only when set.
 
 Run from server/:  ./venv/bin/python -m pytest tests/cappe/test_cappe_studio_schema.py -q
 """
@@ -268,3 +270,39 @@ def test_asset_ids():
                       {"id": "i2", "kind": "image", "page": "p1"}], threads=[])
     assert S.doc_asset_ids(S.normalize_doc(raw)) == {"8d7d2b1e-4d5e-4d0a-9d73-1b2c3d4e5f60"}
     assert S.doc_asset_ids(None) == set()
+
+
+def test_stories_label_pages_in_page_order_and_are_only_stored_when_there_are_some():
+    doc = S.normalize_doc(_doc(sections=[
+        {"id": "st2", "page": "p3", "name": "  Interview\u0007 "},
+        {"id": "st1", "page": "p1", "name": "Front"},
+        {"id": "st3", "page": "p3", "name": "Second on p3"},  # one story per page
+        {"id": "st4", "page": "p9", "name": "Gone"},  # its page isn't there
+        {"id": "BAD!", "page": "p2", "name": "Bad id"},
+        {"id": "st1", "page": "p2", "name": "Repeated id"},
+        "not a story",
+    ]))
+    assert doc["sections"] == [{"id": "st1", "page": "p1", "name": "Front"}, {"id": "st2", "page": "p3", "name": "Interview"}]
+    assert "sections" not in S.normalize_doc(_doc()) and "sections" not in S.normalize_doc(_doc(sections=[]))
+    assert S.normalize_doc(_doc(sections={"p1": "x"})).get("sections") is None
+    # A page that isn't a string (a list, an object) is dropped like any bad entry, never a 500.
+    odd = [{"id": "st1", "page": ["p1"], "name": "A"}, {"id": "st2", "page": {"id": "p2"}, "name": "B"},
+           {"id": "st3", "page": "p2", "name": "C"}]
+    assert S.normalize_doc(_doc(sections=odd))["sections"] == [{"id": "st3", "page": "p2", "name": "C"}]
+    name = S.normalize_doc(_doc(sections=[{"id": "st1", "page": "p1", "name": "😀" * 100}]))["sections"][0]["name"]
+    assert len(name) == L.MAX_SECTION_NAME  # characters, as the client counts them (model/sections.cleanName)
+    many = [{"id": f"x{k}", "page": "p1" if k == 0 else f"q{k}", "name": str(k)} for k in range(L.MAX_SECTIONS + 5)]
+    pages = [{"id": "p1"}, {"id": "p2"}, {"id": "p3"}] + [{"id": f"q{k}"} for k in range(1, L.MAX_SECTIONS + 5)]
+    assert len(S.normalize_doc(_doc(pages=pages, sections=many))["sections"]) == L.MAX_SECTIONS
+    assert S.normalize_doc(json.loads(json.dumps(doc))) == doc  # stable
+
+
+def test_a_picture_frame_keeps_its_link_only_when_it_has_one():
+    frame = {"id": "i1", "kind": "image", "page": "p1", "x": 0, "y": 0, "w": 10, "h": 10}
+    items = _doc()["items"]
+    doc = S.normalize_doc(_doc(items=[*items, {**frame, "link": "lk1"}, {**frame, "id": "i2", "link": "Not OK!"},
+                                      {**frame, "id": "i3"}, {**frame, "id": "i4", "kind": "rect", "link": "lk1"}]))
+    by = {i["id"]: i for i in doc["items"]}
+    assert by["i1"]["link"] == "lk1"
+    assert "link" not in by["i2"] and "link" not in by["i3"] and "link" not in by["i4"]
+

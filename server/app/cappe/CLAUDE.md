@@ -687,6 +687,15 @@ normalized paragraphs itself; a thread with no valid composition prints its word
   finished document is checked against the save limits (`limits.docProblem`, the server's counts) before it is
   committed: a full story is told why and left unchanged, never made unsavable. `templates.test.tsx` holds every face and graphic to the bank and composes each frame at its face's real
   ascent and descent: a display face can be far taller than its size, so size frames from that test, not by eye.
+- **Issue board** (client `ui/board/`, `model/sections.ts`, `crops.ts`, `rhythm.ts`, `gutter.ts`): every page at once,
+  spread by spread, to put the issue in order by dragging, mark where each story starts, and judge its rhythm. Two
+  optional document fields, normalized by `schema.py` and **left out when unset**, so documents without them store as
+  they always did: `doc.sections` (`[{id, page, name}]`, a story runs from its page to the next story's; `_sections`
+  drops a bad or repeated id, a page that's gone or already has a story, sorts by page and caps at `MAX_SECTIONS`, names
+  at `MAX_SECTION_NAME`; never refused, they only label pages) and an image item's `link` (frames sharing one show one
+  picture across a spread). **The server only stores `link`**: each frame keeps its own fx/fy/zoom and both renderers
+  draw it as before; the client keeps linked crops lined up on every edit (`crops.keepLinks`, run by `Store.edit` with
+  `sections.keepSections`), matched to the renderer's object-fit/object-position/scale arithmetic. No migration.
 - **Magazine identity** (`studio/identity.py`, client `studio/model/identity.ts`): documents optionally
   carry a visual system of named paragraph/character styles, swatches, parent layouts and page furniture.
   Raw paragraphs/runs retain style references plus explicit local overrides (including default/false values).

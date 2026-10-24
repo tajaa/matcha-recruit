@@ -1,4 +1,6 @@
+import { facingPage, groupOf } from '../model/crops'
 import { pageSide } from '../model/doc'
+import { GUTTER_SAFE } from '../model/gutter'
 import type { Doc, Item, TextItem } from '../model/types'
 import { useStudio } from '../store/store'
 import { useCtx } from '../ui/context'
@@ -9,9 +11,11 @@ const MARGIN = '#d946ef' // magenta, as print layout tools draw margins
 const COLUMN = '#8b5cf6' // violet column guides
 const GUIDE = '#22d3ee' // ruler guides
 const SELECT = '#10b981'
+const GUTTER = 'rgba(245,158,11,.16)' // the strip the binding hides
 
-/** The page's margins and columns, its guides, the grids; the selection's
- *  handles and threads; smart guides while dragging; the marquee. */
+/** The page's margins and columns, its guides, the grids, the gutter; the
+ *  selection's handles, threads and linked frames; smart guides while
+ *  dragging; the marquee. */
 export function Overlays({ lay }: { lay: Layout }) {
   const { store } = useCtx()
   const doc = useStudio(store, (s) => s.doc)
@@ -25,9 +29,17 @@ export function Overlays({ lay }: { lay: Layout }) {
   const pageOf = new Map(doc.pages.map((p, i) => [p.id, i]))
   const originOf = (i: Item) => lay.origin[pageOf.get(i.page) ?? 0]
   const chosen = doc.items.filter((i) => selection.includes(i.id))
+  // The frames showing one picture with a selected one (model/crops.ts).
+  const partners = editing ? [] : [...new Map(chosen.flatMap((i) => groupOf(doc, i.id)?.members ?? [])
+    .filter((m) => !selection.includes(m.id)).map((m) => [m.id, m])).values()]
   return (
     <div aria-hidden className="pointer-events-none absolute inset-0">
       {doc.pages.map((p, i) => <PageGuides key={p.id} doc={doc} index={i} lay={lay} />)}
+      {partners.map((m) => {
+        const b = itemBox(m, originOf(m))
+        return <div key={m.id} className="absolute" style={{ left: b.x * z, top: b.y * z, width: b.w * z, height: b.h * z,
+          outline: `1px dashed ${SELECT}`, outlineOffset: -1 }} />
+      })}
       {!editing && chosen.length === 1 && <Handles item={chosen[0]} originOf={originOf} />}
       {!editing && chosen.length > 1 && <GroupBox items={chosen} originOf={originOf} z={z} />}
       {chosen.filter((i): i is TextItem => i.kind === 'text').map((i) => (
@@ -84,6 +96,10 @@ function PageGuides({ doc, index, lay }: { doc: Doc; index: number; lay: Layout 
             )
           })}
         </>
+      )}
+      {view.gutter && facingPage(doc, index) !== null && (
+        <div className="absolute top-0 h-full" style={{ [left ? 'right' : 'left']: 0, width: GUTTER_SAFE * z,
+          background: `repeating-linear-gradient(135deg, ${GUTTER} 0 4px, transparent 4px 8px)` }} />
       )}
       {view.guides && doc.guides.filter((g) => g.page === pid).map((g) => (
         <div key={g.id} className="absolute" style={g.axis === 'v'

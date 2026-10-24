@@ -49,6 +49,17 @@ describe('what Ask the Studio sends about the page', () => {
     expect(out).toContain('In view: page 2 of 3 (a spread with page 3).')
   })
 
+  it('names the issue’s stories and a picture’s linked frames', () => {
+    const doc = { ...base(), sections: [{ id: 'st1', page: 'p2', name: 'Harbour' }] }
+    const { store, image } = studio({}, doc)
+    const twin = { ...store.get().doc.items.find((i) => i.id === image)!, id: 'twin', page: 'p3' }
+    store.edit((d) => ({ ...d, items: [...d.items.map((i) => (i.id === image ? { ...i, link: 'lk1' } : i)), { ...twin, link: 'lk1' }] }))
+    const out = describeStudio(store.get())
+    expect(out).toContain('Stories (issue board): "Harbour" pages 2–3.')
+    expect(out).toContain('linked crop: shows one picture with 1 other frame on the spread')
+    expect(describeStudio(studio().store.get())).not.toContain('Stories')
+  })
+
   it('lists the page in view back to front, marking what is selected, with its type', () => {
     const { store, text } = studio()
     const out = describeStudio(store.get())
