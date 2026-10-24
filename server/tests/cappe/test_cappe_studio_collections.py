@@ -4,6 +4,7 @@ All persistence uses a fake connection; no migration or database is touched.
 """
 import json
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -151,6 +152,20 @@ def test_delete_is_owner_scoped_and_idempotent_without_touching_story_pages(monk
 def test_collection_routes_require_a_cappe_session():
     with route_client(studio.router) as client:
         assert client.get("/studio/collections").status_code == 401
+
+
+def test_a_reader_account_keeps_no_collections(monkeypatch):
+    # Readers have no sites, so no Studio: nothing to save, list, open or delete.
+    conn = Conn()
+    monkeypatch.setattr(studio, "get_connection", lambda: Ctx(conn))
+    reader = SimpleNamespace(id=ACCOUNT.id, plan="free", account_type="reader")
+    with route_client(studio.router, overrides={studio.require_cappe_account: reader}) as client:
+        responses = [client.post("/studio/collections", json={"name": "Mine", "doc": starter_doc()}),
+                     client.get("/studio/collections"), client.get(f"/studio/collections/{ID}"),
+                     client.delete(f"/studio/collections/{ID}")]
+    assert [r.status_code for r in responses] == [403] * 4
+    assert responses[0].json()["detail"]["code"] == "reader_account"
+    assert not conn.calls
 
 
 @pytest.mark.parametrize("change", [

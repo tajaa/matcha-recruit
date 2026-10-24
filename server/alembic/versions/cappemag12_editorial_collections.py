@@ -1,5 +1,9 @@
 """Creator-owned editorial design collections.
 
+`request_id` makes a save replay-safe: a retry after a lost response sends the
+same id and gets its first row back (nullable, so a client that sends none
+still saves).
+
 Revision ID: cappemag12
 Revises: cappemag11
 Create Date: 2026-10-23
@@ -20,11 +24,14 @@ def upgrade() -> None:
             name VARCHAR(80) NOT NULL CHECK (length(btrim(name)) > 0),
             doc JSONB NOT NULL CHECK (jsonb_typeof(doc) = 'object'),
             page_count INTEGER NOT NULL CHECK (page_count BETWEEN 1 AND 32),
+            request_id UUID,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
     """)
     op.execute("CREATE INDEX idx_cappe_studio_collections_account "
                "ON cappe_studio_collections (account_id, created_at DESC, id)")
+    op.execute("CREATE UNIQUE INDEX idx_cappe_studio_collection_request "
+               "ON cappe_studio_collections (account_id, request_id) WHERE request_id IS NOT NULL")
 
 
 def downgrade() -> None:

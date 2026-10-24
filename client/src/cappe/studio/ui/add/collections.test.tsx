@@ -41,8 +41,10 @@ beforeEach(() => { vi.clearAllMocks(); vi.mocked(collectionsApi.list).mockResolv
 describe('complete editorial designs', () => {
   it('contains four distinct, valid ten-page directions with available fonts and named frames', () => {
     expect(COLLECTIONS).toHaveLength(4)
-    for (const { doc } of COLLECTIONS) {
+    for (const { doc, pages } of COLLECTIONS) {
       expect(doc.pages).toHaveLength(10)
+      expect(pages).toHaveLength(doc.pages.length) // each page named, in order
+      expect(pages[0]).toBe('Cover')
       expect(docProblem(doc)).toBeNull()
       expect(new Set(allIds(doc)).size).toBe(allIds(doc).length)
       for (const i of doc.items) expect(i.name).toBeTruthy()
@@ -171,8 +173,11 @@ describe('collection library', () => {
   it('previews all pages, applies a direction and reports completion', async () => {
     const { store, ctx } = studio()
     render(<StudioContext.Provider value={ctx}><CollectionsTab /></StudioContext.Provider>)
+    expect(screen.getByRole('button', { name: 'Explore Maison' })).toHaveTextContent('10 editable pages')
     fireEvent.click(screen.getByRole('button', { name: 'Explore Maison' }))
     expect(screen.getByLabelText('Pages in this collection').querySelectorAll('.lyt-item').length).toBeGreaterThan(30)
+    expect(screen.getByText('02 · Contents')).toBeInTheDocument()
+    expect(screen.getByText('10 · Credits')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Use all 10 pages' }))
     await waitFor(() => expect(store.get().doc.pages).toHaveLength(10))
     expect(screen.getByText(/Added 10 pages/)).toBeInTheDocument()

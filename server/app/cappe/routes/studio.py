@@ -68,12 +68,22 @@ class _CollectionRoute(APIRoute):
 
 _collections = APIRouter(route_class=_CollectionRoute)
 
+
+async def _designer(account: CappeAccount = Depends(require_cappe_account)) -> CappeAccount:
+    """Collections belong to accounts that design pages. A reader account has
+    no sites, so no Studio, and keeps no collections (sites.py refuses it a
+    site the same way)."""
+    if account.account_type == "reader":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail={"code": "reader_account", "message": "A reader account doesn't design pages."})
+    return account
+
 KEEP_REVISIONS = 50
 NOT_PAGES = "This story isn't made of pages. Open it in the story editor."
 
 
 @_collections.get("/studio/collections")
-async def list_collections(account: CappeAccount = Depends(require_cappe_account)):
+async def list_collections(account: CappeAccount = Depends(_designer)):
     """Small library cards; fetch a document only when it is opened."""
     async with get_connection() as conn:
         rows = await conn.fetch(
@@ -84,7 +94,7 @@ async def list_collections(account: CappeAccount = Depends(require_cappe_account
 
 
 @_collections.get("/studio/collections/{collection_id}")
-async def open_collection(collection_id: UUID, account: CappeAccount = Depends(require_cappe_account)):
+async def open_collection(collection_id: UUID, account: CappeAccount = Depends(_designer)):
     async with get_connection() as conn:
         row = await conn.fetchrow(
             "SELECT id, name, page_count, created_at, doc FROM cappe_studio_collections "
@@ -98,7 +108,7 @@ async def open_collection(collection_id: UUID, account: CappeAccount = Depends(r
 
 
 @_collections.post("/studio/collections", status_code=201)
-async def save_collection(body: StudioCollectionCreate, account: CappeAccount = Depends(require_cappe_account)):
+async def save_collection(body: StudioCollectionCreate, account: CappeAccount = Depends(_designer)):
     async with get_connection() as conn:
         try:
             # Check the size before resolving the bank, then validate its custom graphics.
@@ -132,7 +142,7 @@ async def save_collection(body: StudioCollectionCreate, account: CappeAccount = 
 
 
 @_collections.delete("/studio/collections/{collection_id}", status_code=204)
-async def delete_collection(collection_id: UUID, account: CappeAccount = Depends(require_cappe_account)):
+async def delete_collection(collection_id: UUID, account: CappeAccount = Depends(_designer)):
     async with get_connection() as conn:
         await conn.execute(
             "DELETE FROM cappe_studio_collections WHERE id = $1 AND account_id = $2",

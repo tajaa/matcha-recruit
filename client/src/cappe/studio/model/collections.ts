@@ -2,7 +2,8 @@ import type { Doc } from './types'
 
 export type CollectionCard = { id: string; name: string; page_count: number; created_at: string }
 export type SavedCollection = CollectionCard & { doc: Doc }
-export type EditorialCollection = { id: string; name: string; direction: string; description: string; fonts: string; doc: Doc }
+/** A built-in collection; `pages` names each page ("Cover", "Contents"…), in order. */
+export type EditorialCollection = { id: string; name: string; direction: string; description: string; fonts: string; pages: string[]; doc: Doc }
 
 export const COLLECTION_LIMITS = { pages: 32, bytes: 1_000_000, count: 50 } as const
 

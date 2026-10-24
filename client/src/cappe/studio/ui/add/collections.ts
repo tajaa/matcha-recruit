@@ -148,12 +148,13 @@ export const COLLECTIONS: EditorialCollection[] = DIRECTIONS.map((d) => {
     cols: { n: 2, g: 24 }, baseline: { start: d.margin, step: 12 }, grid: { step: 12 }, bleed: 0,
     units: 'in', paper: d.paper, pages: [], items: [], threads: [], guides: [], paywall_page: null,
   }
-  pages(d).forEach((t, index) => {
+  const templates = pages(d)
+  templates.forEach((t, index) => {
     const id = `p${index + 1}`
     doc = { ...doc, pages: [...doc.pages, { id }] }
     const built = templateItems(t, doc, id)
     doc = { ...doc, items: [...doc.items, ...built.items], threads: [...doc.threads, ...built.threads] }
   })
   return { id: d.id, name: d.name, direction: d.direction, description: d.description,
-    fonts: [...new Set([d.display, d.body, d.label])].join(' · '), doc }
+    fonts: [...new Set([d.display, d.body, d.label])].join(' · '), pages: templates.map((t) => t.label), doc }
 })

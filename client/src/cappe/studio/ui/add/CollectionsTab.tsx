@@ -38,7 +38,7 @@ export function CollectionPreview({ doc, page = 0, width = 112 }: { doc: Doc; pa
   }} />
 }
 
-type Opened = { id: string; name: string; description: string; fonts?: string; doc: Doc; saved?: boolean }
+type Opened = { id: string; name: string; description: string; fonts?: string; pages?: string[]; doc: Doc; saved?: boolean }
 
 export default function CollectionsTab() {
   const c = useCtx()
@@ -108,7 +108,7 @@ export default function CollectionsTab() {
       <div className="grid grid-cols-2 justify-items-center gap-x-2 gap-y-4" aria-label="Pages in this collection">
         {opened.doc.pages.map((p, k) => <div key={p.id} className="space-y-1.5">
           <CollectionPreview doc={opened.doc} page={k} />
-          <p className="max-w-28 text-[10px] text-zinc-500">{String(k + 1).padStart(2, '0')} · {opened.saved ? 'Your design' : ['Cover', 'Contents', 'Editorial note', 'Opening · left', 'Opening · right', 'Photo essay · left', 'Photo essay · right', 'Interview · portrait', 'Interview · questions', 'Credits'][k]}</p>
+          <p className="max-w-28 text-[10px] text-zinc-500">{String(k + 1).padStart(2, '0')} · {opened.pages?.[k] ?? 'Your design'}</p>
         </div>)}
       </div>
       {opened.saved && <button type="button" className={`${button} flex items-center gap-1.5`} onClick={() => void remove()} disabled={pending}>
@@ -124,7 +124,7 @@ export default function CollectionsTab() {
           className="flex flex-col items-center gap-2 rounded-md border border-zinc-800 p-1.5 text-left hover:border-zinc-500 disabled:opacity-50">
           <CollectionPreview doc={collection.doc} />
           <span className="w-full text-xs text-zinc-200">{collection.name}</span>
-          <span className="w-full text-[10px] leading-snug text-zinc-500">{collection.direction}<span className="mt-1 block">10 editable pages</span></span>
+          <span className="w-full text-[10px] leading-snug text-zinc-500">{collection.direction}<span className="mt-1 block">{collection.doc.pages.length} editable pages</span></span>
         </button>)}
       </div>
       <section className="space-y-3 border-t border-zinc-800 pt-4" aria-label="Your collections">
