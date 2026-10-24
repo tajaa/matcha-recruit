@@ -146,20 +146,19 @@ Website-builder frontend for the consumer brand **Gummfit**, host-routed on gumm
   `collectionLibrary.ts` holds pending library writes and feedback per Studio store across panel remounts,
   invalidates stale reads, and reuses a save request UUID for an unchanged retry. `collectionPreview.ts`
   shares one composition across a collection's thumbnails; failed preparation can be retried.
+  **Magazine identity** (`studio/model/identity.ts`, `ui/panels/IdentityPanel.tsx`): named paragraph/character
+  styles and swatches are references, with local attributes as overrides. `resolveParas` supplies effective
+  type to composition/rendering/font loading; editable paragraphs and ProseMirror keep sparse references,
+  including explicit default/false overrides. A style change recomposes every linked use in the document.
+  Parent layouts are portable page snapshots (no site photos or cross-page threads), drawn behind local
+  content and composed once per definition. Detach creates fresh local IDs; scaled copies preserve appearance.
+  Page furniture is generated from page order with per-page hiding/header overrides. All reader/print rendering
+  uses the same resolver. `identityLibrary.ts` retains pending writes/errors across panel mounts, refreshes
+  saved templates and rejects stale read results. `/sites/:id/studio/identity` stores a versioned magazine
+  template; document snapshots keep published issues stable until explicitly updated. New paged stories copy
+  the saved identity. Import merges by name with ID remapping. See the Studio guide's `identity` section.
 
 ## Backend pairing
-
-**Magazine identity** (`studio/model/identity.ts`, `ui/panels/IdentityPanel.tsx`): named paragraph/character
-styles and swatches are references, with local attributes as overrides. `resolveParas` supplies effective
-type to composition/rendering/font loading; editable paragraphs and ProseMirror keep sparse references,
-including explicit default/false overrides. A style change recomposes every linked use in the document.
-Parent layouts are portable page snapshots (no site photos or cross-page threads), drawn behind local
-content and composed once per definition. Detach creates fresh local IDs; scaled copies preserve appearance.
-Page furniture is generated from page order with per-page hiding/header overrides. All reader/print rendering
-uses the same resolver. `identityLibrary.ts` retains pending writes/errors across panel mounts, refreshes
-saved templates and rejects stale read results. `/sites/:id/studio/identity` stores a versioned magazine
-template; document snapshots keep published issues stable until explicitly updated. New paged stories copy
-the saved identity. Import merges by name with ID remapping. See the Studio guide's `identity` section.
 
 Backend package is `server/app/cappe/` (own `CLAUDE.md`, cross-references `DOMAINS.md` for domain-reselling ops).
 

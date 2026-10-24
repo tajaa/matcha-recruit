@@ -1,13 +1,13 @@
 """Private, versioned magazine identities for Gummfit Studio.
 
 Revision ID: cappeidentity01
-Revises: cappemag11
+Revises: cappemag12
 Create Date: 2026-10-23
 """
 from alembic import op
 
 revision = "cappeidentity01"
-down_revision = "cappemag11"
+down_revision = "cappemag12"
 branch_labels = None
 depends_on = None
 

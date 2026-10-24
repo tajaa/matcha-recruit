@@ -474,3 +474,27 @@ describe('collection robustness regressions', () => {
     expect(store.canUndo()).toBe(false)
   })
 })
+
+describe('collections from identity-styled pages', () => {
+  it('keep how the pages look and name nothing of the source identity, parent frames included', async () => {
+    const { captureParent, starterIdentity } = await import('../../model/identity')
+    let doc: Doc = { ...blank(), identity: starterIdentity() }
+    doc = { ...doc, items: [
+      { ...newItem('text', 'p1', 't1', { x: 50, y: 50, w: 300, h: 100 }) } as TextItem,
+      { ...newItem('rect', 'p1', 'r1', { x: 0, y: 0, w: 20, h: 20 }), fill: '#000000', fill_swatch: 'sw3' } as Doc['items'][number],
+    ], threads: [{ id: 's1', frames: ['t1'], paras: [{ style: 'ps3', runs: [{ t: 'Caption', style: 'cs1' }] }] }] }
+    doc = captureParent(doc, 0, 'pl1', 'Feature')
+    doc = { ...doc, pages: doc.pages.map((p) => ({ ...p, parent: 'pl1' })) }
+    const flat = portableCollection(doc)
+    expect(flat.identity).toBeUndefined()
+    expect(JSON.stringify(flat)).not.toMatch(/"(style|swatch|fill_swatch|parent)"/)
+    // The parent's frames became each page's own, looking as they did.
+    expect(flat.items.filter((i) => i.kind === 'rect').map((i) => (i as { fill: string }).fill)).toEqual(['#b44d35', '#b44d35'])
+    const run = flat.threads[0].paras[0].runs[0]
+    expect(run).toMatchObject({ font: 'Inter', size: 8, color: '#72726b', it: true })
+    // Inserted into a story with no identity, the story still saves.
+    const into = insertCollection(blank(), doc, 'p1')
+    expect(docProblem(into.doc)).toBeNull()
+    expect(JSON.stringify(into.doc)).not.toMatch(/"(style|swatch|fill_swatch)"/)
+  })
+})

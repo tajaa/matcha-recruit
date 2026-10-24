@@ -1,4 +1,6 @@
-import type { Doc } from './types'
+import { mergeRuns, sparsePara } from './doc'
+import { detachParent, resolveItem, resolvedThreads } from './identity'
+import type { Doc, Item } from './types'
 
 export type CollectionCard = { id: string; name: string; page_count: number; created_at: string }
 export type SavedCollection = CollectionCard & { doc: Doc }
@@ -13,8 +15,33 @@ export function collectionJsonSize(value: unknown): number {
   return JSON.stringify(value).replace(/[\u007f-\uffff]/g, (ch) => `\\u${ch.charCodeAt(0).toString(16).padStart(4, '0')}`).length
 }
 
-/** A portable snapshot: source photos and reader access stay with the story. */
-export function portableCollection(doc: Doc): Doc {
+/** The pages as they look, with nothing that names this story's magazine
+ *  identity: a collection goes into other stories, whose identities don't
+ *  have these styles, swatches or parents (and a reference to one they lack
+ *  makes the story unsavable). Parent frames become the page's own. */
+export function flattenIdentity(doc: Doc): Doc {
+  if (!doc.identity) return doc
+  let flat = doc
+  doc.pages.forEach((p, k) => { if (p.parent) flat = detachParent(flat, k) })
+  const identity = flat.identity
+  const out: Doc = { ...flat,
+    pages: flat.pages.map((p) => ({ id: p.id })),
+    threads: resolvedThreads(flat).map((t) => ({ ...t, paras: t.paras.map((p) => ({ ...sparsePara(p), runs: mergeRuns(p.runs) })) })),
+    items: flat.items.map((i) => {
+      const resolved: Item = { ...resolveItem(i, identity) }
+      delete resolved.fill_swatch
+      delete resolved.stroke_swatch
+      return resolved
+    }),
+  }
+  delete out.identity
+  return out
+}
+
+/** A portable snapshot: source photos, reader access and the source's
+ *  identity references stay with the story. */
+export function portableCollection(source: Doc): Doc {
+  const doc = flattenIdentity(source)
   return structuredClone({ ...doc, paywall_page: null,
     items: doc.items.map((i) => i.kind === 'image' ? { ...i, asset_id: null, caption: '' } : i),
     threads: doc.threads.map((t) => ({ id: t.id, frames: t.frames, paras: t.paras })),

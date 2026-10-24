@@ -235,3 +235,24 @@ def test_older_clients_cannot_strip_an_existing_identity(monkeypatch, action):
 def test_current_clients_declare_identity_support():
     S.normalize_doc(document())
     studio._identity_supported(1, document())
+
+
+def test_a_collection_keeps_how_identity_styled_pages_look_without_naming_the_identity():
+    # A collection goes into other stories, whose identities don't have these
+    # styles or swatches: a reference to one they lack would make them unsavable.
+    from app.cappe.services.magazine.studio.collections import collection_doc
+    raw = document()
+    raw["pages"][1].pop("parent")  # the Studio makes parent frames the page's own first
+    raw["items"].append({"id": "r9", "kind": "rect", "page": raw["pages"][0]["id"], "x": 0, "y": 0, "w": 10, "h": 10,
+                         "fill": "#000000", "fill_swatch": "sw1"})
+    out = collection_doc(raw)
+    assert "identity" not in out
+    text = json.dumps(out)
+    assert '"style"' not in text and '"swatch"' not in text and "fill_swatch" not in text and '"parent"' not in text
+    run = out["threads"][0]["paras"][0]["runs"][0]
+    assert run["size"] == 8 and run["color"] == "#ab3322"
+    assert out["threads"][0]["paras"][0]["runs"][1]["it"] is True
+    assert next(i for i in out["items"] if i["id"] == "r9")["fill"] == "#ab3322"
+    # It goes into a story with no identity and saves there.
+    assert S.normalize_doc({**S.starter_doc(), "items": out["items"], "threads": out["threads"],
+                            "pages": out["pages"]})["threads"]
