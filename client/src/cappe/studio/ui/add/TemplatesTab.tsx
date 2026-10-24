@@ -5,6 +5,7 @@ import { useStudio } from '../../store/store'
 import { useCtx } from '../context'
 import { applyTemplate, blankPage, previewDoc, templateFaces } from './applyTemplate'
 import { TEMPLATES, type Template } from './templates'
+import CollectionsTab from './CollectionsTab'
 
 const THUMB = 124
 
@@ -30,6 +31,19 @@ function Thumb({ t }: { t: Template }) {
 /** Ready-made pages: on a blank page in view it takes that page, else it
  *  comes in as a new page after it. */
 export default function TemplatesTab() {
+  const [view, setView] = useState<'collections' | 'pages'>('collections')
+  return <div className="space-y-4">
+    <div className="flex gap-1 rounded-md bg-zinc-950 p-1" aria-label="Template library">
+      {(['collections', 'pages'] as const).map((tab) => <button type="button" key={tab} aria-pressed={view === tab}
+        onClick={() => setView(tab)} className={`flex-1 rounded px-2 py-1.5 text-xs ${view === tab ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-zinc-200'}`}>
+        {tab === 'collections' ? 'Collections' : 'Single pages'}
+      </button>)}
+    </div>
+    {view === 'collections' ? <CollectionsTab /> : <SinglePages />}
+  </div>
+}
+
+function SinglePages() {
   const c = useCtx()
   const book = c.fonts.book
   const blank = useStudio(c.store, (s) => blankPage(s.doc, s.page))

@@ -134,6 +134,14 @@ Website-builder frontend for the consumer brand **Gummfit**, host-routed on gumm
   opens on a first visit (localStorage `cappe-studio-guide-seen`), from Help, the top bar's ? and the
   Picture Editor's ?. **A change to a tool, panel, menu or key changes its section in the same PR**; the
   shortcuts section is built from `COMMANDS`, and a test holds the tool keys to the commands.
+  **Editorial collections** (`ui/add/collections.ts`, `CollectionsTab.tsx`, `applyCollection.ts`): Templates opens
+  on four ten-page art directions; Single pages keeps the original templates. A collection starts a blank
+  story or inserts after the current spread (a spacer keeps its cover on the right), fitted to the story's
+  size, with fresh ids and linked text preserved, in one undo step. Existing paywall pages follow their
+  original pages. The save-limit check runs before committing. Saved collections use `collectionsApi.ts`
+  and `/api/cappe/studio/collections`: account-wide, max 50, each up to 32 pages / 1 MB. `model/collections.ts`
+  strips library photo ids, image captions, compositions and reader access; type, words and guides remain.
+  Page templates and collections share `ui/add/preparation.ts` so switching tabs cannot overlap placement.
 
 ## Backend pairing
 

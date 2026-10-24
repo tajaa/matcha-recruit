@@ -30,10 +30,14 @@ from ...core.services.redis_cache import check_rate_limit
 from ...database import get_connection
 from ..dependencies import require_cappe_account
 from ..models.cappe import CappeAccount
+from ..models.studio import StudioCollectionCreate
 from ..services.entitlements import resolve_entitlements
 from ..services.magazine.stories import POST_COLS, post_row, sync_post_assets
 from ..services.magazine.story_schema import referenced_asset_ids
 from ..services.magazine.studio import ask
+from ..services.magazine.studio import bank as studio_bank
+from ..services.magazine.studio.collections import MAX_COLLECTION_BYTES, MAX_COLLECTIONS, collection_doc
+from ..services.magazine.studio.schema import DocError
 from ..services.magazine.studio.fonts import manifest
 from ..services.magazine.studio.limits import limits
 from ._shared import get_owned_site
@@ -44,6 +48,66 @@ router = APIRouter()
 
 KEEP_REVISIONS = 50
 NOT_PAGES = "This story isn't made of pages. Open it in the story editor."
+
+
+@router.get("/studio/collections")
+async def list_collections(account: CappeAccount = Depends(require_cappe_account)):
+    """Small library cards; fetch a document only when it is opened."""
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            "SELECT id, name, page_count, created_at FROM cappe_studio_collections "
+            "WHERE account_id = $1 ORDER BY created_at DESC, id LIMIT $2", account.id, MAX_COLLECTIONS,
+        )
+    return [dict(row) for row in rows]
+
+
+@router.get("/studio/collections/{collection_id}")
+async def open_collection(collection_id: UUID, account: CappeAccount = Depends(require_cappe_account)):
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT id, name, page_count, created_at, doc FROM cappe_studio_collections "
+            "WHERE id = $1 AND account_id = $2", collection_id, account.id,
+        )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Collection not found")
+    out = dict(row)
+    out["doc"] = json.loads(out["doc"]) if isinstance(out["doc"], str) else out["doc"]
+    return out
+
+
+@router.post("/studio/collections", status_code=201)
+async def save_collection(body: StudioCollectionCreate, account: CappeAccount = Depends(require_cappe_account)):
+    async with get_connection() as conn:
+        try:
+            # Check the size before resolving the bank, then validate its custom graphics.
+            if len(json.dumps(body.doc, separators=(",", ":"))) > MAX_COLLECTION_BYTES:
+                raise DocError("A collection is too big to save. Use fewer pages or less text.")
+            doc = collection_doc(body.doc, await studio_bank.doc_graphics(conn, body.doc))
+        except DocError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        async with conn.transaction():
+            # Serialize saves for this account so concurrent tabs cannot exceed the cap.
+            await conn.fetchval("SELECT id FROM cappe_accounts WHERE id = $1 FOR UPDATE", account.id)
+            count = await conn.fetchval("SELECT count(*) FROM cappe_studio_collections WHERE account_id = $1", account.id)
+            if count >= MAX_COLLECTIONS:
+                raise HTTPException(status_code=409, detail=f"You can save {MAX_COLLECTIONS} collections. Remove one to save another.")
+            row = await conn.fetchrow(
+                "INSERT INTO cappe_studio_collections (account_id, name, doc, page_count) "
+                "VALUES ($1, $2, $3::jsonb, $4) RETURNING id, name, page_count, created_at",
+                account.id, body.name, json.dumps(doc), len(doc["pages"]),
+            )
+    return dict(row)
+
+
+@router.delete("/studio/collections/{collection_id}", status_code=204)
+async def delete_collection(collection_id: UUID, account: CappeAccount = Depends(require_cappe_account)):
+    async with get_connection() as conn:
+        deleted = await conn.fetchval(
+            "DELETE FROM cappe_studio_collections WHERE id = $1 AND account_id = $2 RETURNING id",
+            collection_id, account.id,
+        )
+    if deleted is None:
+        raise HTTPException(status_code=404, detail="Collection not found")
 
 
 class StudioSave(BaseModel):

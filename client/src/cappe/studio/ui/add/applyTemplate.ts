@@ -14,6 +14,7 @@ import { addPages, deleteItems } from '../../model/ops'
 import type { Doc, Item, Para, Thread } from '../../model/types'
 import type { StudioCtx } from '../context'
 import { BASE, type Template, type TItem } from './templates'
+import { layoutPreparation as preparing } from './preparation'
 
 const PREFIX: Record<TItem['kind'], string> = { text: 't', image: 'i', rect: 'r', ellipse: 'e', line: 'l', graphic: 'g' }
 
@@ -104,8 +105,6 @@ export function previewDoc(t: Template, doc: Doc): Doc {
   const base: Doc = { ...doc, pages: [{ id: 'p1' }], items: [], threads: [], guides: [], paywall_page: null }
   return { ...base, ...templateItems(t, base, 'p1') }
 }
-
-const preparing = new WeakSet<object>()
 
 /** Whether a template is still being set up in this Studio (its faces loading). */
 export function preparingTemplate(c: StudioCtx): boolean {

@@ -687,6 +687,16 @@ normalized paragraphs itself; a thread with no valid composition prints its word
   finished document is checked against the save limits (`limits.docProblem`, the server's counts) before it is
   committed: a full story is told why and left unchanged, never made unsavable. `templates.test.tsx` holds every face and graphic to the bank and composes each frame at its face's real
   ascent and descent: a display face can be far taller than its size, so size frames from that test, not by eye.
+- **Editorial collections** (`studio/collections.py`, `models/studio.py`, `routes/studio.py`, `cappemag12`):
+  four built-in ten-page directions live in the client (`ui/add/collections.ts`). Creator designs are stored in
+  `cappe_studio_collections`, account-scoped so they can be reused across that creator's magazines. The
+  `/studio/collections` API lists small cards, fetches a document by id, creates, and deletes; every query
+  names the authenticated account. Saves normalize through the Studio schema including hidden curated
+  graphics. Photos become empty frames, image captions and text composition are cleared, and paywall
+  settings are removed: collections never hold site-owned photo references. Max 32 pages / 1 MB each,
+  50 per account (the account row is locked around count + insert). Removing a collection never changes
+  stories using it. Migration is additive; downgrade refuses while saved collections exist. Apply it through
+  the normal approved dev/prod migration workflow before shipping the saved library; no seed is needed.
 - **Studio bank** (Gummfit-curated, cappemag11: `studio/bank.py`, `routes/studio_bank_admin.py` at
   `/matcha-admin/studio-bank` behind matcha `require_admin`; admin UI hey-matcha.com/admin/cappe → Studio bank;
   client `ui/add/bank.ts`, `BankPhotos.tsx`): photos and graphics every site's Studio shows first (Photos →
