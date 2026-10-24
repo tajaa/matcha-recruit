@@ -81,9 +81,32 @@ def test_a_photo_is_credited_as_the_admin_says_else_its_creator_and_gummfit():
     ('<path style="fill:#fff;stroke:#000" d="M0 0h10v10z"/>', False),
     ('<defs><linearGradient id="g"><stop offset="0"/></linearGradient></defs><path fill="url(#g)" d="M0 0h1z"/>',
      False),
+    # SVG's own defaults and inheritance: a fill nobody set is black, groups pass theirs down.
+    ('<path d="M0 0h10v10z"/><path fill="red" d="M5 5h1v1z"/>', False),
+    ('<g fill="red"><path d="M0 0h10v10z"/></g><path d="M5 5h1v1z"/>', False),
+    ('<g fill="#f00"><path d="M0 0h10v10z"/></g><path fill="red" d="M5 5h1v1z"/>', False),  # names aren't guessed
+    ('<g fill="#f00"><path d="M0 0h10v10z"/></g><path fill="#FF0000" d="M5 5h1v1z"/>', True),
+    ('<path fill="#000" d="M0 0h10v10z"/><path fill="black" d="M5 5h1v1z"/>', True),
+    ('<g color="#ff0000"><path fill="currentColor" d="M0 0h10v10z"/></g><path fill="#ff0000" d="M5 5h1v1z"/>', True),
+    ('<g color="#ff0000"><path fill="currentColor" d="M0 0h10v10z"/></g><path d="M5 5h1v1z"/>', False),
+    ('<line x1="0" y1="0" x2="10" y2="10" stroke="#ff0000"/><path fill="#ff0000" d="M0 0h1z"/>', True),
+    ('<clipPath id="c"><path fill="blue" d="M0 0h10v10z"/></clipPath><path d="M0 0h1z"/>', True),
+    ('<path fill="red" style="fill:#0000ff" d="M0 0h1z"/><path fill="#0000ff" d="M0 0h1z"/>', True),
+    ('<g fill="#00f"><path fill="inherit" d="M0 0h1z"/></g><path fill="#0000ff" d="M0 0h1z"/>', True),
 ])
 def test_one_paint_is_a_silhouette_more_keeps_its_colours(body, one):
     assert bank.one_colour(f'<svg {SVG} viewBox="0 0 10 10">{body}</svg>'.encode()) is one
+
+
+def test_unreadable_svg_keeps_its_own_colours():
+    assert bank.one_colour(b"<svg") is False
+
+
+@pytest.mark.parametrize("attrs", ['viewBox="0 0 NaN 10"', 'viewBox="0 0 10 Infinity"', 'viewBox="nan 0 10 10"',
+                                   'viewBox="0 0 10 -inf"', 'width="Infinity" height="10"', 'width="nan" height="nan"'])
+def test_a_graphic_with_no_finite_size_is_refused(attrs):
+    with pytest.raises(G.SvgError):
+        G.clean_svg(f'<svg {SVG} {attrs}><path d="M0 0h1z"/></svg>'.encode())
 
 
 def test_how_a_graphic_fills_its_box_by_its_group():
@@ -109,6 +132,17 @@ async def test_a_page_names_bank_graphics_the_manifest_lacks():
     assert conn.calls[0][2] == ([CURATED],)  # only what the manifest doesn't have
     quiet = Conn()
     assert await bank.doc_graphics(quiet, _doc(src=star)) == {} and quiet.calls == []
+
+
+@pytest.mark.asyncio
+async def test_every_bank_graphic_a_document_names_is_looked_up():
+    shas = [f"{n:064x}" for n in range(501)]
+    doc = {"pages": [{"id": "p1"}, {"id": "p2"}], "threads": [],
+           "items": [{"id": f"g{n}", "kind": "graphic", "page": f"p{n % 2 + 1}", "src": sha} for n, sha in enumerate(shas)]}
+    conn = Conn(fetch={"FROM cappe_studio_bank": [{"sha": sha, "mono": True, "fit": "contain"} for sha in shas]})
+    found = await bank.doc_graphics(conn, doc)
+    assert conn.calls[0][2] == (shas,) and len(found) == 501
+    assert len(S.normalize_doc(doc, found)["items"]) == 501
 
 
 def test_a_bank_graphic_on_a_page_is_held_to_the_bank():
@@ -241,6 +275,18 @@ def test_a_graphic_that_isnt_one_or_is_built_in_is_refused(monkeypatch):
         assert res.status_code == 422
 
 
+def test_an_svg_with_no_finite_size_stores_nothing(monkeypatch):
+    conn = Conn()
+    storage = AsyncMock(get_key=AsyncMock(return_value=None))
+    cm, audit = _admin_client(monkeypatch, conn, storage)
+    with cm as client:
+        res = client.post("/studio-bank/graphics", data={"name": "Bad"},
+                          files={"file": ("x.svg", f'<svg {SVG} viewBox="0 0 NaN 10"><path d="M0 0h1z"/></svg>',
+                                          "image/svg+xml")})
+    assert res.status_code == 422
+    assert conn.calls == [] and storage.put_key.await_count == 0 and audit.await_count == 0
+
+
 def test_an_admin_adds_a_photo_with_its_sizes(monkeypatch):
     stored = media.StoredImage(url="https://cdn.example.test/bank.jpg", mime="image/jpeg", width=1600, height=1000,
                                bytes=1000, variants={"webp": []})
@@ -293,6 +339,32 @@ def test_editing_hiding_and_deleting(monkeypatch):
     cm, _ = _admin_client(monkeypatch, Conn(fetchrow={"FROM cappe_studio_bank WHERE id = $1": None}))
     with cm as client:
         assert client.delete(f"/studio-bank/{uuid4()}").status_code == 404
+
+
+@pytest.mark.parametrize("stored, patch, ok", [
+    ({"creator": None, "license": "gummfit"}, {"license": "by"}, False),         # BY with no one to credit
+    ({"creator": None, "license": "gummfit"}, {"license": "by-sa", "creator": " "}, False),
+    ({"creator": "Ana Ruiz", "license": "by"}, {"creator": ""}, False),          # clearing a BY photo's creator
+    ({"creator": "Ana Ruiz", "license": "by"}, {"creator": None, "credit_line": ""}, False),
+    ({"creator": None, "license": "gummfit"}, {"license": "by", "creator": "Bo Li"}, True),
+    ({"creator": "Ana Ruiz", "license": "by"}, {"creator": "", "license": "cc0"}, True),
+    ({"creator": "Ana Ruiz", "license": "by"}, {"name": "Harbour"}, True),
+])
+def test_a_cc_by_photo_always_has_a_creator_after_an_edit(monkeypatch, stored, patch, ok):
+    conn = Conn(fetchrow={"FROM cappe_studio_bank WHERE id = $1": {**PHOTO, **stored}, "UPDATE cappe_studio_bank": PHOTO})
+    cm, _ = _admin_client(monkeypatch, conn)
+    with cm as client:
+        res = client.patch(f"/studio-bank/{PHOTO_ID}", json=patch)
+    assert res.status_code == (200 if ok else 422)
+    assert any("UPDATE" in c[1] for c in conn.calls) is ok
+
+
+def test_the_downgrade_refuses_while_the_bank_holds_graphics():
+    import pathlib
+    text = (pathlib.Path(__file__).resolve().parents[2] / "alembic" / "versions" / "cappemag11_studio_bank.py").read_text()
+    down = text[text.index("_DOWNGRADE = ["):]
+    guard = down.index("FROM cappe_studio_bank WHERE kind = 'graphic'")
+    assert down.index("RAISE EXCEPTION", guard) < down.index("DROP TABLE IF EXISTS cappe_studio_bank")
 
 
 # ── the public routes ────────────────────────────────────────────────────────

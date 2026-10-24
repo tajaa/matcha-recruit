@@ -24,11 +24,12 @@ from __future__ import annotations
 
 import json
 import re
+import xml.etree.ElementTree as ET
 from typing import Any, Iterable, Optional
 from uuid import UUID
 
 from ...cappe_assets import COLUMNS as ASSET_COLUMNS, row as asset_row
-from . import graphics
+from . import graphics, limits
 
 KINDS = ("photo", "graphic")
 STATUSES = ("live", "hidden")
@@ -42,7 +43,6 @@ MAX_TAG = 40
 MAX_CREDIT = 500
 PAGE_MAX = 60
 PICKS_MAX = 500
-DOC_GRAPHICS_MAX = 500
 
 COLUMNS = (
     "id, kind, name, tags, collection, status, sort_order, url, variants, width, height, bytes, mime, creator, "
@@ -91,20 +91,72 @@ def credit(creator: Optional[str], credit_line: Optional[str]) -> str:
     return f"{' '.join(creator.split())} / {PROVIDER}"[:MAX_CREDIT] if creator and creator.strip() else PROVIDER
 
 
-_PAINT = re.compile(r"""(?:fill|stroke|stop-color|color)\s*[:=]\s*["']?\s*(#[0-9a-f]{3,8}|[a-z]+\([^)]*\)|[a-z]+)""",
-                    re.I)
-_NO_PAINT = {"none", "transparent", "currentcolor", "inherit"}
 _GRADIENT = re.compile(rb"<(?:linearGradient|radialGradient|pattern|image)\b", re.I)
+# What draws paint, and what never shows its own (a clip path or mask only cuts).
+_DRAWN = {"path", "rect", "circle", "ellipse", "line", "polyline", "polygon", "text", "tspan", "textPath"}
+_UNSEEN = {"clipPath", "mask", "title", "desc", "metadata"}
+_NAMED = {"black": "#000000", "white": "#ffffff"}
+
+
+def _paint(value: str, colour: str) -> Optional[str]:
+    """A fill or stroke as one comparable string: None for no paint, `url(`
+    for a paint server, the element's `color` for currentColor."""
+    v = value.strip().lower()
+    if v in ("none", "transparent"):
+        return None
+    if v == "currentcolor":
+        return colour
+    if v.startswith("url("):
+        return "url("
+    if re.fullmatch(r"#[0-9a-f]{3}", v):
+        v = "#" + "".join(c * 2 for c in v[1:])
+    return _NAMED.get(v, v)
+
+
+def _declared(el) -> dict[str, str]:
+    """An element's fill, stroke and color, from its attributes and its style
+    attribute (which wins, as in CSS)."""
+    out = {k: el.get(k) for k in ("fill", "stroke", "color") if el.get(k) is not None}
+    for part in (el.get("style") or "").split(";"):
+        name, _, value = part.partition(":")
+        if name.strip().lower() in ("fill", "stroke", "color") and value.strip():
+            out[name.strip().lower()] = value
+    return {k: v for k, v in out.items() if v.strip().lower() != "inherit"}
 
 
 def one_colour(svg: bytes) -> bool:
-    """Whether a cleaned SVG is drawn in one colour (or none, so black): the
-    Studio then shows it as a silhouette in any colour. A gradient, a pattern
-    or two paints make it colourful, kept as drawn."""
+    """Whether a cleaned SVG is drawn in one colour: the Studio then shows it
+    as a silhouette in any colour. Every drawn shape's paint counts as SVG
+    paints it: a fill nobody set is black, fills, strokes and color are
+    inherited from the groups around it, and currentColor is that color
+    (black in a picture). A gradient, a pattern, a picture or two paints make
+    it colourful, kept as drawn; so does anything that isn't readable XML."""
     if _GRADIENT.search(svg):
         return False
-    paints = {m.group(1).lower() for m in _PAINT.finditer(svg.decode("utf-8", "replace"))}
-    return len({p for p in paints if p not in _NO_PAINT and not p.startswith("url(")}) <= 1
+    try:
+        root = ET.fromstring(svg)
+    except ET.ParseError:
+        return False
+    paints: set[str] = set()
+
+    def walk(el, fill: str, stroke: str, colour: str) -> None:
+        tag = el.tag.rsplit("}", 1)[-1] if isinstance(el.tag, str) else ""
+        if tag in _UNSEEN:
+            return
+        own = _declared(el)
+        if "color" in own:
+            colour = _paint(own["color"], colour) or colour
+        fill, stroke = own.get("fill", fill), own.get("stroke", stroke)
+        if tag in _DRAWN:
+            for value in ((stroke,) if tag == "line" else (fill, stroke)):
+                p = _paint(value, colour)
+                if p:
+                    paints.add(p)
+        for child in el:
+            walk(child, fill, stroke, colour)
+
+    walk(root, "black", "none", "#000000")
+    return "url(" not in paints and len(paints) <= 1
 
 
 def default_fit(group: str) -> str:
@@ -124,7 +176,7 @@ async def doc_graphics(conn, raw_doc: Any) -> dict[str, dict]:
         i["src"] for i in (items if isinstance(items, list) else [])
         if isinstance(i, dict) and i.get("kind") == "graphic" and graphics.is_sha(i.get("src"))
         and graphics.by_sha(i["src"]) is None
-    })[:DOC_GRAPHICS_MAX]
+    })[:limits.MAX_ITEMS]  # no more than a document can hold, so a valid one is never cut short
     if not srcs:
         return {}
     rows = await conn.fetch(

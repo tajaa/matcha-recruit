@@ -691,8 +691,12 @@ normalized paragraphs itself; a thread with no valid composition prints its word
   `gummfit`, `source_id` the bank id) on the bank's own files, so there is no import queue. A **graphic** is
   `clean_svg`'d and stored by sha at `cappe/graphics/<sha>.svg`, served by the same public route; the two save paths
   in `blog.py` pass `bank.doc_graphics` to `normalize_doc`, which is how a page may name a sha the manifest lacks.
-  So **a graphic is hidden, never deleted** (pages name it); deleting a photo is safe (library rows never delete
-  files). `/public/graphics/picks` is cached 5 minutes.
+  So **a graphic is hidden, never deleted** (pages name it), and cappemag11's downgrade refuses while the bank holds
+  any; deleting a photo is safe (library rows never delete files). `/public/graphics/picks` is cached 5 minutes.
+  An upload's viewBox must be four finite numbers (`clean_svg`; a NaN stored in a REAL breaks every JSON list after).
+  "Auto" colour (`bank.one_colour`) reads paint as SVG does: an unset fill is black, fill/stroke/color inherit,
+  currentColor is the inherited color; two paints, a url() paint or unreadable XML keep the graphic's colours. A CC BY
+  photo always has a creator, on upload and after any edit (placed copies print the credit and can't change it).
 - **Ask the Studio** (`studio/ask.py`, `POST …/studio/stories/{id}/ask`; client `ui/ask/`, `ui/panels/AskPanel.tsx`):
   one Claude Messages call per question (surface `gummfit.studio`, Haiku by default), no tools, nothing saved,
   nothing on the page changed. **The Studio sends the guide (`ui/guideContent.ts`) and the commands

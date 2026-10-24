@@ -13,7 +13,8 @@ import { StudioContext, type StudioCtx } from '../context'
 import AddPanel from './AddPanel'
 import { ELEMENTS, TEXT_COMBOS, TEXT_STYLES, facesOf } from './catalog'
 import { graphicsApi, matchPicks, type GraphicBrowse, type GraphicCard } from '../../model/graphics'
-import type { BankPhoto } from './bank'
+import { bankApi, type BankPhoto } from './bank'
+import { BankPhotos } from './BankPhotos'
 import { ObjectPanel } from '../panels/ObjectPanel'
 import { describeStudio } from '../ask/describe'
 import { dropInto, dropOn, importStock } from './drag'
@@ -395,6 +396,82 @@ describe('Gummfit’s picks and photos', () => {
     vi.spyOn(cappeApi, 'post').mockResolvedValue(asset({ id: 'bank1', kind: 'stock' }))
     await dropInto(ctx, { kind: 'bank', photo: photo() }, landing(ctx))
     expect(only(store)).toMatchObject({ kind: 'image', asset_id: 'bank1' })
+  })
+})
+
+describe('a Gummfit photo clicked while the page changes', () => {
+  type Placed = { resolve: (a: CappeAsset) => void }
+  const pending = () => {
+    const out: Placed = { resolve: () => {} }
+    vi.spyOn(bankApi, 'place').mockImplementation(() => new Promise((res) => { out.resolve = res }))
+    return out
+  }
+  const frames = () => {
+    let d = addItem(doc(), 'image', 'p1', { x: 0, y: 0, w: 100, h: 100 }).doc
+    d = addItem(d, 'image', 'p1', { x: 200, y: 0, w: 100, h: 100 }).doc
+    return d
+  }
+  const show = (ctx: StudioCtx, q = '') => render(<StudioContext.Provider value={ctx}><BankPhotos q={q} /></StudioContext.Provider>)
+  const click = async () => fireEvent.click(await screen.findByRole('button', { name: 'Add Harbour at dawn' }))
+
+  beforeEach(() => { vi.spyOn(bankApi, 'photos').mockResolvedValue({ total: 1, items: [photo()], collections: [] }) })
+
+  it('goes on the page it was clicked on', async () => {
+    const { store, ctx } = studio(doc(), { page: 0 })
+    const placed = pending()
+    show(ctx)
+    await click()
+    act(() => store.set({ page: 1 }))
+    await act(async () => placed.resolve(asset({ id: 'bank1', kind: 'stock' })))
+    expect(only(store)).toMatchObject({ kind: 'image', page: 'p1', asset_id: 'bank1' })
+  })
+
+  it('fills the empty frame selected when it was clicked, not one selected since', async () => {
+    const d = frames()
+    const [f1, f2] = d.items.map((i) => i.id)
+    const { store, ctx } = studio(d, { page: 0, selection: [f1] })
+    const placed = pending()
+    show(ctx)
+    await click()
+    act(() => store.set({ selection: [f2] }))
+    await act(async () => placed.resolve(asset({ id: 'bank1', kind: 'stock' })))
+    const byId = Object.fromEntries(store.get().doc.items.map((i) => [i.id, i as ImageItem]))
+    expect(byId[f1].asset_id).toBe('bank1')
+    expect(byId[f2].asset_id).toBeNull()
+    expect(store.get().doc.items).toHaveLength(2)
+  })
+
+  it('says so, adding nothing, when that frame was removed meanwhile', async () => {
+    const d = frames()
+    const [f1] = d.items.map((i) => i.id)
+    const { store, ctx } = studio(d, { page: 0, selection: [f1] })
+    const placed = pending()
+    show(ctx)
+    await click()
+    act(() => store.edit((x) => ({ ...x, items: x.items.filter((i) => i.id !== f1) }), { extra: { selection: [] } }))
+    await act(async () => placed.resolve(asset({ id: 'bank1', kind: 'stock' })))
+    expect(screen.getByRole('alert')).toHaveTextContent('The frame it was going in was filled or removed meanwhile.')
+    expect(store.get().doc.items.every((i) => !(i as ImageItem).asset_id)).toBe(true)
+    expect(store.get().doc.items).toHaveLength(1)
+  })
+
+  it('never adds a changed search’s pages to the old list', async () => {
+    const dogs = Array.from({ length: 60 }, (_, k) => photo({ id: `d${k}`, name: `Dog ${k}` }))
+    const cats = Array.from({ length: 60 }, (_, k) => photo({ id: `c${k}`, name: `Cat ${k}` }))
+    const photos = vi.spyOn(bankApi, 'photos')
+      .mockResolvedValueOnce({ total: 120, items: dogs, collections: [] })
+      .mockRejectedValueOnce(new Error('The bank is down.'))
+      .mockResolvedValueOnce({ total: 120, items: cats, collections: [] })
+    const { ctx } = studio()
+    const { rerender } = show(ctx, 'dog')
+    expect(await screen.findByRole('button', { name: 'More' })).toBeInTheDocument()
+    rerender(<StudioContext.Provider value={ctx}><BankPhotos q="cat" /></StudioContext.Provider>)
+    expect(await screen.findByRole('alert')).toHaveTextContent('The bank is down.')
+    expect(screen.queryByRole('button', { name: 'More' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(await screen.findByRole('button', { name: 'Add Cat 0' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Add Dog 0' })).not.toBeInTheDocument()
+    expect(photos.mock.calls.map((a) => [a[1], a[3]])).toEqual([['dog', 0], ['cat', 0], ['cat', 0]])
   })
 })
 

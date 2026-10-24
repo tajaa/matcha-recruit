@@ -3,7 +3,7 @@ import { Loader2 } from 'lucide-react'
 import { useCtx } from '../context'
 import { bankApi, bankThumb, type BankPhoto } from './bank'
 import { endDrag, startDrag } from './drag'
-import { addPicture } from './place'
+import { addPicture, landing } from './place'
 
 const CHIP = (on: boolean) => `rounded-full px-2.5 py-1 text-[11px] ${on ? 'bg-emerald-500/20 text-emerald-300' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-100'}`
 const message = (e: unknown, fallback: string) => (e instanceof Error && e.message ? e.message : fallback)
@@ -19,34 +19,44 @@ export function BankPhotos({ q }: { q: string }) {
   const [busy, setBusy] = useState(false)
   const [adding, setAdding] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
+  // The list belongs to the search that found it (`shown`): until a changed
+  // search's first page arrives there is no total, so More can't fetch the
+  // new search's second page onto the old list, and an old answer is dropped.
+  const want = JSON.stringify([c.siteId, q, collection])
+  const [shown, setShown] = useState<string | null>(null)
+  const settled = shown === want
   const gen = useRef(0)
 
   const load = (offset: number) => {
     const mine = ++gen.current
     setBusy(true)
+    if (!offset) setError(null)
     bankApi.photos(c.siteId, q, collection, offset)
       .then((res) => {
         if (mine !== gen.current) return
         setItems((prev) => (offset ? [...prev, ...res.items] : res.items))
         setCollections(res.collections)
         setTotal(res.total)
+        setShown(want)
         setError(null)
       })
       .catch((e) => { if (mine === gen.current) setError(message(e, 'Gummfit’s photos didn’t load.')) })
       .finally(() => { if (mine === gen.current) setBusy(false) })
   }
   useEffect(() => {
+    gen.current++
     const t = setTimeout(() => load(0), 0)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- a new list whenever what is asked changes
-  }, [c.siteId, q, collection])
+  }, [want])
 
   const add = async (p: BankPhoto) => {
     if (adding.includes(p.id)) return
+    const at = landing(c)  // where it was clicked, whatever happens while the library row is made
     setAdding((a) => [...a, p.id])
     setError(null)
     try {
-      addPicture(c, await bankApi.place(c.siteId, p.id))
+      addPicture(c, await bankApi.place(c.siteId, p.id), at)
     } catch (e) {
       setError(message(e, 'That photo couldn’t be added. Try another.'))
     } finally {
@@ -64,9 +74,13 @@ export function BankPhotos({ q }: { q: string }) {
           ))}
         </div>
       )}
-      {error && <p role="alert" className="text-xs text-red-300">{error}</p>}
+      {error && (
+        <p role="alert" className="text-xs text-red-300">
+          {error}{!settled && <> <button type="button" onClick={() => load(0)} className="underline hover:text-red-200">Try again</button></>}
+        </p>
+      )}
       {busy && !items.length && <p className="flex items-center gap-1.5 text-xs text-zinc-400"><Loader2 className="h-3 w-3 animate-spin" />Loading…</p>}
-      {total === 0 && !busy && (
+      {settled && total === 0 && !busy && (
         <p className="text-xs text-zinc-500">{q || collection ? 'No Gummfit photos for that. Try the archives.' : 'No Gummfit photos yet. Try the archives.'}</p>
       )}
       {items.length > 0 && (
@@ -83,7 +97,7 @@ export function BankPhotos({ q }: { q: string }) {
           ))}
         </ul>
       )}
-      {total !== null && items.length < total && (
+      {settled && total !== null && items.length < total && (
         <button type="button" disabled={busy} onClick={() => load(items.length)}
           className="w-full rounded-md border border-zinc-700 py-1.5 text-xs text-zinc-300 hover:border-zinc-500">{busy ? 'Loading…' : 'More'}</button>
       )}

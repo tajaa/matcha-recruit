@@ -73,12 +73,18 @@ _UPGRADE = [
 ]
 
 _DOWNGRADE = [
-    # A library picture from the bank can't be relabelled as any older source.
+    # A library picture from the bank can't be relabelled as any older source,
+    # and the bank's graphics are the only record of the shas pages may name
+    # (in a story, its working copy or a revision): without them, older code
+    # refuses those pages and serves those graphics as 404s.
     """
     DO $$
     BEGIN
         IF EXISTS (SELECT 1 FROM cappe_assets WHERE source = 'gummfit' OR license = 'gummfit') THEN
             RAISE EXCEPTION 'cappe_assets holds pictures from the Studio bank; delete them before downgrading';
+        END IF;
+        IF EXISTS (SELECT 1 FROM cappe_studio_bank WHERE kind = 'graphic') THEN
+            RAISE EXCEPTION 'cappe_studio_bank holds graphics pages may name; downgrading would drop them';
         END IF;
     END $$
     """,

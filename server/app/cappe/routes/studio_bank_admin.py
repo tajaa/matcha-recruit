@@ -174,6 +174,10 @@ async def update_bank_item(item_id: UUID, body: BankPatch, admin=Depends(require
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not in the bank")
             if item["kind"] == "graphic" and set(fields) & set(bank.PHOTO_ONLY):
                 raise _bad("A graphic has no credit or licence to change.")
+            if item["kind"] == "photo" and fields.get("license", item["license"]) in ("by", "by-sa") \
+                    and not fields.get("creator", item["creator"]):
+                # As on upload: a placed photo's credit is copied out and its site can't change it.
+                raise _bad("A CC BY photo is credited to its creator: say who that is.")
             if item["kind"] == "photo" and ("credit_line" in fields or "creator" in fields):
                 # A credit the admin wrote stays; the automatic one follows the creator.
                 automatic = item["credit_line"] == bank.credit(item["creator"], None)

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../../../../api/client'
 import { ToastProvider } from '../../../../components/ui'
@@ -57,5 +57,21 @@ describe('the Studio bank admin', () => {
     fireEvent.click(within(row).getByRole('button', { name: 'Actions for Wave' }))
     expect(screen.getByRole('menuitem', { name: 'Hide' })).toBeInTheDocument()
     expect(screen.queryByRole('menuitem', { name: 'Delete' })).not.toBeInTheDocument()
+  })
+
+  it('keeps a photo upload that finishes after switching to graphics out of the graphics list', async () => {
+    const get = vi.spyOn(api, 'get').mockResolvedValue([])
+    let finish!: (i: CappeStudioBankItem) => void
+    vi.spyOn(api, 'upload').mockImplementation(() => new Promise((res) => { finish = res as typeof finish }))
+    show()
+    const file = new File(['JPEG'], 'b.jpg', { type: 'image/jpeg' })
+    fireEvent.change(await screen.findByLabelText('Photo (JPEG, PNG, WebP)'), { target: { files: [file] } })
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Harbour at dawn' } })
+    fireEvent.submit(screen.getByRole('button', { name: /Add to the bank|Adding/ }).closest('form')!)
+    fireEvent.click(screen.getByRole('button', { name: 'Graphics' }))
+    await waitFor(() => expect(get).toHaveBeenLastCalledWith('/cappe/matcha-admin/studio-bank?kind=graphic'))
+    await act(async () => finish(item()))
+    expect(screen.queryByText('Harbour at dawn')).not.toBeInTheDocument()
+    expect(await screen.findByText("Harbour at dawn is in every site's Studio")).toBeInTheDocument()
   })
 })
