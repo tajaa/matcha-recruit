@@ -139,6 +139,8 @@ export class Store {
    *  (no undo step): readers get the lines set in the real face. */
   recompose(): void {
     const { doc, overset } = composeDoc(this.state.doc, this.measure, true)
+    const problem = doc.identity ? docProblem(doc) : null
+    if (problem) { this.set({ notice: problem }); return }
     if (doc === this.state.doc && overset.size === this.state.overset.size) return
     const lines = doc !== this.state.doc
     const save = lines && this.state.save.state !== 'conflict' ? { ...this.state.save, state: 'dirty' as const } : this.state.save

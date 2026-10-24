@@ -33,7 +33,6 @@ export function updateItems(doc: Doc, ids: Iterable<string>, fn: (item: Item) =>
 export function patchItems(doc: Doc, ids: Iterable<string>, patch: Record<string, unknown>): Doc {
   const clean = Object.fromEntries(Object.entries(patch).map(([k, v]) => [k, typeof v === 'number' ? round(v) : v]))
   if (('fill' in patch || 'color' in patch) && !('fill_swatch' in patch)) clean.fill_swatch = undefined
-  if ('stroke' in patch && !('stroke_swatch' in patch)) clean.stroke_swatch = undefined
   return updateItems(doc, ids, (i) => (Object.entries(clean).every(([k, v]) => (i as Record<string, unknown>)[k] === v)
     ? i : ({ ...i, ...clean } as Item)))
 }

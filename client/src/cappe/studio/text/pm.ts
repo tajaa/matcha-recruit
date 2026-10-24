@@ -17,8 +17,13 @@ export const schema = new Schema({
     paragraph: {
       content: 'text*',
       attrs: { pa: { default: '{}' }, ec: { default: '{}' } },
-      parseDOM: [{ tag: 'p' }],
-      toDOM: () => ['p', 0],
+      parseDOM: [{ tag: 'p', getAttrs: (el) => {
+        try {
+          const raw = JSON.parse((el as HTMLElement).dataset.pa || '{}')
+          return { pa: JSON.stringify(sparsePara({ ...raw, style: undefined })) }
+        } catch { return { pa: '{}' } }
+      } }],
+      toDOM: (p) => ['p', { 'data-pa': p.attrs.pa }, 0],
     },
     text: {},
   },
@@ -75,7 +80,7 @@ export const paraAttrsOf = (p: PMNode): ParaAttrs => parse<ParaAttrs>(p.attrs.pa
 export const emptyAttrsOf = (p: PMNode): CharAttrs => parse<CharAttrs>(p.attrs.ec)
 
 /** Clipboard HTML carries appearance, never document-local style IDs. */
-export function portableSlice(slice: Slice, identity?: MagazineIdentity): Slice {
+export function portableSlice(slice: Slice, identity?: MagazineIdentity, paragraphAttrs: ParaAttrs = {}): Slice {
   if (!identity) return slice
   const copy = (node: PMNode, base: CharAttrs = {}): PMNode => {
     if (node.isText) return node.mark([schema.marks.ch.create({ a: JSON.stringify(resolveChar(attrsOf(node.marks), base, identity)) })])
@@ -84,10 +89,11 @@ export function portableSlice(slice: Slice, identity?: MagazineIdentity): Slice 
     const children: PMNode[] = []
     node.forEach((child) => children.push(copy(child, paragraph?.char ?? base)))
     const pa = { ...raw }; delete pa.style
-    return node.copy(Fragment.fromArray(children)).type.create({ ...node.attrs, pa: JSON.stringify({ ...paragraph?.para, ...pa }) }, children, node.marks)
+    return node.type.create({ ...node.attrs, pa: JSON.stringify({ ...paragraph?.para, ...pa }) }, children, node.marks)
   }
   const children: PMNode[] = []
-  slice.content.forEach((node) => children.push(copy(node)))
+  const base = identity.paragraphs.find((p) => p.id === paragraphAttrs.style)?.char
+  slice.content.forEach((node) => children.push(copy(node, base)))
   return new Slice(Fragment.fromArray(children), slice.openStart, slice.openEnd)
 }
 

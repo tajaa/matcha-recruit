@@ -1,19 +1,21 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { DOMParser, DOMSerializer } from '@tiptap/pm/model'
 import manifest from '../../../../../server/app/cappe/services/magazine/studio/fonts_manifest.json'
 import { identityApi } from '../identityApi'
 import { composeDoc, type Measure } from '../compose/compose'
 import { FaceBook, type Manifest } from '../fonts/faces'
 import { newItem } from './doc'
-import { captureParent, detachParent, importIdentity, parentDoc, removeStyle, removeSwatch, resolveParas, resolveItem, starterIdentity } from './identity'
+import { captureParent, detachParent, importIdentity, linkRole, parentDoc, removeStyle, removeSwatch, resolveParas, resolveItem, starterIdentity } from './identity'
 import { addPages, applyChar, applyPara, movePage, patchItems } from './ops'
-import { docProblem } from './limits'
+import { docProblem, identityName } from './limits'
 import type { Doc, ImageItem, Para } from './types'
-import { fromPM, portableSlice, toPM } from '../text/pm'
+import { fromPM, portableSlice, schema, toPM } from '../text/pm'
 import { Store, DEFAULT_VIEW, type State } from '../store/store'
 import { frameThreads, pageItemsHtml, pagesHtml } from '../render/layoutRender'
 import { StudioContext, type StudioCtx } from '../ui/context'
 import { IdentityPanel } from '../ui/panels/IdentityPanel'
+import { ObjectPanel } from '../ui/panels/ObjectPanel'
 import { identityLibrary } from '../ui/identityLibrary'
 import { command, paste } from '../ui/commands'
 
@@ -121,7 +123,7 @@ describe('live magazine identities', () => {
     const copied = paste(target, 'p1').doc
     expect(copied.threads[0].paras[0].style).toBeUndefined()
     expect(copied.threads[0].paras[0].runs[0]).toMatchObject({ size: 8, color: '#72726b' })
-    const same = paste(original, 'p2').doc
+    const same = paste(original, 'p2', store).doc
     expect(same.threads.at(-1)!.paras[0].style).toBe('ps3')
     const pm = toPM(original.threads[0].paras)
     const slice = portableSlice(pm.slice(0, pm.content.size), original.identity)
@@ -141,6 +143,83 @@ describe('live magazine identities', () => {
     expect(imported.identity!.parents[0].threads[0].paras[0].style).toBe('ps3')
     expect(resolveParas(imported.threads[0].paras, imported.identity)[0].runs[0]).toMatchObject({ size: 20, color: '#ff0000' })
     expect(d.identity!.swatches[1].color).not.toBe('#ff0000')
+  })
+
+  it('copies a partial caption with inherited type and full paragraphs with their spacing and semantic role', () => {
+    const d = doc(), pm = toPM(d.threads[0].paras)
+    const inline = portableSlice(pm.slice(1, 6), d.identity, { style: 'ps3' })
+    const pasted = fromPM(schema.node('doc', null, [schema.node('paragraph', null, inline.content)]))
+    expect(pasted[0].runs[0]).toMatchObject({ size: 8, font: 'Inter', color: '#72726b' })
+    const full = portableSlice(pm.slice(0, pm.content.size), d.identity)
+    const host = document.createElement('div'); host.append(DOMSerializer.fromSchema(schema).serializeFragment(full.content))
+    const roundtrip = fromPM(DOMParser.fromSchema(schema).parse(host))
+    expect(roundtrip[0]).toMatchObject({ role: 'caption', sa: 4 })
+    expect(roundtrip[0].style).toBeUndefined()
+    host.innerHTML = '<p data-pa="{&quot;style&quot;:&quot;ps1&quot;}"><span data-ch="{&quot;style&quot;:&quot;cs1&quot;}">outside</span></p>'
+    const untrusted = fromPM(DOMParser.fromSchema(schema).parse(host))
+    expect(untrusted[0].style).toBeUndefined(); expect(untrusted[0].runs[0].style).toBeUndefined()
+  })
+
+  it('links effective paragraph roles across local and parent text without reclassifying headings', () => {
+    const d = doc()
+    d.threads[0].paras.push({ style: 'ps2', runs: [{ t: 'Heading' }] }, { runs: [{ t: 'Body' }] })
+    d.identity!.parents = [{ id: 'pl1', name: 'Footer', size: d.size, items: [], threads: [d.threads[1]] }]
+    d.identity!.paragraphs.push({ ...d.identity!.paragraphs[2], id: 'ps4', name: 'New caption' })
+    const body = linkRole(d, 'ps1')
+    expect(body.threads[0].paras.map((p) => p.style)).toEqual(['ps3', 'ps2', 'ps1'])
+    const caption = linkRole(body, 'ps4')
+    expect(caption.threads[0].paras.map((p) => p.style)).toEqual(['ps4', 'ps2', 'ps1'])
+    expect(caption.identity!.parents[0].threads[0].paras[0].style).toBe('ps4')
+  })
+
+  it('keeps surviving character styles live when deleting their paragraph style', () => {
+    const d = doc(); d.threads[0].paras[0].runs.push({ t: 'Emphasis', style: 'cs1', size: 9 })
+    const before = resolveParas(d.threads[0].paras, d.identity)
+    const removed = removeStyle(d, 'paragraphs', 'ps3')
+    expect(resolveParas(removed.threads[0].paras, removed.identity)).toEqual(before)
+    expect(removed.threads[0].paras[0].runs[1].style).toBe('cs1')
+    removed.identity = { ...removed.identity!, characters: [{ ...removed.identity!.characters[0], char: { it: false } }] }
+    expect(resolveParas(removed.threads[0].paras, removed.identity)[0].runs[1].it).toBe(false)
+  })
+
+  it('keeps same-issue clipboard links after identity edits and flattens deleted definitions', () => {
+    const { store, ctx } = studio()
+    command('copy').run(ctx)
+    store.edit((d) => ({ ...d, identity: { ...d.identity!, paragraphs: d.identity!.paragraphs.map((p) => ({ ...p, char: { ...p.char, size: 24 } })) } }))
+    command('paste').run(ctx)
+    let d = store.get().doc
+    expect(d.threads.at(-1)!.paras[0].style).toBe('ps3')
+    expect(resolveParas(d.threads.at(-1)!.paras, d.identity)[0].runs[0].size).toBe(24)
+    store.edit((d) => removeStyle(d, 'paragraphs', 'ps3'))
+    command('paste').run(ctx); d = store.get().doc
+    expect(d.threads.at(-1)!.paras[0].style).toBeUndefined()
+    expect(resolveParas(d.threads.at(-1)!.paras, d.identity)[0].runs[0].size).toBe(8)
+  })
+
+  it('refuses canonical duplicate names and merges trimmed names consistently with the server', () => {
+    const d = doc(); d.identity!.characters.push({ id: 'cs2', name: 'Emphasis ', char: {} })
+    expect(docProblem(d)).toMatch(/distinct names/)
+    const target = doc(), source = starterIdentity(); source.characters[0].name = ' Emphasis '
+    expect(importIdentity(target, source).identity!.characters).toHaveLength(1)
+    expect(identityName(' \u0000Tide 📷\ud800 ')).toBe('Tide 📷')
+  })
+
+  it('bounds repeated parent composition, including empty lines with no character cost', () => {
+    const d = doc(); d.items = []; d.threads = []
+    d.identity!.parents = [{ id: 'pl1', name: 'Footer', size: d.size, items: [], threads: [{ id: 's1', frames: [], paras: [], comp: { lines: Array.from({ length: 8000 }, () => [0, 0, 0, 0, 0, 0, 0, 0]) } }] }]
+    d.pages = Array.from({ length: 4 }, (_, k) => ({ id: `p${k}`, parent: 'pl1' }))
+    expect(docProblem(d)).toMatch(/too many composed lines/)
+  })
+
+  it('keeps an accepted document safe when loaded fonts grow its parent composition beyond the byte limit', () => {
+    const d = doc(); d.items = []; d.threads = []; d.pages = [{ id: 'p1', parent: 'pl1' }]
+    d.identity!.parents = [{ id: 'pl1', name: 'Footer', size: d.size, items: [newItem('text', 'p1', 't1', { x: 0, y: 0, w: 2.1, h: 20000 })], threads: [{ id: 's1', frames: ['t1'], paras: [{ runs: [{ t: 'a '.repeat(25000), size: 1 }] }] }] }]
+    const { store } = studio(d), before = store.get().doc, save = vi.fn()
+    expect(docProblem(before)).toBeNull(); store.onDocChange = save
+    store.measure = { ...measure, width: (c, text) => text.length * c.size }
+    store.recompose()
+    expect(store.get().doc).toBe(before); expect(save).not.toHaveBeenCalled()
+    expect(store.get().notice).toMatch(/identity is too big/)
   })
 
   it('page numbers follow page order and overrides, and furniture never prints behind the paywall', () => {
@@ -166,6 +245,19 @@ describe('live magazine identities', () => {
 })
 
 describe('identity library and controls', () => {
+  it('retains palette linkage when changing stroke weight and detaches only an explicit colour edit', () => {
+    const d = doc(); d.items.push({ ...newItem('line', 'p1', 'l1', { x: 0, y: 0, w: 100, h: 0 }), stroke_swatch: 'sw3' })
+    const { store, ctx } = studio(d); store.set({ selection: ['l1'] })
+    render(<StudioContext.Provider value={ctx}><ObjectPanel /></StudioContext.Provider>)
+    fireEvent.change(screen.getByLabelText('Stroke weight'), { target: { value: '2pt' } }); fireEvent.blur(screen.getByLabelText('Stroke weight'))
+    expect(store.get().doc.items.at(-1)!.stroke_swatch).toBe('sw3')
+    act(() => store.edit((d) => ({ ...d, identity: { ...d.identity!, swatches: d.identity!.swatches.map((s) => s.id === 'sw3' ? { ...s, color: '#ff0000' } : s) } })))
+    expect(resolveItem(store.get().doc.items.at(-1)!, store.get().doc.identity)).toMatchObject({ stroke: { w: 2, c: '#ff0000' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Stroke colour: #ff0000' }))
+    fireEvent.change(screen.getByLabelText('Colour, as hex'), { target: { value: '#112233' } }); fireEvent.blur(screen.getByLabelText('Colour, as hex'))
+    expect(store.get().doc.items.at(-1)!.stroke_swatch).toBeUndefined()
+  })
+
   it('edits a caption style across an issue from the panel', async () => {
     const { store, ctx } = studio()
     render(<StudioContext.Provider value={ctx}><IdentityPanel /></StudioContext.Provider>)

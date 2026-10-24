@@ -469,18 +469,25 @@ def normalize_doc(raw: Any, bank: Optional[Mapping[str, dict]] = None) -> dict:
         # Recurring frames count too: a small stored parent must not bypass
         # the normal document/rendering limits through repetition.
         inherited_items = inherited_threads = inherited_chars = 0
+        def line_cost(t):
+            return len(t["comp"]["lines"]) if t.get("comp") is not None else len(t["paras"])
+
+        lines = sum(line_cost(t) for t in threads)
         for page in pages:
             parent = next((p for p in identity["parents"] if p["id"] == page.get("parent")), None)
             if parent:
                 inherited_items += len(parent["items"])
                 inherited_threads += len(parent["threads"])
                 inherited_chars += sum(len16(para_text(p)) for t in parent["threads"] for p in t["paras"])
+                lines += sum(line_cost(t) for t in parent["threads"])
                 if per_page.get(page["id"], 0) + len(parent["items"]) > L.MAX_ITEMS_PER_PAGE:
                     raise DocError("This page and its parent hold too many frames.")
         if len(items) + inherited_items > L.MAX_ITEMS or len(threads) + inherited_threads > L.MAX_THREADS:
             raise DocError("This story and its parents hold too many frames or separate texts.")
         if L.MAX_DOC_CHARS - budget[0] + inherited_chars > L.MAX_DOC_CHARS:
             raise DocError("This story and its parents hold too much text.")
+        if lines > L.MAX_LINES:
+            raise DocError("This story and its parents hold too many composed lines.")
     if len(json.dumps(out, separators=(",", ":"))) > L.MAX_DOC_BYTES:
         raise DocError("This story is too big to save. Split it into two.")
     return out

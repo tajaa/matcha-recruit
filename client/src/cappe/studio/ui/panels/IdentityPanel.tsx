@@ -3,8 +3,8 @@ import { Plus, Trash2 } from 'lucide-react'
 import FontField from '../../../magazine/workspace/FontField'
 import { ColorField, NumberField, Row, Section, Select } from '../../../magazine/workspace/controls'
 import { allIds, charOf, newId } from '../../model/doc'
-import { captureParent, detachParent, importIdentity, removeStyle, removeSwatch, starterIdentity, IDENTITY_LIMITS } from '../../model/identity'
-import { applyPara, updateItems } from '../../model/ops'
+import { captureParent, detachParent, importIdentity, linkRole, removeStyle, removeSwatch, starterIdentity, IDENTITY_LIMITS } from '../../model/identity'
+import { updateItems } from '../../model/ops'
 import type { CharAttrs, Doc, MagazineIdentity, ParaAttrs } from '../../model/types'
 import { useStudio } from '../../store/store'
 import { useCtx } from '../context'
@@ -99,19 +99,31 @@ export function IdentityPanel() {
         onChange={(char) => updateStyle({ char })} />
           {paragraph && <>
             <Select label="Alignment" value={paragraph.para.align ?? 'l'}
-        options={[{ key: 'l', label: 'Left' }, { key: 'c', label: 'Centre' }, { key: 'r', label: 'Right' }, { key: 'j', label: 'Justify' }]}
+        options={[{ key: 'l', label: 'Left' }, { key: 'c', label: 'Centre' }, { key: 'r', label: 'Right' }, { key: 'j', label: 'Justify' }, { key: 'ja', label: 'Justify all lines' }]}
         onChange={(align) => updateStyle({ para: { ...paragraph.para, align } })} />
             <Row>
       <NumberField label="Leading" value={paragraph.para.lead ?? 0} min={0} max={2000}
         onChange={(lead) => updateStyle({ para: { ...paragraph.para, lead } })} />
+      <NumberField label="Space before" value={paragraph.para.sb ?? 0} min={0} max={1000}
+        onChange={(sb) => updateStyle({ para: { ...paragraph.para, sb } })} />
+      </Row>
+            <Row>
       <NumberField label="Space after" value={paragraph.para.sa ?? 0} min={0} max={1000}
         onChange={(sa) => updateStyle({ para: { ...paragraph.para, sa } })} />
+      <NumberField label="First line indent" value={paragraph.para.fi ?? 0} min={-(paragraph.para.li ?? 0)} max={1000}
+        onChange={(fi) => updateStyle({ para: { ...paragraph.para, fi } })} />
+      </Row>
+            <Row>
+      <NumberField label="Left indent" value={paragraph.para.li ?? 0} min={0} max={1000}
+        onChange={(li) => updateStyle({ para: { ...paragraph.para, li } })} />
+      <NumberField label="Right indent" value={paragraph.para.ri ?? 0} min={0} max={1000}
+        onChange={(ri) => updateStyle({ para: { ...paragraph.para, ri } })} />
       </Row>
             <Select label="Paragraph role" value={paragraph.para.role ?? 'p'}
         options={[{ key: 'p', label: 'Body' }, { key: 'h1', label: 'Headline' }, { key: 'h2', label: 'Heading' }, { key: 'h3', label: 'Subheading' }, { key: 'caption', label: 'Caption' }, { key: 'quote', label: 'Quote' }]}
         onChange={(role) => updateStyle({ para: { ...paragraph.para, role } })} />
             <button className={button}
-        onClick={() => edit((d) => ({ ...d, threads: d.threads.map((t) => ({ ...t, paras: t.paras.map((p) => (p.role ?? 'p') === (paragraph.para.role ?? 'p') ? applyPara([p], 0, 0, { style: style.id })[0] : p) })) }))}>Link all {paragraph.para.role ?? 'body'} paragraphs</button>
+        onClick={() => edit((d) => linkRole(d, paragraph.id))}>Link all {paragraph.para.role === 'p' ? 'body' : paragraph.para.role ?? 'body'} paragraphs</button>
           </>}
           <button className={`${button} flex items-center gap-1`}
         onClick={() => { edit((d) => removeStyle(d, tab === 'paragraphs' ? 'paragraphs' : 'characters', style.id)); select('') }}>
@@ -197,6 +209,11 @@ function StyleFields({ value, identity, onChange }: { value: CharAttrs; identity
     <label className="flex gap-2 text-[11px]">
       <input type="checkbox" checked={full.it}
         onChange={(e) => onChange({ ...value, it: e.target.checked })} />Italic</label>
+    <label className="flex gap-2 text-[11px]">
+      <input type="checkbox" checked={full.u}
+        onChange={(e) => onChange({ ...value, u: e.target.checked })} />Underline</label>
+    <NumberField label="Style tracking" value={full.track} min={-500} max={2000} places={0}
+        onChange={(track) => onChange({ ...value, track })} />
     <Select label="Style palette colour" value={value.swatch ?? ''}
         options={[{ key: '', label: 'Custom colour' }, ...identity.swatches.map((s) => ({ key: s.id, label: s.name }))]}
         onChange={(swatch) => onChange({ ...value, swatch: swatch || undefined })} />

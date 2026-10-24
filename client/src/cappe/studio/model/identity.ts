@@ -1,8 +1,9 @@
 // References stay in the editable document. Only composition and rendering
 // receive resolved attributes, so saving/typing cannot freeze an inherited style.
-import { CHAR_KEYS, allIds, charOf, newId, paraOf, sparseChar, sparsePara } from './doc'
+import { CHAR_KEYS, allIds, charOf, newId, paraOf, sparsePara } from './doc'
 import type { CharAttrs, Doc, Item, MagazineIdentity, Para, ParentLayout, Thread } from './types'
-import { LIMITS, round } from './limits'
+import { identityName, LIMITS, round } from './limits'
+import { applyPara } from './ops'
 
 export const IDENTITY_LIMITS = { styles: 32, swatches: 24, parents: 8, parentItems: 80, bytes: 500_000 } as const
 
@@ -127,7 +128,19 @@ export function removeStyle(doc: Doc, kind: 'paragraphs' | 'characters', id: str
   if (!doc.identity) return doc
   const clean = (threads: Thread[]) => threads.map((t) => ({ ...t, paras: t.paras.map((p) => {
     const shown = resolveParas([p], doc.identity)[0]
-    if (kind === 'paragraphs' && p.style === id) return { ...sparsePara(shown), runs: shown.runs.map((r) => ({ t: r.t, ...sparseChar(r) })) }
+    if (kind === 'paragraphs' && p.style === id) {
+      const base = doc.identity!.paragraphs.find((s) => s.id === id)?.char ?? {}
+      return { ...sparsePara(shown), runs: p.runs.map((r) => {
+        const inherited = { ...base }, character = doc.identity!.characters.find((s) => s.id === r.style)?.char
+        // Materialize only the deleted paragraph's contribution. Existing
+        // character styles and local overrides retain their precedence.
+        if (character) {
+          for (const key of Object.keys(character) as (keyof CharAttrs)[]) delete inherited[key]
+          if (character.color !== undefined || character.swatch !== undefined) { delete inherited.color; delete inherited.swatch }
+        }
+        return { ...inherited, ...r }
+      }) }
+    }
     return { ...p, runs: p.runs.map((r, k) => kind === 'characters' && r.style === id ? { t: r.t, ...Object.fromEntries(CHAR_KEYS.map((key) => [key, shown.runs[k][key]])) } : r) }
   }) }))
   return { ...doc, threads: clean(doc.threads), identity: { ...doc.identity,
@@ -142,7 +155,7 @@ export function importIdentity(doc: Doc, source: MagazineIdentity): Doc {
   for (const kind of ['paragraphs', 'characters', 'swatches', 'parents'] as const) {
     const used = target[kind].map((s) => s.id)
     for (const row of source[kind]) {
-      const match = target[kind].find((s) => s.name.toLowerCase() === row.name.toLowerCase())
+      const match = target[kind].find((s) => identityName(s.name).toLowerCase() === identityName(row.name).toLowerCase())
       const id = match?.id ?? newId(kind === 'paragraphs' ? 'ps' : kind === 'characters' ? 'cs' : kind === 'swatches' ? 'sw' : 'pl', used)
       used.push(id); maps[kind].set(row.id, id)
     }
@@ -182,4 +195,14 @@ export function removeSwatch(doc: Doc, id: string): Doc {
   visit(out)
   out.identity!.swatches = out.identity!.swatches.filter((s) => s.id !== id)
   return out
+}
+
+export function linkRole(doc: Doc, id: string): Doc {
+  const identity = doc.identity, style = identity?.paragraphs.find((p) => p.id === id)
+  if (!identity || !style) return doc
+  const link = (threads: Thread[]) => threads.map((t) => {
+    const shown = resolveParas(t.paras, identity)
+    return { ...t, paras: t.paras.map((p, k) => shown[k].role === (style.para.role ?? 'p') ? applyPara([p], 0, 0, { style: id })[0] : p) }
+  })
+  return { ...doc, threads: link(doc.threads), identity: { ...identity, parents: identity.parents.map((p) => ({ ...p, threads: link(p.threads) })) } }
 }

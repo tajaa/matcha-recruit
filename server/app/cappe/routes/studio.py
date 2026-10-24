@@ -24,6 +24,8 @@ from typing import Annotated, Any, Literal, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.exceptions import RequestValidationError
+from fastapi.routing import APIRoute
 from pydantic import BaseModel, Field
 
 from ...core.services.redis_cache import check_rate_limit
@@ -49,6 +51,24 @@ KEEP_REVISIONS = 50
 NOT_PAGES = "This story isn't made of pages. Open it in the story editor."
 
 
+class _IdentityRoute(APIRoute):
+    def get_route_handler(self):
+        handler = super().get_route_handler()
+
+        async def safe_validation(request):
+            try:
+                return await handler(request)
+            except RequestValidationError as exc:
+                # Invalid JSON values may contain lone UTF-16 surrogates.
+                # Echoing their Pydantic input in JSONResponse can itself fail.
+                raise HTTPException(status_code=422, detail="Invalid magazine identity request.") from exc
+
+        return safe_validation
+
+
+identity_router = APIRouter(route_class=_IdentityRoute)
+
+
 class StudioIdentitySave(BaseModel):
     base_rev: int = Field(ge=0)
     identity: dict[str, Any]
@@ -60,7 +80,7 @@ def _identity_record(row):
     return {"rev": row["rev"], "identity": json.loads(row["identity"]) if isinstance(row["identity"], str) else row["identity"]}
 
 
-@router.get("/sites/{site_id}/studio/identity")
+@identity_router.get("/sites/{site_id}/studio/identity")
 async def open_identity(site_id: UUID, account: CappeAccount = Depends(require_cappe_account)):
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
@@ -68,7 +88,7 @@ async def open_identity(site_id: UUID, account: CappeAccount = Depends(require_c
     return _identity_record(row)
 
 
-@router.put("/sites/{site_id}/studio/identity")
+@identity_router.put("/sites/{site_id}/studio/identity")
 async def save_identity(site_id: UUID, body: StudioIdentitySave, account: CappeAccount = Depends(require_cappe_account)):
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
@@ -94,6 +114,9 @@ async def save_identity(site_id: UUID, body: StudioIdentitySave, account: CappeA
                 site_id, saved["rev"], json.dumps(identity),
             )
     return saved
+
+
+router.include_router(identity_router)
 
 
 class StudioSave(BaseModel):

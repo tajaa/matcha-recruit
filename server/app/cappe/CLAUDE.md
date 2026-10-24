@@ -691,7 +691,9 @@ normalized paragraphs itself; a thread with no valid composition prints its word
   carry a visual system of named paragraph/character styles, swatches, parent layouts and page furniture.
   Raw paragraphs/runs retain style references plus explicit local overrides (including default/false values).
   Composition, both renderers, font discovery and Text view resolve the same cascade. Parent snapshots
-  exclude site photo IDs/captions and cross-page text; inherited frames/text count toward document limits.
+  exclude site photo IDs/captions and cross-page text; applied parent text remains in Text view, feeds and
+  search, with hidden-frame and paywall handling. Inherited frames/text count toward document limits;
+  identity documents also cap total rendered lines (or fallback paragraphs) at 30,000 after repetition.
   Parents render behind local content; subscriber-only pages omit them and their furniture entirely.
   Numbers follow page order; headers and visibility can vary per page. The account-owned site endpoints
   `GET/PUT /sites/{id}/studio/identity` store a private `{rev,identity}` in `cappe_studio_identities`
@@ -702,6 +704,8 @@ normalized paragraphs itself; a thread with no valid composition prints its word
   by name and republishing. Limits: 32 paragraph/character styles, 24 swatches, 8 parents, 80 frames per
   parent, 500 KB identity. All normal Studio draft/revision/publish protections remain in force. Identity documents require
   `identity_version:1` on save/discard/restore; older open clients get a reload-required 409 before a write.
+  Keep identity-aware application code on rollback while snapshots remain in live/draft/revision JSON;
+  the table downgrade guard protects saved templates, not those document snapshots.
 - **Studio bank** (Gummfit-curated, cappemag11: `studio/bank.py`, `routes/studio_bank_admin.py` at
   `/matcha-admin/studio-bank` behind matcha `require_admin`; admin UI hey-matcha.com/admin/cappe → Studio bank;
   client `ui/add/bank.ts`, `BankPhotos.tsx`): photos and graphics every site's Studio shows first (Photos →

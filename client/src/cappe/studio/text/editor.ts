@@ -17,7 +17,7 @@ import { applyChar, applyPara, charAt, order, setParas, type Pos } from '../mode
 import type { CharAttrs, Para, ParaAttrs, Thread } from '../model/types'
 import type { Store } from '../store/store'
 import { caretAt, lineEls, offsetAtX } from './caret'
-import { attrsOf, emptyAttrsOf, fromPM, locOf, markFor, portableSlice, posOf, schema, toPM } from './pm'
+import { attrsOf, emptyAttrsOf, fromPM, locOf, markFor, paraAttrsOf, portableSlice, posOf, schema, toPM } from './pm'
 
 const HIDDEN = 'position:fixed;left:0;top:0;width:1px;height:1em;opacity:0;overflow:hidden;white-space:pre-wrap;z-index:-1;pointer-events:none'
 const SHOWN = 'white-space:pre-wrap;outline:none;min-height:100%;padding:12px 14px;font:15px/1.6 Georgia,serif;color:#e4e4e7'
@@ -67,7 +67,7 @@ export class TextEditor {
       this.view = new EditorView(this.host, {
         state: state.apply(state.tr.setSelection(sel)),
         dispatchTransaction: (tr) => this.dispatch(tr),
-        transformCopied: (slice) => portableSlice(slice, this.store.get().doc.identity),
+        transformCopied: (slice, view) => portableSlice(slice, this.store.get().doc.identity, paraAttrsOf(view.state.selection.$from.parent)),
         attributes: { spellcheck: 'true', autocorrect: 'on' },
       })
     } else this.view.updateState(state.apply(state.tr.setSelection(sel)))

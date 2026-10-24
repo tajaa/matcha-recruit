@@ -9,7 +9,7 @@ from uuid import uuid4
 import pytest
 
 from app.cappe.routes import studio
-from app.cappe.services.magazine.studio import identity as I, schema as S, render as R, text_view as T
+from app.cappe.services.magazine.studio import bank as B, identity as I, schema as S, render as R, text_view as T
 from tests._helpers.routes import route_client
 from tests.cappe.test_cappe_magazine_routes import ACCOUNT, SITE, SITE_ROW, Conn, Ctx, _blog_client, _owner_conn, _returning
 from tests.cappe.test_cappe_magazine_routes import invalidated  # noqa: F401
@@ -80,6 +80,50 @@ def test_repeating_a_parent_cannot_bypass_thread_or_text_limits():
     raw = document(); raw["pages"] = [{"id": f"p{k}", "parent": "pl1"} for k in range(1, 202)]
     with pytest.raises(S.DocError, match="parents hold too many"):
         S.normalize_doc(raw)
+
+
+@pytest.mark.parametrize('composed', [True, False])
+def test_repeating_empty_composed_lines_cannot_amplify_rendering_work(composed):
+    raw = document(); raw['items'] = []; raw['threads'] = []
+    parent = raw['identity']['parents'][0]
+    parent['threads'][0]['paras'] = [{'runs': [{'t': ''}]}] * (1 if composed else 8000)
+    if composed:
+        parent['threads'][0]['comp'] = {'lines': [[0, 0, 0, 0, 0, 0, 0, 0]] * 8000}
+    raw['pages'] = [{'id': f'p{k}', 'parent': 'pl1'} for k in range(4)]
+    with pytest.raises(S.DocError, match='too many composed lines'):
+        S.normalize_doc(raw)
+
+
+def test_parent_capture_preserves_semantic_text_and_repeated_instances_respect_hidden_frames_and_paywalls():
+    raw = document(); raw['items'] = []; raw['threads'] = []
+    raw['pages'] = [{'id': 'p1', 'parent': 'pl1'}, {'id': 'p2', 'parent': 'pl1'}]
+    raw['identity']['parents'][0]['threads'][0]['paras'] = [{'style': 'ps1', 'runs': [{'t': 'Visible article words.'}]}]
+    doc = S.normalize_doc(raw)
+    blocks = T.text_blocks(doc, paywall=2)
+    wall = next(k for k, b in enumerate(blocks) if b['type'] == 'paywall')
+    assert 'Visible article words.' in json.dumps(blocks[:wall])
+    assert 'Visible article words.' in json.dumps(blocks[wall + 1:])
+    doc['identity']['parents'][0]['items'][0]['hidden'] = True
+    assert all('Visible article words.' not in json.dumps(b) for b in T.text_blocks(doc))
+
+
+@pytest.mark.asyncio
+async def test_graphic_lookup_includes_unused_parent_definitions_at_the_local_frame_limit():
+    shas = [f'{n:064x}' for n in range(S.L.MAX_ITEMS + 1)]
+    items = [{'kind': 'graphic', 'src': sha} for sha in shas]
+    raw = {'items': items[:-1], 'identity': {'parents': [{'items': items[-1:]}]}}
+    conn = Conn(fetch={'FROM cappe_studio_bank': [{'sha': s, 'mono': True, 'fit': 'contain'} for s in shas]})
+    found = await B.doc_graphics(conn, raw)
+    assert len(found) == len(shas) and shas[-1] in found
+
+
+@pytest.mark.parametrize('body', [{'base_rev': 0, 'identity': '\ud800'}, {'base_rev': '\udfff', 'identity': {}}, {'identity': {'bad': '\ud800'}}])
+def test_malformed_unicode_request_values_return_422_without_database_access(monkeypatch, body):
+    conn = Conn()
+    with client_for(monkeypatch, conn) as client:
+        response = client.put(f'/sites/{SITE}/studio/identity', content=json.dumps(body), headers={'Content-Type': 'application/json'})
+    assert response.status_code == 422
+    assert conn.calls == []
 
 
 def test_rendering_follows_styles_palette_parent_numbers_and_page_overrides_without_paywall_leaks():

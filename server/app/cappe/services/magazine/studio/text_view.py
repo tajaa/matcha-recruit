@@ -129,11 +129,33 @@ def _thread_paras(doc: dict, paywall: Optional[int]) -> dict[str, list[dict]]:
     return out
 
 
+def _with_parents(doc: dict) -> dict:
+    """Applied parent text is visible story content too. Give every instance
+    local frame IDs so reading order, hidden frames and paywalls work exactly
+    as they do before capture or after detaching the parent."""
+    parents = {p["id"]: p for p in (doc.get("identity") or {}).get("parents", [])}
+    if not parents:
+        return doc
+    items, threads = [], []
+    for index, page in enumerate(doc.get("pages") or []):
+        parent = parents.get(page.get("parent"))
+        if not parent:
+            continue
+        prefix = f"parent:{index}:"
+        ids = {i["id"]: prefix + i["id"] for i in parent["items"]}
+        scale = min(doc["size"]["w"] / parent["size"]["w"], doc["size"]["h"] / parent["size"]["h"])
+        items.extend({**i, "id": ids[i["id"]], "page": page["id"],
+                      **{k: i[k] * scale for k in ("x", "y", "w", "h")}} for i in parent["items"])
+        threads.extend({**t, "id": prefix + t["id"], "frames": [ids[f] for f in t["frames"]]} for t in parent["threads"])
+    return {**doc, "items": items + (doc.get("items") or []), "threads": threads + (doc.get("threads") or [])}
+
+
 def text_blocks(doc: dict, paywall: Optional[int] = None) -> list[dict]:
     """The story as blocks, in reading order (see the module). `paywall`: the
     first page for subscribers (`schema.paywall_from`), marked where its
     words start; None reads every page through (the story's word count and
     `body`)."""
+    doc = _with_parents(doc)
     doc = {**doc, "threads": resolved_threads(doc)}
     blocks: list[dict] = []
     cover = cover_image(doc)

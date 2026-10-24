@@ -12,6 +12,7 @@
 .lyt-lock{margin:0;font:600 13px/1.4 system-ui,-apple-system,sans-serif;letter-spacing:.08em;text-transform:uppercase;color:rgba(0,0,0,.45)}
 .lyt a.lyt-lock-go{font:600 15px/1.4 system-ui,-apple-system,sans-serif;color:#1a1a1a;text-decoration:underline;text-underline-offset:3px}
 .lyt-item{position:absolute;box-sizing:border-box;margin:0;padding:0}
+.lyt-furniture{color:#1a1a1a;font-weight:normal;font-style:normal;font-synthesis:none;font-optical-sizing:none}
 .lyt-img{overflow:hidden}
 .lyt-pic{position:absolute;inset:0;display:block;width:100%;height:100%;max-width:none;margin:0}
 .lyt-credit{position:absolute;right:0;bottom:0;max-width:100%;padding:2px 5px;font:500 9px/1.3 system-ui,-apple-system,sans-serif;color:#fff;text-shadow:0 0 3px rgba(0,0,0,.8);text-align:right;opacity:.85}
