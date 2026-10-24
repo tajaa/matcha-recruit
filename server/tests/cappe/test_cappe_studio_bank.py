@@ -17,13 +17,17 @@ What each block pins:
     when it is built in), a photo stored with its sizes; a graphic can't be
     deleted or given a credit; every change is audited;
   * the public routes: the live picks, and a bank graphic's file served like
-    a built-in one.
+    a built-in one;
+  * seeding (scripts/seed_studio_bank_photos.py): big photos only, each
+    once, each shown to Claude first (left out when it says no, or can't
+    say); each stored with its sizes, credit, licence, collection and rank.
 
 Run from server/:  ./venv/bin/python -m pytest tests/cappe/test_cappe_studio_bank.py -q
 """
 import hashlib
 import json
 import re
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -388,3 +392,243 @@ def test_the_live_picks_and_a_bank_graphics_file(monkeypatch, tmp_path):
         assert client.get(f"/public/graphics/stretch/{sha}.svg").content.startswith(b'<svg preserveAspectRatio="none"')
         assert client.get(f"/public/graphics/{'d' * 64}.svg").status_code == 404
         assert client.get("/public/graphics/not-a-sha.svg").status_code == 404
+
+
+# ── seeding the library with free stock photos ──────────────────────────────
+
+def _seeder():
+    import importlib.util
+    path = Path(__file__).resolve().parents[2] / "scripts" / "seed_studio_bank_photos.py"
+    spec = importlib.util.spec_from_file_location("seed_studio_bank_photos", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _stock(n, **over):
+    from app.cappe.services.magazine.sources.base import StockResult
+    return StockResult(**{
+        "source": "openverse", "source_id": f"id{n}", "title": f"Latte {n}", "creator": "Ana Ruiz", "license": "cc0",
+        "license_version": "1.0", "license_url": "", "provider_label": "StockSnap.io",
+        "landing_url": f"https://stocksnap.io/photo/{n}", "image_url": f"https://cdn.stocksnap.io/{n}.jpg",
+        "thumb_url": "", "width": 4000, "height": 2667, "credit_line": "Photo: Ana Ruiz / CC0 via StockSnap.io",
+        "tags": ["coffee", "Latte"], **over})
+
+
+def _fresh(monkeypatch, **over):
+    """The archive's answer when a photo is looked up again before download:
+    the same photo, changed by `over` (None: it's gone)."""
+    from app.cappe.services.magazine import sources
+
+    async def resolve(source, source_id, *, fresh=False):
+        assert fresh, "the seeder must ask the archive itself, not the day-old cache"
+        if over.get("gone"):
+            return None
+        return _stock(int(source_id[2:]), **{k: v for k, v in over.items() if k != "gone"})
+
+    monkeypatch.setattr(sources, "resolve", resolve)
+
+
+def _seed_store_mocks(monkeypatch):
+    import app.core.services.safe_fetch as safe_fetch
+    fetched = []
+
+    async def fetch(url, **kw):
+        fetched.append(url)
+        return SimpleNamespace(status=200, truncated=False, body=b"JPEG", content_type="image/jpeg")
+
+    monkeypatch.setattr(safe_fetch, "fetch_public", fetch)
+    monkeypatch.setattr(media, "process_image", lambda data, mime, derivatives: object())
+    stored = media.StoredImage(url="https://cdn.example.test/bank/1.jpg", mime="image/jpeg", width=1600, height=1067,
+                               bytes=900, variants={"webp": [{"w": 480, "url": "https://cdn.example.test/bank/1-480.webp"}],
+                                                    "share": {"w": 1200, "url": "https://cdn.example.test/bank/1.share.jpg"}})
+    upload = AsyncMock(return_value=stored)
+    monkeypatch.setattr(media, "store_processed", upload)
+    return fetched, upload
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("now", [{"gone": True}, {"license": "by"}, {"license": "by-nc"}])
+async def test_seeding_skips_a_photo_no_longer_free_at_its_archive(monkeypatch, now):
+    seed = _seeder()
+    fetched, upload = _seed_store_mocks(monkeypatch)
+    _fresh(monkeypatch, **now)
+    conn = Conn(fetchrow={"INSERT INTO cappe_studio_bank": PHOTO})
+    assert await seed.store(conn, _stock(7), "Coffee", "coffee", 0, None) is None
+    assert fetched == [] and upload.await_count == 0 and conn.calls == []
+
+
+@pytest.mark.asyncio
+async def test_seeding_credits_what_the_archive_says_now_cut_to_the_banks_columns(monkeypatch):
+    seed = _seeder()
+    _seed_store_mocks(monkeypatch)
+    _fresh(monkeypatch, creator="A" * 300, title="New title", license="pdm")
+    conn = Conn(fetchrow={"INSERT INTO cappe_studio_bank": PHOTO})
+    assert await seed.store(conn, _stock(7), "Coffee", "coffee", 0, None) == bank.row(PHOTO)
+    args = conn.calls[0][2]
+    assert args[0] == "New title" and args[9] == "A" * bank.MAX_CREATOR and args[11] == "pdm"
+    assert len(args[10]) <= bank.MAX_CREDIT
+
+
+@pytest.mark.asyncio
+async def test_seeding_a_photo_the_bank_refuses_takes_its_files_back_and_goes_on(monkeypatch):
+    import asyncpg
+    from app.core.services import storage as storage_mod
+    seed = _seeder()
+    _seed_store_mocks(monkeypatch)
+    _fresh(monkeypatch)
+    deleted = []
+    monkeypatch.setattr(storage_mod, "get_storage", lambda: SimpleNamespace(delete_file=AsyncMock(side_effect=deleted.append)))
+
+    class Refusing(Conn):
+        async def fetchrow(self, sql, *args):
+            raise asyncpg.StringDataRightTruncationError("value too long")
+
+    assert await seed.store(Refusing(), _stock(7), "Coffee", "coffee", 0, None) is None
+    assert deleted == ["https://cdn.example.test/bank/1.jpg", "https://cdn.example.test/bank/1-480.webp",
+                       "https://cdn.example.test/bank/1.share.jpg"]
+
+
+@pytest.mark.asyncio
+async def test_seeding_caches_its_searches_in_redis_and_names_topics_left_over(monkeypatch, capsys):
+    from app.cappe.services.magazine import sources
+    from app.core.services import redis_cache
+    import app.database as database
+    seed = _seeder()
+    monkeypatch.setattr(seed, "SEARCH_GAP", 0)
+    opened, closed = [], []
+
+    async def init(url):
+        opened.append(url)
+
+    async def close():
+        closed.append(True)
+
+    monkeypatch.setattr(redis_cache, "init_redis_cache", init)
+    monkeypatch.setattr(redis_cache, "close_redis_cache", close)
+    monkeypatch.setattr(database, "init_pool", AsyncMock())
+    monkeypatch.setattr(database, "close_pool", AsyncMock())
+    monkeypatch.setattr(database, "get_connection", lambda: Ctx(Conn(fetch={"SELECT source_url": []})))
+    monkeypatch.setattr(seed, "load_settings", lambda: SimpleNamespace(database_url="postgresql://x", database_ssl=None,
+                                                                       redis_url="redis://cache.test:6379/0"))
+
+    async def search_page(source, q, page):
+        if q == "coffee":
+            return [_stock(1)], False
+        raise sources.SourceError("429")
+
+    monkeypatch.setattr(sources, "search_page", search_page)
+    assert await seed.main(["Coffee", "Food"], 1, 1000, True, False) == 0
+    assert opened == ["redis://cache.test:6379/0"] and closed == [True]
+    assert "Openverse stopped answering for: Food" in capsys.readouterr().out
+
+
+def test_seeding_keeps_big_photos_each_once():
+    seed = _seeder()
+    taken = {"https://stocksnap.io/photo/1"}  # already in the bank
+    batch = [_stock(1), _stock(2), _stock(3, width=1200, height=800), _stock(4, width=None), _stock(2), _stock(5), _stock(6)]
+    assert [r.source_id for r in seed.pick(batch, taken, 2)] == ["id2", "id5"]
+    assert [r.source_id for r in seed.pick(batch, taken, 9)] == ["id6"]  # the rest were taken
+    assert seed.TOPICS["Coffee"] == "coffee" and len(seed.TOPICS) >= 12
+
+
+@pytest.mark.asyncio
+async def test_seeding_stores_each_photo_with_its_sizes_credit_and_rank(monkeypatch):
+    import app.core.services.safe_fetch as safe_fetch
+    seed = _seeder()
+    asked = []
+
+    async def fetch(url, **kw):
+        asked.append(url)
+        return SimpleNamespace(status=200, truncated=False, body=b"JPEG", content_type="image/jpeg")
+
+    monkeypatch.setattr(safe_fetch, "fetch_public", fetch)
+    monkeypatch.setattr(media, "process_image", lambda data, mime, derivatives: object())
+    stored = media.StoredImage(url="https://cdn.example.test/bank/1.jpg", mime="image/jpeg", width=1600,
+                               height=1067, bytes=900, variants={"webp": []})
+    monkeypatch.setattr(media, "store_processed", AsyncMock(return_value=stored))
+    _fresh(monkeypatch)
+    conn = Conn(fetchrow={"INSERT INTO cappe_studio_bank": PHOTO})
+    assert await seed.store(conn, _stock(7), "Coffee", "coffee", 3, None) == bank.row(PHOTO)
+    assert asked == ["https://cdn.stocksnap.io/7.jpg"]
+    assert media.store_processed.await_args.kwargs["prefix"] == "cappe/bank"
+    args = conn.calls[0][2]
+    assert (args[0], args[1], args[2]) == ("Latte 7", ["coffee", "latte"], "Coffee")
+    assert args[9:15] == ("Ana Ruiz", "Photo: Ana Ruiz / CC0 via StockSnap.io", "cc0", "https://stocksnap.io/photo/7",
+                          seed.SEEDER, 3)
+
+    async def html(url, **kw):
+        return SimpleNamespace(status=200, truncated=False, body=b"<html>", content_type="text/html")
+
+    monkeypatch.setattr(safe_fetch, "fetch_public", html)
+    assert await seed.store(Conn(), _stock(8), "Coffee", "coffee", 0, None) is None  # not a picture: skipped
+
+
+@pytest.mark.asyncio
+async def test_seeding_tries_a_slow_search_again_then_leaves_its_topic(monkeypatch):
+    from app.cappe.services.magazine import sources
+    seed = _seeder()
+    monkeypatch.setattr(seed, "SEARCH_GAP", 0)
+    answers = [sources.SourceError("ReadTimeout"), ([_stock(1)], True)]
+
+    async def search_page(source, q, page):
+        answer = answers.pop(0) if answers else sources.SourceError("ReadTimeout")
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    monkeypatch.setattr(sources, "search_page", search_page)
+    assert (await seed.search("coffee", 0))[0][0].source_id == "id1"  # second try
+    assert await seed.search("coffee", 1) is None  # three slow answers: left for a re-run
+
+
+
+def _jpeg(w=2400, h=1600) -> bytes:
+    import io
+    from PIL import Image
+    out = io.BytesIO()
+    Image.new("RGB", (w, h), (200, 120, 60)).save(out, "JPEG")
+    return out.getvalue()
+
+
+@pytest.mark.asyncio
+async def test_seeding_keeps_only_what_claude_says_any_business_could_publish(monkeypatch):
+    import io
+    import app.core.services.safe_fetch as safe_fetch
+    from PIL import Image
+    from app.core.services import anthropic_messages
+    seed = _seeder()
+    body = _jpeg()
+    with Image.open(io.BytesIO(seed.preview(body))) as small:
+        assert max(small.size) == seed.PREVIEW_SIDE and small.format == "JPEG"
+
+    async def fetch(url, **kw):
+        return SimpleNamespace(status=200, truncated=False, body=body, content_type="image/jpeg")
+
+    shown = []
+
+    async def verdict(prompt, **kw):
+        shown.append(kw)
+        return verdicts.pop(0)
+
+    monkeypatch.setattr(safe_fetch, "fetch_public", fetch)
+    monkeypatch.setattr(anthropic_messages, "generate_text", verdict)
+    _fresh(monkeypatch)
+    monkeypatch.setattr(media, "process_image", lambda data, mime, derivatives: object())
+    monkeypatch.setattr(media, "store_processed", AsyncMock(return_value=media.StoredImage(
+        url="https://cdn.example.test/bank/1.jpg", mime="image/jpeg", width=1600, height=1067, bytes=9, variants={})))
+    verdicts = ['{"ok": false, "reason": "suggestive pose"}', '{"ok": true, "reason": "a cafe"}']
+    left_out = Conn()
+    assert await seed.store(left_out, _stock(9), "People", "people", 0, "claude-haiku") is None
+    assert left_out.calls == [] and media.store_processed.await_count == 0  # never stored
+    kept = Conn(fetchrow={"INSERT INTO cappe_studio_bank": PHOTO})
+    assert await seed.store(kept, _stock(10), "Coffee", "coffee", 0, "claude-haiku") is not None
+    assert shown[0]["model"] == "claude-haiku" and shown[0]["system"] == seed.SCREEN and shown[0]["json_output"]
+    assert shown[0]["attachments"][0]["type"] == "image"
+
+    async def broken(prompt, **kw):
+        raise RuntimeError("overloaded")
+
+    monkeypatch.setattr(anthropic_messages, "generate_text", broken)
+    assert await seed.suitable("claude-haiku", body) == (False, "couldn't be checked (RuntimeError)")
+    assert (await seed.suitable("claude-haiku", b"not a picture"))[0] is False

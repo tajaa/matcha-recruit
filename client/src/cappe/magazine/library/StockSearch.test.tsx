@@ -66,7 +66,8 @@ describe('StockSearch', () => {
     render(<StockSearch siteId="s-1" onImported={vi.fn()} />)
     await searchFor(' street fashion ')
     const list = await screen.findByRole('list', { name: 'Results' })
-    expect(api.get).toHaveBeenCalledWith('/sites/s-1/library/search?source=openverse&q=street+fashion&page=0')
+    // Free photos (Openverse's CC0 stock collections) come first.
+    expect(api.get).toHaveBeenCalledWith('/sites/s-1/library/search?source=stock&q=street+fashion&page=0')
     expect(within(list).getByText('CC BY 2.0')).toBeInTheDocument()
     expect(within(list).getByText('CC0')).toBeInTheDocument()
     expect(within(list).getAllByText(/by Giuseppe Milo \/ CC BY 2.0 via Flickr/)).toHaveLength(2)

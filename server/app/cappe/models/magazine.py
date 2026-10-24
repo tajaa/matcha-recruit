@@ -121,6 +121,9 @@ class CappeStoryOptions(BaseModel):
 
 # ── Open imagery (cappemag03) ───────────────────────────────────────────────
 StockSource = Literal["openverse", "smithsonian", "met", "nasa"]
+# What can be searched: the archives, and `stock` (Openverse's CC0 stock-photo
+# collections, whose results are Openverse's; imports never name it).
+StockSearchSource = Literal["stock", "openverse", "smithsonian", "met", "nasa"]
 
 
 class CappeStockResult(BaseModel):
@@ -143,7 +146,7 @@ class CappeStockResult(BaseModel):
 
 
 class CappeStockSearch(BaseModel):
-    source: StockSource
+    source: StockSearchSource
     query: str
     page: int
     results: list[CappeStockResult]
@@ -407,6 +410,7 @@ __all__ = [
     "CappeStoryLayoutInfo",
     "CappeStoryOptions",
     "StockSource",
+    "StockSearchSource",
     "CappeStockResult",
     "CappeStockSearch",
     "CappeBankPhoto",

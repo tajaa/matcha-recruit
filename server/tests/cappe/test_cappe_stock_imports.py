@@ -374,6 +374,23 @@ def test_search_marks_what_is_already_in_and_signs_thumbnails(monkeypatch, route
     assert "image_url" not in body["results"][0]  # the archive's file address stays server-side
 
 
+def test_free_photos_browse_with_no_words_and_archives_need_some(monkeypatch, routes):
+    asked = []
+
+    async def search(source, q, page):
+        asked.append((source, q, page))
+        return [_result()], True
+
+    monkeypatch.setattr(library.sources, "search_page", search)
+    routes.conn = _site_conn(fetch={"FROM cappe_assets": []})
+    with _client() as client:
+        res = client.get(f"/sites/{SITE_ID}/library/search", params={"source": "stock"})
+        assert res.status_code == 200, res.text
+        assert res.json()["source"] == "stock" and res.json()["results"][0]["source"] == "openverse"
+        assert client.get(f"/sites/{SITE_ID}/library/search", params={"source": "met", "q": " "}).status_code == 422
+    assert asked == [("stock", "", 0)]
+
+
 def test_a_page_with_nothing_publishable_isnt_the_last(monkeypatch, routes):
     async def search(source, q, page):
         return [], True  # The Met: every hit on this page is copyrighted

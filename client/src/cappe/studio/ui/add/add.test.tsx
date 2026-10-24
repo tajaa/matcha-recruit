@@ -245,7 +245,6 @@ describe('the side panel', () => {
       : { source: 'nasa', query: 'the moon', page: 0, results: [moon], has_more: false }) as never)
     vi.spyOn(cappeApi, 'post').mockResolvedValue({ imports: [{ id: 'j1', status: 'ready', asset: asset({ id: 'moon' }) }] })
     show(ctx)
-    expect(await screen.findByText('No Gummfit photos yet. Try the archives.')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('tab', { name: 'NASA' }))
     fireEvent.click(screen.getByRole('button', { name: 'the moon' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Add The Moon' }))
@@ -375,20 +374,53 @@ describe('Gummfit’s picks and photos', () => {
     expect(screen.queryByRole('button', { name: 'Add Wave' })).not.toBeInTheDocument()
   })
 
-  it('opens Photos on Gummfit’s photos, by collection, and places one with a click', async () => {
+  it('shows Gummfit’s photos above the free ones, by collection, and places one with a click', async () => {
     const { store, ctx } = studio(doc(), { drawer: 'photos' })
-    const get = vi.spyOn(cappeApi, 'get').mockResolvedValue({ total: 1, items: [photo()], collections: ['Coast'] })
+    const get = vi.spyOn(cappeApi, 'get').mockImplementation(async (path: string) => (path.includes('/library/bank')
+      ? { total: 1, items: [photo()], collections: ['Coast'] }
+      : { source: 'stock', query: '', page: 0, results: [], has_more: false }) as never)
     const post = vi.spyOn(cappeApi, 'post').mockResolvedValue(asset({ id: 'bank1', kind: 'stock' }))
     show(ctx)
     const list = await screen.findByRole('list', { name: 'Gummfit photos' })
+    expect(screen.getByText('Gummfit’s library')).toBeInTheDocument()
+    expect(get.mock.calls.some(([path]) => String(path).includes('/library/search'))).toBe(false) // instant: no archive asked
     fireEvent.click(within(list).getByRole('button', { name: 'Add Harbour at dawn' }))
     await waitFor(() => expect((only(store) as ImageItem | undefined)?.asset_id).toBe('bank1'))
     expect(post).toHaveBeenCalledWith('/sites/s1/library/bank/b1')
     fireEvent.click(screen.getByRole('tab', { name: 'Coast' }))
-    await waitFor(() => expect(get).toHaveBeenLastCalledWith('/sites/s1/library/bank?q=&offset=0&collection=Coast'))
+    await waitFor(() => expect(get).toHaveBeenCalledWith('/sites/s1/library/bank?q=&offset=0&collection=Coast'))
     fireEvent.change(screen.getByLabelText('Search free photos'), { target: { value: 'boats' } })
     fireEvent.submit(screen.getByRole('search'))
-    await waitFor(() => expect(get).toHaveBeenLastCalledWith('/sites/s1/library/bank?q=boats&offset=0&collection=Coast'))
+    await waitFor(() => expect(get).toHaveBeenCalledWith('/sites/s1/library/bank?q=boats&offset=0&collection=Coast'))
+    expect(get).toHaveBeenCalledWith('/sites/s1/library/search?source=stock&q=boats&page=0')
+  })
+
+  it('browses free photos when Gummfit’s library is empty, finds more by topic, and keeps archives to a search', async () => {
+    const { store, ctx } = studio(doc(), { drawer: 'photos' })
+    const latte = { source: 'openverse', source_id: 'l1', title: 'Latte art', credit_line: 'Photo: Ana Ruiz / CC0 via StockSnap.io',
+      license: 'cc0', license_version: '1.0', thumb: '/t', imported: false }
+    const desk = { ...latte, source_id: 'd1', title: 'Desk' }
+    const get = vi.spyOn(cappeApi, 'get').mockImplementation(async (path: string) => (path.includes('/library/bank')
+      ? { total: 0, items: [], collections: [] }
+      : path.includes('q=coffee')
+        ? { source: 'stock', query: 'coffee', page: 0, results: [latte], has_more: true }
+        : { source: 'stock', query: '', page: 0, results: [desk], has_more: true }) as never)
+    vi.spyOn(cappeApi, 'post').mockResolvedValue({ imports: [{ id: 'j1', status: 'ready', asset: asset({ id: 'latte' }) }] })
+    show(ctx)
+    const list = await screen.findByRole('list', { name: 'Free photos' })
+    expect(within(list).getByRole('button', { name: 'Add Desk' })).toBeInTheDocument()
+    fireEvent.click(within(screen.getByRole('group', { name: 'Topics' })).getByRole('button', { name: 'coffee' }))
+    await waitFor(() => expect(within(screen.getByRole('list', { name: 'Free photos' })).getByRole('button', { name: 'Add Latte art' })).toBeInTheDocument())
+    expect(screen.queryByRole('button', { name: 'Add Desk' })).not.toBeInTheDocument()
+    expect(get).toHaveBeenCalledWith('/sites/s1/library/search?source=stock&q=&page=0')
+    expect(screen.queryByText('Gummfit’s library')).not.toBeInTheDocument() // an empty library shows nothing
+    expect(get).toHaveBeenCalledWith('/sites/s1/library/search?source=stock&q=coffee&page=0')
+    fireEvent.click(screen.getByRole('button', { name: 'Add Latte art' }))
+    await waitFor(() => expect((only(store) as ImageItem | undefined)?.asset_id).toBe('latte'))
+    fireEvent.change(screen.getByLabelText('Search free photos'), { target: { value: '' } })
+    fireEvent.click(screen.getByRole('tab', { name: 'The Met' }))
+    expect(screen.queryByRole('list', { name: 'Free photos' })).not.toBeInTheDocument() // an archive waits for words
+    expect(screen.getByText(/Only pictures you may publish/)).toBeInTheDocument()
   })
 
   it('places a Gummfit photo dropped on the page', async () => {
@@ -464,14 +496,46 @@ describe('a Gummfit photo clicked while the page changes', () => {
       .mockResolvedValueOnce({ total: 120, items: cats, collections: [] })
     const { ctx } = studio()
     const { rerender } = show(ctx, 'dog')
-    expect(await screen.findByRole('button', { name: 'More' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'More from Gummfit' })).toBeInTheDocument()
     rerender(<StudioContext.Provider value={ctx}><BankPhotos q="cat" /></StudioContext.Provider>)
     expect(await screen.findByRole('alert')).toHaveTextContent('The bank is down.')
-    expect(screen.queryByRole('button', { name: 'More' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'More from Gummfit' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
     expect(await screen.findByRole('button', { name: 'Add Cat 0' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Add Dog 0' })).not.toBeInTheDocument()
     expect(photos.mock.calls.map((a) => [a[1], a[3]])).toEqual([['dog', 0], ['cat', 0], ['cat', 0]])
+  })
+})
+
+describe('Gummfit’s library beside the archives', () => {
+  const panel = (ctx: StudioCtx, q: string, onEmpty?: () => void) =>
+    <StudioContext.Provider value={ctx}><BankPhotos q={q} onEmpty={onEmpty} /></StudioContext.Provider>
+
+  it('doesn’t report an empty library once its panel has gone', async () => {
+    let answer!: (v: { total: number; items: BankPhoto[]; collections: string[] }) => void
+    vi.spyOn(bankApi, 'photos').mockImplementation(() => new Promise((res) => { answer = res }))
+    const onEmpty = vi.fn()
+    const { ctx } = studio()
+    const { unmount } = render(panel(ctx, '', onEmpty))
+    await waitFor(() => expect(bankApi.photos).toHaveBeenCalled())
+    unmount()
+    await act(async () => answer({ total: 0, items: [], collections: [] }))
+    expect(onEmpty).not.toHaveBeenCalled()
+  })
+
+  it('keeps the collections when a picked one has nothing matching, so it can be changed', async () => {
+    const photos = vi.spyOn(bankApi, 'photos').mockImplementation(async (_site, q, collection) =>
+      (q === 'beach' && collection === 'Coffee'
+        ? { total: 0, items: [], collections: ['Beach', 'Coffee'] }
+        : { total: 1, items: [photo({ name: q === 'beach' ? 'Beach 1' : 'Latte' })], collections: ['Beach', 'Coffee'] }))
+    const { ctx } = studio()
+    const { rerender } = render(panel(ctx, ''))
+    fireEvent.click(await screen.findByRole('tab', { name: 'Coffee' }))
+    rerender(panel(ctx, 'beach'))
+    expect(await screen.findByText('Nothing in Coffee matches. Try All.')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('tab', { name: 'All' }))
+    expect(await screen.findByRole('button', { name: 'Add Beach 1' })).toBeInTheDocument()
+    expect(photos).toHaveBeenLastCalledWith('s1', 'beach', null, 0)
   })
 })
 

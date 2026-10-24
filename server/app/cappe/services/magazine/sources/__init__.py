@@ -1,6 +1,8 @@
 """Open-image sources for the magazine Library (cappemag03).
 
-`SOURCES` is the registry the routes and the import worker go through:
+`SOURCES` is the registry the routes and the import worker go through
+(`stock` is Openverse narrowed to its CC0 stock-photo collections; its
+results are Openverse's, so imports never name it):
 `search(source, query, page)` (cached an hour, shared across accounts — the
 data is public) and `resolve(source, source_id)` (the picture looked up again
 at its archive, uncached when the worker asks so a license that changed is
@@ -11,15 +13,16 @@ from __future__ import annotations
 from types import ModuleType
 from typing import Optional
 
-from . import met, nasa, openverse, smithsonian
+from . import met, nasa, openverse, smithsonian, stock
 from .base import RESOLVE_TTL, SEARCH_TTL, SourceError, StockResult, allowed, cached
 
-SOURCES: dict[str, ModuleType] = {m.NAME: m for m in (openverse, smithsonian, met, nasa)}
+SOURCES: dict[str, ModuleType] = {m.NAME: m for m in (stock, openverse, smithsonian, met, nasa)}
 LABELS = {name: m.LABEL for name, m in SOURCES.items()}
 MAX_QUERY = 120
 MAX_PAGE = 20
 
-__all__ = ["SOURCES", "LABELS", "SourceError", "StockResult", "search", "search_page", "resolve", "allowed"]
+__all__ = ["SOURCES", "LABELS", "SourceError", "StockResult", "browsable", "search", "search_page", "resolve",
+           "allowed"]
 
 
 def _module(source: str) -> ModuleType:
@@ -34,15 +37,21 @@ async def search_page(source: str, query: str, page: int = 0) -> tuple[list[Stoc
     The Met) isn't the end of the results."""
     module = _module(source)
     q = " ".join(query.split())[:MAX_QUERY]
-    if not q:
+    if not q and not browsable(source):
         return [], False
     page = max(0, min(int(page), MAX_PAGE))
 
     async def load():
         return [r.to_dict() for r in await module.search(q, page)]
 
-    rows = await cached("search", (source, q.lower(), page), SEARCH_TTL, load) or []
+    ttl = getattr(module, "SEARCH_TTL", SEARCH_TTL)
+    rows = await cached("search", (source, q.lower(), page), ttl, load) or []
     return [r for r in (StockResult.from_dict(d) for d in rows) if allowed(r)], bool(rows)
+
+
+def browsable(source: str) -> bool:
+    """Whether `source` lists pictures with no words asked."""
+    return bool(getattr(_module(source), "BROWSE", False))
 
 
 async def search(source: str, query: str, page: int = 0) -> list[StockResult]:

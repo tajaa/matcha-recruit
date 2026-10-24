@@ -8,9 +8,12 @@ import { addPicture, landing } from './place'
 const CHIP = (on: boolean) => `rounded-full px-2.5 py-1 text-[11px] ${on ? 'bg-emerald-500/20 text-emerald-300' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-100'}`
 const message = (e: unknown, fallback: string) => (e instanceof Error && e.message ? e.message : fallback)
 
-/** Gummfit's photos, by collection, matching `q`. A click puts one on the
- *  page; the first time, it goes into the library too. */
-export function BankPhotos({ q }: { q: string }) {
+/** Gummfit's own photo library, by collection, matching `q`. Nothing shows
+ *  while it has none to offer (a collection picked with no match still
+ *  shows its chips, so it can be changed); `onEmpty` hears when the whole
+ *  library is empty. A click puts one on the page; the first time, it goes
+ *  into the site's library too. */
+export function BankPhotos({ q, onEmpty }: { q: string; onEmpty?: () => void }) {
   const c = useCtx()
   const [collection, setCollection] = useState<string | null>(null)
   const [items, setItems] = useState<BankPhoto[]>([])
@@ -39,14 +42,17 @@ export function BankPhotos({ q }: { q: string }) {
         setTotal(res.total)
         setShown(want)
         setError(null)
+        if (!q && !collection && !offset && res.total === 0) onEmpty?.()
       })
       .catch((e) => { if (mine === gen.current) setError(message(e, 'Gummfit’s photos didn’t load.')) })
       .finally(() => { if (mine === gen.current) setBusy(false) })
   }
   useEffect(() => {
-    gen.current++
     const t = setTimeout(() => load(0), 0)
-    return () => clearTimeout(t)
+    // A changed search, or the panel closing, drops whatever was still on its
+    // way: an answer arriving after the source changed must not call onEmpty.
+    const requests = gen  // the counter itself, bumped as it stands at cleanup
+    return () => { clearTimeout(t); requests.current++ }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- a new list whenever what is asked changes
   }, [want])
 
@@ -64,8 +70,10 @@ export function BankPhotos({ q }: { q: string }) {
     }
   }
 
+  if (!items.length && !error && !(collection && collections.length)) return null
   return (
-    <div className="space-y-3">
+    <section className="space-y-2">
+      <h3 className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400">{q ? 'From Gummfit’s library' : 'Gummfit’s library'}</h3>
       {collections.length > 0 && (
         <div className="flex flex-wrap gap-1" role="tablist" aria-label="Collections">
           {[null, ...collections].map((k) => (
@@ -79,10 +87,7 @@ export function BankPhotos({ q }: { q: string }) {
           {error}{!settled && <> <button type="button" onClick={() => load(0)} className="underline hover:text-red-200">Try again</button></>}
         </p>
       )}
-      {busy && !items.length && <p className="flex items-center gap-1.5 text-xs text-zinc-400"><Loader2 className="h-3 w-3 animate-spin" />Loading…</p>}
-      {settled && total === 0 && !busy && (
-        <p className="text-xs text-zinc-500">{q || collection ? 'No Gummfit photos for that. Try the archives.' : 'No Gummfit photos yet. Try the archives.'}</p>
-      )}
+      {settled && total === 0 && collection && <p className="text-xs text-zinc-500">Nothing in {collection} matches. Try All.</p>}
       {items.length > 0 && (
         <ul className="grid grid-cols-2 gap-2" aria-label="Gummfit photos">
           {items.map((p) => (
@@ -99,8 +104,8 @@ export function BankPhotos({ q }: { q: string }) {
       )}
       {settled && total !== null && items.length < total && (
         <button type="button" disabled={busy} onClick={() => load(items.length)}
-          className="w-full rounded-md border border-zinc-700 py-1.5 text-xs text-zinc-300 hover:border-zinc-500">{busy ? 'Loading…' : 'More'}</button>
+          className="w-full rounded-md border border-zinc-700 py-1.5 text-xs text-zinc-300 hover:border-zinc-500">{busy ? 'Loading…' : 'More from Gummfit'}</button>
       )}
-    </div>
+    </section>
   )
 }

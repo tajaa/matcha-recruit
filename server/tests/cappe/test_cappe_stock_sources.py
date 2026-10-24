@@ -36,7 +36,7 @@ from app.config import load_settings  # noqa: E402
 load_settings()
 
 from app.cappe.services.magazine import sources  # noqa: E402
-from app.cappe.services.magazine.sources import base, credit, met, nasa, openverse, smithsonian, thumbs  # noqa: E402
+from app.cappe.services.magazine.sources import base, credit, met, nasa, openverse, smithsonian, stock, thumbs  # noqa: E402
 
 FIX = pathlib.Path(__file__).parent / "fixtures" / "stock"
 
@@ -342,6 +342,49 @@ def test_openverse_uses_a_token_when_configured_and_falls_back_when_it_fails(mon
     log.clear()
     assert run(openverse.search("x", openverse.ANON_PAGES)) == []  # anonymous paging stops at 240
     assert log == []
+
+
+class ParamsClient(FakeClient):
+    async def get(self, url, params=None, headers=None):
+        self.log.append(("GET", url, params))
+        return self.routes["get"]
+
+
+def test_free_photos_are_openverses_cc0_stock_collections_browsable_with_no_words(monkeypatch):
+    snap = {**fixture("openverse_search.json")["results"][0], "source": "stocksnap", "provider": "stocksnap",
+            "license": "cc0", "license_version": "1.0", "creator": "Ana Ruiz"}
+    log = []
+    routes = {"get": FakeResponse(200, {"results": [snap]})}
+    monkeypatch.setattr(openverse.httpx, "AsyncClient", lambda **kw: ParamsClient(routes, log))
+    monkeypatch.setattr(openverse, "get_settings",
+                        lambda: SimpleNamespace(openverse_client_id=None, openverse_client_secret=None))
+    monkeypatch.setattr(base, "get_redis_cache", lambda: None)
+    results, more = run(sources.search_page("stock", "", 0))
+    params = log[-1][2]
+    assert "q" not in params and params["source"] == "stocksnap,wordpress,nappy" and params["license"] == "cc0,pdm"
+    assert more and results[0].source == "openverse"  # imported, credited and re-checked as Openverse's
+    assert results[0].credit_line == "Photo: Ana Ruiz / CC0 via StockSnap.io"
+    run(sources.search_page("stock", "  coffee  ", 1))
+    assert log[-1][2]["q"] == "coffee" and log[-1][2]["page"] == 2
+    run(openverse.search("coffee", 0))
+    assert "source" not in log[-1][2] and log[-1][2]["license"] == ",".join(sorted(base.ALLOWED_LICENSES))
+    assert sources.browsable("stock") and not sources.browsable("met")
+    assert openverse.normalize(fixture("openverse_search.json")["results"][0]).tags[:2] == ["blackandwhite", "bw"]
+    assert run(sources.search_page("met", "   ", 0)) == ([], False)  # an archive needs words
+    assert stock.resolve is not None and stock.NAME in sources.SOURCES
+
+
+def test_free_photo_searches_are_kept_a_day_archives_an_hour(monkeypatch):
+    kept = {}
+
+    async def cached(kind, parts, ttl, load):
+        kept[parts[0]] = ttl
+        return []
+
+    monkeypatch.setattr(sources, "cached", cached)
+    run(sources.search_page("stock", "coffee", 0))
+    run(sources.search_page("met", "coffee", 0))
+    assert kept == {"stock": 86400, "met": base.SEARCH_TTL}
 
 
 def test_openverse_errors(monkeypatch):

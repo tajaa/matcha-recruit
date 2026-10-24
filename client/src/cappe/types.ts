@@ -1713,6 +1713,10 @@ export type CappeAsset = {
 
 /** Open-image archives the Library searches (cappemag03). */
 export type CappeStockSource = 'openverse' | 'smithsonian' | 'met' | 'nasa'
+/** What can be searched: the archives, and `stock` (Openverse's CC0
+ *  stock-photo collections; its results are Openverse's, so they import as
+ *  `openverse`). */
+export type CappeStockSearchSource = 'stock' | CappeStockSource
 
 /** One archive picture, already filtered to licenses a magazine can publish.
  *  `thumb` is a signed path under the Cappe API (our origin, not the archive's). */
@@ -1735,7 +1739,7 @@ export type CappeStockResult = {
 }
 
 export type CappeStockSearch = {
-  source: CappeStockSource
+  source: CappeStockSearchSource
   query: string
   page: number
   results: CappeStockResult[]

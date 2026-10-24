@@ -1,4 +1,4 @@
-import type { CappeAsset, CappeStockImport, CappeStockSource } from '../../types'
+import type { CappeAsset, CappeStockImport, CappeStockSearchSource } from '../../types'
 
 /** The smallest stored size that still fills a thumbnail, else the original. */
 export function thumbUrl(asset: CappeAsset): string {
@@ -11,7 +11,8 @@ export function creditEditable(asset: CappeAsset): boolean {
   return asset.kind === 'upload' && !asset.ai_generated
 }
 
-export const STOCK_SOURCES: { key: CappeStockSource; label: string; hint: string }[] = [
+export const STOCK_SOURCES: { key: CappeStockSearchSource; label: string; hint: string }[] = [
+  { key: 'stock', label: 'Free photos', hint: 'Modern photos free for any use (CC0), from StockSnap.io, WordPress and Nappy' },
   { key: 'openverse', label: 'Openverse', hint: 'Creative Commons photos from Flickr, Wikimedia and more' },
   { key: 'smithsonian', label: 'Smithsonian', hint: 'Public-domain collections of the Smithsonian museums' },
   { key: 'met', label: 'The Met', hint: 'Public-domain art from The Metropolitan Museum of Art' },
