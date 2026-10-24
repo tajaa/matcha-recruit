@@ -687,13 +687,35 @@ normalized paragraphs itself; a thread with no valid composition prints its word
   finished document is checked against the save limits (`limits.docProblem`, the server's counts) before it is
   committed: a full story is told why and left unchanged, never made unsavable. `templates.test.tsx` holds every face and graphic to the bank and composes each frame at its face's real
   ascent and descent: a display face can be far taller than its size, so size frames from that test, not by eye.
+- **Magazine identity** (`studio/identity.py`, client `studio/model/identity.ts`): documents optionally
+  carry a visual system of named paragraph/character styles, swatches, parent layouts and page furniture.
+  Raw paragraphs/runs retain style references plus explicit local overrides (including default/false values).
+  Composition, both renderers, font discovery and Text view resolve the same cascade. Parent snapshots
+  exclude site photo IDs/captions and cross-page text; applied parent text remains in Text view, feeds and
+  search, with hidden-frame and paywall handling. Inherited frames/text count toward document limits;
+  identity documents also cap total rendered lines (or fallback paragraphs) at 30,000 after repetition.
+  Parents render behind local content; subscriber-only pages omit them and their furniture entirely.
+  Numbers follow page order; headers and visibility can vary per page. The account-owned site endpoints
+  `GET/PUT /sites/{id}/studio/identity` store a private `{rev,identity}` in `cappe_studio_identities`
+  (`cappeidentity01`). Saves lock and recheck the owning site before revision comparison and upsert; stale
+  edits are 409, and identical retries after a lost successful response return that save. Public metadata
+  never contains the template. Apply the additive migration through the approved workflow before deploying. New paged
+  stories copy the saved identity; each existing document keeps its snapshot until explicitly importing
+  by name and republishing. Limits: 32 paragraph/character styles, 24 swatches, 8 parents, 80 frames per
+  parent, 500 KB identity. All normal Studio draft/revision/publish protections remain in force. Identity documents require
+  `identity_version:1` on save/discard/restore; older open clients get a reload-required 409 before a write.
+  Keep identity-aware application code on rollback while snapshots remain in live/draft/revision JSON;
+  the table downgrade guard protects saved templates, not those document snapshots.
 - **Editorial collections** (`studio/collections.py`, `models/studio.py`, `routes/studio.py`, `cappemag12`):
   four built-in ten-page directions live in the client (`ui/add/collections.ts`). Creator designs are stored in
   `cappe_studio_collections`, account-scoped so they can be reused across that creator's magazines. The
   `/studio/collections` API lists small cards, fetches a document by id, creates, and deletes; every query
   names the authenticated account, and a reader account (no sites, no Studio) gets 403 `reader_account`. Saves normalize through the Studio schema including hidden curated
   graphics. Photos become empty frames, image captions and text composition are cleared, and paywall
-  settings are removed: collections never hold site-owned photo references. Max 32 pages / 1 MB each,
+  settings are removed: collections never hold site-owned photo references. A magazine identity is flattened
+  out (`collection_doc`; client `model/collections.flattenIdentity` detaches parents first): styles, swatches
+  and parents become the plain attributes they stood for, since another story's identity lacks them and a
+  reference to one it lacks makes that story unsavable. Max 32 pages / 1 MB each,
   50 per account (the account row is locked around replay lookup + count + insert). An optional request UUID
   is unique per account (nullable, so a client that sends none still saves). An identical retry returns
   its existing card, including when the library is full; changing the payload for that key is 409. Malformed

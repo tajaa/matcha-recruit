@@ -12,6 +12,7 @@ import { escHtml } from '../../magazine/canvas/rt'
 import { fontStack } from '../../magazine/design/fontStack'
 import { CHAR_DEFAULTS, PARA_DEFAULTS } from '../model/limits'
 import { spreads } from '../model/doc'
+import { parentDoc, resolveChar, resolveItem, resolvedThreads } from '../model/identity'
 import { graphicUrl } from '../model/graphics'
 import type { Asset, CharAttrs, Doc, GraphicItem, ImageItem, Item, Para, Run, TextItem, Thread } from '../model/types'
 import { faceUrl, familyName, type FaceLookup } from '../fonts/faces'
@@ -240,6 +241,7 @@ function graphicHtml(item: GraphicItem): string {
 }
 
 export function itemHtml(item: Item, doc: Doc, d: Draw, eager = false): string {
+  item = resolveItem(item, doc.identity)
   switch (item.kind) {
     case 'text': return textHtml(item, d)
     case 'image': return imageHtml(item, d, doc.size.w, eager)
@@ -263,7 +265,7 @@ export function flowFrame(doc: Doc, thread: Thread, lockedFrom: number | null = 
 
 export function frameThreads(doc: Doc, lockedFrom: number | null = null): Threads {
   const out: Threads = new Map()
-  for (const t of doc.threads) {
+  for (const t of resolvedThreads(doc)) {
     const flow = flowFrame(doc, t, lockedFrom)
     t.frames.forEach((f, i) => out.set(f, [t, i, flow]))
   }
@@ -272,8 +274,28 @@ export function frameThreads(doc: Doc, lockedFrom: number | null = null): Thread
 
 /** What sits on one page, bottom to top (hidden items left out). */
 export function pageItemsHtml(doc: Doc, index: number, d: Draw): string {
-  const pageId = doc.pages[index].id
-  return doc.items.filter((i) => i.page === pageId && !i.hidden).map((i) => itemHtml(i, doc, d, index === 0)).join('')
+  const page = doc.pages[index]
+  const parent = doc.identity?.parents.find((p) => p.id === page.parent)
+  let inherited = ''
+  if (parent) {
+    const pd = parentDoc(doc, parent)
+    const draw = { ...d, mark: undefined, threads: frameThreads(pd) }
+    inherited = `<div class="lyt-parent" style="position:absolute;inset:0;transform-origin:top left;transform:scale(min(calc(${n(doc.size.w)} / ${n(parent.size.w)}),calc(${n(doc.size.h)} / ${n(parent.size.h)})))">`
+      + parent.items.filter((i) => !i.hidden).map((i) => itemHtml(i, pd, draw)).join('') + '</div>'
+  }
+  return inherited + doc.items.filter((i) => i.page === page.id && !i.hidden).map((i) => itemHtml(i, doc, d, index === 0)).join('')
+    + furnitureHtml(doc, index, d)
+}
+
+function furnitureHtml(doc: Doc, index: number, d: Draw): string {
+  const f = doc.identity?.furniture, page = doc.pages[index]
+  if (!f || page.hide_furniture || (f.skip_first && index === 0)) return ''
+  const c = resolveChar(f.char, {}, doc.identity)
+  const inset = Math.min(f.inset, Math.max(0, Math.min(doc.size.w, doc.size.h) / 2 - 8))
+  const align = doc.facing && index % 2 === 1 ? 'left' : 'right'
+  const label = (text: string, y: number) => `<div class="lyt-item lyt-furniture" style="left:${u(inset)};top:${u(y)};width:${u(doc.size.w - 2 * inset)};height:${u(c.size * 1.3)};${runStyle(c, d.used, d.faces)};text-align:${align};line-height:1;white-space:nowrap">${esc(text)}</div>`
+  const header = page.header ?? f.header
+  return (header ? label(header, inset) : '') + (f.numbers ? label(String(index + f.start), doc.size.h - inset - c.size) : '')
 }
 
 export function spreadHtml(doc: Doc, pages: number[], d: Draw, lockedFrom: number | null = null): string {
@@ -312,7 +334,10 @@ export function pagesHtml(doc: Doc, assets: Record<string, Asset>, faces: FaceLo
 /** An @font-face for each of the Studio's faces the story sets (render.faces_css). */
 export function facesCss(doc: Doc, faces: FaceLookup): string {
   const shas = new Set<string>()
-  for (const t of doc.threads) for (const p of t.paras) for (const r of p.runs) {
+  const documents = [doc, ...(doc.identity?.parents.map((p) => parentDoc(doc, p)) ?? [])]
+  const runs = documents.flatMap((d) => resolvedThreads(d).flatMap((t) => t.paras.flatMap((p) => p.runs)))
+  if (doc.identity) runs.push({ t: '', ...resolveChar(doc.identity.furniture.char, {}, doc.identity) })
+  for (const r of runs) {
     const a = { ...CHAR_DEFAULTS, ...r }
     const f = faces(a.font, a.wt, a.it)
     if (f) shas.add(f.sha)

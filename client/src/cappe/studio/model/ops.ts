@@ -32,6 +32,7 @@ export function updateItems(doc: Doc, ids: Iterable<string>, fn: (item: Item) =>
 /** Set fields on items (numbers rounded as the server keeps them). */
 export function patchItems(doc: Doc, ids: Iterable<string>, patch: Record<string, unknown>): Doc {
   const clean = Object.fromEntries(Object.entries(patch).map(([k, v]) => [k, typeof v === 'number' ? round(v) : v]))
+  if (('fill' in patch || 'color' in patch) && !('fill_swatch' in patch)) clean.fill_swatch = undefined
   return updateItems(doc, ids, (i) => (Object.entries(clean).every(([k, v]) => (i as Record<string, unknown>)[k] === v)
     ? i : ({ ...i, ...clean } as Item)))
 }
@@ -191,25 +192,32 @@ export function applyChar(paras: Para[], from: Pos, to: Pos, attrs: CharAttrs): 
     const end = k === b[0] ? b[1] : paraText(p).length
     if (start >= end && paraText(p).length) return p
     const runs = []
+    const change = (r: CharAttrs) => {
+      const merged = { ...('style' in attrs ? {} : r), ...attrs }
+      if ('color' in attrs && !('swatch' in attrs)) delete merged.swatch
+      return sparseChar(merged, !!p.style)
+    }
     let at = 0
     for (const r of p.runs) {
       const s = Math.max(start, at), e = Math.min(end, at + r.t.length)
       if (e > s) {
         if (s > at) runs.push({ ...r, t: r.t.slice(0, s - at) })
-        runs.push({ ...sparseChar({ ...r, ...attrs }), t: r.t.slice(s - at, e - at) })
+        runs.push({ ...change(r), t: r.t.slice(s - at, e - at) })
         if (at + r.t.length > e) runs.push({ ...r, t: r.t.slice(e - at) })
-      } else if (!paraText(p).length) runs.push({ ...sparseChar({ ...r, ...attrs }), t: '' })
+      } else if (!paraText(p).length) runs.push({ ...change(r), t: '' })
       else runs.push(r)
       at += r.t.length
     }
-    return { ...p, runs: mergeRuns(runs) }
+    return { ...p, runs: mergeRuns(runs, !!p.style) }
   })
 }
 
 /** Paragraph attributes set on the paragraphs `from` to `to`. */
 export function applyPara(paras: Para[], from: number, to: number, attrs: ParaAttrs): Para[] {
   const [a, b] = from <= to ? [from, to] : [to, from]
-  return paras.map((p, k) => (k < a || k > b ? p : { runs: p.runs, ...sparsePara({ ...p, ...attrs }) }))
+  return paras.map((p, k) => (k < a || k > b ? p : 'style' in attrs
+    ? { ...sparsePara(attrs), runs: p.runs.map((r) => ({ t: r.t, ...(r.style ? { style: r.style } : {}) })) }
+    : { runs: p.runs, ...sparsePara({ ...p, ...attrs }) }))
 }
 
 /** The attributes at a place: of the character before it (as typing takes). */

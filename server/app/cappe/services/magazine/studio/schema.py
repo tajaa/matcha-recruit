@@ -176,8 +176,12 @@ def _sparse(full: dict, defaults: dict) -> dict:
     return {k: v for k, v in full.items() if v != defaults[k]}
 
 
-def _para(raw: Any, budget: list[int]) -> dict:
+def _para(raw: Any, budget: list[int], identity=None) -> dict:
     raw = raw if isinstance(raw, dict) else {}
+    from .identity import ref
+    identity = identity or {}
+    style = ref(raw.get("style"), identity.get("paragraphs", []), "paragraph style")
+    named = next((s for s in identity.get("paragraphs", []) if s["id"] == style), {})
     runs: list[dict] = []
     last_attrs: Optional[dict] = None
     raw_runs = raw.get("runs") if isinstance(raw.get("runs"), list) else []
@@ -187,7 +191,15 @@ def _para(raw: Any, budget: list[int]) -> dict:
         if not isinstance(r, dict):
             continue
         text = _clean_text(r.get("t"))
-        attrs = _sparse(char_attrs(r), L.CHAR_DEFAULTS)
+        character_style = ref(r.get("style"), identity.get("characters", []), "character style")
+        character = next((s["char"] for s in identity.get("characters", []) if s["id"] == character_style), {})
+        full = char_attrs({**named.get("char", {}), **character, **r})
+        attrs = {k: v for k, v in full.items() if k in r} if style or character_style else _sparse(full, L.CHAR_DEFAULTS)
+        if character_style:
+            attrs["style"] = character_style
+        swatch = ref(r.get("swatch"), identity.get("swatches", []), "swatch")
+        if swatch:
+            attrs["swatch"] = swatch
         last_attrs = attrs
         if not text:
             continue
@@ -201,7 +213,9 @@ def _para(raw: Any, budget: list[int]) -> dict:
     if not runs:
         # An empty paragraph keeps its type, for the height of its line.
         runs = [{"t": "", **(last_attrs or {})}]
-    return {"runs": runs, **_sparse(para_attrs(raw), L.PARA_DEFAULTS)}
+    full = para_attrs({**named.get("para", {}), **raw})
+    attrs = {k: v for k, v in full.items() if k in raw} if style else _sparse(full, L.PARA_DEFAULTS)
+    return {"runs": runs, **attrs, **({"style": style} if style else {})}
 
 
 def para_text(p: dict) -> str:
@@ -291,7 +305,7 @@ def _geometry(raw: dict) -> dict:
     }
 
 
-def _item(raw: Any, pages: set[str], bank: Mapping[str, dict]) -> dict:
+def _item(raw: Any, pages: set[str], bank: Mapping[str, dict], identity=None) -> dict:
     if not isinstance(raw, dict) or raw.get("kind") not in L.KINDS:
         raise DocError("Something on a page isn't a kind of frame a story can have.")
     kind = raw["kind"]
@@ -299,6 +313,11 @@ def _item(raw: Any, pages: set[str], bank: Mapping[str, dict]) -> dict:
     if page not in pages:
         raise DocError("A frame sits on a page that isn't in the story. Reload the Studio and try again.")
     out = {"id": _id(raw.get("id"), "frame"), "kind": kind, "page": page, **_geometry(raw)}
+    from .identity import ref
+    for key in ("fill_swatch", "stroke_swatch"):
+        swatch = ref(raw.get(key), (identity or {}).get("swatches", []), "swatch")
+        if swatch:
+            out[key] = swatch
     if kind == "text":
         out.update(cols=_int(raw.get("cols"), 1, 12, 1), gutter=num(raw.get("gutter"), 0, L.GUTTER_MAX, 12),
                    inset=num(raw.get("inset"), 0, L.GUTTER_MAX, 0), valign=_choice(raw.get("valign"), L.VALIGNS),
@@ -326,7 +345,7 @@ def _item(raw: Any, pages: set[str], bank: Mapping[str, dict]) -> dict:
     return out
 
 
-def _thread(raw: Any, text_frames: set[str], used: set[str], budget: list[int]) -> dict:
+def _thread(raw: Any, text_frames: set[str], used: set[str], budget: list[int], identity=None) -> dict:
     if not isinstance(raw, dict):
         raise DocError("A story's text is damaged. Reload the Studio and try again.")
     frames = raw.get("frames") if isinstance(raw.get("frames"), list) else []
@@ -342,7 +361,7 @@ def _thread(raw: Any, text_frames: set[str], used: set[str], budget: list[int]) 
     if len(raw_paras) > L.MAX_PARAS:
         raise DocError("A text has too many paragraphs. Split it into two.")
     mine = [L.MAX_THREAD_CHARS]
-    paras = [_para(p, mine) for p in raw_paras]
+    paras = [_para(p, mine, identity) for p in raw_paras]
     budget[0] -= L.MAX_THREAD_CHARS - mine[0]
     if mine[0] < 0:
         raise DocError("A text frame's story is too long. Split it into two.")
@@ -369,6 +388,8 @@ def normalize_doc(raw: Any, bank: Optional[Mapping[str, dict]] = None) -> dict:
     document names (`bank.doc_graphics`), besides the built-in ones."""
     if not isinstance(raw, dict):
         raise DocError("A paged story is a document of pages.")
+    from .identity import normalize_identity, ref
+    identity = normalize_identity(raw["identity"], bank) if "identity" in raw else None
     size = raw.get("size") if isinstance(raw.get("size"), dict) else {}
     w = num(size.get("w"), L.PAGE_MIN, L.PAGE_MAX, 612)
     h = num(size.get("h"), L.PAGE_MIN, L.PAGE_MAX, 792)
@@ -383,13 +404,21 @@ def normalize_doc(raw: Any, bank: Optional[Mapping[str, dict]] = None) -> dict:
     if len(raw_pages) > L.MAX_PAGES:
         raise DocError(f"A story holds at most {L.MAX_PAGES} pages.")
     pages = [{"id": _id(p.get("id") if isinstance(p, dict) else None, "page")} for p in raw_pages]
+    for page, source in zip(pages, raw_pages):
+        parent = ref(source.get("parent"), (identity or {}).get("parents", []), "parent layout")
+        if parent:
+            page["parent"] = parent
+        if source.get("hide_furniture"):
+            page["hide_furniture"] = True
+        if "header" in source:
+            page["header"] = _str(source["header"], 120)
     _unique((p["id"] for p in pages), "pages")
     page_ids = {p["id"] for p in pages}
 
     raw_items = raw.get("items") if isinstance(raw.get("items"), list) else []
     if len(raw_items) > L.MAX_ITEMS:
         raise DocError(f"A story holds at most {L.MAX_ITEMS} frames and shapes.")
-    items = [_item(i, page_ids, bank or {}) for i in raw_items]
+    items = [_item(i, page_ids, bank or {}, identity) for i in raw_items]
     _unique((i["id"] for i in items), "frames")
     per_page: dict[str, int] = {}
     for i in items:
@@ -403,7 +432,7 @@ def normalize_doc(raw: Any, bank: Optional[Mapping[str, dict]] = None) -> dict:
     text_frames = {i["id"] for i in items if i["kind"] == "text"}
     used: set[str] = set()
     budget = [L.MAX_DOC_CHARS]
-    threads = [_thread(t, text_frames, used, budget) for t in raw_threads]
+    threads = [_thread(t, text_frames, used, budget, identity) for t in raw_threads]
     if budget[0] < 0:
         raise DocError("This story holds too much text. Split it into two.")
     _unique((t["id"] for t in threads), "texts")
@@ -435,6 +464,30 @@ def normalize_doc(raw: Any, bank: Optional[Mapping[str, dict]] = None) -> dict:
         "threads": threads,
         "paywall_page": (_int(paywall, 2, len(pages), 2) if paywall is not None and len(pages) > 1 else None),
     }
+    if identity is not None:
+        out["identity"] = identity
+        # Recurring frames count too: a small stored parent must not bypass
+        # the normal document/rendering limits through repetition.
+        inherited_items = inherited_threads = inherited_chars = 0
+        def line_cost(t):
+            return len(t["comp"]["lines"]) if t.get("comp") is not None else len(t["paras"])
+
+        lines = sum(line_cost(t) for t in threads)
+        for page in pages:
+            parent = next((p for p in identity["parents"] if p["id"] == page.get("parent")), None)
+            if parent:
+                inherited_items += len(parent["items"])
+                inherited_threads += len(parent["threads"])
+                inherited_chars += sum(len16(para_text(p)) for t in parent["threads"] for p in t["paras"])
+                lines += sum(line_cost(t) for t in parent["threads"])
+                if per_page.get(page["id"], 0) + len(parent["items"]) > L.MAX_ITEMS_PER_PAGE:
+                    raise DocError("This page and its parent hold too many frames.")
+        if len(items) + inherited_items > L.MAX_ITEMS or len(threads) + inherited_threads > L.MAX_THREADS:
+            raise DocError("This story and its parents hold too many frames or separate texts.")
+        if L.MAX_DOC_CHARS - budget[0] + inherited_chars > L.MAX_DOC_CHARS:
+            raise DocError("This story and its parents hold too much text.")
+        if lines > L.MAX_LINES:
+            raise DocError("This story and its parents hold too many composed lines.")
     if len(json.dumps(out, separators=(",", ":"))) > L.MAX_DOC_BYTES:
         raise DocError("This story is too big to save. Split it into two.")
     return out

@@ -1,6 +1,7 @@
 import { ArrowDownToLine, ArrowUpToLine, ChevronDown, ChevronUp, Eye, EyeOff, Image as ImageIcon, Link2Off, Lock, Scissors, SlidersHorizontal, Unlock } from 'lucide-react'
 import { ColorField, IconBtn, NumberField, Row, Section, Seg, Slider } from '../../../magazine/workspace/controls'
 import { round } from '../../model/limits'
+import { resolveItem } from '../../model/identity'
 import { arrange, patchItems, unlinkAfter, type Arrange } from '../../model/ops'
 import type { Fit, GraphicFit, GraphicItem, Item, Stroke, VAlign } from '../../model/types'
 import { useStudio } from '../../store/store'
@@ -23,7 +24,7 @@ export function ObjectPanel() {
   const selection = useStudio(store, (s) => s.selection)
   const overset = useStudio(store, (s) => s.overset)
   const assets = useStudio(store, (s) => s.assets)
-  const items = doc.items.filter((i) => selection.includes(i.id))
+  const items = doc.items.filter((i) => selection.includes(i.id)).map((i) => resolveItem(i, doc.identity))
   if (!items.length) {
     return (
       <Section title="Object">
@@ -158,7 +159,7 @@ export function ObjectPanel() {
 
       {only && 'stroke' in one && (
         <StrokeSection stroke={one.stroke} line={only === 'line'} units={units}
-          onChange={(stroke) => set({ stroke })} flip={one.kind === 'line' ? one.flip : undefined}
+          onChange={(stroke, colour) => set({ stroke, ...(colour ? { stroke_swatch: undefined } : {}) })} flip={one.kind === 'line' ? one.flip : undefined}
           onFlip={() => set({ flip: one.kind === 'line' && !one.flip })} />
       )}
     </>
@@ -166,13 +167,13 @@ export function ObjectPanel() {
 }
 
 function StrokeSection({ stroke, line, onChange, units, flip, onFlip }: {
-  stroke: Stroke | null; line: boolean; onChange: (s: Stroke | null) => void; units: import('../../model/types').Units
+  stroke: Stroke | null; line: boolean; onChange: (s: Stroke | null, colour?: boolean) => void; units: import('../../model/types').Units
   flip?: boolean; onFlip: () => void
 }) {
   const s = stroke ?? { c: '#1a1a1a', w: 0 }
   return (
     <Section title="Stroke">
-      <ColorField label="Stroke colour" value={s.c} onChange={(c) => c && onChange({ c, w: s.w || 1 })} />
+      <ColorField label="Stroke colour" value={s.c} onChange={(c) => c && onChange({ c, w: s.w || 1 }, true)} />
       <Row>
         <LengthField label="Stroke weight" short="≡" units={units} value={s.w} min={line ? 0.25 : 0} max={144}
           onChange={(w) => onChange(w > 0 ? { c: s.c, w } : line ? { c: s.c, w: 0.25 } : null)} />

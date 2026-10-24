@@ -187,7 +187,19 @@ async def create_post(
         await get_owned_site(conn, site_id, account.id)
         await _check_paid(conn, site_id, body.access)
         if paged:
-            derived = await pages_fields(conn, site_id, (body.content or {}).get("doc") or starter_doc())
+            raw_doc = (body.content or {}).get("doc")
+            if not raw_doc:
+                raw_doc = starter_doc()
+                saved = await conn.fetchrow("SELECT identity FROM cappe_studio_identities WHERE site_id = $1", site_id)
+                if saved is not None:
+                    template = json.loads(saved["identity"]) if isinstance(saved["identity"], str) else saved["identity"]
+                    raw_doc["identity"] = template
+                    body_style = next((s for s in template.get("paragraphs", []) if s.get("para", {}).get("role", "p") == "p"), None)
+                    if body_style:
+                        for thread in raw_doc["threads"]:
+                            for paragraph in thread["paras"]:
+                                paragraph["style"] = body_style["id"]
+            derived = await pages_fields(conn, site_id, raw_doc)
         elif is_story:
             derived = await _story_fields(conn, site_id, body.content or starter_content(layout),
                                           body.cover_asset_id)

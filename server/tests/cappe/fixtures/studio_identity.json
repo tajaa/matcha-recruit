@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "name": "Tide identity",
+  "swatches": [{"id": "sw1", "name": "Editorial red", "color": "#ab3322"}],
+  "paragraphs": [{"id": "ps1", "name": "Caption", "char": {"font": "Inter", "size": 8, "swatch": "sw1"}, "para": {"role": "caption", "sa": 4}}],
+  "characters": [{"id": "cs1", "name": "Emphasis", "char": {"it": true}}],
+  "parents": [{"id": "pl1", "name": "Feature", "size": {"w": 612, "h": 792}, "items": [
+    {"id": "t1", "kind": "text", "page": "p1", "x": 54, "y": 25, "w": 200, "h": 30},
+    {"id": "i1", "kind": "image", "page": "p1", "x": 300, "y": 25, "w": 40, "h": 40, "asset_id": "private", "caption": "private photo"}
+  ], "threads": [{"id": "s1", "frames": ["t1"], "paras": [{"style": "ps1", "runs": [{"t": "TIDE & LIGHT"}]}]}]}],
+  "furniture": {"numbers": true, "header": "Tide <issue>", "start": 4, "skip_first": false, "inset": 24, "char": {"font": "Inter", "size": 8, "swatch": "sw1"}}
+}

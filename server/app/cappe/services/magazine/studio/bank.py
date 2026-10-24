@@ -30,6 +30,7 @@ from uuid import UUID
 
 from ...cappe_assets import COLUMNS as ASSET_COLUMNS, row as asset_row
 from . import graphics, limits
+from .identity import MAX_PARENTS, MAX_PARENT_ITEMS
 
 KINDS = ("photo", "graphic")
 STATUSES = ("live", "hidden")
@@ -173,11 +174,17 @@ async def doc_graphics(conn, raw_doc: Any) -> dict[str, dict]:
     doesn't, as `schema.normalize_doc` reads them. Hidden ones count: a page
     keeps a graphic it already has."""
     items = raw_doc.get("items") if isinstance(raw_doc, dict) else None
+    items = items[:limits.MAX_ITEMS] if isinstance(items, list) else []
+    identity = raw_doc.get("identity") if isinstance(raw_doc, dict) else None
+    if isinstance(identity, dict) and isinstance(identity.get("parents"), list):
+        for parent in identity["parents"][:MAX_PARENTS]:
+            if isinstance(parent, dict) and isinstance(parent.get("items"), list):
+                items.extend(parent["items"][:MAX_PARENT_ITEMS])
     srcs = sorted({
-        i["src"] for i in (items if isinstance(items, list) else [])
+        i["src"] for i in items
         if isinstance(i, dict) and i.get("kind") == "graphic" and graphics.is_sha(i.get("src"))
         and graphics.by_sha(i["src"]) is None
-    })[:limits.MAX_ITEMS]  # no more than a document can hold, so a valid one is never cut short
+    })[:limits.MAX_ITEMS + MAX_PARENTS * MAX_PARENT_ITEMS]  # includes saved, currently unused definitions
     if not srcs:
         return {}
     rows = await conn.fetch(

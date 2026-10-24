@@ -8,6 +8,7 @@ global and remain available even when hidden in the bank.
 import json
 from typing import Any, Mapping, Optional
 
+from .identity import resolve_item, resolved_threads
 from .schema import DocError, normalize_doc
 
 MAX_COLLECTIONS = 50
@@ -33,6 +34,18 @@ def collection_doc(raw: dict[str, Any], bank: Optional[Mapping[str, dict]] = Non
         doc = normalize_doc(portable, bank)
     except (TypeError, OverflowError) as exc:
         raise DocError("This collection has malformed page data. Check its frames and text, then try again.") from exc
+    if doc.get("identity") is not None:
+        # A collection goes into other stories, whose identities lack these
+        # styles and swatches: keep how it looks, not what it named. (The
+        # Studio makes parent frames the pages' own before it sends them.)
+        identity = doc["identity"]
+        doc = normalize_doc({
+            **{k: v for k, v in doc.items() if k != "identity"},
+            "pages": [{"id": p["id"]} for p in doc["pages"]],
+            "threads": [{"id": t["id"], "frames": t["frames"], "paras": t["paras"]} for t in resolved_threads(doc)],
+            "items": [{k: v for k, v in resolve_item(i, identity).items() if k not in ("fill_swatch", "stroke_swatch")}
+                      for i in doc["items"]],
+        }, bank)
     if len(json.dumps(doc, separators=(",", ":"))) > MAX_COLLECTION_BYTES:
         raise DocError("A collection is too big to save. Use fewer pages or less text.")
     return doc

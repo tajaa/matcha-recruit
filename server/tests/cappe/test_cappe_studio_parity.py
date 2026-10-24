@@ -100,11 +100,16 @@ def _cases() -> list[dict]:
     ], "threads": []}
     locked = {**composed, "paywall_page": 2}
     a4 = {**composed, "size": {"w": 595.28, "h": 841.89}}
+    identity = json.loads((Path(__file__).parent / 'fixtures/studio_identity.json').read_text())
+    branded = {"identity": identity, "pages": [{"id": "p1"}, {"id": "p2", "parent": "pl1", "header": "Feature & profile"}],
+               "items": [_frame("t1", "p1")], "threads": [{"id": "s1", "frames": ["t1"], "paras": [
+                   {"style": "ps1", "runs": [{"t": "Named caption"}, {"t": " emphasis", "style": "cs1"}, {"t": " local", "it": False, "color": "#1a1a1a"}]}]}]}
     out = []
     for name, raw, locked_from in [("composed text", composed, None), ("flowed text", flowed, None),
                                    ("pictures and shapes", pictures, None), ("locked pages", locked, 2),
                                    ("a4 pages", a4, None), ("uncomposed past the wall", flowed, 2),
-                                   ("graphics", graphic_page, None)]:
+                                   ("graphics", graphic_page, None), ("magazine identity", branded, None),
+                                   ("identity locked pages", branded, 2)]:
         doc = S.normalize_doc(raw)
         html, used = R.pages_html(doc, ASSETS, locked_from=locked_from, label="Pages of 'Tide'")
         out.append({"name": name, "doc": doc, "locked_from": locked_from, "html": html,

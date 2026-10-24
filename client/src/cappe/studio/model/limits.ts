@@ -59,10 +59,42 @@ export function clamp(n: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, n))
 }
 
+/** The server's sanitized, trimmed 80-code-point identity labels. */
+export function identityName(name: string): string {
+  const clean = [...name].filter((c) => {
+    const cp = c.codePointAt(0)!
+    return cp === 10 || (cp >= 32 && cp !== 127 && !(cp >= 0xd800 && cp <= 0xdfff))
+  }).join('').replace(/^[\n \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+|[\n \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+$/gu, '')
+  return [...clean].slice(0, 80).join('')
+}
+
 /** Why the server would refuse to save `doc` for its size, in its words, or
  *  null. Counts what normalize_doc counts; the byte limit is checked on the
  *  document as it stands (the server's copy is compact JSON, much the same). */
 export function docProblem(doc: Doc): string | null {
+  if (doc.identity) {
+    const i = doc.identity
+    if (!identityName(i.name) || [...i.paragraphs, ...i.characters, ...i.swatches, ...i.parents].some((r) => !identityName(r.name))) return 'Give each identity, style, swatch and parent a name.'
+    for (const rows of [i.paragraphs, i.characters, i.swatches, i.parents]) if (new Set(rows.map((r) => identityName(r.name).toLowerCase())).size !== rows.length) return 'Use distinct names in each identity list.'
+    if (i.paragraphs.length > 32 || i.characters.length > 32 || i.swatches.length > 24 || i.parents.length > 8) return 'This magazine identity has too many styles, swatches or parents.'
+    if (JSON.stringify(i).replace(/[\u007f-\uffff]/g, () => 'xxxxxx').length > 500_000) return 'This magazine identity is too big. Use fewer parent frames or less text.'
+    let items = doc.items.length, threads = doc.threads.length, chars = 0
+    let lines = doc.threads.reduce((n, t) => n + (t.comp?.lines.length ?? t.paras.length), 0)
+    for (const page of doc.pages) {
+      const parent = i.parents.find((p) => p.id === page.parent)
+      if (!parent) continue
+      items += parent.items.length; threads += parent.threads.length
+      chars += parent.threads.reduce((n, t) => n + t.paras.reduce((n, p) => n + p.runs.reduce((n, r) => n + r.t.length, 0), 0), 0)
+      lines += parent.threads.reduce((n, t) => n + (t.comp?.lines.length ?? t.paras.length), 0)
+      if (parent.items.length + doc.items.filter((item) => item.page === page.id).length > LIMITS.MAX_ITEMS_PER_PAGE) return 'This page and its parent hold too many frames.'
+    }
+    if (items > LIMITS.MAX_ITEMS || threads > LIMITS.MAX_THREADS) return 'This story and its parents hold too many frames or separate texts.'
+    chars += doc.threads.reduce((n, t) => n + t.paras.reduce((n, p) => n + p.runs.reduce((n, r) => n + r.t.length, 0), 0), 0)
+    if (chars > LIMITS.MAX_DOC_CHARS) return 'This story and its parents hold too much text.'
+    if (lines > LIMITS.MAX_LINES) return 'This story and its parents hold too many composed lines.'
+    if ([...doc.threads, ...i.parents.flatMap((p) => p.threads)].some((t) => (t.comp?.lines.length ?? 0) > LIMITS.MAX_LINES)) return 'A text has too many composed lines.'
+    if (JSON.stringify(doc).replace(/[\u007f-\uffff]/g, () => 'xxxxxx').length > LIMITS.MAX_DOC_BYTES) return 'This story is too big to save. Split it into two.'
+  }
   if (doc.pages.length > LIMITS.MAX_PAGES) return `A story holds at most ${LIMITS.MAX_PAGES} pages.`
   if (doc.items.length > LIMITS.MAX_ITEMS) return `A story holds at most ${LIMITS.MAX_ITEMS} frames and shapes.`
   const perPage = new Map<string, number>()
