@@ -166,7 +166,7 @@ export const GUIDE: GuideSection[] = [
     id: 'text', group: 'Words', icon: Type, title: 'Type',
     points: [
       'With the Type tool (T), click a page or drag out a frame, then type. Click any text frame later to type in it again.',
-      'Select words and use the Character panel: the font (95 faces, each with its weights and italics, or one of your own), size, leading, tracking, kerning, colour and underline.',
+      'Select words and use the Character panel: the font (102 families, each with its weights and italics, 11 Gummfit cuts, or one of your own), size, leading, tracking, kerning, colour and underline.',
       'The Paragraph panel sets a paragraph’s alignment (left, centre, right or justified), indents, and space before and after.',
       'Paragraph styles (Body text, Headline, Heading, Subheading, Pull quote, Caption) also say what each paragraph is in the Text view readers get on phones.',
       'Select a text frame (not its words) to set its columns, gutter, inset and vertical alignment in the Object panel.',
@@ -191,6 +191,7 @@ export const GUIDE: GuideSection[] = [
       'Drop cap: in the Paragraph panel, choose how many lines deep (2 to 6) and how many letters (1 to 3). The cap grows to fill those lines and the lines beside it move over.',
       'Keep last lines and Keep first lines stop a column or frame break from leaving one or two of a paragraph’s lines alone at the top or foot of a column (widows and orphans). Last line words stops a paragraph ending on a single short word. They change where lines break, so the text may run a little longer.',
       'A style applied over letters keeps their kerning and alternates: those are choices made letter by letter.',
+      'Gummfit cuts, at the end of the font list, are display cuts made for covers and headlines: Bodoni Moda Display, Fraunces Display and Playfair Poster (the hairline contrast of large type), Playfair Condensed Poster, and condensed or expanded widths of Noto Serif Display, Anybody, Archivo, League Gothic and Bricolage Grotesque. They’re the Studio’s own.',
     ],
   },
   {

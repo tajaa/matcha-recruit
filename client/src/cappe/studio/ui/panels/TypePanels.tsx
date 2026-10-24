@@ -1,6 +1,7 @@
 import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Underline } from 'lucide-react'
 import { hasItalic, weightsOf } from '../../../magazine/design/fontStack'
 import FontField from '../../../magazine/workspace/FontField'
+import { CUTS } from '../../fonts/cuts'
 import { WEIGHT_NAMES } from '../../../magazine/workspace/fontPreview'
 import { ColorField, IconBtn, NumberField, Row, Section, Seg, Select } from '../../../magazine/workspace/controls'
 import { CUSTOM_FAMILY, customFamily } from '../../model/doc'
@@ -65,7 +66,7 @@ export function CharacterPanel() {
       {s.doc.identity && <Select label="Character style" value={s.editing ? c.editor.currentChar().style ?? '' : s.doc.threads.find((t) => t.id === selectedThreads(s)[0])?.paras[0]?.runs[0]?.style ?? ''}
         options={[{ key: '', label: 'No character style (reset)' }, ...s.doc.identity.characters.map((r) => ({ key: r.id, label: r.name }))]}
         onChange={(style) => set({ style })} />}
-      <FontField value={custom ? `${customFamily(char.font)?.[0]?.name ?? 'Your font'} (yours)` : char.font} roles={false} onChange={(font) => set({ font })} />
+      <FontField value={custom ? `${customFamily(char.font)?.[0]?.name ?? 'Your font'} (yours)` : char.font} roles={false} cuts={CUTS} onChange={(font) => set({ font })} />
       <div className="flex items-center gap-2">
         {ownFamilies.length > 0 && <div className="min-w-0 flex-1"><Select label="Your fonts" value={custom ? char.font : ''}
           options={[{ key: '', label: 'Your fonts…' }, ...ownFamilies.map(([key, name]) => ({ key, label: name }))]}

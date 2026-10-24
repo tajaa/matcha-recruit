@@ -41,6 +41,7 @@ from PIL import Image, UnidentifiedImageError
 
 from .....core.services import agent_surfaces, anthropic_messages
 from ..fonts import FONTS
+from .cuts import CUTS
 from .fonts import manifest
 
 logger = logging.getLogger(__name__)
@@ -219,7 +220,8 @@ def fonts_text() -> str:
     groups: dict[str, list[str]] = {}
     for name in sorted(families):
         fam = families[name]
-        kind, body = FONTS.get(name, ("other", False, (), ()))[:2]
+        cut = CUTS.get(name)
+        kind, body = (cut.category, cut.body) if cut else FONTS.get(name, ("other", False, (), ()))[:2]
         notes = [weights_text(fam["weights"])] + (["italic"] if fam["italic"] else []) + (["good for body text"] if body else [])
         groups.setdefault(_KINDS.get(kind, "Other"), []).append(f"{name} ({', '.join(notes)})")
     return "\n".join(f"{kind}: {'; '.join(names)}" for kind, names in groups.items())

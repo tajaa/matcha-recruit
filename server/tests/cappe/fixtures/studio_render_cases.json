@@ -23,6 +23,12 @@
    "weight": 700,
    "italic": false,
    "sha": "4444444444444444444444444444444444444444444444444444444444444444"
+  },
+  {
+   "family": "Bodoni Moda Display",
+   "weight": 700,
+   "italic": true,
+   "sha": "6666666666666666666666666666666666666666666666666666666666666666"
   }
  ],
  "assets": {
@@ -2029,6 +2035,115 @@
    "html": "<div class=\"lyt\" data-lyt style=\"--pw:612;--ph:792;--sw:612;--paper:#ffffff\"><div class=\"lyt-strip\" data-lyt-strip tabindex=\"0\" role=\"region\" aria-label=\"Pages of &#x27;Tide&#x27;\"><div class=\"lyt-slot\" data-lyt-spread=\"0\"><div class=\"lyt-spread\" style=\"width:calc(612 * var(--u));height:calc(792 * var(--u))\"><div class=\"lyt-paper\" data-lyt-n=\"1\" style=\"left:calc(0 * var(--u));width:calc(612 * var(--u))\"></div><div class=\"lyt-page\" data-lyt-page=\"1\" style=\"left:calc(0 * var(--u));width:calc(612 * var(--u))\"><div class=\"lyt-item lyt-text\" style=\"left:calc(54 * var(--u));top:calc(54 * var(--u));width:calc(240 * var(--u));height:calc(200 * var(--u))\"><p class=\"lyt-p\"><span class=\"lyt-l\" style=\"left:calc(30 * var(--u));bottom:calc(186 * var(--u));width:calc(210 * var(--u))\"><span class=\"lyt-dc\" style=\"left:calc(-30 * var(--u));bottom:calc(-28 * var(--u))\"><span style=\"font-family:'f-1111111111111111';font-size:calc(36.5 * var(--u))\">D</span></span><span style=\"font-family:'f-1111111111111111';font-size:calc(10.5 * var(--u))\">rop</span><span style=\"font-family:'f-1111111111111111';font-size:calc(10.5 * var(--u));letter-spacing:calc(0.42 * var(--u));font-feature-settings:'kern' 1,'liga' 1,'calt' 1,'onum' 1,'smcp' 1\"> caps</span></span><span class=\"lyt-sp\"> </span><span class=\"lyt-l\" style=\"left:calc(30 * var(--u));bottom:calc(172 * var(--u));width:calc(210 * var(--u))\"><span style=\"font-family:'f-4444444444444444';font-size:calc(10.5 * var(--u))\">and more</span></span></p><p class=\"lyt-p\"><span class=\"lyt-l\" style=\"left:calc(0 * var(--u));bottom:calc(140 * var(--u));width:calc(240 * var(--u))\"><span style=\"font-family:'f-1111111111111111';font-size:calc(10.5 * var(--u));letter-spacing:calc(-0.1 * var(--u))\">AV</span></span></p></div><figure class=\"lyt-item lyt-img\" style=\"left:calc(300 * var(--u));top:calc(40 * var(--u));width:calc(200 * var(--u));height:calc(300 * var(--u))\"><img src=\"https://cdn.example.test/a.jpg\" alt=\"Boats &quot;at&quot; dawn\" srcset=\"https://cdn.example.test/a-480.webp 480w, https://cdn.example.test/a-960.webp 960w\" sizes=\"(min-width: 700px) 17vw, 33vw\" fetchpriority=\"high\" class=\"lyt-pic\" style=\"object-fit:cover;object-position:50% 50%\" /><figcaption class=\"lyt-credit\"><span class=\"mz-credit\"><a href=\"https://flickr.example.test/p/1\" rel=\"nofollow noopener\" target=\"_blank\">Photo: Ana &amp; Bo</a></span></figcaption></figure><div class=\"lyt-item lyt-text\" style=\"left:calc(280 * var(--u));top:calc(60 * var(--u));width:calc(250 * var(--u));height:calc(80 * var(--u))\"></div><figure class=\"lyt-item lyt-img\" style=\"left:calc(360 * var(--u));top:calc(40 * var(--u));width:calc(80 * var(--u));height:calc(300 * var(--u))\"><img src=\"https://cdn.example.test/a.jpg\" alt=\"Boats &quot;at&quot; dawn\" srcset=\"https://cdn.example.test/a-480.webp 480w, https://cdn.example.test/a-960.webp 960w\" sizes=\"(min-width: 700px) 7vw, 14vw\" fetchpriority=\"high\" class=\"lyt-pic\" style=\"object-fit:cover;object-position:40% 50%;transform:scale(1.6);transform-origin:40% 50%\" /></figure><div class=\"lyt-item lyt-shape\" style=\"left:calc(54 * var(--u));top:calc(400 * var(--u));width:calc(100 * var(--u));height:calc(100 * var(--u))\"></div></div></div></div></div></div>",
    "used": {},
    "faces_css": "@font-face{font-family:'f-1111111111111111';src:url(/api/cappe/public/fonts/1111111111111111111111111111111111111111111111111111111111111111.ttf) format('truetype');font-display:block}@font-face{font-family:'f-4444444444444444';src:url(/api/cappe/public/fonts/4444444444444444444444444444444444444444444444444444444444444444.ttf) format('truetype');font-display:block}"
+  },
+  {
+   "name": "gummfit cuts",
+   "doc": {
+    "v": 1,
+    "size": {
+     "w": 612,
+     "h": 792
+    },
+    "facing": false,
+    "margins": {
+     "t": 36,
+     "b": 36,
+     "i": 36,
+     "o": 36
+    },
+    "cols": {
+     "n": 1,
+     "g": 12
+    },
+    "baseline": {
+     "start": 36,
+     "step": 12
+    },
+    "grid": {
+     "step": 12
+    },
+    "bleed": 9,
+    "units": "in",
+    "paper": "#ffffff",
+    "pages": [
+     {
+      "id": "p1"
+     }
+    ],
+    "guides": [],
+    "items": [
+     {
+      "id": "t1",
+      "kind": "text",
+      "page": "p1",
+      "x": 54,
+      "y": 54,
+      "w": 400,
+      "h": 200,
+      "rot": 0,
+      "opacity": 100,
+      "locked": false,
+      "hidden": false,
+      "name": "",
+      "cols": 1,
+      "gutter": 12,
+      "inset": 0,
+      "valign": "top",
+      "fill": null,
+      "stroke": null
+     }
+    ],
+    "threads": [
+     {
+      "id": "s1",
+      "frames": [
+       "t1"
+      ],
+      "paras": [
+       {
+        "runs": [
+         {
+          "t": "Vogue",
+          "font": "Playfair Poster",
+          "wt": 300,
+          "size": 72
+         },
+         {
+          "t": " Spring",
+          "font": "Bodoni Moda Display",
+          "wt": 700,
+          "it": true,
+          "size": 72
+         }
+        ]
+       }
+      ],
+      "comp": {
+       "lines": [
+        [
+         0,
+         0,
+         0,
+         12,
+         0,
+         70,
+         400,
+         0
+        ]
+       ]
+      }
+     }
+    ],
+    "paywall_page": null
+   },
+   "locked_from": null,
+   "html": "<div class=\"lyt\" data-lyt style=\"--pw:612;--ph:792;--sw:612;--paper:#ffffff\"><div class=\"lyt-strip\" data-lyt-strip tabindex=\"0\" role=\"region\" aria-label=\"Pages of &#x27;Tide&#x27;\"><div class=\"lyt-slot\" data-lyt-spread=\"0\"><div class=\"lyt-spread\" style=\"width:calc(612 * var(--u));height:calc(792 * var(--u))\"><div class=\"lyt-paper\" data-lyt-n=\"1\" style=\"left:calc(0 * var(--u));width:calc(612 * var(--u))\"></div><div class=\"lyt-page\" data-lyt-page=\"1\" style=\"left:calc(0 * var(--u));width:calc(612 * var(--u))\"><div class=\"lyt-item lyt-text\" style=\"left:calc(54 * var(--u));top:calc(54 * var(--u));width:calc(400 * var(--u));height:calc(200 * var(--u))\"><p class=\"lyt-p\"><span class=\"lyt-l\" style=\"left:calc(0 * var(--u));bottom:calc(130 * var(--u));width:calc(400 * var(--u))\"><span style=\"font-family:'Playfair Display', Georgia, 'Times New Roman', serif;font-weight:300;font-size:calc(72 * var(--u))\">Vogue</span><span style=\"font-family:'f-6666666666666666';font-size:calc(72 * var(--u))\"> Spring</span></span></p></div></div></div></div></div></div>",
+   "used": {
+    "Playfair Display": [
+     "300|0"
+    ]
+   },
+   "faces_css": "@font-face{font-family:'f-6666666666666666';src:url(/api/cappe/public/fonts/6666666666666666666666666666666666666666666666666666666666666666.ttf) format('truetype');font-display:block}"
   }
  ]
 }

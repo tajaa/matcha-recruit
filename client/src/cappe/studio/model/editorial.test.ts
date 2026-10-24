@@ -35,6 +35,12 @@ describe('type the server keeps', () => {
     expect(charOf({ font: 'Nope' }).font).toBe('Source Serif 4')
   })
 
+  it('a Gummfit cut at its nearest style', () => {
+    expect(charOf({ font: 'Bodoni Moda Display', wt: 300, it: true })).toMatchObject({ font: 'Bodoni Moda Display', wt: 400, it: true })
+    expect(charOf({ font: 'Bricolage Grotesque Condensed', wt: 900, it: true })).toMatchObject({ wt: 800, it: false })
+    expect(charOf({ font: 'League Gothic Condensed', wt: 700 })).toMatchObject({ wt: 400 })
+  })
+
   it('a style applied over letters keeps their kerning and alternates', () => {
     const paras = [{ runs: [{ t: 'A', kern: -40, ot: 'swsh', size: 30 }, { t: 'V' }] }]
     expect(applyChar(paras, [0, 0], [0, 2], { style: 'cs1' })[0].runs).toEqual([{ t: 'A', kern: -40, ot: 'swsh', style: 'cs1' }, { t: 'V', style: 'cs1' }])

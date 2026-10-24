@@ -41,6 +41,7 @@ from typing import Any, Iterable, Mapping, Optional
 from uuid import UUID
 
 from ..fonts import FONTS, has_italic, nearest_weight
+from . import cuts
 from . import fonts as faces
 from . import graphics
 from . import limits as L
@@ -152,6 +153,10 @@ def _face(raw: dict) -> tuple[str, int, bool]:
     custom = faces.custom_face(raw.get("font"), raw.get("wt", L.CHAR_DEFAULTS["wt"]), raw.get("it"))
     if custom:
         return custom
+    if cuts.cut(raw.get("font")):  # a Gummfit cut (cuts.py)
+        font = raw["font"]
+        wt = cuts.nearest_weight(font, raw.get("wt", L.CHAR_DEFAULTS["wt"]))
+        return font, wt, bool(raw.get("it")) and cuts.has_italic(font, wt)
     font = raw.get("font") if raw.get("font") in FONTS else L.CHAR_DEFAULTS["font"]
     wt = nearest_weight(font, raw.get("wt", L.CHAR_DEFAULTS["wt"]))
     return font, wt, bool(raw.get("it")) and has_italic(font, wt)

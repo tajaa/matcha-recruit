@@ -31,6 +31,7 @@ from PIL import Image
 
 from app.cappe.routes import studio as studio_mod
 from app.cappe.services.magazine.fonts import FONTS
+from app.cappe.services.magazine.studio.cuts import CUTS
 from app.cappe.services.magazine.studio import ask
 from app.cappe.services.magazine.studio.fonts import manifest
 from app.core.services import agent_surfaces, anthropic_messages
@@ -116,7 +117,9 @@ def test_the_font_list_is_every_studio_family_once_by_kind():
         assert text.count(f"{name} (") == 1, name
     assert text.startswith(("Display:", "Handwriting:", "Monospace:", "Sans serif:", "Serif:"))
     serif = next(line for line in text.splitlines() if line.startswith("Serif:"))
-    assert all(FONTS[n][0] == "serif" for n in families if f"{n} (" in serif)
+    kind = lambda n: CUTS[n].category if n in CUTS else FONTS[n][0]  # noqa: E731 - a Gummfit cut is a family of its own
+    assert all(kind(n) == "serif" for n in families if f"{n} (" in serif)
+    assert "Bodoni Moda Display (" in serif
 
 
 def test_a_familys_weights_are_only_the_ones_it_has():

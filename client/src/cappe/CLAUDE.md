@@ -170,6 +170,9 @@ Website-builder frontend for the consumer brand **Gummfit**, host-routed on gumm
   the photo stays under the lettering and a linked `cutout` partner showing its cut-out goes over it (`keepLinks` lets a
   partner keep its own picture and drops it when the photo changes); `geometry.hitItem` clicks a partner only on its
   `shape` unless it is selected. Collections leave own fonts and cut-out partners behind (`portableCollection`).
+  **Gummfit cuts** (`fonts/cuts.ts`, the server's `studio/cuts.py`): Studio-only display and width cuts, listed after
+  the catalog in `FontField` (`cuts` prop, previewed from Google in the family they are cut from), accepted by
+  `charOf`, and set by `layoutRender.runStyle` in their `stand_in` family while their faces aren't built.
   **Magazine identity** (`studio/model/identity.ts`, `ui/panels/IdentityPanel.tsx`): named paragraph/character
   styles and swatches are references, with local attributes as overrides. `resolveParas` supplies effective
   type to composition/rendering/font loading; editable paragraphs and ProseMirror keep sparse references,

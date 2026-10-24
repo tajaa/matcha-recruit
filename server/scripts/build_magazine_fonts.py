@@ -26,7 +26,13 @@ puts each face in storage at `cappe/fonts/<sha>.ttf`, where the font route
     venv/bin/python scripts/build_magazine_fonts.py --out /tmp/faces --upload
 
 `--families "Inter,Source Serif 4"` builds only those (a quick local build;
-point `CAPPE_FONTS_DIR` at `--out` to serve them without uploading).
+point `CAPPE_FONTS_DIR` at `--out` to serve them without uploading); with
+`--manifest` it adds them to the manifest (or rebuilds them in it) and
+leaves every other face as it is, so a new family needs no full rebuild.
+
+Gummfit cuts (`studio/cuts.py`) are built the same way from their source
+family, fixed at their axes (a display optical size, a width) and renamed
+inside the file.
 """
 from __future__ import annotations
 
@@ -47,7 +53,8 @@ sys.path.insert(0, str(ROOT))
 from fontTools.ttLib import TTFont  # noqa: E402
 
 from app.cappe.services.magazine.fonts import FONTS  # noqa: E402
-from app.cappe.services.magazine.studio.font_build import build_face, features, metrics  # noqa: E402
+from app.cappe.services.magazine.studio.cuts import CUTS  # noqa: E402
+from app.cappe.services.magazine.studio.font_build import build_face, features, metrics, rename  # noqa: E402
 from app.cappe.services.magazine.studio.fonts import MANIFEST  # noqa: E402
 
 # google/fonts main on 2026-10-21. Change it only together with a full
@@ -101,8 +108,10 @@ def _pick(files: list[dict], weight: int, italic: bool) -> dict | None:
 def build(families: list[str], out: Path, cache: Path) -> list[dict]:
     faces = []
     for name in families:
-        _cat, _body, weights, italics = FONTS[name]
-        where, files = sources(name, cache)
+        # A Gummfit cut (studio/cuts.py) is its source family's file fixed at its axes, under its own name.
+        cut = CUTS.get(name)
+        _cat, _body, weights, italics = (cut.category, cut.body, cut.weights, cut.italics) if cut else FONTS[name]
+        where, files = sources(cut.source if cut else name, cache)
         styles = [(w, False) for w in weights] + [(w, True) for w in italics]
         for weight, italic in styles:
             src = _pick(files, weight, italic)
@@ -113,7 +122,9 @@ def build(families: list[str], out: Path, cache: Path) -> list[dict]:
             if data is None:
                 print(f"  {name}: {src['filename']} missing, skipped", file=sys.stderr)
                 continue
-            font = build_face(TTFont(BytesIO(data), recalcTimestamp=False), weight)
+            font = build_face(TTFont(BytesIO(data), recalcTimestamp=False), weight, at=cut.axes if cut else None)
+            if cut:
+                rename(font, name, weight, italic)
             buf = BytesIO()
             font.recalcTimestamp = False
             font.save(buf)
@@ -165,17 +176,26 @@ def main() -> None:
                 raise SystemExit(f"{len(lost)} faces built to other bytes than the manifest's: rebuild the manifest")
         asyncio.run(upload(faces, args.out, args.dry_run))
         return
-    names = [n.strip() for n in args.families.split(",") if n.strip()] or list(FONTS)
-    unknown = [n for n in names if n not in FONTS]
+    names = [n.strip() for n in args.families.split(",") if n.strip()] or [*FONTS, *CUTS]
+    unknown = [n for n in names if n not in FONTS and n not in CUTS]
     if unknown:
         raise SystemExit(f"not in the catalog: {', '.join(unknown)}")
     faces = build(names, args.out, cache)
     print(f"{len(faces)} faces, {sum(f['bytes'] for f in faces) / 1e6:.1f} MB")
     if args.manifest:
         if args.families:
-            raise SystemExit("--manifest builds the whole catalog: leave out --families")
+            # Families added (or rebuilt): the rest of the manifest stays as it is.
+            faces = merge(json.loads(MANIFEST.read_text())["faces"], faces, names)
         MANIFEST.write_text(json.dumps({"version": COMMIT, "faces": faces}, indent=1) + "\n")
         print(f"wrote {MANIFEST}")
+
+
+def merge(kept: list[dict], built: list[dict], names: list[str]) -> list[dict]:
+    """The manifest's faces with `names`' replaced by those just built, in
+    catalog order (the catalog's families, then the cuts)."""
+    order = {name: k for k, name in enumerate([*FONTS, *CUTS])}
+    faces = [f for f in kept if f["family"] not in set(names)] + built
+    return sorted(faces, key=lambda f: (order.get(f["family"], len(order)), f["italic"], f["weight"]))
 
 
 if __name__ == "__main__":

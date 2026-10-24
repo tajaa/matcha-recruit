@@ -102,4 +102,11 @@ export const FONTS: MagFont[] = [
   { name: 'Righteous', cat: 'display', body: false, w: [400], i: [] },
   { name: 'Permanent Marker', cat: 'handwriting', body: false, w: [400], i: [] },
   { name: 'Shadows Into Light', cat: 'handwriting', body: false, w: [400], i: [] },
+  { name: 'Big Shoulders Stencil Display', cat: 'display', body: false, w: [100, 200, 300, 400, 500, 600, 700, 800, 900], i: [] },
+  { name: 'Anybody', cat: 'display', body: false, w: [100, 200, 300, 400, 500, 600, 700, 800, 900], i: [100, 200, 300, 400, 500, 600, 700, 800, 900] },
+  { name: 'Jost', cat: 'sans', body: true, w: [100, 200, 300, 400, 500, 600, 700, 800, 900], i: [100, 200, 300, 400, 500, 600, 700, 800, 900] },
+  { name: 'Poiret One', cat: 'display', body: false, w: [400], i: [] },
+  { name: 'Great Vibes', cat: 'handwriting', body: false, w: [400], i: [] },
+  { name: 'Italianno', cat: 'handwriting', body: false, w: [400], i: [] },
+  { name: 'Pinyon Script', cat: 'handwriting', body: false, w: [400], i: [] },
 ]
