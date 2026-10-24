@@ -29,8 +29,8 @@ function doc(): Doc {
     threads: ['t1', 't2'].map((frame, k) => ({ id: `s${k + 1}`, frames: [frame], paras: [{ style: 'ps3', runs: [{ t: 'A caption with enough words to wrap across several lines.' }] }] })),
   }
 }
-function studio(d = doc()) {
-  const store = new Store({ doc: d, page: 0, selection: ['t1'], tool: 'select', view: DEFAULT_VIEW, panels: ['identity'], drawer: null, editing: null, overset: new Set(), assets: {}, dialog: null, guide: null, threading: null, snaps: null, marquee: null, save: { state: 'saved', rev: 1, draft: false, live: false, message: null } } as State, measure)
+function studio(d = doc(), metrics = measure) {
+  const store = new Store({ doc: d, page: 0, selection: ['t1'], tool: 'select', view: DEFAULT_VIEW, panels: ['identity'], drawer: null, editing: null, overset: new Set(), assets: {}, dialog: null, guide: null, threading: null, snaps: null, marquee: null, save: { state: 'saved', rev: 1, draft: false, live: false, message: null } } as State, metrics)
   const ctx = { store, siteId: 'site', fonts: { book, ensureDoc: vi.fn(async () => {}) }, editor: { currentChar: () => ({}), currentPara: () => ({}), close: vi.fn() } } as unknown as StudioCtx
   return { store, ctx }
 }
@@ -158,6 +158,11 @@ describe('live magazine identities', () => {
     host.innerHTML = '<p data-pa="{&quot;style&quot;:&quot;ps1&quot;}"><span data-ch="{&quot;style&quot;:&quot;cs1&quot;}">outside</span></p>'
     const untrusted = fromPM(DOMParser.fromSchema(schema).parse(host))
     expect(untrusted[0].style).toBeUndefined(); expect(untrusted[0].runs[0].style).toBeUndefined()
+    const empty = toPM([{ style: 'ps2', runs: [{ t: '' }] }, { runs: [{ t: 'next' }] }])
+    host.replaceChildren(DOMSerializer.fromSchema(schema).serializeFragment(portableSlice(empty.slice(0, empty.content.size), d.identity).content))
+    const blank = fromPM(DOMParser.fromSchema(schema).parse(host))[0]
+    expect(blank.runs[0]).toMatchObject({ t: '', font: 'Inter', size: 28, wt: 600 })
+    expect(blank.style).toBeUndefined()
   })
 
   it('links effective paragraph roles across local and parent text without reclassifying headings', () => {
@@ -182,6 +187,18 @@ describe('live magazine identities', () => {
     expect(resolveParas(removed.threads[0].paras, removed.identity)[0].runs[1].it).toBe(false)
   })
 
+  it('keeps local colour overrides on deletion and paragraph styles live after removing a character style', () => {
+    const d = doc(); d.threads[0].paras[0].runs = [{ t: 'local red', color: '#ff0000' }, { t: 'emphasis', style: 'cs1' }]
+    const before = resolveParas(d.threads[0].paras, d.identity)
+    const noParagraph = removeStyle(d, 'paragraphs', 'ps3')
+    expect(resolveParas(noParagraph.threads[0].paras, noParagraph.identity)).toEqual(before)
+    const noCharacter = removeStyle(d, 'characters', 'cs1')
+    expect(resolveParas(noCharacter.threads[0].paras, noCharacter.identity)).toEqual(before)
+    noCharacter.identity = { ...noCharacter.identity!, paragraphs: noCharacter.identity!.paragraphs.map((p) => p.id === 'ps3' ? { ...p, char: { ...p.char, size: 20 } } : p) }
+    expect(resolveParas(noCharacter.threads[0].paras, noCharacter.identity)[0].runs[1].size).toBe(20)
+    expect(noCharacter.threads[0].paras[0].runs[1].style).toBeUndefined()
+  })
+
   it('keeps same-issue clipboard links after identity edits and flattens deleted definitions', () => {
     const { store, ctx } = studio()
     command('copy').run(ctx)
@@ -202,6 +219,10 @@ describe('live magazine identities', () => {
     const target = doc(), source = starterIdentity(); source.characters[0].name = ' Emphasis '
     expect(importIdentity(target, source).identity!.characters).toHaveLength(1)
     expect(identityName(' \u0000Tide 📷\ud800 ')).toBe('Tide 📷')
+    expect(identityName('\u0085Body\u0085')).toBe('Body')
+    expect(identityName('\ufeffBody')).toBe('\ufeffBody')
+    d.identity!.characters[1].name = '\u0085Emphasis'
+    expect(docProblem(d)).toMatch(/distinct names/)
   })
 
   it('bounds repeated parent composition, including empty lines with no character cost', () => {
@@ -220,6 +241,15 @@ describe('live magazine identities', () => {
     store.recompose()
     expect(store.get().doc).toBe(before); expect(save).not.toHaveBeenCalled()
     expect(store.get().notice).toMatch(/identity is too big/)
+    act(() => store.edit((d) => ({ ...d, pages: [{ id: 'p1' }], identity: { ...d.identity!, parents: [] } })))
+    store.undo()
+    expect(store.get().doc).toBe(before); expect(docProblem(store.get().doc)).toBeNull()
+    store.replace(before)
+    expect(store.get().doc).toBe(before); expect(docProblem(store.get().doc)).toBeNull()
+    const raw = structuredClone(d)
+    expect(docProblem(raw)).toBeNull()
+    const loaded = studio(raw, store.measure).store
+    expect(loaded.get().doc).toBe(raw); expect(loaded.get().notice).toMatch(/identity is too big/)
   })
 
   it('page numbers follow page order and overrides, and furniture never prints behind the paywall', () => {

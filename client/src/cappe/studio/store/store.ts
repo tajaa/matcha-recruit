@@ -88,7 +88,10 @@ export class Store {
   constructor(initial: State, measure: Measure) {
     this.measure = measure
     const { doc, overset } = composeDoc(initial.doc, measure)
-    this.state = { ...initial, doc, overset }
+    const problem = doc.identity ? docProblem(doc) : null
+    // A saved template may fit before fonts load but compose beyond its
+    // budget. Keep the saved snapshot editable so its parent can be simplified.
+    this.state = { ...initial, doc: problem ? initial.doc : doc, overset, ...(problem ? { notice: problem } : {}) }
   }
 
   get = (): State => this.state
@@ -169,11 +172,13 @@ export class Store {
   private restore(doc: Doc): void {
     this.lastKey = null
     const composed = composeDoc(doc, this.measure)
+    const problem = composed.doc.identity ? docProblem(composed.doc) : null
+    const safe = problem ? doc : composed.doc
     this.state = within({
-      ...this.state, doc: composed.doc, overset: composed.overset, save: { ...this.state.save, state: 'dirty' },
+      ...this.state, doc: safe, overset: composed.overset, ...(problem ? { notice: problem } : {}), save: { ...this.state.save, state: 'dirty' },
     })
     this.emit()
-    this.onDocChange?.(composed.doc)
+    this.onDocChange?.(safe)
   }
 
   /** Replace the document without history (a reload, a restored version). */
@@ -182,7 +187,8 @@ export class Store {
     this.future = []
     this.lastKey = null
     const composed = composeDoc(doc, this.measure)
-    this.state = { ...this.state, ...extra, doc: composed.doc, overset: composed.overset, selection: [], editing: null,
+    const problem = composed.doc.identity ? docProblem(composed.doc) : null
+    this.state = { ...this.state, ...extra, doc: problem ? doc : composed.doc, overset: composed.overset, ...(problem ? { notice: problem } : {}), selection: [], editing: null,
       page: Math.min(this.state.page, doc.pages.length - 1) }
     this.emit()
   }

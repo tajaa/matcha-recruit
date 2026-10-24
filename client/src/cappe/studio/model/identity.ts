@@ -1,6 +1,6 @@
 // References stay in the editable document. Only composition and rendering
 // receive resolved attributes, so saving/typing cannot freeze an inherited style.
-import { CHAR_KEYS, allIds, charOf, newId, paraOf, sparsePara } from './doc'
+import { allIds, charOf, newId, paraOf, sparsePara } from './doc'
 import type { CharAttrs, Doc, Item, MagazineIdentity, Para, ParentLayout, Thread } from './types'
 import { identityName, LIMITS, round } from './limits'
 import { applyPara } from './ops'
@@ -126,6 +126,11 @@ export function detachParent(doc: Doc, page: number): Doc {
 /** Removing a definition leaves its text's appearance intact. */
 export function removeStyle(doc: Doc, kind: 'paragraphs' | 'characters', id: string): Doc {
   if (!doc.identity) return doc
+  const materialize = (base: CharAttrs, raw: Para['runs'][number]) => {
+    const out = { ...base, ...raw }
+    if (raw.color !== undefined && raw.swatch === undefined) delete out.swatch
+    return out
+  }
   const clean = (threads: Thread[]) => threads.map((t) => ({ ...t, paras: t.paras.map((p) => {
     const shown = resolveParas([p], doc.identity)[0]
     if (kind === 'paragraphs' && p.style === id) {
@@ -138,10 +143,14 @@ export function removeStyle(doc: Doc, kind: 'paragraphs' | 'characters', id: str
           for (const key of Object.keys(character) as (keyof CharAttrs)[]) delete inherited[key]
           if (character.color !== undefined || character.swatch !== undefined) { delete inherited.color; delete inherited.swatch }
         }
-        return { ...inherited, ...r }
+        return materialize(inherited, r)
       }) }
     }
-    return { ...p, runs: p.runs.map((r, k) => kind === 'characters' && r.style === id ? { t: r.t, ...Object.fromEntries(CHAR_KEYS.map((key) => [key, shown.runs[k][key]])) } : r) }
+    return { ...p, runs: p.runs.map((r) => {
+      if (kind !== 'characters' || r.style !== id) return r
+      const local = { ...r }; delete local.style
+      return materialize(doc.identity!.characters.find((s) => s.id === id)?.char ?? {}, local)
+    }) }
   }) }))
   return { ...doc, threads: clean(doc.threads), identity: { ...doc.identity,
     [kind]: doc.identity[kind].filter((s) => s.id !== id), parents: doc.identity.parents.map((p) => ({ ...p, threads: clean(p.threads) })) } }

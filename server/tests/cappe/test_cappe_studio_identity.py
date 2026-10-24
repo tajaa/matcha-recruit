@@ -114,6 +114,7 @@ async def test_graphic_lookup_includes_unused_parent_definitions_at_the_local_fr
     raw = {'items': items[:-1], 'identity': {'parents': [{'items': items[-1:]}]}}
     conn = Conn(fetch={'FROM cappe_studio_bank': [{'sha': s, 'mono': True, 'fit': 'contain'} for s in shas]})
     found = await B.doc_graphics(conn, raw)
+    assert conn.args_for('FROM cappe_studio_bank')[0] == shas
     assert len(found) == len(shas) and shas[-1] in found
 
 

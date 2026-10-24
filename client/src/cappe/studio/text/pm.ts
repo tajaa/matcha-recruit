@@ -20,10 +20,11 @@ export const schema = new Schema({
       parseDOM: [{ tag: 'p', getAttrs: (el) => {
         try {
           const raw = JSON.parse((el as HTMLElement).dataset.pa || '{}')
-          return { pa: JSON.stringify(sparsePara({ ...raw, style: undefined })) }
+          const empty = JSON.parse((el as HTMLElement).dataset.ec || '{}')
+          return { pa: JSON.stringify(sparsePara({ ...raw, style: undefined })), ec: JSON.stringify(sparseChar({ ...empty, style: undefined, swatch: undefined }, true)) }
         } catch { return { pa: '{}' } }
       } }],
-      toDOM: (p) => ['p', { 'data-pa': p.attrs.pa }, 0],
+      toDOM: (p) => ['p', { 'data-pa': p.attrs.pa, 'data-ec': p.attrs.ec }, 0],
     },
     text: {},
   },
@@ -89,7 +90,9 @@ export function portableSlice(slice: Slice, identity?: MagazineIdentity, paragra
     const children: PMNode[] = []
     node.forEach((child) => children.push(copy(child, paragraph?.char ?? base)))
     const pa = { ...raw }; delete pa.style
-    return node.type.create({ ...node.attrs, pa: JSON.stringify({ ...paragraph?.para, ...pa }) }, children, node.marks)
+    return node.type.create({ ...node.attrs, pa: JSON.stringify({ ...paragraph?.para, ...pa }),
+      ...(node.type === schema.nodes.paragraph ? { ec: JSON.stringify(resolveChar(emptyAttrsOf(node), paragraph?.char ?? base, identity)) } : {}),
+    }, children, node.marks)
   }
   const children: PMNode[] = []
   const base = identity.paragraphs.find((p) => p.id === paragraphAttrs.style)?.char

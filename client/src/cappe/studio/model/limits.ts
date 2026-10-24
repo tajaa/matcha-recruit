@@ -64,7 +64,7 @@ export function identityName(name: string): string {
   const clean = [...name].filter((c) => {
     const cp = c.codePointAt(0)!
     return cp === 10 || (cp >= 32 && cp !== 127 && !(cp >= 0xd800 && cp <= 0xdfff))
-  }).join('').trim()
+  }).join('').replace(/^[\n \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+|[\n \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+$/gu, '')
   return [...clean].slice(0, 80).join('')
 }
 
