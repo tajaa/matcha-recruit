@@ -29,7 +29,7 @@ def upgrade() -> None:
             sha TEXT NOT NULL CHECK (sha ~ '^[0-9a-f]{64}$'),
             bytes INTEGER,
             upm INTEGER,
-            asc INTEGER,
+            "asc" INTEGER,
             "desc" INTEGER,
             cap INTEGER,
             x INTEGER,

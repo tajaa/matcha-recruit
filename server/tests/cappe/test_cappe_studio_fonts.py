@@ -4,6 +4,7 @@ uses a fake connection, storage a mock. No database is touched."""
 import asyncio
 import hashlib
 import pathlib
+import re
 from datetime import datetime, timezone
 from io import BytesIO
 from types import SimpleNamespace
@@ -435,3 +436,13 @@ def test_the_catalog_build_uses_the_shared_steps():
     from app.cappe.services.magazine.studio import font_build
     face = font_build.build_face(TTFont(BytesIO(variable()), recalcTimestamp=False), 700)
     assert "fvar" not in face and face["hhea"].lineGap == 0 and face.getBestCmap()[ord("A")]
+
+
+
+def test_the_columns_named_after_sql_keywords_are_always_quoted():
+    # `asc` and `desc` are reserved in Postgres: unquoted, the migration (and any query naming them) is a syntax error.
+    root = pathlib.Path(__file__).resolve().parents[2]
+    for path in ("alembic/versions/cappefont01_studio_fonts.py", "app/cappe/services/magazine/studio/custom_fonts.py"):
+        for line in (root / path).read_text().splitlines():
+            if any(word in line for word in ("INTEGER", "SELECT", "INSERT", "_COLS")):
+                assert not re.search(r'(?<![\w"])(asc|desc)(?![\w"])', line), f"{path}: {line.strip()}"

@@ -43,7 +43,7 @@ _REQUIRED = ("cmap", "head", "hhea", "OS/2", "hmtx")
 # Bitmap and SVG glyphs: not text faces, and more parser surface for nothing.
 _DROP = ["DSIG", "STAT", "SVG ", "sbix", "CBDT", "CBLC", "EBDT", "EBLC", "EBSC"]
 
-_COLS = ('id, family, name, weight, italic, sha, bytes, upm, asc, "desc", cap, x, features, filename, '
+_COLS = ('id, family, name, weight, italic, sha, bytes, upm, "asc", "desc", cap, x, features, filename, '
          "created_at, hidden_at")
 
 
@@ -277,7 +277,7 @@ async def create_font(conn, *, site_id: UUID, account_id: Optional[UUID], name: 
             raise _duplicate()
         try:
             row = await conn.fetchrow(
-                "INSERT INTO cappe_studio_fonts (site_id, family, name, weight, italic, sha, bytes, upm, asc, \"desc\", "
+                "INSERT INTO cappe_studio_fonts (site_id, family, name, weight, italic, sha, bytes, upm, \"asc\", \"desc\", "
                 "cap, x, features, filename, licence_attested_at, created_by) "
                 "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), $15) "
                 f"RETURNING {_COLS}",
