@@ -7,15 +7,19 @@ them and a reader's page draws them, as a mask or a background.
   * `GET /public/graphics/search?q=&group=&set=&offset=&limit=`: matches,
     best first;
   * `GET /public/graphics/licenses.txt`: the sources' licences, kept with them;
+  * `GET /public/graphics/picks`: the Gummfit-curated bank's live graphics
+    (`studio/bank.py`), cached five minutes so an admin's change shows soon;
   * `GET /public/graphics/{sha}.svg`: a file, by its sha256, only one in the
-    committed manifest, checked against its sha and cached for a year. It is
+    committed manifest or the curated bank, checked against its sha and cached
+    for a year. It is
     sent with a CSP that runs nothing (the files are cleaned when built);
   * `GET /public/graphics/stretch/{sha}.svg`: the same file made to fill any
     box out of its own shape, for the "stretch" fit (`graphics.stretched`).
 
 Files are read from `CAPPE_GRAPHICS_DIR` when it is set (a local build of
 `scripts/build_studio_graphics.py`), else from storage
-(`cappe/graphics/<sha>.svg`), and kept in memory once read.
+(`cappe/graphics/<sha>.svg`, where the curated bank's go too), and kept in
+memory once read.
 """
 from __future__ import annotations
 
@@ -30,7 +34,8 @@ from fastapi import APIRouter, HTTPException, Query, status
 from fastapi.responses import JSONResponse, PlainTextResponse, Response
 
 from ....core.services.storage import get_storage
-from ...services.magazine.studio import graphics
+from ....database import get_connection
+from ...services.magazine.studio import bank, graphics
 
 router = APIRouter()
 
@@ -40,6 +45,7 @@ _IMMUTABLE = {"Cache-Control": "public, max-age=31536000, immutable"}
 _SVG_HEADERS = {**_IMMUTABLE, "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
                 "X-Content-Type-Options": "nosniff"}
 _LISTS = {"Cache-Control": "public, max-age=3600"}
+_PICKS = {"Cache-Control": "public, max-age=300"}
 
 
 def _local(sha: str) -> Optional[bytes]:
@@ -77,6 +83,13 @@ async def search_graphics(q: str = Query("", max_length=100), group: Optional[st
     return JSONResponse(graphics.search(q, group, set, offset, limit), headers=_LISTS)
 
 
+@router.get("/public/graphics/picks")
+async def graphic_picks():
+    async with get_connection() as conn:
+        picks = await bank.graphic_picks(conn)
+    return JSONResponse({"items": picks}, headers=_PICKS)
+
+
 @router.get("/public/graphics/licenses.txt")
 async def graphics_licenses():
     try:
@@ -86,8 +99,17 @@ async def graphics_licenses():
     return PlainTextResponse(text, headers=_LISTS)
 
 
+async def _known(sha: str) -> bool:
+    if graphics.by_sha(sha) is not None or sha in _cache:
+        return True
+    if not graphics.is_sha(sha):
+        return False
+    async with get_connection() as conn:
+        return await bank.has_graphic(conn, sha)
+
+
 async def _file(sha: str) -> bytes:
-    if graphics.by_sha(sha) is None:
+    if not await _known(sha):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No such graphic")
     data = await graphic_bytes(sha)
     if data is None:

@@ -17,7 +17,11 @@ import { facesOf, type Box, type ElementSpec, type TextStyle } from './catalog'
 /** Where something lands: a page (its index then, and its id: a text style's
  *  faces or an archive picture take a moment, and pages can move or go
  *  meanwhile), a point on it (page points), and what was under it when dropped. */
-export type At = { page: number; pageId: string; x: number; y: number; hit: Item | null; dropped: boolean }
+/** Where something added goes, taken when it was clicked or dropped (a
+ *  picture from the network arrives later, after the page may have turned):
+ *  the page by id, the point on it, what a drop landed on, and, for a click,
+ *  the empty picture frame that was selected then. */
+export type At = { page: number; pageId: string; x: number; y: number; hit: Item | null; dropped: boolean; frame: string | null }
 
 /** Where a drop at (clientX, clientY) lands; with none, the middle of the
  *  page in view. */
@@ -25,14 +29,18 @@ export function landing(c: StudioCtx, drop?: { clientX: number; clientY: number 
   const s = c.store.get()
   const board = drop ? c.board() : null
   const id = (page: number) => s.doc.pages[page]?.id ?? ''
-  if (!drop || !board) return { page: s.page, pageId: id(s.page), x: s.doc.size.w / 2, y: s.doc.size.h / 2, hit: null, dropped: false }
+  if (!drop || !board) {
+    const one = s.selection.length === 1 ? s.doc.items.find((i) => i.id === s.selection[0]) : undefined
+    const frame = one?.kind === 'image' && !one.asset_id ? one.id : null
+    return { page: s.page, pageId: id(s.page), x: s.doc.size.w / 2, y: s.doc.size.h / 2, hit: null, dropped: false, frame }
+  }
   const r = board.getBoundingClientRect()
   const zoom = s.view.zoom
   const p = { x: (drop.clientX - r.left) / zoom, y: (drop.clientY - r.top) / zoom }
   const lay = layout(s.doc)
   const page = pageAt(s.doc, lay, p)
   const o = lay.origin[page]
-  return { page, pageId: id(page), x: p.x - o.x, y: p.y - o.y, hit: hitItem(s.doc, lay, p), dropped: true }
+  return { page, pageId: id(page), x: p.x - o.x, y: p.y - o.y, hit: hitItem(s.doc, lay, p), dropped: true, frame: null }
 }
 
 /** Where `at`'s page is now; it may have moved, or gone, while what lands on
@@ -129,18 +137,20 @@ export async function addText(c: StudioCtx, style: TextStyle, at: At = landing(c
 }
 
 /** A library picture: into the empty frame it was dropped on (or the empty
- *  frame selected, for a click), else a new frame its shape. Returns the
- *  frame's id. */
+ *  frame selected when it was clicked), else a new frame its shape on the
+ *  page it was meant for. Throws when that page, or that selected frame, has
+ *  gone (or the frame was filled) meanwhile. Returns the frame's id. */
 export function addPicture(c: StudioCtx, asset: CappeAsset, at: At = landing(c)): string {
   c.store.set((x) => ({ assets: { ...x.assets, [asset.id]: toAsset(asset) } }))
   const s = c.store.get()
   // An archive picture arrives a moment after its drop: go by what is there now.
   const find = (id?: string) => (id ? s.doc.items.find((i) => i.id === id) : undefined)
   const hit = find(at.hit?.id)
-  const chosen = s.selection.length === 1 ? find(s.selection[0]) : undefined
-  const target = at.dropped
-    ? (hit?.kind === 'image' && !hit.locked ? hit : null)
-    : (chosen?.kind === 'image' && !chosen.asset_id ? chosen : null)
+  const chosen = find(at.frame ?? undefined)
+  if (at.frame && !(chosen?.kind === 'image' && !chosen.asset_id)) {
+    throw new Error('The frame it was going in was filled or removed meanwhile.')
+  }
+  const target = at.dropped ? (hit?.kind === 'image' && !hit.locked ? hit : null) : chosen ?? null
   if (target) {
     c.store.edit((d) => patchItems(d, [target.id], { asset_id: asset.id }), { key: `add:${Date.now()}` })
     const page = s.doc.pages.findIndex((p) => p.id === target.page)

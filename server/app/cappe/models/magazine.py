@@ -160,6 +160,25 @@ class CappeStockImportRequest(BaseModel):
     post_id: Optional[UUID] = None
 
 
+class CappeBankPhoto(BaseModel):
+    """A photo in the Gummfit-curated bank, as the Studio's Photos tab shows it
+    (services/magazine/studio/bank.py)."""
+    id: UUID
+    name: str
+    url: str
+    variants: dict[str, Any] = Field(default_factory=dict)
+    width: int
+    height: int
+    credit_line: Optional[str] = None
+    collection: Optional[str] = None
+
+
+class CappeBankPhotos(BaseModel):
+    total: int
+    items: list[CappeBankPhoto]
+    collections: list[str]
+
+
 class CappeStockTopicRequest(BaseModel):
     topic: str = Field(max_length=40)
     count: int = Field(default=12, ge=1, le=24)
@@ -390,6 +409,8 @@ __all__ = [
     "StockSource",
     "CappeStockResult",
     "CappeStockSearch",
+    "CappeBankPhoto",
+    "CappeBankPhotos",
     "CappeStockKey",
     "CappeStockImportRequest",
     "CappeStockTopicRequest",

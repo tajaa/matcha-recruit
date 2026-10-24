@@ -34,6 +34,7 @@ from .domains import router as domains_router
 from .forms import router as forms_router
 from .locations import router as locations_router
 from .matcha_admin import router as matcha_admin_router
+from .studio_bank_admin import router as studio_bank_admin_router
 from .merlin import router as merlin_router
 from .merlin_setup import router as merlin_setup_router
 from .messages import router as messages_router
@@ -92,6 +93,10 @@ cappe_router.include_router(
 # Gated at the mount for the same reason.
 cappe_router.include_router(
     matcha_admin_router, prefix="/matcha-admin", dependencies=[Depends(require_admin)]
+)
+# The Studio bank's admin (Gummfit-curated photos and graphics), same realm.
+cappe_router.include_router(
+    studio_bank_admin_router, prefix="/matcha-admin", dependencies=[Depends(require_admin)]
 )
 
 # Authenticated, per-site (each route gates on require_cappe_account + get_owned_site).

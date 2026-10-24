@@ -16,6 +16,7 @@ colourful one is drawn as it is.
 from __future__ import annotations
 
 import json
+import math
 import re
 import xml.etree.ElementTree as ET
 from functools import lru_cache
@@ -47,6 +48,11 @@ def _index() -> dict[str, dict]:
 
 def by_sha(sha: object) -> Optional[dict]:
     return _index().get(sha) if isinstance(sha, str) else None
+
+
+def is_sha(value: object) -> bool:
+    """Whether `value` could name a graphic's file (a sha256, lower-case hex)."""
+    return isinstance(value, str) and bool(_SHA.match(value))
 
 
 def url(sha: str, stretch: bool = False) -> str:
@@ -138,9 +144,11 @@ def clean_svg(data: bytes) -> tuple[bytes, float, float]:
             raise SvgError("no viewBox") from exc
         root.set("viewBox", " ".join(box))
     try:
-        vw, vh = float(box[2]), float(box[3])
+        x, y, vw, vh = (float(v) for v in box)
     except ValueError as exc:
         raise SvgError("bad viewBox") from exc
+    if not all(math.isfinite(v) for v in (x, y, vw, vh)):  # NaN or Infinity: no size to store or draw
+        raise SvgError("bad viewBox")
     if vw <= 0 or vh <= 0:
         raise SvgError("empty viewBox")
     for key in ("width", "height"):

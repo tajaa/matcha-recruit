@@ -7,7 +7,8 @@ import { UploadForm } from '../../../magazine/library/LibraryPanel'
 import type { CappeAsset, CappeAssetKind, CappeStockResult, CappeStockSearch, CappeStockSource } from '../../../types'
 import { useCtx } from '../context'
 import { endDrag, importStock, startDrag } from './drag'
-import { addPicture } from './place'
+import { BankPhotos } from './BankPhotos'
+import { addPicture, landing } from './place'
 
 const HINT = 'text-[11px] leading-snug text-zinc-500'
 const INPUT = 'w-full rounded-md border border-zinc-700 bg-zinc-950 py-1.5 pl-8 pr-2 text-xs text-zinc-100 placeholder:text-zinc-600 focus:border-emerald-500 focus:outline-none'
@@ -15,13 +16,19 @@ const CHIP = (on: boolean) => `rounded-full px-2.5 py-1 text-[11px] ${on ? 'bg-e
 const IDEAS = ['harbour', 'city at night', 'mountains', 'flowers', 'street market', 'the moon']
 const message = (e: unknown, fallback: string) => (e instanceof Error && e.message ? e.message : fallback)
 
-/** Free photos from the archives (each one a magazine may publish, credited
- *  as it should be), and AI pictures. A click adds it to the page; the first
- *  time, it is copied into the library. */
+type Source = CappeStockSource | 'gummfit'
+const SOURCES: { key: Source; label: string; hint: string }[] = [
+  { key: 'gummfit', label: 'Gummfit', hint: 'Photos Gummfit picked, free on every site' }, ...STOCK_SOURCES,
+]
+
+/** Gummfit's photos, free photos from the archives (each one a magazine may
+ *  publish, credited as it should be), and AI pictures. A click adds it to
+ *  the page; the first time, it goes into the library too. */
 export function PhotosTab() {
   const c = useCtx()
-  const [source, setSource] = useState<CappeStockSource>('openverse')
+  const [source, setSource] = useState<Source>('gummfit')
   const [query, setQuery] = useState('')
+  const [bankQuery, setBankQuery] = useState('')
   const [last, setLast] = useState<CappeStockSearch | null>(null)
   const [results, setResults] = useState<CappeStockResult[]>([])
   const [searching, setSearching] = useState(false)
@@ -53,17 +60,26 @@ export function PhotosTab() {
       if (mine === gen.current) setSearching(false)
     }
   }
-  const submit = (e: FormEvent) => { e.preventDefault(); void search(source, query.trim(), 0) }
-  const pick = (src: CappeStockSource) => { setSource(src); if (query.trim()) void search(src, query.trim(), 0) }
-  const idea = (q: string) => { setQuery(q); void search(source, q, 0) }
+  const submit = (e: FormEvent) => {
+    e.preventDefault()
+    if (source === 'gummfit') setBankQuery(query.trim())
+    else void search(source, query.trim(), 0)
+  }
+  const pick = (src: Source) => {
+    setSource(src)
+    if (src === 'gummfit') setBankQuery(query.trim())
+    else if (query.trim()) void search(src, query.trim(), 0)
+  }
+  const idea = (q: string) => { setQuery(q); if (source !== 'gummfit') void search(source, q, 0) }
 
   const add = async (r: CappeStockResult) => {
     const key = stockKey(r)
     if (adding.includes(key)) return
+    const at = landing(c)  // where it was clicked: the import takes a moment
     setAdding((a) => [...a, key])
     setError(null)
     try {
-      addPicture(c, await importStock(c.siteId, c.postId, r))
+      addPicture(c, await importStock(c.siteId, c.postId, r), at)
     } catch (e) {
       setError(message(e, 'That picture couldn’t be added. Try another.'))
     } finally {
@@ -73,48 +89,53 @@ export function PhotosTab() {
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap gap-1" role="tablist" aria-label="Archive">
-        {STOCK_SOURCES.map((s) => (
+      <div className="flex flex-wrap gap-1" role="tablist" aria-label="Where the photos come from">
+        {SOURCES.map((s) => (
           <button key={s.key} type="button" role="tab" aria-selected={source === s.key} title={s.hint}
             onClick={() => pick(s.key)} className={CHIP(source === s.key)}>{s.label}</button>
         ))}
       </div>
       <form onSubmit={submit} role="search" className="relative">
-        <span className="sr-only">Search {STOCK_SOURCES.find((s) => s.key === source)?.label}</span>
+        <span className="sr-only">Search {SOURCES.find((s) => s.key === source)?.label}</span>
         <Search className="pointer-events-none absolute left-2.5 top-2 h-4 w-4 text-zinc-500" />
         <input value={query} onChange={(e) => setQuery(e.target.value)} maxLength={120} placeholder="Search free photos"
           aria-label="Search free photos" className={INPUT} />
       </form>
-      {!last && !searching && (
+      {source === 'gummfit' && <BankPhotos q={bankQuery} />}
+      {source !== 'gummfit' && !last && !searching && (
         <div className="space-y-2">
           <p className={HINT}>Only pictures you may publish and crop, each credited under it. Try:</p>
           <div className="flex flex-wrap gap-1">{IDEAS.map((q) => <button key={q} type="button" onClick={() => idea(q)} className={CHIP(false)}>{q}</button>)}</div>
         </div>
       )}
-      {error && <p role="alert" className="text-xs text-red-300">{error}</p>}
-      {searching && !results.length && <p className="flex items-center gap-1.5 text-xs text-zinc-400"><Loader2 className="h-3 w-3 animate-spin" />Searching…</p>}
-      {last && !results.length && !searching && <p className="text-xs text-zinc-500">Nothing we can publish for “{last.query}”. Try other words or another archive.</p>}
-      {results.length > 0 && (
-        <ul className="grid grid-cols-2 gap-2" aria-label="Free photos">
-          {results.map((r) => {
-            const busy = adding.includes(stockKey(r))
-            return (
-              <li key={stockKey(r)}>
-                <button type="button" draggable onDragStart={(e) => startDrag(e, { kind: 'stock', result: r })} onDragEnd={endDrag}
-                  onClick={() => void add(r)} disabled={busy} title={r.credit_line} aria-label={`Add ${r.title || 'this picture'}`}
-                  className="relative block aspect-[4/3] w-full overflow-hidden rounded-md bg-zinc-800 hover:ring-2 hover:ring-emerald-500">
-                  {r.thumb && <img src={`${cappeApiBase}${r.thumb}`} alt="" loading="lazy" draggable={false} className="h-full w-full object-cover" />}
-                  <span className="absolute left-1 top-1 rounded bg-black/70 px-1 py-0.5 text-[9px] font-semibold text-white">{licenseLabel(r.license, r.license_version)}</span>
-                  {busy && <span className="absolute inset-0 flex items-center justify-center bg-black/50"><Loader2 className="h-5 w-5 animate-spin text-white" /></span>}
-                </button>
-              </li>
-            )
-          })}
-        </ul>
-      )}
-      {last?.has_more && (
-        <button type="button" disabled={searching} onClick={() => void search(last.source, last.query, last.page + 1)}
-          className="w-full rounded-md border border-zinc-700 py-1.5 text-xs text-zinc-300 hover:border-zinc-500">More</button>
+      {source !== 'gummfit' && (
+        <>
+          {error && <p role="alert" className="text-xs text-red-300">{error}</p>}
+          {searching && !results.length && <p className="flex items-center gap-1.5 text-xs text-zinc-400"><Loader2 className="h-3 w-3 animate-spin" />Searching…</p>}
+          {last && !results.length && !searching && <p className="text-xs text-zinc-500">Nothing we can publish for “{last.query}”. Try other words or another archive.</p>}
+          {results.length > 0 && (
+            <ul className="grid grid-cols-2 gap-2" aria-label="Free photos">
+              {results.map((r) => {
+                const busy = adding.includes(stockKey(r))
+                return (
+                  <li key={stockKey(r)}>
+                    <button type="button" draggable onDragStart={(e) => startDrag(e, { kind: 'stock', result: r })} onDragEnd={endDrag}
+                      onClick={() => void add(r)} disabled={busy} title={r.credit_line} aria-label={`Add ${r.title || 'this picture'}`}
+                      className="relative block aspect-[4/3] w-full overflow-hidden rounded-md bg-zinc-800 hover:ring-2 hover:ring-emerald-500">
+                      {r.thumb && <img src={`${cappeApiBase}${r.thumb}`} alt="" loading="lazy" draggable={false} className="h-full w-full object-cover" />}
+                      <span className="absolute left-1 top-1 rounded bg-black/70 px-1 py-0.5 text-[9px] font-semibold text-white">{licenseLabel(r.license, r.license_version)}</span>
+                      {busy && <span className="absolute inset-0 flex items-center justify-center bg-black/50"><Loader2 className="h-5 w-5 animate-spin text-white" /></span>}
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+          {last?.has_more && (
+            <button type="button" disabled={searching} onClick={() => void search(last.source, last.query, last.page + 1)}
+              className="w-full rounded-md border border-zinc-700 py-1.5 text-xs text-zinc-300 hover:border-zinc-500">More</button>
+          )}
+        </>
       )}
       <div className="border-t border-zinc-800 pt-3">
         {aiRun

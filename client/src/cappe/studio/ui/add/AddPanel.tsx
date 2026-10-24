@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { ChevronsLeft, Image as ImageIcon, Images, LayoutTemplate, Search, Shapes, Type } from 'lucide-react'
-import { graphicsApi, type GraphicBrowse, type GraphicGroup } from '../../model/graphics'
+import { ArrowLeft, ChevronsLeft, Image as ImageIcon, Images, LayoutTemplate, Search, Shapes, Type } from 'lucide-react'
+import { graphicsApi, matchPicks, type GraphicBrowse, type GraphicCard, type GraphicGroup } from '../../model/graphics'
 import { familyName } from '../../fonts/faces'
 import { CHAR_DEFAULTS } from '../../model/limits'
 import type { Doc } from '../../model/types'
@@ -127,16 +127,19 @@ const NATIVE_IN: Record<string, GraphicGroup | 'frames' | 'blocks'> = {
 }
 const ORDER: (GraphicGroup | 'frames' | 'blocks')[] = ['shapes', 'lines', 'badges', 'icons', 'stickers', 'patterns', 'frames', 'blocks']
 const FIRST: Partial<Record<GraphicGroup, number>> = { shapes: 8, badges: 8, icons: 15, stickers: 12, patterns: 8, lines: 4 }
+const PICKS_FIRST = 8
 
 function ElementsTab() {
   const c = useCtx()
   const doc = useStudio(c.store, (s) => s.doc)
   const [q, setQ] = useState('')
-  const [open, setOpen] = useState<GraphicGroup | null>(null)
+  const [open, setOpen] = useState<GraphicGroup | 'picks' | null>(null)
   const [bank, setBank] = useState<GraphicBrowse | null>(null)
+  const [picks, setPicks] = useState<GraphicCard[]>([])
   const [error, setError] = useState<string | null>(null)
   useEffect(() => {
     graphicsApi.browse().then(setBank, (e) => setError(e instanceof Error ? e.message : 'The graphics didn’t load.'))
+    graphicsApi.picks().then(setPicks, () => setPicks([])) // none to show is no reason to say so
   }, [])
   const want = q.trim().toLowerCase()
   const native = (title: string) => ELEMENT_GROUPS.find((g) => g.title === title)?.items ?? []
@@ -153,11 +156,29 @@ function ElementsTab() {
         className="w-full rounded-md border border-zinc-700 bg-zinc-950 py-1.5 pl-8 pr-2 text-xs text-zinc-100 placeholder:text-zinc-600 focus:border-emerald-500 focus:outline-none" />
     </label>
   )
+  const pickMatches = want ? matchPicks(picks, want) : picks
+  if (open === 'picks') {
+    return (
+      <div className="space-y-3">
+        {search}
+        <button type="button" onClick={() => setOpen(null)} className="flex items-center gap-1 text-xs text-zinc-300 hover:text-white">
+          <ArrowLeft className="h-3.5 w-3.5" />From Gummfit<span className="text-zinc-500"> · {pickMatches.length}</span>
+        </button>
+        <GraphicGrid items={pickMatches} group="shapes" />
+      </div>
+    )
+  }
   if (open) return <div className="space-y-3">{search}<GroupView group={open} q={want} onBack={() => setOpen(null)} /></div>
   if (want) {
     return (
       <div className="space-y-4">
         {search}
+        {pickMatches.length > 0 && (
+          <section>
+            <SectionHead title="From Gummfit" count={pickMatches.length} onAll={pickMatches.length > PICKS_FIRST ? () => setOpen('picks') : undefined} />
+            <GraphicGrid items={pickMatches.slice(0, PICKS_FIRST)} group="shapes" />
+          </section>
+        )}
         {nativeMatches.length > 0 && (
           <div className="grid grid-cols-3 gap-2">{nativeMatches.map((el) => <ElementTile key={el.id} el={el} doc={doc} />)}</div>
         )}
@@ -170,6 +191,12 @@ function ElementsTab() {
       {search}
       <p className={HINT}>Click to add one to the page, or drag it where you want it. Change a shape or icon’s colour in the Object panel.</p>
       {error && <p role="alert" className="text-xs text-red-300">{error}</p>}
+      {picks.length > 0 && (
+        <section>
+          <SectionHead title="From Gummfit" count={picks.length} onAll={picks.length > PICKS_FIRST ? () => setOpen('picks') : undefined} />
+          <GraphicGrid items={picks.slice(0, PICKS_FIRST)} group="shapes" />
+        </section>
+      )}
       {ORDER.map((key) => {
         const title = key === 'frames' ? 'Picture frames' : key === 'blocks' ? 'Colour blocks' : GROUP_TITLE[key]
         const basics = native(Object.keys(NATIVE_IN).find((t) => NATIVE_IN[t] === key) ?? '')

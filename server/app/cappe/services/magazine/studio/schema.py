@@ -37,7 +37,7 @@ from __future__ import annotations
 import json
 import math
 import re
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable, Mapping, Optional
 from uuid import UUID
 
 from ..fonts import FONTS, has_italic, nearest_weight
@@ -291,7 +291,7 @@ def _geometry(raw: dict) -> dict:
     }
 
 
-def _item(raw: Any, pages: set[str]) -> dict:
+def _item(raw: Any, pages: set[str], bank: Mapping[str, dict]) -> dict:
     if not isinstance(raw, dict) or raw.get("kind") not in L.KINDS:
         raise DocError("Something on a page isn't a kind of frame a story can have.")
     kind = raw["kind"]
@@ -313,8 +313,9 @@ def _item(raw: Any, pages: set[str]) -> dict:
         out.update(fill=_colour(raw.get("fill"), None), stroke=_stroke(raw.get("stroke")))
         if kind == "rect":
             out["radius"] = num(raw.get("radius"), 0, L.RADIUS_MAX, 0)
-    elif kind == "graphic":  # one of the bank's (graphics.py); only a one-colour one takes a colour
-        g = graphics.by_sha(raw.get("src"))
+    elif kind == "graphic":  # built in (graphics.py) or the curated bank's (bank.py); one-colour ones take a colour
+        src = raw.get("src")
+        g = graphics.by_sha(src) or (bank.get(src) if isinstance(src, str) else None)
         if g is None:
             raise DocError("A graphic on a page isn't one the Studio has. Reload the Studio and try again.")
         out.update(src=g["sha"], color=_colour(raw.get("color"), "#1a1a1a") if g.get("mono") else None,
@@ -362,9 +363,10 @@ def _unique(ids: Iterable[str], what: str) -> None:
         seen.add(i)
 
 
-def normalize_doc(raw: Any) -> dict:
+def normalize_doc(raw: Any, bank: Optional[Mapping[str, dict]] = None) -> dict:
     """The storable form of a paged story's document. Raises `DocError` for
-    anything the owner has to fix."""
+    anything the owner has to fix. `bank`: the curated bank's graphics the
+    document names (`bank.doc_graphics`), besides the built-in ones."""
     if not isinstance(raw, dict):
         raise DocError("A paged story is a document of pages.")
     size = raw.get("size") if isinstance(raw.get("size"), dict) else {}
@@ -387,7 +389,7 @@ def normalize_doc(raw: Any) -> dict:
     raw_items = raw.get("items") if isinstance(raw.get("items"), list) else []
     if len(raw_items) > L.MAX_ITEMS:
         raise DocError(f"A story holds at most {L.MAX_ITEMS} frames and shapes.")
-    items = [_item(i, page_ids) for i in raw_items]
+    items = [_item(i, page_ids, bank or {}) for i in raw_items]
     _unique((i["id"] for i in items), "frames")
     per_page: dict[str, int] = {}
     for i in items:

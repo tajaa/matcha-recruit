@@ -7,6 +7,7 @@ import { cappeApi } from '../../../api'
 import type { CappeAsset, CappeStockImports, CappeStockResult } from '../../../types'
 import type { StudioCtx } from '../context'
 import type { GraphicCard } from '../../model/graphics'
+import { bankApi, type BankPhoto } from './bank'
 import type { ElementSpec, TextStyle } from './catalog'
 import { addElement, addGraphic, addPicture, addText, type At } from './place'
 
@@ -18,6 +19,7 @@ export type Dragged =
   | { kind: 'text'; style: TextStyle }
   | { kind: 'asset'; asset: CappeAsset }
   | { kind: 'stock'; result: CappeStockResult }
+  | { kind: 'bank'; photo: BankPhoto }
 
 let current: Dragged | null = null
 
@@ -71,6 +73,7 @@ export async function dropInto(c: StudioCtx, what: Dragged, at: At): Promise<voi
     case 'graphic': addGraphic(c, what.g, at); return
     case 'text': await addText(c, what.style, at); return
     case 'asset': addPicture(c, what.asset, at); return
-    case 'stock': addPicture(c, await importStock(c.siteId, c.postId, what.result), at)
+    case 'stock': addPicture(c, await importStock(c.siteId, c.postId, what.result), at); return
+    case 'bank': addPicture(c, await bankApi.place(c.siteId, what.photo.id), at)
   }
 }

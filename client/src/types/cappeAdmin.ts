@@ -32,3 +32,30 @@ export type CappeSignupGrant = {
   signup_count: number
   accounts: CappeSignupGrantAccount[]
 }
+
+// One photo or graphic in Gummfit Studio's curated bank (server
+// services/magazine/studio/bank.py): photos carry their files, credit and
+// licence; graphics their sha, group and whether sites recolour them.
+export type CappeStudioBankItem = {
+  id: string
+  kind: 'photo' | 'graphic'
+  name: string
+  tags: string[]
+  collection: string | null
+  status: 'live' | 'hidden'
+  sort_order: number
+  url: string | null
+  variants: { webp?: { url: string; width: number }[] } | null
+  width: number | null
+  height: number | null
+  creator: string | null
+  credit_line: string | null
+  license: 'gummfit' | 'cc0' | 'pdm' | 'by' | 'by-sa' | null
+  source_url: string | null
+  sha: string | null
+  mono: boolean | null
+  fit: 'contain' | 'stretch' | 'tile' | null
+  graphic_group: string | null
+  created_by_email: string | null
+  created_at: string
+}
