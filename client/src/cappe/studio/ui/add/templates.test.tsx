@@ -14,6 +14,8 @@ import { applyTemplate, blankPage, templateFaces, templateItems } from './applyT
 import { TEMPLATES } from './templates'
 import TemplatesTab from './TemplatesTab'
 
+vi.mock('../../collectionsApi', () => ({ collectionsApi: { list: vi.fn(async () => []) } }))
+
 const mono: Measure = { width: (c, t) => [...t].length * 0.5 * c.size, metrics: (c) => ({ asc: 0.8 * c.size, desc: 0.2 * c.size }) }
 const book = new FaceBook(fonts as Manifest)
 const shas = new Set((bank as { graphics: { sha: string }[] }).graphics.map((g) => g.sha))
@@ -37,7 +39,7 @@ function studio(d = starter(), page = 0) {
     save: { rev: 1, state: 'saved', message: null, draft: false, live: false },
   } as State, mono)
   const ctx = { store, siteId: 's1', postId: 'post1', editor: { close: vi.fn() }, fit: vi.fn(),
-    fonts: { book, ensure: vi.fn(async () => {}) } } as unknown as StudioCtx
+    fonts: { book, ensure: vi.fn(async () => {}), ensureDoc: vi.fn(async () => {}) } } as unknown as StudioCtx
   return { store, ctx }
 }
 
@@ -227,6 +229,7 @@ describe('using a template', () => {
     const faces = new Promise<void>((res) => { loaded = res })
     ctx.fonts.ensure = vi.fn(() => faces)
     render(<StudioContext.Provider value={ctx}><TemplatesTab /></StudioContext.Provider>)
+    fireEvent.click(screen.getByRole('button', { name: 'Single pages' }))
     const quoteButton = screen.getByRole('button', { name: 'Use the big quote template' })
     fireEvent.click(quoteButton)
     expect(quoteButton).toHaveAttribute('aria-busy', 'true')
@@ -240,6 +243,7 @@ describe('using a template', () => {
   it('shows each template drawn small, and uses one with a click', async () => {
     const { store, ctx } = studio()
     render(<StudioContext.Provider value={ctx}><TemplatesTab /></StudioContext.Provider>)
+    fireEvent.click(screen.getByRole('button', { name: 'Single pages' }))
     expect(screen.getByText(/Click one to lay out page 1/)).toBeInTheDocument()
     const button = screen.getByRole('button', { name: 'Use the contents template' })
     expect(button.querySelector('.lyt-item')).not.toBeNull()

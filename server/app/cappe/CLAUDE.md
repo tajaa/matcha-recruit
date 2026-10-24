@@ -706,6 +706,23 @@ normalized paragraphs itself; a thread with no valid composition prints its word
   `identity_version:1` on save/discard/restore; older open clients get a reload-required 409 before a write.
   Keep identity-aware application code on rollback while snapshots remain in live/draft/revision JSON;
   the table downgrade guard protects saved templates, not those document snapshots.
+- **Editorial collections** (`studio/collections.py`, `models/studio.py`, `routes/studio.py`, `cappemag12`):
+  four built-in ten-page directions live in the client (`ui/add/collections.ts`). Creator designs are stored in
+  `cappe_studio_collections`, account-scoped so they can be reused across that creator's magazines. The
+  `/studio/collections` API lists small cards, fetches a document by id, creates, and deletes; every query
+  names the authenticated account, and a reader account (no sites, no Studio) gets 403 `reader_account`. Saves normalize through the Studio schema including hidden curated
+  graphics. Photos become empty frames, image captions and text composition are cleared, and paywall
+  settings are removed: collections never hold site-owned photo references. A magazine identity is flattened
+  out (`collection_doc`; client `model/collections.flattenIdentity` detaches parents first): styles, swatches
+  and parents become the plain attributes they stood for, since another story's identity lacks them and a
+  reference to one it lacks makes that story unsavable. Max 32 pages / 1 MB each,
+  50 per account (the account row is locked around replay lookup + count + insert). An optional request UUID
+  is unique per account (nullable, so a client that sends none still saves). An identical retry returns
+  its existing card, including when the library is full; changing the payload for that key is 409. Malformed
+  nested document values are 422; collection validation errors use ASCII JSON so even invalid Unicode
+  can be rejected safely. Removal is owner-scoped and idempotent. Removing a collection never changes
+  stories using it. The migration is additive; its downgrade refuses while saved collections exist. Apply it
+  through the normal approved dev/prod migration workflow before the backend ships; no seed is needed.
 - **Studio bank** (Gummfit-curated, cappemag11: `studio/bank.py`, `routes/studio_bank_admin.py` at
   `/matcha-admin/studio-bank` behind matcha `require_admin`; admin UI hey-matcha.com/admin/cappe → Studio bank;
   client `ui/add/bank.ts`, `BankPhotos.tsx`): photos and graphics every site's Studio shows first (Photos →
