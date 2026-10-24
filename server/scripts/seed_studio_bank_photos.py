@@ -16,9 +16,15 @@ each photo is shown to Claude first (the Studio's model, surface
 is kept. A photo that can't be checked isn't kept either; `--no-screen` turns
 the check off (only for a library someone reviews by hand at /admin/cappe).
 
+Search results go stale: before a photo is downloaded it is looked up again
+at its archive (`sources.resolve(..., fresh=True)`, as the importer does), and
+one no longer CC0 or public domain, or now flagged mature, is skipped.
+
 Anonymous Openverse allows 20 searches a minute and 200 a day; the script
-waits between searches and uses a page of 20 at a time (searches are cached a
-day, so a re-run doesn't spend them again).
+waits between searches and uses a page of 20 at a time. Searches are cached a
+day in the environment's Redis (REDIS_URL, as the app uses), so a dry run
+followed by the real one, or a re-run, doesn't spend them again; topics a
+search gave up on are named at the end, to run again later.
 
     cd server
     venv/bin/python scripts/seed_studio_bank_photos.py --dry-run
@@ -39,6 +45,8 @@ import os
 import re
 import sys
 from typing import Iterable
+
+import asyncpg
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -131,6 +139,57 @@ def slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-") or "photo"
 
 
+def bank_fields(r, collection: str, query: str) -> dict | None:
+    """What the bank row will hold, already cut to its columns (the archive's
+    words may be longer than the bank keeps), or None for a photo the bank
+    can't hold at all. Worked out before anything is downloaded or uploaded."""
+    from app.cappe.services.magazine.studio import bank
+
+    if r.license not in bank.LICENSES:
+        return None
+    creator = " ".join((r.creator or "").split())[:bank.MAX_CREATOR] or None
+    return {
+        "name": bank.clean_name(r.title) or collection,
+        "tags": bank.clean_tags([*r.tags, *query.split(), collection]),
+        "collection": bank.clean_collection(collection),
+        "creator": creator,
+        "credit_line": bank.credit(creator, r.credit_line),
+        "license": r.license,
+        "source_url": r.landing_url or None,
+    }
+
+
+async def fresh_copy(r):
+    """The photo as its archive describes it now, if it may still be offered:
+    CC0 or public domain, not mature. None otherwise (or if the archive
+    didn't answer)."""
+    from app.cappe.services.magazine import sources
+
+    try:
+        now = await sources.resolve(r.source, r.source_id, fresh=True)
+    except sources.SourceError:
+        return None
+    if now is None or now.license not in ("cc0", "pdm"):
+        return None
+    if not now.tags:
+        now.tags = list(r.tags)
+    return now
+
+
+async def forget(stored) -> None:
+    """Delete the files of a photo whose row couldn't be written."""
+    from app.core.services.storage import get_storage
+
+    storage = get_storage()
+    urls = [stored.url, *(v.get("url") for v in stored.variants.get("webp", [])),
+            (stored.variants.get("share") or {}).get("url")]
+    for url in filter(None, urls):
+        try:
+            await storage.delete_file(url)
+        except Exception as exc:  # noqa: BLE001 — best effort: report it and go on
+            print(f"    couldn't delete {url}: {type(exc).__name__}")
+
+
 async def store(conn, r, collection: str, query: str, rank: int, model: str | None) -> dict | None:
     """Download, check (with `model`; None: no check), re-encode and add one
     photo; None when it couldn't be, or shouldn't."""
@@ -140,6 +199,14 @@ async def store(conn, r, collection: str, query: str, rank: int, model: str | No
     from app.cappe.services.magazine.studio import bank
     from app.core.services.safe_fetch import fetch_public
 
+    r = await fresh_copy(r)
+    if r is None:
+        print("    skip: no longer free to offer at its archive (or it didn't answer)")
+        return None
+    fields = bank_fields(r, collection, query)
+    if fields is None:
+        print(f"    skip {r.landing_url}: a licence the bank doesn't hold ({r.license})")
+        return None
     try:
         got = await fetch_public(r.image_url, max_bytes=imports.MAX_IMAGE_BYTES, accept=IMAGE_ACCEPT,
                                  total_timeout=imports.DOWNLOAD_SECONDS)
@@ -161,24 +228,28 @@ async def store(conn, r, collection: str, query: str, rank: int, model: str | No
         print(f"    skip {r.landing_url}: {exc}")
         return None
     stored = await media.store_processed(image, prefix="cappe/bank", filename=f"{slug(collection)}.jpg")
-    item = await bank.add_photo(
-        conn, url=stored.url, variants=stored.variants, width=stored.width, height=stored.height,
-        size_bytes=stored.bytes, mime=stored.mime, name=bank.clean_name(r.title) or collection,
-        tags=bank.clean_tags([*r.tags, *query.split(), collection]), collection=collection,
-        creator=r.creator or None, credit_line=r.credit_line, license=r.license,
-        source_url=r.landing_url or None, email=SEEDER, sort_order=rank,
-    )
-    return item
+    try:
+        return await bank.add_photo(
+            conn, url=stored.url, variants=stored.variants, width=stored.width, height=stored.height,
+            size_bytes=stored.bytes, mime=stored.mime, email=SEEDER, sort_order=rank, **fields,
+        )
+    except asyncpg.PostgresError as exc:  # this photo only: take its files back and go on with the rest
+        print(f"    skip {r.landing_url}: the bank refused it ({type(exc).__name__}: {exc})")
+        await forget(stored)
+        return None
 
 
 async def main(topics: list[str], per_topic: int, min_side: int, dry_run: bool, screen: bool) -> int:
     settings = load_settings()
     from app.cappe.services.magazine import sources
     from app.core.services import agent_surfaces, anthropic_messages
+    from app.core.services.redis_cache import close_redis_cache, init_redis_cache
     from app.database import close_pool, get_connection, init_pool
 
     await init_pool(settings.database_url, ssl_mode=settings.database_ssl)
+    await init_redis_cache(settings.redis_url)  # the archive searches' day-long cache (unreachable: no cache)
     added = skipped = 0
+    cut_short: list[str] = []
     try:
         model = await anthropic_messages.claude_default(agent_surfaces.GUMMFIT_STUDIO) if screen else None
         if screen and not model:
@@ -195,6 +266,7 @@ async def main(topics: list[str], per_topic: int, min_side: int, dry_run: bool, 
                 while len(chosen) < per_topic and page < sources.MAX_PAGE:
                     found = await search(query, page)
                     if found is None:
+                        cut_short.append(collection)
                         break
                     results, more = found
                     chosen += pick(results, taken, per_topic - len(chosen), min_side)
@@ -213,8 +285,12 @@ async def main(topics: list[str], per_topic: int, min_side: int, dry_run: bool, 
                         skipped += 1
                 await asyncio.sleep(SEARCH_GAP)
     finally:
+        await close_redis_cache()
         await close_pool()
     print("dry run: nothing downloaded or added" if dry_run else f"added {added} photos, skipped {skipped}")
+    if cut_short:
+        print(f"Openverse stopped answering for: {', '.join(cut_short)}. Run those topics again later "
+              f"(--topics {','.join(cut_short)}); it allows 200 anonymous searches a day.")
     return 0
 
 

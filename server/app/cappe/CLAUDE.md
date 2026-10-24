@@ -705,8 +705,11 @@ normalized paragraphs itself; a thread with no valid composition prints its word
   `scripts/seed_studio_bank_photos.py`: CC0 photos from Openverse's stock collections (`sources/stock.py`),
   one collection per topic, copied to `cappe/bank/` with sizes and credits (CC0 lets us re-offer them;
   Unsplash's and Pexels' licences don't). The Photos tab opens on the library with no archive call, and
-  only falls back to browsing free photos live when it is empty. **Ops:** run it `--dry-run`, then for real,
-  per environment (it uploads to that environment's bucket).
+  only falls back to browsing free photos live when it is empty. Each photo is resolved again at its archive
+  (`fresh=True`) before download, its fields are cut to the bank's columns before upload, a refused row deletes its
+  files and the run goes on, and searches are cached in the environment's Redis (so the dry run doesn't spend the
+  real run's 200 anonymous searches). **Ops:** run it `--dry-run`, then for real, one run at a time, per
+  environment (it uploads to that environment's bucket); re-run any topics it names at the end.
 - **Ask the Studio** (`studio/ask.py`, `POST …/studio/stories/{id}/ask`; client `ui/ask/`, `ui/panels/AskPanel.tsx`):
   one Claude Messages call per question (surface `gummfit.studio`, Haiku by default), no tools, nothing saved,
   nothing on the page changed. **The Studio sends the guide (`ui/guideContent.ts`) and the commands

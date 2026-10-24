@@ -43,7 +43,7 @@ class BankPatch(BaseModel):
     collection: Optional[str] = Field(default=None, max_length=bank.MAX_COLLECTION)
     status: Optional[Literal["live", "hidden"]] = None
     sort_order: Optional[int] = Field(default=None, ge=-100_000, le=100_000)
-    creator: Optional[str] = Field(default=None, max_length=200)
+    creator: Optional[str] = Field(default=None, max_length=bank.MAX_CREATOR)
     credit_line: Optional[str] = Field(default=None, max_length=bank.MAX_CREDIT)
     license: Optional[Literal["gummfit", "cc0", "pdm", "by", "by-sa"]] = None
     source_url: Optional[str] = Field(default=None, max_length=2000)
@@ -79,7 +79,7 @@ async def add_photo(
     name: str = Form(..., max_length=500),
     tags: str = Form("", max_length=1000),
     collection: str = Form("", max_length=200),
-    creator: str = Form("", max_length=200),
+    creator: str = Form("", max_length=bank.MAX_CREATOR),
     credit_line: str = Form("", max_length=bank.MAX_CREDIT),
     license: Literal["gummfit", "cc0", "pdm", "by", "by-sa"] = Form("gummfit"),
     source_url: str = Form("", max_length=2000),

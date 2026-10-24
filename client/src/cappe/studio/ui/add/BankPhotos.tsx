@@ -51,7 +51,8 @@ export function BankPhotos({ q, onEmpty }: { q: string; onEmpty?: () => void }) 
     const t = setTimeout(() => load(0), 0)
     // A changed search, or the panel closing, drops whatever was still on its
     // way: an answer arriving after the source changed must not call onEmpty.
-    return () => { clearTimeout(t); gen.current++ }
+    const requests = gen  // the counter itself, bumped as it stands at cleanup
+    return () => { clearTimeout(t); requests.current++ }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- a new list whenever what is asked changes
   }, [want])
 

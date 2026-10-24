@@ -415,6 +415,114 @@ def _stock(n, **over):
         "tags": ["coffee", "Latte"], **over})
 
 
+def _fresh(monkeypatch, **over):
+    """The archive's answer when a photo is looked up again before download:
+    the same photo, changed by `over` (None: it's gone)."""
+    from app.cappe.services.magazine import sources
+
+    async def resolve(source, source_id, *, fresh=False):
+        assert fresh, "the seeder must ask the archive itself, not the day-old cache"
+        if over.get("gone"):
+            return None
+        return _stock(int(source_id[2:]), **{k: v for k, v in over.items() if k != "gone"})
+
+    monkeypatch.setattr(sources, "resolve", resolve)
+
+
+def _seed_store_mocks(monkeypatch):
+    import app.core.services.safe_fetch as safe_fetch
+    fetched = []
+
+    async def fetch(url, **kw):
+        fetched.append(url)
+        return SimpleNamespace(status=200, truncated=False, body=b"JPEG", content_type="image/jpeg")
+
+    monkeypatch.setattr(safe_fetch, "fetch_public", fetch)
+    monkeypatch.setattr(media, "process_image", lambda data, mime, derivatives: object())
+    stored = media.StoredImage(url="https://cdn.example.test/bank/1.jpg", mime="image/jpeg", width=1600, height=1067,
+                               bytes=900, variants={"webp": [{"w": 480, "url": "https://cdn.example.test/bank/1-480.webp"}],
+                                                    "share": {"w": 1200, "url": "https://cdn.example.test/bank/1.share.jpg"}})
+    upload = AsyncMock(return_value=stored)
+    monkeypatch.setattr(media, "store_processed", upload)
+    return fetched, upload
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("now", [{"gone": True}, {"license": "by"}, {"license": "by-nc"}])
+async def test_seeding_skips_a_photo_no_longer_free_at_its_archive(monkeypatch, now):
+    seed = _seeder()
+    fetched, upload = _seed_store_mocks(monkeypatch)
+    _fresh(monkeypatch, **now)
+    conn = Conn(fetchrow={"INSERT INTO cappe_studio_bank": PHOTO})
+    assert await seed.store(conn, _stock(7), "Coffee", "coffee", 0, None) is None
+    assert fetched == [] and upload.await_count == 0 and conn.calls == []
+
+
+@pytest.mark.asyncio
+async def test_seeding_credits_what_the_archive_says_now_cut_to_the_banks_columns(monkeypatch):
+    seed = _seeder()
+    _seed_store_mocks(monkeypatch)
+    _fresh(monkeypatch, creator="A" * 300, title="New title", license="pdm")
+    conn = Conn(fetchrow={"INSERT INTO cappe_studio_bank": PHOTO})
+    assert await seed.store(conn, _stock(7), "Coffee", "coffee", 0, None) == bank.row(PHOTO)
+    args = conn.calls[0][2]
+    assert args[0] == "New title" and args[9] == "A" * bank.MAX_CREATOR and args[11] == "pdm"
+    assert len(args[10]) <= bank.MAX_CREDIT
+
+
+@pytest.mark.asyncio
+async def test_seeding_a_photo_the_bank_refuses_takes_its_files_back_and_goes_on(monkeypatch):
+    import asyncpg
+    from app.core.services import storage as storage_mod
+    seed = _seeder()
+    _seed_store_mocks(monkeypatch)
+    _fresh(monkeypatch)
+    deleted = []
+    monkeypatch.setattr(storage_mod, "get_storage", lambda: SimpleNamespace(delete_file=AsyncMock(side_effect=deleted.append)))
+
+    class Refusing(Conn):
+        async def fetchrow(self, sql, *args):
+            raise asyncpg.StringDataRightTruncationError("value too long")
+
+    assert await seed.store(Refusing(), _stock(7), "Coffee", "coffee", 0, None) is None
+    assert deleted == ["https://cdn.example.test/bank/1.jpg", "https://cdn.example.test/bank/1-480.webp",
+                       "https://cdn.example.test/bank/1.share.jpg"]
+
+
+@pytest.mark.asyncio
+async def test_seeding_caches_its_searches_in_redis_and_names_topics_left_over(monkeypatch, capsys):
+    from app.cappe.services.magazine import sources
+    from app.core.services import redis_cache
+    import app.database as database
+    seed = _seeder()
+    monkeypatch.setattr(seed, "SEARCH_GAP", 0)
+    opened, closed = [], []
+
+    async def init(url):
+        opened.append(url)
+
+    async def close():
+        closed.append(True)
+
+    monkeypatch.setattr(redis_cache, "init_redis_cache", init)
+    monkeypatch.setattr(redis_cache, "close_redis_cache", close)
+    monkeypatch.setattr(database, "init_pool", AsyncMock())
+    monkeypatch.setattr(database, "close_pool", AsyncMock())
+    monkeypatch.setattr(database, "get_connection", lambda: Ctx(Conn(fetch={"SELECT source_url": []})))
+    monkeypatch.setattr(seed, "load_settings", lambda: SimpleNamespace(database_url="postgresql://x", database_ssl=None,
+                                                                       redis_url="redis://cache.test:6379/0"))
+
+    async def search_page(source, q, page):
+        if q == "coffee":
+            return [_stock(1)], False
+        raise sources.SourceError("429")
+
+    monkeypatch.setattr(sources, "search_page", search_page)
+    assert await seed.main(["Coffee", "Food"], 1, 1000, True, False) == 0
+    assert opened == ["redis://cache.test:6379/0"] and closed == [True]
+    assert "Openverse stopped answering for: Food" in capsys.readouterr().out
+
+
 def test_seeding_keeps_big_photos_each_once():
     seed = _seeder()
     taken = {"https://stocksnap.io/photo/1"}  # already in the bank
@@ -439,6 +547,7 @@ async def test_seeding_stores_each_photo_with_its_sizes_credit_and_rank(monkeypa
     stored = media.StoredImage(url="https://cdn.example.test/bank/1.jpg", mime="image/jpeg", width=1600,
                                height=1067, bytes=900, variants={"webp": []})
     monkeypatch.setattr(media, "store_processed", AsyncMock(return_value=stored))
+    _fresh(monkeypatch)
     conn = Conn(fetchrow={"INSERT INTO cappe_studio_bank": PHOTO})
     assert await seed.store(conn, _stock(7), "Coffee", "coffee", 3, None) == bank.row(PHOTO)
     assert asked == ["https://cdn.stocksnap.io/7.jpg"]
@@ -504,6 +613,7 @@ async def test_seeding_keeps_only_what_claude_says_any_business_could_publish(mo
 
     monkeypatch.setattr(safe_fetch, "fetch_public", fetch)
     monkeypatch.setattr(anthropic_messages, "generate_text", verdict)
+    _fresh(monkeypatch)
     monkeypatch.setattr(media, "process_image", lambda data, mime, derivatives: object())
     monkeypatch.setattr(media, "store_processed", AsyncMock(return_value=media.StoredImage(
         url="https://cdn.example.test/bank/1.jpg", mime="image/jpeg", width=1600, height=1067, bytes=9, variants={})))

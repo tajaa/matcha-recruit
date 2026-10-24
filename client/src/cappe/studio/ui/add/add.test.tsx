@@ -507,6 +507,38 @@ describe('a Gummfit photo clicked while the page changes', () => {
   })
 })
 
+describe('Gummfit’s library beside the archives', () => {
+  const panel = (ctx: StudioCtx, q: string, onEmpty?: () => void) =>
+    <StudioContext.Provider value={ctx}><BankPhotos q={q} onEmpty={onEmpty} /></StudioContext.Provider>
+
+  it('doesn’t report an empty library once its panel has gone', async () => {
+    let answer!: (v: { total: number; items: BankPhoto[]; collections: string[] }) => void
+    vi.spyOn(bankApi, 'photos').mockImplementation(() => new Promise((res) => { answer = res }))
+    const onEmpty = vi.fn()
+    const { ctx } = studio()
+    const { unmount } = render(panel(ctx, '', onEmpty))
+    await waitFor(() => expect(bankApi.photos).toHaveBeenCalled())
+    unmount()
+    await act(async () => answer({ total: 0, items: [], collections: [] }))
+    expect(onEmpty).not.toHaveBeenCalled()
+  })
+
+  it('keeps the collections when a picked one has nothing matching, so it can be changed', async () => {
+    const photos = vi.spyOn(bankApi, 'photos').mockImplementation(async (_site, q, collection) =>
+      (q === 'beach' && collection === 'Coffee'
+        ? { total: 0, items: [], collections: ['Beach', 'Coffee'] }
+        : { total: 1, items: [photo({ name: q === 'beach' ? 'Beach 1' : 'Latte' })], collections: ['Beach', 'Coffee'] }))
+    const { ctx } = studio()
+    const { rerender } = render(panel(ctx, ''))
+    fireEvent.click(await screen.findByRole('tab', { name: 'Coffee' }))
+    rerender(panel(ctx, 'beach'))
+    expect(await screen.findByText('Nothing in Coffee matches. Try All.')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('tab', { name: 'All' }))
+    expect(await screen.findByRole('button', { name: 'Add Beach 1' })).toBeInTheDocument()
+    expect(photos).toHaveBeenLastCalledWith('s1', 'beach', null, 0)
+  })
+})
+
 describe('searching the graphics bank', () => {
   type Page = { total: number; items: GraphicCard[] }
   const page = (n: number, name: string, total = 120): Page =>
