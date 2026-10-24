@@ -13,6 +13,7 @@ import { LibraryDialog, PictureDialog, RevisionsDialog, StoryDialog } from './di
 import { markGuideSeen } from './guideContent'
 import StudioGuide from './StudioGuide'
 import AddPanel from './add/AddPanel'
+import FontsDialog from './FontsDialog'
 import Board from './board/Board'
 import { AskPanel } from './panels/AskPanel'
 import { ObjectPanel } from './panels/ObjectPanel'
@@ -101,7 +102,8 @@ function Shell() {
       {dialog === 'story' && <StoryDialog />}
       {dialog === 'revisions' && <RevisionsDialog />}
       {dialog === 'board' && <Board />}
-      {(dialog === 'picture' || dialog === 'cutout') && <PictureDialog cutout={dialog === 'cutout'} />}
+      {dialog === 'fonts' && <FontsDialog />}
+      {(dialog === 'picture' || dialog === 'cutout' || dialog === 'subject') && <PictureDialog cutout={dialog === 'cutout'} subject={dialog === 'subject'} />}
       {preview !== null && <Preview html={preview} onClose={() => setPreview(null)} />}
       {guide && <StudioGuide section={guide} onClose={() => { markGuideSeen(); c.store.set({ guide: null }) }} />}
     </div>

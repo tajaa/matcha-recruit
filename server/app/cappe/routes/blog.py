@@ -59,6 +59,7 @@ from ..services.magazine.story_schema import (
     with_designs,
 )
 from ..services.magazine.studio import bank as studio_bank
+from ..services.magazine.studio import custom_fonts
 from ..services.magazine.studio.schema import DocError, normalize_doc, starter_doc
 from ..services.magazine.topics import TOPICS, normalize_topic
 from ._shared import get_owned_site, slugify, unique_site_slug
@@ -139,7 +140,8 @@ async def pages_fields(conn, site_id: UUID, raw_doc: Any) -> dict[str, Any]:
     the app and the feed read (its Text view), the reading time and its cover
     picture (the biggest on its first page)."""
     try:
-        doc = normalize_doc(raw_doc, await studio_bank.doc_graphics(conn, raw_doc))
+        doc = normalize_doc(raw_doc, await studio_bank.doc_graphics(conn, raw_doc),
+                            await custom_fonts.doc_faces(conn, site_id, raw_doc))
         content = {"doc": doc}
         assets = await check_assets(conn, site_id, content, None)
     except (DocError, StoryError) as exc:
@@ -401,7 +403,8 @@ async def preview_story(site_id: UUID, body: CappeStoryPreview,
         try:
             if paged:
                 raw_doc = body.content.get("doc")
-                content = {"doc": normalize_doc(raw_doc, await studio_bank.doc_graphics(conn, raw_doc))}
+                content = {"doc": normalize_doc(raw_doc, await studio_bank.doc_graphics(conn, raw_doc),
+                                                await custom_fonts.doc_faces(conn, site_id, raw_doc))}
             else:
                 content = normalize_story(body.content)
             assets = await check_assets(conn, site_id, content,

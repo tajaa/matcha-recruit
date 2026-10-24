@@ -220,6 +220,19 @@ def test_an_empty_story_has_no_blocks():
     assert T.text_blocks({}) == []
 
 
+def test_the_text_view_keeps_a_drop_cap_and_reads_the_subject_in_front_once():
+    doc = _doc([{"runs": [{"t": "Once upon a time"}], "dc": 3}, {"runs": [{"t": "Then"}]}],
+               comp=[[0, 0, 0, 16, 0, 20, 240, 0], [0, 1, 0, 4, 0, 40, 240, 0]])
+    photo = {**doc["items"][0], "id": "i8", "kind": "image", "asset_id": ASSET, "fit": "fill", "fx": 50, "fy": 50,
+             "zoom": 100, "radius": 0, "caption": "", "link": "lk1", "page": "p2", "y": 700}
+    doc["items"] += [photo, {**photo, "id": "i9", "cutout": True}]
+    blocks = T.text_blocks(doc)
+    assert [b["type"] for b in blocks] == ["text", "photo"]
+    assert blocks[0]["dropcap"] is True
+    plain = T.text_blocks(_doc([{"runs": [{"t": "Plain"}]}], comp=[[0, 0, 0, 5, 0, 20, 240, 0]]))
+    assert plain[0]["dropcap"] is False
+
+
 # ── paid stories leak nothing ───────────────────────────────────────────────
 
 def _paid():

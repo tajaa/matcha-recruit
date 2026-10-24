@@ -36,7 +36,7 @@ from app.cappe.routes.public import blog as public_blog
 from app.cappe.routes.public import fonts as fonts_mod
 from app.cappe.services.magazine.studio import fonts as faces
 from app.cappe.services.magazine.studio import schema as S
-from tests._helpers.routes import route_client
+from tests._helpers.routes import QueryConn, route_client
 from tests.cappe.test_cappe_magazine_paid import PAID_POST, SENTINEL as PAID_SENTINEL, _paid_client  # noqa: F401
 from tests.cappe.test_cappe_magazine_routes import (
     ACCOUNT, ASSET, POST, SITE, SITE_ROW, Conn, Ctx, _blog_client, _owner_conn, _render_conn, _request, _returning,
@@ -363,6 +363,9 @@ def one_face(monkeypatch, tmp_path):
     monkeypatch.setenv("CAPPE_FONTS_DIR", str(tmp_path))
     monkeypatch.setattr(faces, "_index", lambda: ({}, {FACE_SHA: {"sha": FACE_SHA}, "b" * 64: {"sha": "b" * 64}}))
     monkeypatch.setattr(fonts_mod, "_cache", fonts_mod.OrderedDict())
+    monkeypatch.setattr(fonts_mod, "_custom", fonts_mod.OrderedDict())
+    # No magazine has uploaded a face with any other sha.
+    monkeypatch.setattr(fonts_mod, "get_connection", lambda: QueryConn(fetchval={"FROM cappe_studio_fonts": None}))
     storage = AsyncMock()
     storage.get_key.return_value = None
     monkeypatch.setattr(fonts_mod, "get_storage", lambda: storage)

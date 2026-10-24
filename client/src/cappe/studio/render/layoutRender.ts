@@ -66,18 +66,20 @@ export function runStyle(attrs: CharAttrs, used: Used, faces: FaceLookup): strin
     family = `${fontStack(a.font)};font-weight:${a.wt}${a.it ? ';font-style:italic' : ''}`
   }
   let style = `font-family:${family};font-size:${u(a.size)}`
-  if (a.track) style += `;letter-spacing:${u((a.track / 1000) * a.size)}`
+  if (a.track || a.kern) style += `;letter-spacing:${u(((a.track + a.kern) / 1000) * a.size)}`
+  if (a.ot) style += ";font-feature-settings:'kern' 1,'liga' 1,'calt' 1," + a.ot.split(',').map((t) => `'${t}' 1`).join(',')
   if (a.color !== CHAR_DEFAULTS.color) style += `;color:${a.color}`
   if (a.u) style += ';text-decoration:underline'
   return style
 }
 
-function spans(runs: Run[], start: number, end: number, used: Used, faces: FaceLookup): string {
+/** The runs' text in [start, end); `size`: set at this size instead (a drop cap). */
+function spans(runs: Run[], start: number, end: number, used: Used, faces: FaceLookup, size?: number): string {
   let out = ''
   let at = 0
   for (const r of runs) {
     const a = Math.max(start, at), b = Math.min(end, at + r.t.length)
-    if (b > a) out += `<span style="${runStyle(r, used, faces)}">${esc(r.t.slice(a - at, b - at))}</span>`
+    if (b > a) out += `<span style="${runStyle(size === undefined ? r : { ...r, size }, used, faces)}">${esc(r.t.slice(a - at, b - at))}</span>`
     at += r.t.length
   }
   return out
@@ -88,6 +90,7 @@ const paraText = (p: Para) => p.runs.map((r) => r.t).join('')
 function linesHtml(thread: Thread, frameIndex: number, frameH: number, used: Used, faces: FaceLookup,
   mark?: (k: number) => string): string {
   const lines = thread.comp!.lines
+  const caps = new Map((thread.comp!.caps ?? []).map((c) => [c[0], c]))
   let out = ''
   let open = -1
   lines.forEach(([f, p, s, e, x, b, w, a], k) => {
@@ -98,8 +101,14 @@ function linesHtml(thread: Thread, frameIndex: number, frameH: number, used: Use
       open = p
     }
     const runs = thread.paras[p].runs
+    // A drop cap: its first line's first characters, in a box of their own placed from that line.
+    const cap = s === 0 && (k === 0 || lines[k - 1][1] !== p) ? caps.get(p) : undefined
+    const inner = cap
+      ? `<span class="lyt-dc" style="left:${u(cap[2] - x)};bottom:${u(b - cap[3])}">${spans(runs, 0, cap[1], used, faces, cap[4])}</span>`
+        + spans(runs, cap[1], e, used, faces)
+      : spans(runs, s, e, used, faces)
     out += `<span class="lyt-l${ALIGN_CLASS[a]}"${mark ? mark(k) : ''} style="left:${u(x)};bottom:${u(frameH - b)};`
-      + `width:${u(w)}">${spans(runs, s, e, used, faces)}</span>`
+      + `width:${u(w)}">${inner}</span>`
     const next = lines[k + 1]
     if (next && next[1] === p) {
       const gap = paraText(thread.paras[p]).slice(e, next[2])
@@ -205,7 +214,8 @@ function imageHtml(item: ImageItem, d: Draw, pageW: number, eager: boolean): str
     let pic = `object-fit:${FIT[item.fit]};object-position:${n(item.fx)}% ${n(item.fy)}%`
     if (item.zoom !== 100) pic += `;transform:scale(${n(item.zoom / 100)});transform-origin:${n(item.fx)}% ${n(item.fy)}%`
     const tag = img(asset, imageSizes(item, pageW), eager, pic)
-    const credit = creditHtml(asset)
+    // The subject in front is its picture's cut-out: the picture behind it prints the credit.
+    const credit = item.cutout ? '' : creditHtml(asset)
     if (tag) inner = tag + (credit ? `<figcaption class="lyt-credit">${credit}</figcaption>` : '')
   }
   return `<figure class="lyt-item lyt-img" style="${style}">${inner}${stroke(item, radius)}</figure>`

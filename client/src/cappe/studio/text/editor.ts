@@ -9,11 +9,12 @@
 
 import { baseKeymap } from '@tiptap/pm/commands'
 import { keymap } from '@tiptap/pm/keymap'
-import { EditorState, TextSelection, type Command } from '@tiptap/pm/state'
+import { EditorState, TextSelection, type Command, type Transaction } from '@tiptap/pm/state'
 import { EditorView } from '@tiptap/pm/view'
 import { paraText } from '../model/doc'
+import { LIMITS, clamp } from '../model/limits'
 import { resolveChar } from '../model/identity'
-import { applyChar, applyPara, charAt, order, setParas, type Pos } from '../model/ops'
+import { applyChar, applyPara, charAt, kernAt, order, setParas, type Pos } from '../model/ops'
 import type { CharAttrs, Para, ParaAttrs, Thread } from '../model/types'
 import type { Store } from '../store/store'
 import { caretAt, lineEls, offsetAtX } from './caret'
@@ -109,9 +110,9 @@ export class TextEditor {
     this.host.style.top = `${y}px`
   }
 
-  private dispatch(tr: import('@tiptap/pm/state').Transaction): void {
+  private dispatch(tr: Transaction): void {
     const view = this.view!
-    let next = view.state.apply(tr)
+    let next = this.unkern(view.state.apply(tr), tr)
     const { $from, empty } = next.selection
     if (empty && !$from.parent.content.size && !next.storedMarks) {
       const ec = emptyAttrsOf($from.parent)
@@ -125,6 +126,54 @@ export class TextEditor {
       const thread = this.thread
       this.store.edit((d) => setParas(d, thread, paras), { key: `type:${thread}`, extra: { editing: this.selection() } })
     } else this.publish()
+  }
+
+  /** Characters typed after a kerned one don't take its kerning: it is the
+   *  space after that one letter, set at the caret (⌥← ⌥→), not a look. */
+  private unkern(next: EditorState, tr: Transaction): EditorState {
+    if (!tr.docChanged || tr.getMeta('paste') || tr.getMeta('uiEvent') === 'paste') return next
+    let fix = next.tr
+    tr.mapping.maps.forEach((map, k) => map.forEach((_a, _b, start, end) => {
+      const later = tr.mapping.slice(k + 1)
+      const from = later.map(start, -1), to = later.map(end)
+      if (to - from > 8 || to <= from) return
+      next.doc.nodesBetween(from, to, (node, pos) => {
+        if (!node.isText) return
+        const attrs = attrsOf(node.marks)
+        if (!attrs.kern) return
+        const rest = { ...attrs }
+        delete rest.kern
+        const a = Math.max(from, pos), b = Math.min(to, pos + node.nodeSize)
+        fix = fix.removeMark(a, b, schema.marks.ch)
+        for (const mark of markFor(rest, !!this.currentPara().style)) fix = fix.addMark(a, b, mark)
+      })
+    }))
+    return fix.docChanged ? next.apply(fix) : next
+  }
+
+  /** Manual kerning at the caret: the space after the character before it, by
+   *  `step` thousandths of an em; with text selected, its tracking. */
+  private kern(step: number): Command {
+    return () => {
+      const t = this.threadObj()
+      const sel = this.selection()
+      if (!t || !sel) return true
+      const [a, b] = order(sel.anchor, sel.head)
+      const identity = this.store.get().doc.identity
+      const base = identity?.paragraphs.find((p) => p.id === t.paras[a[0]].style)?.char
+      const thread = t.id
+      if (a[0] !== b[0] || a[1] !== b[1]) {
+        const cur = resolveChar(charAt(t.paras[a[0]], a[1] + 1), base, identity)
+        const track = clamp(cur.track + step, LIMITS.TRACK_MIN, LIMITS.TRACK_MAX)
+        this.store.edit((d) => setParas(d, thread, applyChar(t.paras, a, b, { track })), { key: `track:${thread}` })
+        return true
+      }
+      if (!a[1]) return true
+      const resolve = (r: CharAttrs) => resolveChar(r, base, identity)
+      this.store.edit((d) => setParas(d, thread, kernAt(t.paras, a[0], a[1], step, this.store.measure.width, resolve)),
+        { key: `kern:${thread}`, extra: { editing: sel } })
+      return true
+    }
   }
 
   private selection(): { thread: string; anchor: Pos; head: Pos } | null {
@@ -219,6 +268,11 @@ export class TextEditor {
       'Mod-i': toggle('it', true, false),
       'Mod-u': toggle('u', true, false),
       'Mod-z': () => { this.store.undo(); return true },
+      // Kerning, as InDesign keys it: tighter or looser by 10, by 50 with ⌘ (Ctrl).
+      'Alt-ArrowLeft': this.kern(-10),
+      'Alt-ArrowRight': this.kern(10),
+      'Alt-Mod-ArrowLeft': this.kern(-50),
+      'Alt-Mod-ArrowRight': this.kern(50),
       'Shift-Mod-z': () => { this.store.redo(); return true },
       Escape: () => {
         const frame = this.threadObj()?.frames[0]

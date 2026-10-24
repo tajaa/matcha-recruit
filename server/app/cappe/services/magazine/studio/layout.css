@@ -28,6 +28,7 @@
 .lyt-l--r{text-align:right}
 .lyt-l--j{text-align:justify;text-align-last:justify;white-space:nowrap}
 .lyt-l>span{line-height:0;vertical-align:baseline}
+.lyt-dc{position:absolute;display:block;white-space:pre;line-height:0;font-size:0}
 .lyt-sp{position:absolute;white-space:pre;font-size:0;line-height:0}
 .lyt-flow{position:absolute;inset:0;box-sizing:border-box;overflow:hidden;color:#1a1a1a}
 .lyt-flow p{margin:0}

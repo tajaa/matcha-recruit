@@ -3,31 +3,79 @@
 
 import { FONT_BY_NAME, hasItalic, nearestWeight } from '../../magazine/design/fontStack'
 import { CHAR_DEFAULTS, LIMITS, PARA_DEFAULTS, clamp, round } from './limits'
-import type { Align, CharAttrs, Doc, Item, Kind, Para, ParaAttrs, Role, Run, Thread } from './types'
+import type { Align, CharAttrs, Doc, Face, Item, Kind, Para, ParaAttrs, Role, Run, Thread } from './types'
 
-export type FullChar = { font: string; wt: number; it: boolean; size: number; track: number; color: string; u: boolean }
-export type FullPara = { align: Align; li: number; ri: number; fi: number; sb: number; sa: number; lead: number; role: Role }
+export type FullChar = { font: string; wt: number; it: boolean; size: number; track: number; color: string; u: boolean
+  kern: number; ot: string }
+export type FullPara = { align: Align; li: number; ri: number; fi: number; sb: number; sa: number; lead: number; role: Role
+  dc: number; dcn: number; kw: number; ko: number; runt: number }
 
-export const CHAR_KEYS = ['font', 'wt', 'it', 'size', 'track', 'color', 'u'] as const
-export const PARA_KEYS = ['align', 'li', 'ri', 'fi', 'sb', 'sa', 'lead', 'role'] as const
+export const CHAR_KEYS = ['font', 'wt', 'it', 'size', 'track', 'color', 'u', 'kern', 'ot'] as const
+export const PARA_KEYS = ['align', 'li', 'ri', 'fi', 'sb', 'sa', 'lead', 'role', 'dc', 'dcn', 'kw', 'ko', 'runt'] as const
+/** What a run keeps of its own when a style is applied over it: choices made
+ *  letter by letter (a kerned pair, an alternate glyph), not a look. */
+export const LOCAL_KEYS = ['kern', 'ot'] as const
+
+/** A magazine's own font (uploaded): `u-` and 16 hex digits, never a real name. */
+export const CUSTOM_FAMILY = /^u-[0-9a-f]{16}$/
+const customFaces = new Map<string, Face[]>()
+
+/** Make the magazine's own fonts known to charOf (as the server's
+ *  normalize_doc is given the site's): a run names one by its key. */
+export function registerFaces(faces: Iterable<Face>): void {
+  for (const f of faces) {
+    if (!CUSTOM_FAMILY.test(f.family)) continue
+    const list = customFaces.get(f.family) ?? []
+    if (!list.some((g) => g.sha === f.sha)) customFaces.set(f.family, [...list, f])
+  }
+}
+export const customFamily = (key: string) => customFaces.get(key)
+
+const intIn = (v: unknown, lo: number, hi: number, d: number) =>
+  typeof v === 'number' && Number.isFinite(v) ? Math.round(clamp(v, lo, hi)) : d
+
+/** A run's face as stored: a catalog font, or one of the magazine's own (its
+ *  nearest weight among its faces; any weight, to the hundred, while they
+ *  aren't known here, as the server reads a stored page). */
+function faceOf(r: CharAttrs): { font: string; wt: number; it: boolean } {
+  const want = typeof r.wt === 'number' && Number.isFinite(r.wt) ? r.wt : CHAR_DEFAULTS.wt
+  if (r.font && CUSTOM_FAMILY.test(r.font)) {
+    const faces = customFaces.get(r.font)
+    if (!faces?.length) return { font: r.font, wt: clamp(Math.floor(want / 100 + 0.5) * 100, 100, 900), it: !!r.it }
+    const wt = faces.map((f) => f.weight).reduce((best, w) => {
+      const d = Math.abs(w - want), bd = Math.abs(best - want)
+      return d < bd || (d === bd && w > best) ? w : best
+    })
+    return { font: r.font, wt, it: !!r.it && faces.some((f) => f.weight === wt && f.italic) }
+  }
+  const font = r.font && FONT_BY_NAME.has(r.font) ? r.font : CHAR_DEFAULTS.font
+  const wt = nearestWeight(font, want)
+  return { font, wt, it: !!r.it && hasItalic(font, wt) }
+}
+
+/** OpenType tags as stored: allowed ones, each once, sorted, comma-separated. */
+export function otOf(value: unknown): string {
+  if (typeof value !== 'string' || !value) return ''
+  const allowed = LIMITS.OT_TAGS as readonly string[]
+  return [...new Set(value.split(','))].filter((t) => allowed.includes(t)).sort().join(',')
+}
 
 /** A run's character attributes, every one present (as `schema.char_attrs`). */
 export function charOf(r: CharAttrs): FullChar {
-  const font = r.font && FONT_BY_NAME.has(r.font) ? r.font : CHAR_DEFAULTS.font
-  const wt = nearestWeight(font, r.wt ?? CHAR_DEFAULTS.wt)
   return {
-    font,
-    wt,
-    it: !!r.it && hasItalic(font, wt),
+    ...faceOf(r),
     size: round(clamp(r.size ?? CHAR_DEFAULTS.size, 1, LIMITS.SIZE_MAX)),
     track: Math.round(clamp(r.track ?? 0, LIMITS.TRACK_MIN, LIMITS.TRACK_MAX)),
     color: r.color && /^#[0-9a-f]{6}([0-9a-f]{2})?$/.test(r.color) ? r.color : CHAR_DEFAULTS.color,
     u: !!r.u,
+    kern: intIn(r.kern, LIMITS.KERN_MIN, LIMITS.KERN_MAX, 0),
+    ot: otOf(r.ot),
   }
 }
 
 export function paraOf(p: ParaAttrs): FullPara {
   const li = round(clamp(p.li ?? 0, 0, LIMITS.INDENT_MAX))
+  const dc = intIn(p.dc, 0, LIMITS.DROPCAP_LINES, 0)
   return {
     align: (LIMITS.ALIGNS as readonly string[]).includes(p.align ?? '') ? (p.align as Align) : 'l',
     li,
@@ -37,6 +85,11 @@ export function paraOf(p: ParaAttrs): FullPara {
     sa: round(clamp(p.sa ?? 0, 0, LIMITS.INDENT_MAX)),
     lead: round(clamp(p.lead ?? 0, 0, LIMITS.LEAD_MAX)),
     role: (LIMITS.ROLES as readonly string[]).includes(p.role ?? '') ? (p.role as Role) : 'p',
+    dc: dc === 1 ? 0 : dc,
+    dcn: intIn(p.dcn, 1, LIMITS.DROPCAP_CHARS, 1),
+    kw: intIn(p.kw, 1, LIMITS.KEEP_MAX, 1),
+    ko: intIn(p.ko, 1, LIMITS.KEEP_MAX, 1),
+    runt: intIn(p.runt, 1, LIMITS.KEEP_MAX, 1),
   }
 }
 

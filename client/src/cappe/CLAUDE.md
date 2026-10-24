@@ -154,6 +154,22 @@ Website-builder frontend for the consumer brand **Gummfit**, host-routed on gumm
   `collectionLibrary.ts` holds pending library writes and feedback per Studio store across panel remounts,
   invalidates stale reads, and reuses a save request UUID for an unchanged retry. `collectionPreview.ts`
   shares one composition across a collection's thumbnails; failed preparation can be retried.
+  **Editorial type** (feature 4): the Character panel's Kerning (⌥←/⌥→ at the caret, `ops.kernAt`; with letters
+  selected, tracking; letters typed after a kerned one don't take its kerning, `unkern`). **No browser kerns across a
+  change of letter-spacing** (Chrome does across same-font spans otherwise; the composer never does across runs), so a
+  word's first manual kern writes each pair's font kerning into its letters first, or the first ⌥← would open the pair;
+  checked in Chromium 2026-10-24. Also Alternates and figures (the
+  face's own OpenType features of `LIMITS.OT_TAGS`, measured by HarfBuzz with the same features, `Shaper.em(sha, text, ot)`)
+  and Your fonts (`ui/FontsDialog.tsx`, `ui/siteFonts.ts`: the site's uploads, registered in the `FaceBook` and in
+  `model/doc.registerFaces` so `charOf` keeps a `u-` key at its nearest face); the Paragraph panel's Drop cap and Keep
+  lines. The composer (`compose/compose.ts`) sets each paragraph through `layPara` and sets it again (≤3 times) to mend
+  a widow, orphan or runt, falling back to the first setting if mending would overset. Text wrap (`compose/wrap.ts`):
+  `threadWraps` turns wrap items on a frame's page into rectangles in its coordinates (a subject's rows through
+  `picturePlace`, the renderer's object-fit/position/scale arithmetic), joins the composition cache key, and the
+  composer fills each line in the widest `room` at its height. **Subject in front** (`model/subject.ts`, `ui/subject.ts`):
+  the photo stays under the lettering and a linked `cutout` partner showing its cut-out goes over it (`keepLinks` lets a
+  partner keep its own picture and drops it when the photo changes); `geometry.hitItem` clicks a partner only on its
+  `shape` unless it is selected. Collections leave own fonts and cut-out partners behind (`portableCollection`).
   **Magazine identity** (`studio/model/identity.ts`, `ui/panels/IdentityPanel.tsx`): named paragraph/character
   styles and swatches are references, with local attributes as overrides. `resolveParas` supplies effective
   type to composition/rendering/font loading; editable paragraphs and ProseMirror keep sparse references,

@@ -2,7 +2,8 @@
 
 Every face in the magazine catalog (`app/cappe/services/magazine/fonts.FONTS`:
 each family's weights and italics) is built from google/fonts (OFL/Apache/
-UFL) at a pinned commit:
+UFL) at a pinned commit, through the steps in `app/cappe/services/magazine/
+studio/font_build.py` (an owner's own uploads go through them too):
 
   * a variable font is instanced at the weight (every other axis at its
     default), a static one taken as it is;
@@ -43,11 +44,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from fontTools import subset  # noqa: E402
 from fontTools.ttLib import TTFont  # noqa: E402
-from fontTools.varLib import instancer  # noqa: E402
 
 from app.cappe.services.magazine.fonts import FONTS  # noqa: E402
+from app.cappe.services.magazine.studio.font_build import build_face, features, metrics  # noqa: E402
 from app.cappe.services.magazine.studio.fonts import MANIFEST  # noqa: E402
 
 # google/fonts main on 2026-10-21. Change it only together with a full
@@ -56,8 +56,6 @@ COMMIT = "45e3d5269e4a17d823f6d84470bc084dc5ae46f6"
 RAW = f"https://raw.githubusercontent.com/google/fonts/{COMMIT}"
 LICENSES = ("ofl", "apache", "ufl")
 
-LATIN = sorted({*range(0x20, 0x7F), *range(0xA0, 0x180), *range(0x2010, 0x2028), *range(0x2030, 0x203B),
-                0x2044, 0x20AC, 0x2122, 0x2212, 0xFB01, 0xFB02, 0x0131, 0x02C6, 0x02DA, 0x02DC})
 _FONT = re.compile(r"fonts\s*\{(.*?)\}", re.S)
 _FIELD = re.compile(r'(\w+):\s*"?([^"\n]*)"?')
 
@@ -100,46 +98,6 @@ def _pick(files: list[dict], weight: int, italic: bool) -> dict | None:
     return next((f for f in mine if int(f.get("weight", 0)) == weight), None)
 
 
-def build_face(font: TTFont, weight: int) -> TTFont:
-    if "fvar" in font:
-        axes = {a.axisTag: a for a in font["fvar"].axes}
-        loc = {tag: a.defaultValue for tag, a in axes.items()}
-        if "wght" in axes:
-            loc["wght"] = max(axes["wght"].minValue, min(axes["wght"].maxValue, weight))
-        font = instancer.instantiateVariableFont(font, loc, updateFontNames=False)
-    opts = subset.Options()
-    opts.layout_features = ["*"]
-    opts.name_IDs = ["*"]
-    opts.name_languages = ["*"]
-    opts.notdef_outline = True
-    opts.hinting = False
-    opts.glyph_names = False
-    opts.drop_tables += ["DSIG", "STAT"]
-    sub = subset.Subsetter(opts)
-    sub.populate(unicodes=LATIN)
-    sub.subset(font)
-    os2, hhea = font["OS/2"], font["hhea"]
-    asc, desc = os2.sTypoAscender, os2.sTypoDescender  # desc is negative
-    if asc <= 0:  # a face without typo metrics: take its hhea's
-        asc, desc = hhea.ascent, hhea.descent
-        os2.sTypoAscender, os2.sTypoDescender = asc, desc
-    hhea.ascent, hhea.descent, hhea.lineGap = asc, desc, 0
-    os2.sTypoLineGap = 0
-    os2.usWinAscent, os2.usWinDescent = max(asc, 0), max(-desc, 0)
-    if 2 <= os2.version < 4:
-        os2.version = 4  # the flag below is read from version 4 on; 2 and 3 have the same fields
-    os2.fsSelection |= 1 << 7  # USE_TYPO_METRICS
-    return font
-
-
-def _features(font: TTFont) -> list[str]:
-    tags: set[str] = set()
-    for table in ("GSUB", "GPOS"):
-        if table in font and font[table].table.FeatureList:
-            tags |= {fr.FeatureTag for fr in font[table].table.FeatureList.FeatureRecord}
-    return sorted(tags)
-
-
 def build(families: list[str], out: Path, cache: Path) -> list[dict]:
     faces = []
     for name in families:
@@ -162,12 +120,9 @@ def build(families: list[str], out: Path, cache: Path) -> list[dict]:
             ttf = buf.getvalue()
             sha = hashlib.sha256(ttf).hexdigest()
             (out / f"{sha}.ttf").write_bytes(ttf)
-            os2 = font["OS/2"]
             faces.append({
                 "family": name, "weight": weight, "italic": italic, "sha": sha, "bytes": len(ttf),
-                "upm": font["head"].unitsPerEm, "asc": os2.sTypoAscender, "desc": os2.sTypoDescender,
-                "cap": getattr(os2, "sCapHeight", 0) or 0, "x": getattr(os2, "sxHeight", 0) or 0,
-                "features": _features(font),
+                **metrics(font), "features": features(font),
             })
         print(f"{name}: {sum(1 for f in faces if f['family'] == name)} faces", flush=True)
     return faces

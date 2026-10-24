@@ -5,11 +5,13 @@ import LibraryPanel from '../../magazine/library/LibraryPanel'
 import type { CappeAsset, CappeStoryOptions } from '../../types'
 import { studioApi, toAsset, type Revision, type StudioPost } from '../api'
 import { addItem, patchItems } from '../model/ops'
+import { isCutout } from '../model/subject'
+import { placeSubject } from './subject'
 import PictureEditor from '../picture/PictureEditor'
 import { useStudio } from '../store/store'
 import { useCtx } from './context'
 
-function Dialog({ title, onClose, children, wide }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
+export function Dialog({ title, onClose, children, wide }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
   useEffect(() => {
     const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', esc)
@@ -179,7 +181,7 @@ export function RevisionsDialog() {
 
 /** The Picture Editor on the picture frame selected: Done puts the edited
  *  picture in the frame (one undo step) and in the library. */
-export function PictureDialog({ cutout }: { cutout?: boolean }) {
+export function PictureDialog({ cutout, subject }: { cutout?: boolean; subject?: boolean }) {
   const c = useCtx()
   // The frame and its picture as they were when the editor opened.
   const [target] = useState(() => {
@@ -197,11 +199,14 @@ export function PictureDialog({ cutout }: { cutout?: boolean }) {
     )
   }
   return (
-    <PictureEditor siteId={c.siteId} asset={target.asset} startIn={cutout ? 'cutout' : 'adjust'} onClose={close}
+    <PictureEditor siteId={c.siteId} asset={target.asset} startIn={cutout || subject ? 'cutout' : 'adjust'} onClose={close}
       onHelp={(section) => c.store.set({ guide: section })}
       onDone={(saved) => {
-        c.store.set((s) => ({ assets: { ...s.assets, [saved.id]: toAsset(saved) } }))
-        c.store.edit((d) => patchItems(d, [target.frame], { asset_id: saved.id }))
+        const asset = toAsset(saved)
+        c.store.set((s) => ({ assets: { ...s.assets, [saved.id]: asset } }))
+        // The subject in front: the photo stays, its cut-out goes over the text.
+        if (subject && isCutout(asset)) void placeSubject(c, target.frame, asset)
+        else c.store.edit((d) => patchItems(d, [target.frame], { asset_id: saved.id }))
         close()
       }} />
   )

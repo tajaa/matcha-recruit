@@ -1,4 +1,4 @@
-import { mergeRuns, sparsePara } from './doc'
+import { CUSTOM_FAMILY, mergeRuns, sparsePara } from './doc'
 import { detachParent, resolveItem, resolvedThreads } from './identity'
 import type { Doc, Item } from './types'
 
@@ -38,12 +38,29 @@ export function flattenIdentity(doc: Doc): Doc {
   return out
 }
 
-/** A portable snapshot: source photos, reader access and the source's
- *  identity references stay with the story. */
+/** A portable snapshot: source photos, reader access, the source's identity
+ *  references and its magazine's own fonts stay with the story (as the
+ *  server's collection_doc: a cut-out subject is its photo's, and text in an
+ *  own font is set in the default face). */
 export function portableCollection(source: Doc): Doc {
   const doc = flattenIdentity(source)
-  return structuredClone({ ...doc, paywall_page: null,
-    items: doc.items.map((i) => i.kind === 'image' ? { ...i, asset_id: null, caption: '' } : i),
-    threads: doc.threads.map((t) => ({ id: t.id, frames: t.frames, paras: t.paras })),
+  const out: Doc = structuredClone({ ...doc, paywall_page: null,
+    items: doc.items.map((i) => {
+      if (i.kind !== 'image') return i
+      const plain = { ...i, asset_id: null, caption: '' }
+      delete plain.cutout
+      delete plain.shape
+      if (plain.wrap?.m === 'subject') plain.wrap = { ...plain.wrap, m: 'box' }
+      return plain
+    }),
+    threads: doc.threads.map((t) => ({ id: t.id, frames: t.frames, paras: t.paras.map((p) => ({ ...p,
+      runs: mergeRuns(p.runs.map((r) => {
+        if (!r.font || !CUSTOM_FAMILY.test(r.font)) return r
+        const rest = { ...r }
+        delete rest.font
+        return rest
+      })) })) })),
   })
+  delete out.faces
+  return out
 }

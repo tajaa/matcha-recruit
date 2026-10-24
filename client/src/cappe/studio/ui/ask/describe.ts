@@ -5,10 +5,10 @@
 // question, so it stays short: long text is cut to its start.
 
 import { groupOf } from '../../model/crops'
-import { spreads } from '../../model/doc'
+import { CUSTOM_FAMILY, spreads } from '../../model/doc'
 import { runs } from '../../model/sections'
 import { CHAR_DEFAULTS, PARA_DEFAULTS } from '../../model/limits'
-import type { Asset, Doc, Item, Para, Run, Stroke, Thread, Units } from '../../model/types'
+import type { Asset, Doc, Face, Item, Para, Run, Stroke, Thread, Units } from '../../model/types'
 import { show } from '../../model/units'
 import { LOOKS } from '../../picture/looks'
 import type { State } from '../../store/store'
@@ -48,8 +48,9 @@ function describeDoc(doc: Doc): string {
 const strokeText = (s: Stroke | null) => (s ? `stroke ${n(s.w)} pt ${s.c}` : 'no stroke')
 const fillText = (f: string | null) => (f ? `fill ${f}` : 'no fill')
 
-function runStyle(r: Run, p: Para): string {
-  const font = r.font ?? CHAR_DEFAULTS.font
+function runStyle(r: Run, p: Para, fonts: Face[] = []): string {
+  const own = r.font && CUSTOM_FAMILY.test(r.font) ? fonts.find((f) => f.family === r.font) : undefined
+  const font = own ? `${own.name ?? 'their own font'} (the magazine's own font)` : r.font ?? CHAR_DEFAULTS.font
   const wt = r.wt ?? CHAR_DEFAULTS.wt
   const lead = p.lead ?? PARA_DEFAULTS.lead
   const bits = [
@@ -58,10 +59,15 @@ function runStyle(r: Run, p: Para): string {
     r.color ?? CHAR_DEFAULTS.color, ALIGN[p.align ?? PARA_DEFAULTS.align],
   ]
   if (r.u) bits.push('underlined')
+  if (r.kern) bits.push(`kerned ${r.kern}`)
+  if (r.ot) bits.push(`OpenType ${r.ot}`)
   for (const [key, label] of [['li', 'left indent'], ['ri', 'right indent'], ['fi', 'first-line indent'],
     ['sb', 'space before'], ['sa', 'space after']] as const) {
     if (p[key]) bits.push(`${label} ${n(p[key]!)} pt`)
   }
+  if (p.dc) bits.push(`drop cap ${p.dc} lines deep, ${p.dcn ?? 1} letter${(p.dcn ?? 1) === 1 ? '' : 's'}`)
+  if ((p.kw ?? 1) > 1 || (p.ko ?? 1) > 1) bits.push(`keeps ${p.ko ?? 1} first and ${p.kw ?? 1} last lines together at a column break`)
+  if ((p.runt ?? 1) > 1) bits.push(`at least ${p.runt} words on its last line`)
   return bits.join(', ')
 }
 
@@ -73,13 +79,13 @@ export function clip(s: string, n: number): string {
   return s.slice(0, code >= 0xd800 && code <= 0xdbff ? n - 1 : n)
 }
 
-function paraLine(p: Para): string {
+function paraLine(p: Para, fonts: Face[]): string {
   const text = p.runs.map((r) => r.t).join('').replace(/\s+/g, ' ').trim()
   const excerpt = text.length > EXCERPT ? `${clip(text, EXCERPT)}…` : text
   const first = p.runs.find((r) => r.t.trim()) ?? p.runs[0] ?? { t: '' }
   const mixed = p.runs.some((r) => r.t.trim() && (r.font !== first.font || r.size !== first.size || r.color !== first.color
     || r.wt !== first.wt || !!r.it !== !!first.it))
-  return `    · ${ROLE[p.role ?? PARA_DEFAULTS.role]}: "${excerpt || '(empty)'}" in ${runStyle(first, p)}${mixed ? ' (some words styled differently)' : ''}`
+  return `    · ${ROLE[p.role ?? PARA_DEFAULTS.role]}: "${excerpt || '(empty)'}" in ${runStyle(first, p, fonts)}${mixed ? ' (some words styled differently)' : ''}`
 }
 
 /** The part of a paragraph from `start` to `end` (UTF-16), its runs cut to fit. */
@@ -156,7 +162,7 @@ function itemLines(item: Item, s: State, len: (pt: number) => string): string[] 
         extra.push("some of its text doesn't fit")
       }
       const lines = [[...head, ...extra].join('; ')]
-      lines.push(...(paras.length ? paras.map(paraLine) : ['    · (no text)']))
+      lines.push(...(paras.length ? paras.map((p) => paraLine(p, s.fonts ?? s.doc.faces ?? [])) : ['    · (no text)']))
       if (more) lines.push(`    · …and ${more} more paragraph${more === 1 ? '' : 's'}`)
       return lines
     }
@@ -171,6 +177,7 @@ function itemLines(item: Item, s: State, len: (pt: number) => string): string[] 
         const g = groupOf(s.doc, item.id)
         if (g) extra.push(`linked crop: shows one picture with ${g.members.length - 1} other frame${g.members.length === 2 ? '' : 's'} on the spread`)
       }
+      if (item.cutout) extra.push('the subject in front: its photo\'s cut-out, set over the text so the subject stands in front of the lettering')
       break
     case 'rect':
       extra.push(fillText(item.fill), strokeText(item.stroke))
@@ -188,6 +195,7 @@ function itemLines(item: Item, s: State, len: (pt: number) => string): string[] 
       else if (item.fit === 'stretch') extra.push('stretched to its box')
       break
   }
+  if ('wrap' in item && item.wrap) extra.push(`text wraps ${item.wrap.m === 'subject' ? 'around its subject' : 'around its box'}, ${len(item.wrap.o)} away`)
   return [[...head, ...extra].join('; ')]
 }
 

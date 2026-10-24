@@ -36,6 +36,7 @@ from ..figures import _variants, credit_html
 from ..fonts import Uses, add_use, font_stack
 from . import fonts as faces
 from . import graphics
+from .fonts import showing
 from .identity import parent_doc, resolve_char, resolve_item, resolved_threads
 from .limits import CHAR_DEFAULTS, PARA_DEFAULTS
 from .schema import flow_frame, len16, para_text, slice16, spreads
@@ -82,7 +83,7 @@ def _stroke(item: dict, radius: str = "") -> str:
 
 def run_style(attrs: dict, used: Uses) -> str:
     """A run's type: its face (by the name it was measured in), size,
-    tracking, colour, underline."""
+    tracking (with its kerning), OpenType features, colour, underline."""
     a = {**CHAR_DEFAULTS, **attrs}
     face = faces.face(a["font"], a["wt"], a["it"])
     if face:
@@ -91,8 +92,10 @@ def run_style(attrs: dict, used: Uses) -> str:
         add_use(used, a["font"], a["wt"], a["it"])
         family = font_stack(a["font"]) + (";font-weight:" + str(a["wt"])) + (";font-style:italic" if a["it"] else "")
     style = f"font-family:{family};font-size:{u(a['size'])}"
-    if a["track"]:
-        style += f";letter-spacing:{u(a['track'] / 1000 * a['size'])}"
+    if a["track"] or a["kern"]:
+        style += f";letter-spacing:{u((a['track'] + a['kern']) / 1000 * a['size'])}"
+    if a["ot"]:
+        style += ";font-feature-settings:'kern' 1,'liga' 1,'calt' 1," + ",".join(f"'{t}' 1" for t in a["ot"].split(","))
     if a["color"] != CHAR_DEFAULTS["color"]:
         style += f";color:{a['color']}"
     if a["u"]:
@@ -100,25 +103,29 @@ def run_style(attrs: dict, used: Uses) -> str:
     return style
 
 
-def _spans(runs: list[dict], start: int, end: int, used: Uses) -> str:
-    """The runs' text in [start, end) of the paragraph (UTF-16 offsets)."""
+def _spans(runs: list[dict], start: int, end: int, used: Uses, size: Optional[float] = None) -> str:
+    """The runs' text in [start, end) of the paragraph (UTF-16 offsets);
+    `size`: set at this size instead (a drop cap)."""
     out = []
     at = 0
     for r in runs:
         text = r.get("t", "")
-        size = len16(text)
-        a, b = max(start, at), min(end, at + size)
+        length = len16(text)
+        a, b = max(start, at), min(end, at + length)
         if b > a:
             part = slice16(text, a - at, b - at) or ""
-            out.append(f'<span style="{run_style(r, used)}">{escape(part, quote=False)}</span>')
-        at += size
+            out.append(f'<span style="{run_style(r if size is None else {**r, "size": size}, used)}">{escape(part, quote=False)}</span>')
+        at += length
     return "".join(out)
 
 
 def _lines_html(thread: dict, frame_index: int, frame_h: float, used: Uses) -> str:
-    """The lines a thread set in one of its frames, paragraph by paragraph."""
+    """The lines a thread set in one of its frames, paragraph by paragraph. A
+    paragraph's drop cap is its first line's first characters, drawn in a box
+    of their own placed from that line (so they still read first)."""
     paras = thread["paras"]
     lines = thread["comp"]["lines"]
+    caps = {c[0]: c for c in thread["comp"].get("caps") or []}
     out: list[str] = []
     open_para = -1
     for k, (f, p, s, e, x, b, w, a) in enumerate(lines):
@@ -130,8 +137,14 @@ def _lines_html(thread: dict, frame_index: int, frame_h: float, used: Uses) -> s
             out.append('<p class="lyt-p">')
             open_para = p
         runs = paras[p]["runs"]
+        cap = caps.get(p) if s == 0 and (k == 0 or lines[k - 1][1] != p) else None
+        inner = _spans(runs, s, e, used)
+        if cap:
+            _p, n16, cx, cb, csize = cap
+            inner = (f'<span class="lyt-dc" style="left:{u(cx - x)};bottom:{u(b - cb)}">{_spans(runs, 0, n16, used, csize)}</span>'
+                     + _spans(runs, n16, e, used))
         out.append(f'<span class="lyt-l{_ALIGN_CLASS[a]}" style="left:{u(x)};bottom:{u(frame_h - b)};width:{u(w)}">'
-                   f'{_spans(runs, s, e, used)}</span>')
+                   f'{inner}</span>')
         nxt = lines[k + 1] if k + 1 < len(lines) else None
         if nxt and nxt[1] == p:
             gap = slice16(para_text(paras[p]), e, nxt[2]) or ""
@@ -223,7 +236,8 @@ def _image_html(item: dict, assets: dict[str, dict], page_w: float, eager: bool)
         if item["zoom"] != 100:
             pic += f";transform:scale({n(item['zoom'] / 100)});transform-origin:{n(item['fx'])}% {n(item['fy'])}%"
         img = _img(asset, sizes=_image_sizes(item, page_w), eager=eager, style=pic)
-        credit = credit_html(asset)
+        # The subject in front is its picture's cut-out: the picture behind it prints the credit.
+        credit = "" if item.get("cutout") else credit_html(asset)
         if img:
             inner = img + (f'<figcaption class="lyt-credit">{credit}</figcaption>' if credit else "")
     return f'<figure class="lyt-item lyt-img" style="{style}">{inner}{_stroke(item, radius)}</figure>'
@@ -294,6 +308,12 @@ def frame_threads(doc: dict, locked_from: Optional[int] = None) -> Threads:
 def page_items_html(doc: dict, index: int, assets: dict[str, dict], used: Optional[Uses] = None,
                     threads: Optional[Threads] = None) -> str:
     """What sits on one page, bottom to top (hidden items left out)."""
+    with showing(doc):
+        return _page_items_html(doc, index, assets, used, threads)
+
+
+def _page_items_html(doc: dict, index: int, assets: dict[str, dict], used: Optional[Uses] = None,
+                     threads: Optional[Threads] = None) -> str:
     used = used if used is not None else {}
     threads = threads if threads is not None else frame_threads(doc)
     page = doc["pages"][index]
@@ -357,6 +377,11 @@ def pages_html(doc: dict, assets: dict[str, dict], *, locked_from: Optional[int]
                label: str = "The story's pages") -> tuple[str, Uses]:
     """The whole story as a strip of spreads (one page at a time on a phone),
     and the faces it sets that aren't in the Studio's own set."""
+    with showing(doc):
+        return _pages_html(doc, assets, locked_from=locked_from, label=label)
+
+
+def _pages_html(doc: dict, assets: dict[str, dict], *, locked_from: Optional[int], label: str) -> tuple[str, Uses]:
     used: Uses = {}
     threads = frame_threads(doc, locked_from)
     pw, ph = doc["size"]["w"], doc["size"]["h"]
@@ -376,18 +401,21 @@ def pages_html(doc: dict, assets: dict[str, dict], *, locked_from: Optional[int]
 def locked_pages(doc: dict, assets: dict[str, dict], from_page: int) -> list[dict]:
     """The pages for subscribers only, each as its items' HTML (`/paid`)."""
     used: Uses = {}
-    threads = frame_threads(doc, from_page)
-    return [{"n": i + 1, "html": page_items_html(doc, i, assets, used, threads)}
-            for i in range(from_page - 1, len(doc["pages"]))]
+    with showing(doc):
+        threads = frame_threads(doc, from_page)
+        return [{"n": i + 1, "html": _page_items_html(doc, i, assets, used, threads)}
+                for i in range(from_page - 1, len(doc["pages"]))]
 
 
 def faces_css(doc: dict) -> str:
-    """An @font-face for each of the Studio's faces the story sets."""
-    documents = [doc] + [parent_doc(doc, p) for p in doc.get("identity", {}).get("parents", [])]
-    runs = [r for d in documents for t in resolved_threads(d) for p in t["paras"] for r in p["runs"]]
-    if doc.get("identity"):
-        runs.append(resolve_char(doc["identity"]["furniture"]["char"], identity=doc["identity"]))
-    shas = sorted({f["sha"] for f in (_run_face(r) for r in runs) if f})
+    """An @font-face for each of the Studio's faces, and the magazine's own
+    fonts, the story sets."""
+    with showing(doc):
+        documents = [doc] + [parent_doc(doc, p) for p in doc.get("identity", {}).get("parents", [])]
+        runs = [r for d in documents for t in resolved_threads(d) for p in t["paras"] for r in p["runs"]]
+        if doc.get("identity"):
+            runs.append(resolve_char(doc["identity"]["furniture"]["char"], identity=doc["identity"]))
+        shas = sorted({f["sha"] for f in (_run_face(r) for r in runs) if f})
     return "".join(
         f"@font-face{{font-family:'{faces.family(sha)}';src:url({faces.url(sha)}) format('truetype');"
         "font-display:block}" for sha in shas

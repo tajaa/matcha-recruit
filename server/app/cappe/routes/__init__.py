@@ -20,6 +20,7 @@ from .library import router as library_router
 from .magazine_ai import router as magazine_ai_router
 from .issues import router as issues_router
 from .studio import router as studio_router
+from .studio_fonts import router as studio_fonts_router
 from .pictures import router as pictures_router
 from .magazine_emails import router as magazine_emails_router
 from .magazine_paid import router as magazine_paid_router
@@ -129,6 +130,7 @@ cappe_router.include_router(magazine_ai_router)
 cappe_router.include_router(magazine_emails_router)
 cappe_router.include_router(issues_router)
 cappe_router.include_router(studio_router)
+cappe_router.include_router(studio_fonts_router)
 cappe_router.include_router(pictures_router)
 cappe_router.include_router(magazine_paid_router)
 cappe_router.include_router(reader_router)

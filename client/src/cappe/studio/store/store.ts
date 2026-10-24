@@ -13,6 +13,7 @@ import { composeDoc, type Measure } from '../compose/compose'
 import { keepLinks } from '../model/crops'
 import { keepSections } from '../model/sections'
 import { docProblem } from '../model/limits'
+import type { SiteFont } from '../api'
 import type { Asset, Doc } from '../model/types'
 
 export type Tool = 'select' | 'text' | 'frame' | 'rect' | 'ellipse' | 'line' | 'hand' | 'zoom'
@@ -49,8 +50,9 @@ export type State = {
   save: { rev: number; state: SaveState; message: string | null; draft: boolean; live: boolean }
   /** A thread port clicked: the next text frame clicked joins this thread. */
   threading: { thread: string | null; frame: string } | null
-  /** `picture`: the Picture Editor on the picture frame selected; `cutout`: it, open at the cut-out. */
-  dialog: null | 'library' | 'story' | 'revisions' | 'preview' | 'picture' | 'cutout' | 'board'
+  /** `picture`: the Picture Editor on the picture frame selected; `cutout`: it, open at the cut-out;
+   *  `subject`: at the cut-out, and Done sets the subject in front of the text (ui/subject.ts). */
+  dialog: null | 'library' | 'story' | 'revisions' | 'preview' | 'picture' | 'cutout' | 'board' | 'fonts' | 'subject'
   /** The guide, open at this section (`ui/guideContent.ts`); it can open over a dialog. */
   guide: string | null
   /** While dragging: the lines an edge snapped to, and the marquee (pasteboard pt). */
@@ -60,6 +62,8 @@ export type State = {
    *  drop that failed, a page gone before a picture landed): shown in the
    *  Studio's bar until dismissed. */
   notice?: string | null
+  /** The magazine's own fonts (uploaded; `ui/FontsDialog.tsx`), as listed when the Studio opened or since. */
+  fonts?: SiteFont[]
 }
 
 type Listener = () => void

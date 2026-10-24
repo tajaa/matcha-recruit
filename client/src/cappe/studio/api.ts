@@ -2,7 +2,7 @@
 
 import { cappeApi, cappeApiBase, cappeStreamHeaders } from '../api'
 import type { CappeAsset } from '../types'
-import type { Asset, Doc } from './model/types'
+import type { Asset, Doc, Face } from './model/types'
 import type { Recipe } from './picture/recipe'
 
 export type StudioPost = {
@@ -11,6 +11,8 @@ export type StudioPost = {
   published_at: string | null; updated_at: string; rev: number
 }
 export type Opened = { post: StudioPost; doc: Doc; draft: boolean; live: boolean }
+/** One of the magazine's own fonts (server routes/studio_fonts.py): a face, and its upload. */
+export type SiteFont = Face & { id: string; filename: string | null; hidden: boolean; created_at: string }
 export type Saved = { rev: number; draft: boolean; doc: Doc }
 export type Revision = { id: string; rev: number; kind: 'save' | 'publish' | 'restore' | 'convert'; title: string | null;
   created_at: string }
@@ -28,7 +30,25 @@ export type AskRequest = {
 
 const base = (siteId: string, postId: string) => `/sites/${siteId}/studio/stories/${postId}`
 
+const fontsPath = (siteId: string) => `/sites/${siteId}/studio/fonts`
+
 export const studioApi = {
+  /** The magazine's own fonts (not those taken off its list). */
+  fonts: (siteId: string) => cappeApi.get<{ fonts: SiteFont[] }>(fontsPath(siteId)),
+  /** A font file added to the magazine, under `name` (a family it already has joins it). */
+  uploadFont: (siteId: string, file: File, opts: { name: string; licence: boolean; weight?: number; italic?: boolean }) => {
+    const form = new FormData()
+    form.append('file', file, file.name)
+    form.append('name', opts.name)
+    form.append('licence_attested', opts.licence ? 'true' : 'false')
+    if (opts.weight !== undefined) form.append('weight', String(opts.weight))
+    if (opts.italic !== undefined) form.append('italic', opts.italic ? 'true' : 'false')
+    return cappeApi.upload<SiteFont>(fontsPath(siteId), form)
+  },
+  renameFontFamily: (siteId: string, family: string, name: string) =>
+    cappeApi.patch<{ family: string; name: string }>(`${fontsPath(siteId)}/families/${family}`, { name }),
+  /** Off the magazine's list; pages that set it keep it. */
+  hideFont: (siteId: string, fontId: string) => cappeApi.delete<void>(`${fontsPath(siteId)}/${fontId}`),
   open: (siteId: string, postId: string) => cappeApi.get<Opened>(base(siteId, postId)),
   save: (siteId: string, postId: string, body: { base_rev: number; doc: Doc; publish?: boolean; keep?: boolean }) =>
     cappeApi.put<Saved>(base(siteId, postId), { ...body, identity_version: 1 }),

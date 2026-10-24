@@ -34,10 +34,13 @@ export default function StudioPage() {
     let gone = false
     let made: Loaded | null = null
     ;(async () => {
-      const [opened, manifest, hb, lib] = await Promise.all([
+      const [opened, manifest, hb, lib, own] = await Promise.all([
         studioApi.open(siteId, postId), loadManifest(), loadHarfBuzz(), studioApi.assets(siteId).catch(() => ({ assets: [] })),
+        studioApi.fonts(siteId).catch(() => ({ fonts: [] })),
       ])
-      const fonts = new FontLoader(new FaceBook(manifest), new Shaper(hb, browserWidth))
+      const book = new FaceBook(manifest)
+      book.add(own.fonts)
+      const fonts = new FontLoader(book, new Shaper(hb, browserWidth))
       await fonts.ensureDoc(opened.doc).catch(() => {})
       const assets = Object.fromEntries(lib.assets.map((a) => [a.id, toAsset(a)]))
       const store = new Store({
@@ -46,6 +49,7 @@ export default function StudioPage() {
         guide: guideSeen() ? null : 'start',
         snaps: null, marquee: null,
         save: { rev: opened.post.rev, state: 'saved', message: null, draft: opened.draft, live: opened.live },
+        fonts: own.fonts,
       }, fonts.measure)
       made = { store, fonts, editor: new TextEditor(store, () => document.querySelector('[data-studio-board]')),
         saver: new Saver(store, siteId, postId), post: opened.post }
