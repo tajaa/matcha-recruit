@@ -53,9 +53,26 @@ function inside(item: Item, x: number, y: number): boolean {
   return px >= item.x && px <= item.x + item.w && py >= item.y && py <= item.y + item.h
 }
 
+/** The frames a page's parent layout draws behind its own (model/identity.ts),
+ *  placed and sized as the renderer draws them on this page, under ids of
+ *  their own; and which of their text frames hold words. */
+export function inheritedItems(doc: Doc): { items: Item[]; worded: Set<string> } {
+  const items: Item[] = [], worded = new Set<string>()
+  const parents = new Map((doc.identity?.parents ?? []).map((p) => [p.id, p]))
+  doc.pages.forEach((page, k) => {
+    const parent = page.parent ? parents.get(page.parent) : undefined
+    if (!parent) return
+    const s = Math.min(doc.size.w / parent.size.w, doc.size.h / parent.size.h)
+    const id = (i: string) => `parent:${k}:${i}`
+    for (const i of parent.items) items.push({ ...i, id: id(i.id), page: page.id, x: i.x * s, y: i.y * s, w: i.w * s, h: i.h * s })
+    for (const t of parent.threads) if (t.paras.some((p) => p.runs.some((r) => r.t.trim()))) worded.add(id(t.frames[0]))
+  })
+  return { items, worded }
+}
+
 /** The text frames holding words (of their thread's composed lines). */
 export function wordedFrames(doc: Doc): Set<string> {
-  const out = new Set<string>()
+  const out = new Set<string>(inheritedItems(doc).worded)
   for (const t of doc.threads) {
     if (t.comp?.lines.length) {
       for (const l of t.comp.lines) if (l[3] > l[2]) out.add(t.frames[l[0]])
@@ -71,7 +88,8 @@ export function beats(doc: Doc): PageBeat[] {
   const worded = wordedFrames(doc)
   const index = new Map(doc.pages.map((p, i) => [p.id, i]))
   const byPage = doc.pages.map(() => [] as Item[])
-  for (const it of doc.items) {
+  // A parent's frames are drawn under the page's own.
+  for (const it of [...inheritedItems(doc).items, ...doc.items]) {
     const i = index.get(it.page)
     if (i !== undefined) byPage[i].push(it)
   }

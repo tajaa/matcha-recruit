@@ -5,7 +5,7 @@
 // is meant to (model/crops.ts keeps its two halves lined up).
 
 import { spreads } from './doc'
-import { wordedFrames } from './rhythm'
+import { inheritedItems, wordedFrames } from './rhythm'
 import type { Doc } from './types'
 
 /** How wide the strip is on each side of the spine, in pt (a quarter inch). */
@@ -26,7 +26,7 @@ export function gutterIssues(doc: Doc): GutterIssue[] {
   const out: GutterIssue[] = []
   const index = new Map(doc.pages.map((p, i) => [p.id, i]))
   const paired = new Set(spreads(doc).filter((s) => s.length === 2).flat())
-  for (const item of doc.items) {
+  for (const item of [...inheritedItems(doc).items, ...doc.items]) {
     if (item.kind !== 'text' || item.hidden || !worded.has(item.id)) continue
     const i = index.get(item.page)
     if (i === undefined || !paired.has(i)) continue

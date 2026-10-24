@@ -299,3 +299,23 @@ describe('the gutter', () => {
     expect(gutterIssues({ ...empty, threads: [{ id: 's1', frames: ['t1'], paras: [{ runs: [{ t: ' ' }] }] }] })).toEqual([])
   })
 })
+
+describe('pages drawn from a parent layout', () => {
+  it('count the parent’s frames in their beat and their gutter', async () => {
+    const { captureParent, starterIdentity } = await import('./identity')
+    // Page 2's parent: a full-bleed picture and words running into the spine.
+    let d: Doc = { ...doc(), identity: starterIdentity(), items: [
+      newItem('image', 'p2', 'i1', { x: -9, y: -9, w: 618, h: 818 }),
+      newItem('text', 'p2', 't1', { x: 400, y: 50, w: 195, h: 100 }),
+    ], threads: [{ id: 's1', frames: ['t1'], paras: [{ runs: [{ t: 'By the spine' }] }] }] }
+    d = captureParent(d, 1, 'pl1', 'Opener')
+    expect(d.items).toHaveLength(0) // the page's frames now live on the parent
+    expect(beats(d)[1].beat).toBe('bleed')
+    expect(beats(d)[3].beat).toBe('white')
+    expect(gutterIssues(d)).toEqual([expect.objectContaining({ page: 1 })])
+    // The same parent on another left page is counted there too.
+    d = { ...d, pages: d.pages.map((p, k) => (k === 3 ? { ...p, parent: 'pl1' } : p)) }
+    expect(beats(d)[3].beat).toBe('bleed')
+    expect(gutterIssues(d).map((x) => x.page)).toEqual([1, 3])
+  })
+})
