@@ -695,8 +695,13 @@ normalized paragraphs itself; a thread with no valid composition prints its word
   `gummfit`, `source_id` the bank id) on the bank's own files, so there is no import queue. A **graphic** is
   `clean_svg`'d and stored by sha at `cappe/graphics/<sha>.svg`, served by the same public route; the two save paths
   in `blog.py` pass `bank.doc_graphics` to `normalize_doc`, which is how a page may name a sha the manifest lacks.
-  So **a graphic is hidden, never deleted** (pages name it); deleting a photo is safe (library rows never delete
-  files). `/public/graphics/picks` is cached 5 minutes. **The photo library is seeded** by
+  So **a graphic is hidden, never deleted** (pages name it), and cappemag11's downgrade refuses while the bank holds
+  any; deleting a photo is safe (library rows never delete files). `/public/graphics/picks` is cached 5 minutes.
+  An upload's viewBox must be four finite numbers (`clean_svg`; a NaN stored in a REAL breaks every JSON list after).
+  "Auto" colour (`bank.one_colour`) reads paint as SVG does: an unset fill is black, fill/stroke/color inherit,
+  currentColor is the inherited color; two paints, a url() paint or unreadable XML keep the graphic's colours. A CC BY
+  photo always has a creator, on upload and after any edit (placed copies print the credit and can't change it).
+  **The photo library is seeded** by
   `scripts/seed_studio_bank_photos.py`: CC0 photos from Openverse's stock collections (`sources/stock.py`),
   one collection per topic, copied to `cappe/bank/` with sizes and credits (CC0 lets us re-offer them;
   Unsplash's and Pexels' licences don't). The Photos tab opens on the library with no archive call, and

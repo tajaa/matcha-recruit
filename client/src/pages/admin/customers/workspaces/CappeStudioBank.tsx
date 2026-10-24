@@ -1,7 +1,7 @@
 import { AdminButton as Button, AdminInput as Input, AdminSelect as Select, AdminCard, AdminTable } from '../../../../components/admin/AdminUI'
 import { AdminActionMenu } from '../../../../components/admin/AdminActionMenu'
 import { AdminTabs as PillTabs } from '../../../../components/admin/AdminTabs'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api } from '../../../../api/client'
 import { graphicUrl } from '../../../../cappe/studio/model/graphics'
 import { Modal, useToast } from '../../../../components/ui'
@@ -40,6 +40,13 @@ function preview(item: CappeStudioBankItem): string {
 // (cleaned, stored by its sha) to the bank.
 function AddForm({ kind, onAdded }: { kind: Kind; onAdded: (item: CappeStudioBankItem) => void }) {
   const { toast } = useToast()
+  // An upload that finishes after the admin switched kinds is saved, but this
+  // form (and its list) has gone: the other kind's list mustn't show it.
+  const mounted = useRef(true)
+  useEffect(() => {
+    mounted.current = true
+    return () => { mounted.current = false }
+  }, [])
   const [file, setFile] = useState<File | null>(null)
   const [fileKey, setFileKey] = useState(0)
   const [name, setName] = useState('')
@@ -71,6 +78,10 @@ function AddForm({ kind, onAdded }: { kind: Kind; onAdded: (item: CappeStudioBan
     setBusy(true)
     try {
       const item = await api.upload<CappeStudioBankItem>(`${BASE}/${kind === 'photo' ? 'photos' : 'graphics'}`, form)
+      if (!mounted.current) {
+        toast(`${item.name} is in every site's Studio`, 'success')
+        return
+      }
       onAdded(item)
       setFile(null)
       setFileKey((k) => k + 1)

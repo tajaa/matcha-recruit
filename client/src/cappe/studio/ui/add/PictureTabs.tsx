@@ -8,7 +8,7 @@ import type { CappeAsset, CappeAssetKind, CappeStockResult, CappeStockSearch, Ca
 import { useCtx } from '../context'
 import { endDrag, importStock, startDrag } from './drag'
 import { BankPhotos } from './BankPhotos'
-import { addPicture } from './place'
+import { addPicture, landing } from './place'
 
 const HINT = 'text-[11px] leading-snug text-zinc-500'
 const INPUT = 'w-full rounded-md border border-zinc-700 bg-zinc-950 py-1.5 pl-8 pr-2 text-xs text-zinc-100 placeholder:text-zinc-600 focus:border-emerald-500 focus:outline-none'
@@ -80,10 +80,11 @@ export function PhotosTab() {
   const add = async (r: CappeStockResult) => {
     const key = stockKey(r)
     if (adding.includes(key)) return
+    const at = landing(c)  // where it was clicked: the import takes a moment
     setAdding((a) => [...a, key])
     setError(null)
     try {
-      addPicture(c, await importStock(c.siteId, c.postId, r))
+      addPicture(c, await importStock(c.siteId, c.postId, r), at)
     } catch (e) {
       setError(message(e, 'That picture couldn’t be added. Try another.'))
     } finally {
