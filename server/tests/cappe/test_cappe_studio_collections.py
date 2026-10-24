@@ -138,12 +138,12 @@ def test_bad_save_never_writes(monkeypatch, name, doc):
     assert not conn.calls
 
 
-@pytest.mark.parametrize("found", [True, False])
-def test_delete_is_owner_scoped_and_never_touches_story_pages(monkeypatch, found):
-    conn = Conn(fetchval={"DELETE FROM cappe_studio_collections": ID if found else None})
+@pytest.mark.parametrize("result", ["DELETE 1", "DELETE 0"])
+def test_delete_is_owner_scoped_and_idempotent_without_touching_story_pages(monkeypatch, result):
+    conn = Conn(execute={"DELETE FROM cappe_studio_collections": result}, strict_execute=True)
     with client_for(monkeypatch, conn) as client:
         res = client.delete(f"/studio/collections/{ID}")
-    assert res.status_code == (204 if found else 404)
+    assert res.status_code == 204
     assert conn.args_for("DELETE FROM cappe_studio_collections") == (ID, ACCOUNT.id)
     assert len(conn.calls) == 1 and "AND account_id = $2" in conn.calls[0][1]
 
@@ -151,3 +151,75 @@ def test_delete_is_owner_scoped_and_never_touches_story_pages(monkeypatch, found
 def test_collection_routes_require_a_cappe_session():
     with route_client(studio.router) as client:
         assert client.get("/studio/collections").status_code == 401
+
+
+@pytest.mark.parametrize("change", [
+    {"items": [{"kind": "text", "id": "t1", "page": []}]},
+    {"threads": [{"id": "s1", "frames": [{}]}]},
+    {"threads": [{"id": "s1", "frames": ["t1"], "paras": [{"runs": [{"t": "bad", "font": []}]}]}]},
+    {"size": {"w": 10 ** 400}},
+])
+def test_malformed_nested_input_is_a_422_without_persistence(monkeypatch, change):
+    conn = Conn()
+    with client_for(monkeypatch, conn) as client:
+        res = client.post("/studio/collections", json={"name": "Bad input", "doc": {**starter_doc(), **change}})
+    assert res.status_code == 422 and "malformed page data" in res.text
+    assert not conn.calls
+
+
+def test_a_new_save_stores_its_request_key_after_the_account_lock(monkeypatch):
+    request_id = uuid4()
+    conn = Conn(fetchval={"FROM cappe_accounts": ACCOUNT.id, "SELECT count(*)": 0},
+                fetchrow={"request_id = $2": None, "INSERT INTO cappe_studio_collections": CARD})
+    with client_for(monkeypatch, conn) as client:
+        res = client.post("/studio/collections", json={"name": CARD["name"], "doc": starter_doc(), "request_id": str(request_id)})
+    assert res.status_code == 201, res.text
+    assert conn.args_for("INSERT INTO cappe_studio_collections")[4] == request_id
+    assert conn.args_for("request_id = $2") == (ACCOUNT.id, request_id)
+    assert "FOR UPDATE" in conn.calls[0][1]
+
+
+@pytest.mark.parametrize("as_json", [True, False])
+def test_save_retry_returns_the_original_row_even_at_the_library_cap(monkeypatch, as_json):
+    request_id = uuid4()
+    doc = C.collection_doc(starter_doc())
+    conn = Conn(fetchval={"FROM cappe_accounts": ACCOUNT.id},
+                fetchrow={"request_id = $2": {**CARD, "doc": json.dumps(doc) if as_json else doc}})
+    with client_for(monkeypatch, conn) as client:
+        res = client.post("/studio/collections", json={"name": CARD["name"], "doc": starter_doc(), "request_id": str(request_id)})
+    assert res.status_code == 201 and res.json()["id"] == str(ID)
+    assert "doc" not in res.json()
+    assert len(conn.calls) == 2  # account lock + replay; no cap check or insert
+
+
+@pytest.mark.parametrize("changed_name", [True, False])
+def test_request_key_cannot_be_reused_for_a_different_design(monkeypatch, changed_name):
+    doc = starter_doc()
+    if not changed_name:
+        doc["threads"][0]["paras"] = [{"runs": [{"t": "Different words"}]}]
+    conn = Conn(fetchval={"FROM cappe_accounts": ACCOUNT.id},
+                fetchrow={"request_id = $2": {**CARD, "doc": C.collection_doc(starter_doc())}})
+    with client_for(monkeypatch, conn) as client:
+        res = client.post("/studio/collections", json={"name": "Changed" if changed_name else CARD["name"], "doc": doc, "request_id": str(uuid4())})
+    assert res.status_code == 409 and "another collection" in res.text
+    assert len(conn.calls) == 2
+
+
+def test_invalid_request_uuid_is_rejected_before_queries(monkeypatch):
+    conn = Conn()
+    with client_for(monkeypatch, conn) as client:
+        res = client.post("/studio/collections", json={"name": "Bad request", "doc": starter_doc(), "request_id": "bad"})
+    assert res.status_code == 422 and not conn.calls
+
+
+@pytest.mark.parametrize("change", [
+    {"name": "bad\ud800name"}, {"name": "bad\udfffname"},
+    {"name": {"bad": "\ud800"}}, {"request_id": "\udfff"},
+])
+def test_invalid_unicode_validation_errors_are_serializable_422s(monkeypatch, change):
+    conn = Conn()
+    body = {"name": "Invalid", "doc": starter_doc(), **change}
+    with client_for(monkeypatch, conn) as client:
+        res = client.post("/studio/collections", content=json.dumps(body), headers={"Content-Type": "application/json"})
+    assert res.status_code == 422 and res.json()["detail"]
+    assert not conn.calls

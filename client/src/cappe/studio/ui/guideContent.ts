@@ -84,10 +84,11 @@ export const GUIDE: GuideSection[] = [
     body: 'A complete editorial design, with typography, colour and spacing considered together across the whole publication. Open Templates → Collections to explore one.',
     points: [
       'Quiet Form is restrained fashion editorial; Off Register an experimental art zine; Still Light a photographic monograph; Maison a luxury lookbook. Each has ten editable pages: a cover, contents and editorial note, facing opening and photo-essay spreads, a two-page interview, and credits.',
-      'Explore a collection to see every page and its type pairing. Use all pages starts a blank story with the collection, or inserts it after the spread in view. A blank page is added when needed to keep the cover on the right and the spreads together. Your page size is used. Existing pages and their text stay in the story.',
+      'Explore a collection to see every page and its type pairing. Use all pages starts a blank story with the collection, or inserts it after the spread in view. Blank pages are added when needed to keep the cover on the right and preserve your existing facing spreads. Your page size is used. Existing pages and their text stay in the story.',
       'Fill the picture frames from Photos or Yours, and type over the sample words. The layouts are ordinary frames: move them, change the type, link text, and make the design your own. One ⌘Z undoes adding the whole collection. If the story would exceed its save limits, nothing is added.',
       'Save these pages stores your current pages as a named collection (up to 32 pages and 50 saved collections). It keeps type, spacing, words, shapes and guides. Photos become empty frames, and subscriber access settings stay with the source story. Saved collections are available across your account’s magazines.',
       'Open one of Your collections to preview and reuse it, or remove it from the library. Removing it never removes pages already added to a story.',
+      'Saving and removing a collection keep running while you use another panel. Return to Collections to see the result. If a save loses its connection, retrying the same design completes that save without creating another copy.',
     ],
   },
   {

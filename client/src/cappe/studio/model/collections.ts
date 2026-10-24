@@ -6,6 +6,12 @@ export type EditorialCollection = { id: string; name: string; direction: string;
 
 export const COLLECTION_LIMITS = { pages: 32, bytes: 1_000_000, count: 50 } as const
 
+/** Python's compact ensure_ascii JSON size. Studio measurements are rounded
+ *  to hundredths; the normalized document has no exponent-sized numbers. */
+export function collectionJsonSize(value: unknown): number {
+  return JSON.stringify(value).replace(/[\u007f-\uffff]/g, (ch) => `\\u${ch.charCodeAt(0).toString(16).padStart(4, '0')}`).length
+}
+
 /** A portable snapshot: source photos and reader access stay with the story. */
 export function portableCollection(doc: Doc): Doc {
   return structuredClone({ ...doc, paywall_page: null,

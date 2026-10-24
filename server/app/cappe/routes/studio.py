@@ -23,7 +23,10 @@ import json
 from typing import Annotated, Any, Literal, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
+from fastapi.routing import APIRoute
 from pydantic import BaseModel, Field
 
 from ...core.services.redis_cache import check_rate_limit
@@ -46,11 +49,30 @@ from .render import invalidate_render_cache
 
 router = APIRouter()
 
+
+class _CollectionRoute(APIRoute):
+    def get_route_handler(self):
+        handle = super().get_route_handler()
+
+        async def validated(request: Request) -> Response:
+            try:
+                return await handle(request)
+            except RequestValidationError as exc:
+                # Escaped lone surrogates are legal JSON but invalid names. The
+                # default UTF-8 error response cannot echo them; ASCII JSON can.
+                return Response(json.dumps(jsonable_encoder({"detail": exc.errors()})),
+                                status_code=422, media_type="application/json")
+
+        return validated
+
+
+_collections = APIRouter(route_class=_CollectionRoute)
+
 KEEP_REVISIONS = 50
 NOT_PAGES = "This story isn't made of pages. Open it in the story editor."
 
 
-@router.get("/studio/collections")
+@_collections.get("/studio/collections")
 async def list_collections(account: CappeAccount = Depends(require_cappe_account)):
     """Small library cards; fetch a document only when it is opened."""
     async with get_connection() as conn:
@@ -61,7 +83,7 @@ async def list_collections(account: CappeAccount = Depends(require_cappe_account
     return [dict(row) for row in rows]
 
 
-@router.get("/studio/collections/{collection_id}")
+@_collections.get("/studio/collections/{collection_id}")
 async def open_collection(collection_id: UUID, account: CappeAccount = Depends(require_cappe_account)):
     async with get_connection() as conn:
         row = await conn.fetchrow(
@@ -75,7 +97,7 @@ async def open_collection(collection_id: UUID, account: CappeAccount = Depends(r
     return out
 
 
-@router.post("/studio/collections", status_code=201)
+@_collections.post("/studio/collections", status_code=201)
 async def save_collection(body: StudioCollectionCreate, account: CappeAccount = Depends(require_cappe_account)):
     async with get_connection() as conn:
         try:
@@ -88,26 +110,37 @@ async def save_collection(body: StudioCollectionCreate, account: CappeAccount = 
         async with conn.transaction():
             # Serialize saves for this account so concurrent tabs cannot exceed the cap.
             await conn.fetchval("SELECT id FROM cappe_accounts WHERE id = $1 FOR UPDATE", account.id)
+            if body.request_id is not None:
+                replay = await conn.fetchrow(
+                    "SELECT id, name, page_count, created_at, doc FROM cappe_studio_collections "
+                    "WHERE account_id = $1 AND request_id = $2", account.id, body.request_id,
+                )
+                if replay is not None:
+                    kept = json.loads(replay["doc"]) if isinstance(replay["doc"], str) else replay["doc"]
+                    if replay["name"] != body.name or kept != doc:
+                        raise HTTPException(status_code=409, detail="That save request already belongs to another collection. Start a new save.")
+                    return {k: replay[k] for k in ("id", "name", "page_count", "created_at")}
             count = await conn.fetchval("SELECT count(*) FROM cappe_studio_collections WHERE account_id = $1", account.id)
             if count >= MAX_COLLECTIONS:
                 raise HTTPException(status_code=409, detail=f"You can save {MAX_COLLECTIONS} collections. Remove one to save another.")
             row = await conn.fetchrow(
-                "INSERT INTO cappe_studio_collections (account_id, name, doc, page_count) "
-                "VALUES ($1, $2, $3::jsonb, $4) RETURNING id, name, page_count, created_at",
-                account.id, body.name, json.dumps(doc), len(doc["pages"]),
+                "INSERT INTO cappe_studio_collections (account_id, name, doc, page_count, request_id) "
+                "VALUES ($1, $2, $3::jsonb, $4, $5) RETURNING id, name, page_count, created_at",
+                account.id, body.name, json.dumps(doc), len(doc["pages"]), body.request_id,
             )
     return dict(row)
 
 
-@router.delete("/studio/collections/{collection_id}", status_code=204)
+@_collections.delete("/studio/collections/{collection_id}", status_code=204)
 async def delete_collection(collection_id: UUID, account: CappeAccount = Depends(require_cappe_account)):
     async with get_connection() as conn:
-        deleted = await conn.fetchval(
-            "DELETE FROM cappe_studio_collections WHERE id = $1 AND account_id = $2 RETURNING id",
+        await conn.execute(
+            "DELETE FROM cappe_studio_collections WHERE id = $1 AND account_id = $2",
             collection_id, account.id,
         )
-    if deleted is None:
-        raise HTTPException(status_code=404, detail="Collection not found")
+
+
+router.include_router(_collections)
 
 
 class StudioSave(BaseModel):

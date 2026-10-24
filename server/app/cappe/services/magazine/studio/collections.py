@@ -29,7 +29,10 @@ def collection_doc(raw: dict[str, Any], bank: Optional[Mapping[str, dict]] = Non
     if isinstance(raw.get("threads"), list):
         portable["threads"] = [{k: v for k, v in t.items() if k != "comp"} if isinstance(t, dict) else t
                                for t in raw["threads"]]
-    doc = normalize_doc(portable, bank)
+    try:
+        doc = normalize_doc(portable, bank)
+    except (TypeError, OverflowError) as exc:
+        raise DocError("This collection has malformed page data. Check its frames and text, then try again.") from exc
     if len(json.dumps(doc, separators=(",", ":"))) > MAX_COLLECTION_BYTES:
         raise DocError("A collection is too big to save. Use fewer pages or less text.")
     return doc
