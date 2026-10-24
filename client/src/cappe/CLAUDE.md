@@ -130,6 +130,14 @@ Website-builder frontend for the consumer brand **Gummfit**, host-routed on gumm
   model (onnxruntime-web, `optimizeDeps.exclude`d, a module worker) and `samMath.ts` its arithmetic. The
   cut-out's mask always follows the recipe's clicks (an effect keyed by them, a few masks kept), so undo,
   redo, Reset all and reopening an edit show and save the mask of the clicks that are there.
+  **The issue board** (`ui/board/Board.tsx`, `dialog === 'board'`, ⌥⌘P or Board in the top bar) draws every page with
+  `pageItemsHtml` + `setHtml`, spread by spread and story by story. Its pure parts: `model/sections.ts` (stories as runs
+  of pages; `moveBlock` moves pages or a whole story; `keepSections` re-anchors stories after any edit),
+  `model/crops.ts` (linked crops: one picture through several frames on a spread; `keepLinks` after any edit — both run
+  in `Store.edit`, so nothing else needs to know), `model/rhythm.ts` (each page's beat from a coverage grid),
+  `model/gutter.ts` (words in the strip by the spine; View → Gutter safety shades it), `ui/board/sequence.ts` (what
+  moves together: a page with a picture across the spine brings its facing page) and `ui/board/pairs.ts` (paired
+  spread layouts). Object panel → Across the spread and the Object menu make and link spread pictures.
   **The guide** (`ui/StudioGuide.tsx`, words in `ui/guideContent.ts`) explains every part of the Studio; it
   opens on a first visit (localStorage `cappe-studio-guide-seen`), from Help, the top bar's ? and the
   Picture Editor's ?. **A change to a tool, panel, menu or key changes its section in the same PR**; the

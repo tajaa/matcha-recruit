@@ -309,6 +309,9 @@ def _item(raw: Any, pages: set[str], bank: Mapping[str, dict]) -> dict:
                    zoom=_int(raw.get("zoom"), L.ZOOM_MIN, L.ZOOM_MAX, 100),
                    fill=_colour(raw.get("fill"), None), stroke=_stroke(raw.get("stroke")),
                    radius=num(raw.get("radius"), 0, L.RADIUS_MAX, 0), caption=_str(raw.get("caption"), L.MAX_CAPTION))
+        link = raw.get("link")  # frames showing one picture across a spread (client model/crops.ts); kept only when set
+        if isinstance(link, str) and _ID.match(link):
+            out["link"] = link
     elif kind in ("rect", "ellipse"):
         out.update(fill=_colour(raw.get("fill"), None), stroke=_stroke(raw.get("stroke")))
         if kind == "rect":
@@ -354,6 +357,25 @@ def _thread(raw: Any, text_frames: set[str], used: set[str], budget: list[int]) 
 
 
 # ── the document ─────────────────────────────────────────────────────────────
+
+def _sections(raw: Any, page_order: list[str]) -> list[dict]:
+    """The issue's stories (the issue board): each starts at a page and runs to
+    the next one's first page. One per page, in page order; a story whose page
+    is gone, a bad or repeated id, or more than `MAX_SECTIONS` are dropped
+    rather than refused (they only label pages)."""
+    at = {pid: k for k, pid in enumerate(page_order)}
+    kept: dict[str, dict] = {}
+    ids: set[str] = set()
+    for item in raw[:L.MAX_SECTIONS * 2] if isinstance(raw, list) else []:
+        if not isinstance(item, dict):
+            continue
+        sid, page = item.get("id"), item.get("page")
+        if not (isinstance(sid, str) and _ID.match(sid)) or sid in ids or page not in at or page in kept:
+            continue
+        ids.add(sid)
+        kept[page] = {"id": sid, "page": page, "name": _str(item.get("name"), L.MAX_SECTION_NAME)}
+    return sorted(kept.values(), key=lambda sec: at[sec["page"]])[:L.MAX_SECTIONS]
+
 
 def _unique(ids: Iterable[str], what: str) -> None:
     seen: set[str] = set()
@@ -417,6 +439,8 @@ def normalize_doc(raw: Any, bank: Optional[Mapping[str, dict]] = None) -> dict:
                        "at": num(g.get("at"), -L.COORD, L.COORD, 0)})
     _unique((g["id"] for g in guides), "guides")
 
+    sections = _sections(raw.get("sections"), [p["id"] for p in pages])
+
     paywall = raw.get("paywall_page")
     out = {
         "v": 1,
@@ -435,6 +459,8 @@ def normalize_doc(raw: Any, bank: Optional[Mapping[str, dict]] = None) -> dict:
         "threads": threads,
         "paywall_page": (_int(paywall, 2, len(pages), 2) if paywall is not None and len(pages) > 1 else None),
     }
+    if sections:  # left out when there are none, so stories without any are stored as they always were
+        out["sections"] = sections
     if len(json.dumps(out, separators=(",", ":"))) > L.MAX_DOC_BYTES:
         raise DocError("This story is too big to save. Split it into two.")
     return out

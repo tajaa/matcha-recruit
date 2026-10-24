@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Circle, CircleHelp, Hand, Image as ImageIcon, Minus, MousePointer2, Sparkles, Square, Type, X, ZoomIn } from 'lucide-react'
+import { Circle, CircleHelp, Hand, Image as ImageIcon, LayoutGrid, Minus, MousePointer2, Sparkles, Square, Type, X, ZoomIn } from 'lucide-react'
 import type { Panel, Tool } from '../store/store'
 import { useStudio } from '../store/store'
 import { command, zoomTo, type Command } from './commands'
@@ -9,10 +9,10 @@ const MENUS: { label: string; items: (string | '-')[] }[] = [
   { label: 'File', items: ['save', 'story', 'revisions', '-', 'close'] },
   { label: 'Edit', items: ['undo', 'redo', '-', 'cut', 'copy', 'paste', 'duplicate', 'delete', '-', 'select-all', 'deselect'] },
   { label: 'Insert', items: ['add-templates', 'add-elements', 'add-text', 'add-photos', 'add-uploads', '-', 'place', 'tool-text'] },
-  { label: 'Layout', items: ['page-add', 'spread-add', 'page-delete', '-', 'page-up', 'page-down', '-', 'margins'] },
+  { label: 'Layout', items: ['board', '-', 'page-add', 'spread-add', 'page-delete', '-', 'page-up', 'page-down', '-', 'margins'] },
   { label: 'Type', items: ['story-editor', 'tool-text'] },
-  { label: 'Object', items: ['arrange-front', 'arrange-forward', 'arrange-backward', 'arrange-back', '-', 'lock', 'hide', 'show-all', '-', 'place', 'edit-picture', 'cut-out'] },
-  { label: 'View', items: ['zoom-in', 'zoom-out', 'fit-page', 'fit-spread', 'actual', '-', 'view-rulers', 'view-guides', 'view-margins', 'view-baseline', 'view-grid', 'view-snap'] },
+  { label: 'Object', items: ['arrange-front', 'arrange-forward', 'arrange-backward', 'arrange-back', '-', 'lock', 'hide', 'show-all', '-', 'place', 'edit-picture', 'cut-out', '-', 'across-spread', 'spine-clear', 'link-crops', 'unlink-crops'] },
+  { label: 'View', items: ['zoom-in', 'zoom-out', 'fit-page', 'fit-spread', 'actual', '-', 'view-rulers', 'view-guides', 'view-margins', 'view-baseline', 'view-grid', 'view-gutter', 'view-snap', '-', 'board'] },
 ]
 const HELP = { label: 'Help', items: ['ask', '-', 'guide', 'shortcuts'] }
 
@@ -183,6 +183,10 @@ export function TopBar({ onPreview, onPublish }: { onPreview: () => void; onPubl
         <span className="text-[11px] text-zinc-500">{save.draft ? 'Changes not live yet' : 'Live'}</span>
       )}
       <div className="ml-auto flex items-center gap-2">
+        <button type="button" onClick={() => command('board').run(c)} title="Every page together, to put the issue in order (⌥⌘P)"
+          className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white">
+          <LayoutGrid className="h-3.5 w-3.5" />Board
+        </button>
         <button type="button" onClick={() => command('ask').run(c)} title="Ask how to do something, or how to get a look"
           className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white">
           <Sparkles className="h-3.5 w-3.5 text-emerald-400" />Ask

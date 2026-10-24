@@ -2,7 +2,9 @@
 // menu shows the key that does the same thing.
 
 import { boardOffset } from '../canvas/geometry'
+import { acrossSpread, facingPage, groupOf, linkFrames, linkProblem, unlinkFrames } from '../model/crops'
 import { allIds, newId } from '../model/doc'
+import { SPINE_CLEAR } from '../model/gutter'
 import { addPages, arrange, deleteItems, deletePage, duplicate, movePage, patchItems, type Arrange } from '../model/ops'
 import type { Doc, Item, Thread } from '../model/types'
 import type { AddTab, State, Tool } from '../store/store'
@@ -22,6 +24,24 @@ const selected = (s: State) => s.selection.length > 0 && !s.editing
 /** One picture frame with a picture in it, selected. */
 const pictureSelected = (s: State) => !s.editing && s.selection.length === 1
   && s.doc.items.some((i) => i.id === s.selection[0] && i.kind === 'image' && !!i.asset_id)
+/** Picture frames selected that can show one picture between them. */
+const linkable = (s: State) => !s.editing && !linkProblem(s.doc, s.selection)
+/** Frames selected with a linked crop among them. */
+const linked = (s: State) => !s.editing && s.selection.some((id) => !!groupOf(s.doc, id))
+/** One unturned picture frame selected, on a page with a page facing it. */
+const spreadable = (s: State) => {
+  const item = s.selection.length === 1 && !s.editing ? s.doc.items.find((i) => i.id === s.selection[0]) : undefined
+  return !!item && item.kind === 'image' && item.rot === 0
+    && facingPage(s.doc, s.doc.pages.findIndex((p) => p.id === item.page)) !== null
+}
+/** The picture frame selected made two, one on each page of the spread. */
+function across(c: StudioCtx, spine: number): void {
+  const { store } = c
+  let ids: string[] = []
+  store.edit((d) => { const r = acrossSpread(d, store.get().selection[0], store.get().assets, spine); ids = r?.ids ?? []; return r?.doc ?? d })
+  if (ids.length) store.set({ selection: ids })
+}
+
 /** Zoom to `z`, keeping what is in the middle of the view there. */
 export function zoomTo(c: StudioCtx, z: number): void {
   const next = Math.max(0.05, Math.min(64, z))
@@ -134,6 +154,7 @@ export const COMMANDS: Command[] = [
     run: ({ store }) => { const p = store.get().page; store.edit((d) => movePage(d, p, p - 1), { extra: { page: p - 1 } }) } },
   { id: 'page-down', label: 'Move page later', enabled: (s) => s.page < s.doc.pages.length - 1,
     run: ({ store }) => { const p = store.get().page; store.edit((d) => movePage(d, p, p + 1), { extra: { page: p + 1 } }) } },
+  { id: 'board', label: 'Issue board', keys: '⌥⌘P', run: ({ store, editor }) => { editor.close(); store.set({ dialog: 'board' }) } },
   { id: 'margins', label: 'Margins and columns…',
     run: ({ store }) => store.set((s) => ({ panels: s.panels.includes('pages') ? s.panels : ['pages', ...s.panels] })) },
   // Type
@@ -161,6 +182,12 @@ export const COMMANDS: Command[] = [
   { id: 'place', label: 'Place a picture…', keys: '⌘P', run: ({ store }) => store.set({ dialog: 'library' }) },
   { id: 'edit-picture', label: 'Edit picture…', keys: '⇧⌘E', enabled: pictureSelected, run: ({ store }) => store.set({ dialog: 'picture' }) },
   { id: 'cut-out', label: 'Cut out the subject…', enabled: pictureSelected, run: ({ store }) => store.set({ dialog: 'cutout' }) },
+  { id: 'across-spread', label: 'Run the picture across the spread', enabled: spreadable, run: (c) => across(c, 0) },
+  { id: 'spine-clear', label: 'Split the picture clear of the spine', enabled: spreadable, run: (c) => across(c, SPINE_CLEAR) },
+  { id: 'link-crops', label: 'Link crops (one picture through the frames)', enabled: linkable,
+    run: ({ store }) => store.edit((d) => linkFrames(d, store.get().selection, store.get().assets)) },
+  { id: 'unlink-crops', label: 'Unlink crops', enabled: linked,
+    run: ({ store }) => store.edit((d) => unlinkFrames(d, store.get().selection)) },
   // View
   // Help
   { id: 'ask', label: 'Ask the Studio…',
@@ -181,6 +208,7 @@ export const COMMANDS: Command[] = [
   toggle('baseline', 'Baseline grid', '⌥⌘\''),
   toggle('grid', 'Document grid', '⌘\''),
   toggle('snap', 'Snap', '⇧⌘;'),
+  toggle('gutter', 'Gutter safety'),
   // Tools
   tool('select', 'Selection', 'V'),
   tool('text', 'Type', 'T'),

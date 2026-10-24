@@ -76,6 +76,9 @@ export type ImageItem = Base & {
   stroke: Stroke | null
   radius: number
   caption: string
+  /** Frames with the same link on one spread show one picture through them
+   *  (model/crops.ts): moving a frame moves the window, not the picture. */
+  link?: string
 }
 export type RectItem = Base & { kind: 'rect'; fill: string | null; stroke: Stroke | null; radius: number }
 export type EllipseItem = Base & { kind: 'ellipse'; fill: string | null; stroke: Stroke | null }
@@ -89,6 +92,9 @@ export type Kind = Item['kind']
 
 export type Guide = { id: string; page: string; axis: 'v' | 'h'; at: number }
 export type Page = { id: string }
+/** A story in the issue (model/sections.ts): it starts at `page` and runs to
+ *  the next one's first page. */
+export type Section = { id: string; page: string; name: string }
 
 export type Doc = {
   v: 1
@@ -106,6 +112,8 @@ export type Doc = {
   items: Item[]
   threads: Thread[]
   paywall_page: number | null
+  /** The issue's stories, in page order; left out when there are none. */
+  sections?: Section[]
 }
 
 /** A library picture as the renderer needs it (`cappe_assets` row). */
