@@ -7,7 +7,7 @@
 
 import type { LucideIcon } from 'lucide-react'
 import {
-  BookOpen, FileStack, Image, Keyboard, LayoutTemplate, Link2, MousePointer2, Move, PanelsTopLeft, Ruler, Save,
+  BookOpen, Columns2, FileStack, Image, Keyboard, LayoutGrid, LayoutTemplate, Link2, MousePointer2, Move, PanelsTopLeft, Ruler, Save,
   Scissors, Shapes, SlidersHorizontal, Smartphone, Sparkles, Type, ZoomIn,
 } from 'lucide-react'
 
@@ -37,7 +37,7 @@ export const GUIDE: GuideSection[] = [
   {
     id: 'around', group: 'Start', icon: PanelsTopLeft, title: 'Find your way around',
     points: [
-      'Top bar: the story’s name (click it for its settings: headline, kicker, dek, byline, topic and who can read it), Preview, and Publish.',
+      'Top bar: the story’s name (click it for its settings: headline, kicker, dek, byline, topic and who can read it), Board (every page at once), Preview, and Publish.',
       'Menus: everything the Studio can do, with the key that does the same thing beside it.',
       'The side panel, at the far left: Templates, Elements, Text, Photos and Yours (your pictures). Click anything there to add it, or drag it onto a page.',
       'Tools, beside it: what a click or a drag on the page makes or does.',
@@ -132,7 +132,8 @@ export const GUIDE: GuideSection[] = [
       'Drag down from the top ruler, or right from the side ruler, to make a guide on the page you drop it on. Drag a guide back onto a ruler to remove it.',
       'The pink and violet lines are the page’s margins and columns. Set them in the Pages panel (Layout → Margins and columns).',
       'While you move or resize, things snap to guides, margins, columns, the grid and other things on the page, and the line they snap to lights up. Resizing with Alt held doesn’t snap.',
-      'The View menu turns the rulers, guides, margins, baseline grid, document grid and snapping on and off.',
+      'The View menu turns the rulers, guides, margins, baseline grid, document grid, gutter safety and snapping on and off.',
+      'With facing pages, an amber striped strip either side of the spine is the gutter: the binding hides it, so keep words out of it. Pictures may run across.',
       'Rulers and every measurement use the units you pick in the Pages panel: inches, centimetres, millimetres, points, picas or pixels.',
     ],
   },
@@ -143,6 +144,22 @@ export const GUIDE: GuideSection[] = [
       'Layout → Add a spread adds two facing pages. With Facing pages on, pages pair up as spreads the way a magazine opens.',
       'Document: the page size (Letter, A4, Magazine, Tabloid, Square, Portrait 4:5 or your own), margins, columns and gutter, the baseline and document grids, bleed, units and the paper colour.',
       'For a subscribers’ story (story settings → Who can read it), pick here the first page that needs a subscription. Page 1 is always free, so everyone sees the opening.',
+      'To see every page at once and put them in order, open the issue board (Board in the top bar, or ⌥⌘P).',
+    ],
+  },
+  {
+    id: 'board', group: 'Make', icon: LayoutGrid, title: 'The issue board',
+    body: 'The board (Board in the top bar, Layout → Issue board, or ⌥⌘P) lays out every page at once, spread by spread, '
+      + 'so you can judge how the issue reads from cover to back and put it in order.',
+    points: [
+      'Drag a page to move it; a green bar shows where it will land. Click to select a page, Shift-click for a run of them, ⌘-click to add one; drag any of them to move them all. ⌥← and ⌥→ move what is selected earlier or later, a spread at a time with facing pages.',
+      'A page with a picture running across the spine moves with the page facing it, so the picture is never cut in two. Moving an odd number of pages turns the pages after them to the other side: the board says when.',
+      'Stories: select a story’s first page and click Start a story here. Each story gets a name you can change, a grip to drag the whole story by, and arrows to move it before or after the next one. The ✕ takes the break away and its pages join the story before.',
+      'The strip along the top is the issue’s rhythm: a block for each page, darker the heavier it looks. A good issue mixes a dramatic opening, quiet details, portraits and white space; long runs of the same shade read flat.',
+      'Beats (on by default) label each page: Full-bleed picture, Picture, Portrait, Pictures, Quiet detail, Words, Words and pictures, Colour or White space.',
+      'An amber ⚠ on a spread means words run into the gutter or cross the spine. A $ marks the pages for subscribers.',
+      'Select a spread’s two pages and click Lay out the spread… for a paired layout: Across the spread, Clear of the spine, Diptych, Full bleed and a quiet page, or Portrait and detail. On a blank spread it lays out that spread; otherwise it comes in as a new spread after it, so nothing is covered.',
+      'Double-click a page (or Open the page) to go to it in the editor. ⌘Z undoes on the board too; Esc or Back to the pages closes it.',
     ],
   },
   {
@@ -172,6 +189,16 @@ export const GUIDE: GuideSection[] = [
       'In the Object panel, Fit says how the picture sits in its frame: Fill covers the frame and trims what’s over, Fit shows all of it, and Stretch fills it exactly. Zoom and the focus sliders choose which part shows.',
       'Replace picture… swaps it for another. The caption is what readers see beside it in the Text view.',
       'Every picture’s credit prints by itself, from the library.',
+    ],
+  },
+  {
+    id: 'spreads', group: 'Pictures', icon: Columns2, title: 'Pictures across a spread',
+    body: 'One picture can run over both pages of a spread, or show through several frames, with its crops kept lined up as if it were one print.',
+    points: [
+      'Select a picture frame on a page that faces another, and in the Object panel’s Across the spread click Across (out to the edges of both pages) or Clear of spine (two halves with the fold left white). Object → Run the picture across the spread and Split the picture clear of the spine do the same.',
+      'Select two picture frames or more on one spread and click Link crops: they show one picture between them, as through windows. It works for a diptych too.',
+      'Put a picture in any linked frame and it goes into all of them. Move or resize one frame to show a different part of the picture; move them all together and the picture moves with them. Change one’s focus or zoom and the picture moves in every frame.',
+      'A selected frame’s linked partners show a dashed green outline. Unlink crops lets each frame go its own way, keeping what it shows. Turning a frame, or setting it to Fit or Stretch, unlinks it, and the frames still linked keep showing what they showed. A locked frame can’t be linked; lock one already in a group and it keeps its picture and crop while the others follow it.',
     ],
   },
   {
@@ -228,6 +255,8 @@ export const MORE_KEYS: [string, string][] = [
   ['Alt + drag', 'Move a copy'],
   ['Double-click', 'Type in a text frame, edit a picture'],
   ['\\ (Picture Editor)', 'Hold to see the picture before'],
+  ['⌥← / ⌥→ (issue board)', 'Move the selected pages a spread earlier or later'],
+  ['Shift-click / ⌘-click (issue board)', 'Select a run of pages / add a page'],
 ]
 
 /** Whether this browser has seen the guide (storage can be off: then say yes, never nag). */

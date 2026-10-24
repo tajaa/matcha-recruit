@@ -10,6 +10,8 @@
 
 import { useSyncExternalStore } from 'react'
 import { composeDoc, type Measure } from '../compose/compose'
+import { keepLinks } from '../model/crops'
+import { keepSections } from '../model/sections'
 import { docProblem } from '../model/limits'
 import type { Asset, Doc } from '../model/types'
 
@@ -27,6 +29,8 @@ export type View = {
   baseline: boolean
   grid: boolean
   snap: boolean
+  /** The strip either side of the spine the binding hides (model/gutter.ts). */
+  gutter: boolean
 }
 
 export type State = {
@@ -46,7 +50,7 @@ export type State = {
   /** A thread port clicked: the next text frame clicked joins this thread. */
   threading: { thread: string | null; frame: string } | null
   /** `picture`: the Picture Editor on the picture frame selected; `cutout`: it, open at the cut-out. */
-  dialog: null | 'library' | 'story' | 'revisions' | 'preview' | 'picture' | 'cutout'
+  dialog: null | 'library' | 'story' | 'revisions' | 'preview' | 'picture' | 'cutout' | 'board'
   /** The guide, open at this section (`ui/guideContent.ts`); it can open over a dialog. */
   guide: string | null
   /** While dragging: the lines an edge snapped to, and the marquee (pasteboard pt). */
@@ -112,11 +116,14 @@ export class Store {
    *  one undo step. */
   edit(fn: (doc: Doc) => Doc, { key = null, extra }: { key?: string | null; extra?: Partial<State> } = {}): void {
     const before = this.state.doc
-    const changed = fn(before)
-    if (changed === before) {
+    const edited = fn(before)
+    if (edited === before) {
       if (extra) this.set(extra)
       return
     }
+    // Stories follow their pages, and linked frames keep showing one picture,
+    // whatever the edit was (model/sections.ts, model/crops.ts).
+    const changed = keepLinks(before, keepSections(before, edited), this.state.assets)
     const { doc, overset } = composeDoc(changed, this.measure)
     const problem = doc.identity ? docProblem(doc) : null
     if (problem) { this.set({ notice: problem }); return }
@@ -204,4 +211,4 @@ export function useStudio<T>(store: Store, select: (s: State) => T): T {
 }
 
 export const DEFAULT_VIEW: View = { zoom: 1, rulers: true, guides: true, margins: true, baseline: false, grid: false,
-  snap: true }
+  snap: true, gutter: true }

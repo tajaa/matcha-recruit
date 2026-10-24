@@ -4,7 +4,9 @@
 // size, type and colours, in the document's units. It goes with every
 // question, so it stays short: long text is cut to its start.
 
+import { groupOf } from '../../model/crops'
 import { spreads } from '../../model/doc'
+import { runs } from '../../model/sections'
 import { CHAR_DEFAULTS, PARA_DEFAULTS } from '../../model/limits'
 import type { Asset, Doc, Item, Para, Run, Stroke, Thread, Units } from '../../model/types'
 import { show } from '../../model/units'
@@ -35,6 +37,11 @@ function describeDoc(doc: Doc): string {
       + `Baseline grid every ${n(doc.baseline.step)} pt. Bleed ${len(doc.bleed)}. Paper colour ${doc.paper}.`,
   ]
   if (doc.paywall_page) lines.push(`Pages from page ${doc.paywall_page} on are for subscribers only.`)
+  const stories = runs(doc).filter((r) => r.section)
+  if (stories.length) {
+    lines.push(`Stories (issue board): ${stories.map((r) => `"${clip(r.section!.name, EXCERPT)}" ${r.end - r.start === 1
+      ? `page ${r.start + 1}` : `pages ${r.start + 1}–${r.end}`}`).join(', ')}.`)
+  }
   return lines.join('\n')
 }
 
@@ -160,6 +167,10 @@ function itemLines(item: Item, s: State, len: (pt: number) => string): string[] 
       if (item.fill) extra.push(fillText(item.fill))
       if (item.stroke) extra.push(strokeText(item.stroke))
       if (item.caption) extra.push(`caption "${clip(item.caption, EXCERPT)}"`)
+      {
+        const g = groupOf(s.doc, item.id)
+        if (g) extra.push(`linked crop: shows one picture with ${g.members.length - 1} other frame${g.members.length === 2 ? '' : 's'} on the spread`)
+      }
       break
     case 'rect':
       extra.push(fillText(item.fill), strokeText(item.stroke))
