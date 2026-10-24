@@ -16,8 +16,8 @@
 // nearest the middle of the group (the spine, for two halves), and a fresh
 // fit picks the scale that keeps the leftover under a hair.
 
-import { newId, spreads } from './doc'
-import { LIMITS, round } from './limits'
+import { allIds, newId, spreads } from './doc'
+import { LIMITS, clamp, round } from './limits'
 import type { Asset, Doc, ImageItem, Item } from './types'
 
 export type Rect = { x: number; y: number; w: number; h: number }
@@ -80,7 +80,6 @@ function union(rects: Rect[]): Rect {
   return { x, y, w: x2 - x, h: y2 - y }
 }
 
-const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
 
 /** How far from a whole percent the frames' zooms would be at scale `s`
  *  (the most, as a share of the zoom: what can't be matched exactly). */
@@ -133,9 +132,21 @@ export function cropsFor(rects: Rect[], p: Placement, z: Size): Crop[] | null {
 
 export type LinkGroup = { link: string; spread: string; members: ImageItem[]; rects: Rect[] }
 
+const groupsOf = new WeakMap<Doc, LinkGroup[]>()
+
 /** The frames sharing a link on one spread (one link on two spreads is two
- *  groups: a copied spread keeps working). */
+ *  groups: a copied spread keeps working). Worked out once per document:
+ *  documents never change, and the board, the overlays and the panels ask
+ *  for every frame. */
 export function linkGroups(doc: Doc): LinkGroup[] {
+  const hit = groupsOf.get(doc)
+  if (hit) return hit
+  const out = doc.items.some((i) => i.kind === 'image' && i.link) ? findGroups(doc) : []
+  groupsOf.set(doc, out)
+  return out
+}
+
+function findGroups(doc: Doc): LinkGroup[] {
   const places = spreadPlaces(doc)
   const groups = new Map<string, LinkGroup>()
   for (const item of doc.items) {
@@ -168,7 +179,8 @@ function setCrops(doc: Doc, members: ImageItem[], crops: Crop[]): Doc {
   let changed = false
   const items = doc.items.map((i) => {
     const c = want.get(i.id)
-    if (!c || i.kind !== 'image' || (i.fx === c.fx && i.fy === c.fy && i.zoom === c.zoom)) return i
+    // A locked frame is never changed: the others follow it (keepLinks).
+    if (!c || i.kind !== 'image' || i.locked || (i.fx === c.fx && i.fy === c.fy && i.zoom === c.zoom)) return i
     changed = true
     return { ...i, ...c }
   })
@@ -197,6 +209,7 @@ const withoutLink = (i: ImageItem): ImageItem => {
 export function linkProblem(doc: Doc, ids: string[]): string | null {
   const items = doc.items.filter((i) => ids.includes(i.id))
   if (items.length < 2 || items.some((i) => i.kind !== 'image')) return 'Select two picture frames or more.'
+  if (items.some((i) => i.locked)) return 'Unlock the frames first.'
   if (items.some((i) => i.rot !== 0)) return 'Turned frames can’t share a picture.'
   const places = spreadPlaces(doc)
   if (new Set(items.map((i) => places.get(i.page)?.spread)).size !== 1) return 'Linked frames have to be on one spread.'
@@ -252,14 +265,13 @@ export function acrossSpread(doc: Doc, id: string, assets: Record<string, Asset>
   const item = doc.items.find((i): i is ImageItem => i.id === id && i.kind === 'image')
   const index = item ? doc.pages.findIndex((p) => p.id === item.page) : -1
   const other = index === -1 ? null : facingPage(doc, index)
-  if (!item || other === null || item.rot !== 0) return null
+  if (!item || other === null || item.rot !== 0 || item.locked) return null
   const { w, h } = doc.size, b = doc.bleed
   const leftIndex = Math.min(index, other), rightIndex = Math.max(index, other)
   const half = (left: boolean) => ({ x: round(left ? -b : spine), y: round(-b), w: round(w + b - spine), h: round(h + 2 * b) })
   const taken = doc.items.flatMap((i) => (i.kind === 'image' && i.link ? [i.link] : []))
   const link = newId('lk', taken)
-  const partnerId = newId('i', [...doc.items.map((i) => i.id), ...doc.threads.map((t) => t.id), ...doc.pages.map((p) => p.id),
-    ...doc.guides.map((g) => g.id)])
+  const partnerId = newId('i', allIds(doc))
   const mine = index === leftIndex
   const partner: ImageItem = { ...withoutLink(item), id: partnerId, page: doc.pages[mine ? rightIndex : leftIndex].id,
     ...half(!mine), rot: 0, locked: false, hidden: false, link, fit: 'fill' }
@@ -301,19 +313,37 @@ export function keepLinks(before: Doc, after: Doc, assets: Record<string, Asset>
     if (g.members.length < 2) continue
     const was = oldGroups.get(`${g.link}|${g.spread}`)
     const prev = g.members.map((m) => old.get(m.id) as ImageItem | undefined)
-    // A picture placed or changed in one frame goes into all of them.
+    // A picture placed or changed in one frame goes into all of them; a
+    // locked frame keeps its own, and holds the group's picture where it is.
+    const locked = g.members.findIndex((m) => m.locked)
     const pics = g.members.map((m) => m.asset_id)
     const changedPic = g.members.find((m, k) => m.asset_id && m.asset_id !== prev[k]?.asset_id)?.asset_id
-    const pic = changedPic ?? pics.find(Boolean) ?? null
+    const pic = (locked !== -1 ? g.members[locked].asset_id : null) ?? changedPic ?? pics.find(Boolean) ?? null
     if (pics.some((p) => p !== pic)) {
-      const ids = new Set(g.members.map((m) => m.id))
+      const ids = new Set(g.members.filter((m) => !m.locked).map((m) => m.id))
       doc = patch(doc, ids, (i) => (i.asset_id === pic ? i : { ...i, asset_id: pic }))
     }
     const size = sizeOf(assets, pic)
     if (!size) continue
     const same = was && was.members.length === g.members.length && prev.every((m) => !!m && was.members.includes(m))
+    // Frames that were in the group before this edit, as they were.
+    const stayed = g.members.findIndex((_, k) => !!was && !!prev[k] && was.members.includes(prev[k]!))
     let want: Placement | null = null
-    if (same && !changedPic) {
+    if (locked !== -1 && g.members[locked].asset_id === pic) {
+      want = shown(g.rects[locked], g.members[locked], size)
+    } else if (!same && !changedPic && was && stayed !== -1) {
+      // Frames left or joined (unlinked, deleted, turned): the picture stays
+      // where the frames still in the group showed it. Frames that all were
+      // there, unmoved and uncropped, already show it: leave them be.
+      const untouched = g.members.every((m, k) => {
+        const p0 = prev[k]
+        const at = p0 ? was.members.indexOf(p0) : -1
+        return at !== -1 && cropKey(m) === cropKey(p0!) && m.page === p0!.page
+          && ['x', 'y', 'w', 'h'].every((key) => g.rects[k][key as keyof Rect] === was.rects[at][key as keyof Rect])
+      })
+      if (untouched) continue
+      want = shown(was.rects[was.members.indexOf(prev[stayed]!)], prev[stayed]!, size)
+    } else if (same && !changedPic) {
       const oldRects = prev.map((m) => was.rects[was.members.indexOf(m!)])
       const moved = g.rects.map((r, k) => r.x !== oldRects[k].x || r.y !== oldRects[k].y || r.w !== oldRects[k].w
         || r.h !== oldRects[k].h || g.members[k].page !== prev[k]!.page)

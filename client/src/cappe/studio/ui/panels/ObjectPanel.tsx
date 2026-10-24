@@ -175,12 +175,14 @@ export function ObjectPanel() {
  *  the spine), and frames linked to show one picture between them. */
 function SpreadSection({ ids }: { ids: string[] }) {
   const c = useCtx()
-  const state = useStudio(c.store, (s) => s)
-  const group = ids.length === 1 ? groupOf(state.doc, ids[0]) : null
-  const anyLinked = ids.some((id) => !!groupOf(state.doc, id))
-  const can = (id: string) => { const cmd = command(id); return !cmd.enabled || cmd.enabled(state) }
+  // Only the document: the selection comes in as `ids` (a panel that took the
+  // whole store would draw again on every zoom and hover).
+  const doc = useStudio(c.store, (s) => s.doc)
+  const group = ids.length === 1 ? groupOf(doc, ids[0]) : null
+  const anyLinked = ids.some((id) => !!groupOf(doc, id))
+  const can = (id: string) => { const cmd = command(id); return !cmd.enabled || cmd.enabled(c.store.get()) }
   const btn = 'flex items-center justify-center gap-1.5 rounded-md border border-zinc-700 py-1.5 text-xs text-zinc-200 hover:border-emerald-500 disabled:border-zinc-800 disabled:text-zinc-600'
-  const problem = ids.length > 1 ? linkProblem(state.doc, ids) : null
+  const problem = ids.length > 1 ? linkProblem(doc, ids) : null
   if (ids.length === 1 && !group && !can('across-spread')) return null
   return (
     <Section title="Across the spread">

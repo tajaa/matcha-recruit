@@ -32,7 +32,7 @@ const linked = (s: State) => !s.editing && s.selection.some((id) => !!groupOf(s.
 /** One unturned picture frame selected, on a page with a page facing it. */
 const spreadable = (s: State) => {
   const item = s.selection.length === 1 && !s.editing ? s.doc.items.find((i) => i.id === s.selection[0]) : undefined
-  return !!item && item.kind === 'image' && item.rot === 0
+  return !!item && item.kind === 'image' && item.rot === 0 && !item.locked
     && facingPage(s.doc, s.doc.pages.findIndex((p) => p.id === item.page)) !== null
 }
 /** The picture frame selected made two, one on each page of the spread. */

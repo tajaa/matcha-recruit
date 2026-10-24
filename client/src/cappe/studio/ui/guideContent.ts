@@ -198,7 +198,7 @@ export const GUIDE: GuideSection[] = [
       'Select a picture frame on a page that faces another, and in the Object panel’s Across the spread click Across (out to the edges of both pages) or Clear of spine (two halves with the fold left white). Object → Run the picture across the spread and Split the picture clear of the spine do the same.',
       'Select two picture frames or more on one spread and click Link crops: they show one picture between them, as through windows. It works for a diptych too.',
       'Put a picture in any linked frame and it goes into all of them. Move or resize one frame to show a different part of the picture; move them all together and the picture moves with them. Change one’s focus or zoom and the picture moves in every frame.',
-      'A selected frame’s linked partners show a dashed green outline. Unlink crops lets each frame go its own way, keeping what it shows. Turning a frame, or setting it to Fit or Stretch, unlinks it.',
+      'A selected frame’s linked partners show a dashed green outline. Unlink crops lets each frame go its own way, keeping what it shows. Turning a frame, or setting it to Fit or Stretch, unlinks it, and the frames still linked keep showing what they showed. A locked frame can’t be linked; lock one already in a group and it keeps its picture and crop while the others follow it.',
     ],
   },
   {

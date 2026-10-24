@@ -389,7 +389,8 @@ def _sections(raw: Any, page_order: list[str]) -> list[dict]:
         if not isinstance(item, dict):
             continue
         sid, page = item.get("id"), item.get("page")
-        if not (isinstance(sid, str) and _ID.match(sid)) or sid in ids or page not in at or page in kept:
+        # The page is checked to be a string first: a list or object can't be looked up.
+        if not (isinstance(sid, str) and _ID.match(sid)) or sid in ids or not isinstance(page, str) or page not in at or page in kept:
             continue
         ids.add(sid)
         kept[page] = {"id": sid, "page": page, "name": _str(item.get("name"), L.MAX_SECTION_NAME)}

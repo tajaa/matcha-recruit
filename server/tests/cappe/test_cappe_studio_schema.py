@@ -285,6 +285,10 @@ def test_stories_label_pages_in_page_order_and_are_only_stored_when_there_are_so
     assert doc["sections"] == [{"id": "st1", "page": "p1", "name": "Front"}, {"id": "st2", "page": "p3", "name": "Interview"}]
     assert "sections" not in S.normalize_doc(_doc()) and "sections" not in S.normalize_doc(_doc(sections=[]))
     assert S.normalize_doc(_doc(sections={"p1": "x"})).get("sections") is None
+    # A page that isn't a string (a list, an object) is dropped like any bad entry, never a 500.
+    odd = [{"id": "st1", "page": ["p1"], "name": "A"}, {"id": "st2", "page": {"id": "p2"}, "name": "B"},
+           {"id": "st3", "page": "p2", "name": "C"}]
+    assert S.normalize_doc(_doc(sections=odd))["sections"] == [{"id": "st3", "page": "p2", "name": "C"}]
     name = S.normalize_doc(_doc(sections=[{"id": "st1", "page": "p1", "name": "😀" * 100}]))["sections"][0]["name"]
     assert len(name) == L.MAX_SECTION_NAME  # characters, as the client counts them (model/sections.cleanName)
     many = [{"id": f"x{k}", "page": "p1" if k == 0 else f"q{k}", "name": str(k)} for k in range(L.MAX_SECTIONS + 5)]

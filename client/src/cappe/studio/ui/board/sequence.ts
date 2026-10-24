@@ -7,16 +7,19 @@ import type { Doc } from '../../model/types'
 
 /** Pages that have to move with their facing page: a picture runs across
  *  the spine (linked frames on both, or a frame hanging over onto the
- *  other), so splitting them would cut it in two. */
+ *  other), so splitting them would cut it in two. A frame out to the bleed
+ *  (a full-bleed background) stays on its own page: only one reaching past
+ *  the bleed shows on the facing page. */
 export function boundPages(doc: Doc, ids: Iterable<string>): string[] {
   const want = new Set(ids)
-  const w = doc.size.w
+  const edge = doc.size.w + doc.bleed + 0.5
+  const groups = linkGroups(doc)
   const facingOf = new Map<string, string>()
   for (const pages of spreads(doc)) {
     if (pages.length !== 2) continue
     const [l, r] = pages.map((p) => doc.pages[p].id)
-    const across = doc.items.some((i) => (i.page === l && i.x + i.w > w + 0.5) || (i.page === r && i.x < -0.5))
-      || linkGroups(doc).some((g) => g.members.some((m) => m.page === l) && g.members.some((m) => m.page === r))
+    const across = doc.items.some((i) => (i.page === l && i.x + i.w > edge) || (i.page === r && i.x < doc.size.w - edge))
+      || groups.some((g) => g.members.some((m) => m.page === l) && g.members.some((m) => m.page === r))
     if (across) { facingOf.set(l, r); facingOf.set(r, l) }
   }
   for (const id of [...want]) { const f = facingOf.get(id); if (f) want.add(f) }

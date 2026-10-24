@@ -37,7 +37,7 @@ function savedSize(): Size {
   }
 }
 
-type Drag = { ids: string[]; x: number; y: number; at: ReturnType<typeof slotAt>; story: boolean }
+type Drag = { ids: string[]; story: boolean }
 
 /** The issue board: every page of the story, spread by spread and story by
  *  story, big enough to judge the rhythm, to put in order by dragging. */
@@ -52,7 +52,12 @@ export default function Board() {
   const [anchor, setAnchor] = useState<string | null>(null)
   const [note, setNote] = useState<string | null>(null)
   const [pairsOpen, setPairsOpen] = useState(false)
+  // React hears only that a drag began or ended; the bar and the label move
+  // by their own elements, so a drag never draws the board again.
   const [drag, setDrag] = useState<Drag | null>(null)
+  const bar = useRef<HTMLDivElement>(null)
+  const label = useRef<HTMLDivElement>(null)
+  const target = useRef<ReturnType<typeof slotAt>>(null)
   const root = useRef<HTMLDivElement>(null)
   const scroller = useRef<HTMLDivElement>(null)
   const pending = useRef<{ ids: string[]; x: number; y: number; story: boolean } | null>(null)
@@ -110,36 +115,62 @@ export default function Board() {
     if (e.button !== 0) return
     pending.current = { ids, x: e.clientX, y: e.clientY, story }
   }
+  /** Stop a drag without moving anything (Esc, a cancelled pointer). */
+  const cancelDrag = () => {
+    pending.current = null
+    target.current = null
+    setDrag(null)
+  }
+  // The handlers below are added once; they read the newest of these.
+  const latest = useRef({ drag, change, cancelDrag })
+  useLayoutEffect(() => { latest.current = { drag, change, cancelDrag } })
   useEffect(() => {
     const move = (e: PointerEvent) => {
       const p = pending.current
       if (!p) return
-      if (!drag && Math.hypot(e.clientX - p.x, e.clientY - p.y) < 5) return
+      // No button held: the release went somewhere we didn't hear (outside
+      // the window, a pen lifted), so this is not a drag.
+      if ((e.buttons & 1) === 0) { latest.current.cancelDrag(); return }
+      if (!latest.current.drag) {
+        if (Math.hypot(e.clientX - p.x, e.clientY - p.y) < 5) return
+        setDrag({ ids: p.ids, story: p.story })
+      }
       const sc = scroller.current
       if (sc) {
         const r = sc.getBoundingClientRect()
         if (e.clientY < r.top + 40) sc.scrollTop -= 12
         else if (e.clientY > r.bottom - 40) sc.scrollTop += 12
       }
-      setDrag({ ids: p.ids, x: e.clientX, y: e.clientY, at: slotAt(tiles(), e.clientX, e.clientY), story: p.story })
+      const at = slotAt(tiles(), e.clientX, e.clientY)
+      target.current = at
+      if (label.current) Object.assign(label.current.style, { left: `${e.clientX + 14}px`, top: `${e.clientY + 10}px` })
+      if (bar.current) {
+        Object.assign(bar.current.style, at
+          ? { display: '', left: `${at.x}px`, top: `${at.top - 8}px`, height: `${at.bottom - at.top + 16}px` }
+          : { display: 'none' })
+      }
     }
     const up = () => {
-      const d = drag
+      const d = latest.current.drag
+      const at = target.current
       pending.current = null
+      target.current = null
       if (!d) return
       dragged.current = true
       setDrag(null)
-      const at = d.at
-      if (at) change((x) => moveBlock(x, d.ids, at.slot, at.before ? 'after' : 'before'))
+      if (at) latest.current.change((x) => moveBlock(x, d.ids, at.slot, at.before ? 'after' : 'before'))
       setTimeout(() => { dragged.current = false }, 0)
     }
+    const cancel = () => latest.current.cancelDrag()
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', cancel)
     return () => {
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', cancel)
     }
-  })
+  }, [])
 
   const keys = (e: ReactKeyboardEvent) => {
     const t = e.target as HTMLElement
@@ -147,10 +178,8 @@ export default function Board() {
     const mod = e.metaKey || e.ctrlKey
     if (e.key === 'Escape') {
       e.preventDefault()
-      if (drag) {
-        pending.current = null
-        setDrag(null)
-      } else if (pairsOpen) setPairsOpen(false)
+      if (drag) cancelDrag()
+      else if (pairsOpen) setPairsOpen(false)
       else close()
     } else if (mod && e.key.toLowerCase() === 'z') {
       e.preventDefault()
@@ -245,17 +274,16 @@ export default function Board() {
             showHeader={allRuns.some((r) => r.section)} rhythm={showBeats ? rhythm : null} issues={issues} picked={chosen}
             onPick={pick} onOpen={open}
             onPress={(id, e) => press(blockOf(id), e)}
-            onPressStory={(e) => press(doc.pages.slice(run.start, run.end).map((p) => p.id), e, true)}
-            onChange={change} prevStart={allRuns[k - 1]?.start ?? null} nextEnd={allRuns[k + 1]?.end ?? null} />
+            onPressStory={(e) => press(boundPages(doc, doc.pages.slice(run.start, run.end).map((p) => p.id)), e, true)}
+            onChange={change} prevStart={allRuns[k - 1]?.section ? allRuns[k - 1].start : null} nextEnd={allRuns[k + 1]?.end ?? null} />
         ))}
       </div>
-      {drag?.at && (
-        <div aria-hidden className="pointer-events-none fixed z-[60] w-1 -translate-x-1/2 rounded bg-emerald-400"
-          style={{ left: drag.at.x, top: drag.at.top - 8, height: drag.at.bottom - drag.at.top + 16 }} />
+      {drag && (
+        <div ref={bar} aria-hidden className="pointer-events-none fixed z-[60] w-1 -translate-x-1/2 rounded bg-emerald-400"
+          style={{ display: 'none' }} />
       )}
       {drag && (
-        <div className="pointer-events-none fixed z-[60] rounded-md bg-emerald-600 px-2 py-1 text-xs font-medium text-white shadow-lg"
-          style={{ left: drag.x + 14, top: drag.y + 10 }}>
+        <div ref={label} className="pointer-events-none fixed z-[60] rounded-md bg-emerald-600 px-2 py-1 text-xs font-medium text-white shadow-lg">
           {drag.story ? 'Moving the story' : `Moving ${drag.ids.length} ${drag.ids.length === 1 ? 'page' : 'pages'}`}
         </div>
       )}
@@ -314,7 +342,11 @@ function RunBlock({ run, doc, size, first, last, showHeader, rhythm, issues, pic
   issues: GutterIssue[]; picked: string[]
   onPick: (id: string, e: { shiftKey: boolean; metaKey: boolean; ctrlKey: boolean }) => void; onOpen: (index: number) => void
   onPress: (id: string, e: React.PointerEvent) => void; onPressStory: (e: React.PointerEvent) => void
-  onChange: (fn: (d: Doc) => Doc) => void; prevStart: number | null; nextEnd: number | null
+  onChange: (fn: (d: Doc) => Doc) => void
+  /** The start of the story before (null when the run before isn't a story:
+   *  a story never goes ahead of the pages before the first one). */
+  prevStart: number | null
+  nextEnd: number | null
 }) {
   const s = run.section
   // The name being typed (null: not typing, so the story's own name shows).
@@ -341,9 +373,9 @@ function RunBlock({ run, doc, size, first, last, showHeader, rhythm, issues, pic
           {s && (
             <span className="ml-1 flex">
               <IconButton label="Move the story earlier" disabled={first || prevStart === null}
-                onClick={() => prevStart !== null && onChange((d) => moveBlock(d, ids, prevStart))}><ArrowUp className="h-3.5 w-3.5" /></IconButton>
+                onClick={() => prevStart !== null && onChange((d) => moveBlock(d, boundPages(d, ids), prevStart))}><ArrowUp className="h-3.5 w-3.5" /></IconButton>
               <IconButton label="Move the story later" disabled={last || nextEnd === null}
-                onClick={() => nextEnd !== null && onChange((d) => moveBlock(d, ids, nextEnd))}><ArrowDown className="h-3.5 w-3.5" /></IconButton>
+                onClick={() => nextEnd !== null && onChange((d) => moveBlock(d, boundPages(d, ids), nextEnd))}><ArrowDown className="h-3.5 w-3.5" /></IconButton>
               <IconButton label="Remove the story break (its pages join the story before)"
                 onClick={() => onChange((d) => removeSection(d, s.id))}><X className="h-3.5 w-3.5" /></IconButton>
             </span>

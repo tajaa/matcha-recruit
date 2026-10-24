@@ -201,6 +201,43 @@ describe('linked crops', () => {
 
   const filled = () => { const d = pair(); return keepLinks(d, patchItems(d, ['i1'], { asset_id: 'a1' }), assets) }
 
+  /** Three frames showing a1, then a crop chosen by hand in one of them. */
+  const three = () => {
+    let d = linkFrames(doc({ items: [frame('i1', 'p2', { x: 100, y: 200, w: 300, h: 300 }, { asset_id: 'a1' }),
+      frame('i2', 'p3', { x: 60, y: 200, w: 200, h: 300 }), frame('i3', 'p3', { x: 300, y: 200, w: 200, h: 300 })] }),
+    ['i1', 'i2', 'i3'], assets)
+    d = keepLinks(d, patchItems(d, ['i1'], { zoom: 150, fx: 30 }), assets)
+    return d
+  }
+
+  it('keep the crop chosen when a frame leaves the group (unlinked, deleted, turned, set to Fit)', () => {
+    const d = three()
+    const crop = (x: Doc, id: string) => { const i = item(x, id); return [i.fx, i.fy, i.zoom] }
+    for (const after of [
+      keepLinks(d, unlinkFrames(d, ['i3']), assets),
+      keepLinks(d, { ...d, items: d.items.filter((i) => i.id !== 'i3') }, assets),
+      keepLinks(d, patchItems(d, ['i3'], { rot: 10 }), assets),
+      keepLinks(d, patchItems(d, ['i3'], { fit: 'fit' }), assets),
+    ]) {
+      expect(groupOf(after, 'i1')?.members.map((m) => m.id)).toEqual(['i1', 'i2'])
+      expect(crop(after, 'i1')).toEqual(crop(d, 'i1'))
+      expect(crop(after, 'i2')).toEqual(crop(d, 'i2'))
+    }
+  })
+
+  it('never change a locked frame: the others follow it, and a locked one can’t be linked', () => {
+    const d = keepLinks(three(), patchItems(three(), ['i2'], { locked: true }), assets)
+    const locked = item(d, 'i2')
+    const moved = keepLinks(d, patchItems(d, ['i1'], { zoom: 200 }), assets)
+    expect(item(moved, 'i2')).toEqual(locked) // its crop stays
+    const placed = keepLinks(d, patchItems(d, ['i3'], { asset_id: 'a2' }), assets)
+    expect(item(placed, 'i2')).toEqual(locked) // and its picture
+    expect(item(placed, 'i3').asset_id).toBe('a1') // the group keeps the locked frame's picture
+    const loose = doc({ items: [frame('i1', 'p2', { x: 0, y: 0, w: 10, h: 10 }, { locked: true }), frame('i2', 'p3', { x: 0, y: 0, w: 10, h: 10 })] })
+    expect(linkProblem(loose, ['i1', 'i2'])).toMatch(/Unlock/)
+    expect(acrossSpread(loose, 'i1', assets)).toBeNull()
+  })
+
   it('keep the picture still when one window moves, and move it when they all do', () => {
     const d = filled()
     const still = browser(rectOf(d, 'i2'), item(d, 'i2'), PIC)
@@ -254,14 +291,15 @@ describe('linked crops', () => {
 const words = (n: number): Para[] => [{ runs: [{ t: 'word '.repeat(n) }] }]
 
 describe('each page’s beat', () => {
+  const pic = { asset_id: 'a1' }
   it('reads a page by what covers it', () => {
     const d = doc({
       items: [
-        frame('i1', 'p2', { x: -9, y: -9, w: 618, h: 818 }), // full bleed
-        frame('i2', 'p3', { x: 120, y: 80, w: 360, h: 600 }), // tall: a portrait
-        frame('i3', 'p4', { x: 50, y: 100, w: 500, h: 400 }), // a picture
-        frame('i4', 'p5', { x: 50, y: 50, w: 240, h: 320 }), frame('i5', 'p5', { x: 310, y: 400, w: 240, h: 320 }),
-        frame('i6', 'p6', { x: 250, y: 500, w: 100, h: 100 }), // a small detail and white around it
+        frame('i1', 'p2', { x: -9, y: -9, w: 618, h: 818 }, pic), // full bleed
+        frame('i2', 'p3', { x: 120, y: 80, w: 360, h: 600 }, pic), // tall: a portrait
+        frame('i3', 'p4', { x: 50, y: 100, w: 500, h: 400 }, pic), // a picture
+        frame('i4', 'p5', { x: 50, y: 50, w: 240, h: 320 }, pic), frame('i5', 'p5', { x: 310, y: 400, w: 240, h: 320 }, pic),
+        frame('i6', 'p6', { x: 250, y: 500, w: 100, h: 100 }, pic), // a small detail and white around it
         { ...newItem('text', 'p7', 't1', { x: 50, y: 50, w: 500, h: 700 }) },
         { ...newItem('rect', 'p8', 'r1', { x: -9, y: -9, w: 618, h: 818 }), fill: '#2b2b2b' } as Item,
       ],
@@ -274,8 +312,18 @@ describe('each page’s beat', () => {
   })
 
   it('counts a picture across the spread on both pages, and nothing hidden', () => {
-    const d = doc({ items: [frame('i1', 'p2', { x: -9, y: -9, w: 1218, h: 818 }), frame('i2', 'p4', { x: 0, y: 0, w: 600, h: 800 }, { hidden: true })] })
+    const d = doc({ items: [frame('i1', 'p2', { x: -9, y: -9, w: 1218, h: 818 }, pic), frame('i2', 'p4', { x: 0, y: 0, w: 600, h: 800 }, { ...pic, hidden: true })] })
     expect(beats(d).slice(1, 4).map((x) => x.beat)).toEqual(['bleed', 'bleed', 'white'])
+  })
+
+  it('reads an empty picture frame as no picture, and a portrait by its largest picture', () => {
+    const d = doc({ items: [
+      frame('i1', 'p2', { x: -9, y: -9, w: 618, h: 818 }), // waiting for its picture
+      frame('i2', 'p3', { x: 50, y: 50, w: 200, h: 120 }, pic), // found first by the scan, smaller
+      frame('i3', 'p3', { x: 120, y: 200, w: 360, h: 560 }, pic), // the largest, and tall
+    ] })
+    expect(beats(d)[1].beat).toBe('white')
+    expect(beats(d)[2].beat).toBe('portrait')
   })
 })
 
@@ -303,19 +351,19 @@ describe('the gutter', () => {
 describe('pages drawn from a parent layout', () => {
   it('count the parent’s frames in their beat and their gutter', async () => {
     const { captureParent, starterIdentity } = await import('./identity')
-    // Page 2's parent: a full-bleed picture and words running into the spine.
+    // Page 2's parent: a full-bleed colour (parents hold no pictures) and words running into the spine.
     let d: Doc = { ...doc(), identity: starterIdentity(), items: [
-      newItem('image', 'p2', 'i1', { x: -9, y: -9, w: 618, h: 818 }),
+      { ...newItem('rect', 'p2', 'r1', { x: -9, y: -9, w: 618, h: 818 }), fill: '#2b2b2b' } as Item,
       newItem('text', 'p2', 't1', { x: 400, y: 50, w: 195, h: 100 }),
     ], threads: [{ id: 's1', frames: ['t1'], paras: [{ runs: [{ t: 'By the spine' }] }] }] }
     d = captureParent(d, 1, 'pl1', 'Opener')
     expect(d.items).toHaveLength(0) // the page's frames now live on the parent
-    expect(beats(d)[1].beat).toBe('bleed')
+    expect(beats(d)[1].beat).toBe('colour')
     expect(beats(d)[3].beat).toBe('white')
     expect(gutterIssues(d)).toEqual([expect.objectContaining({ page: 1 })])
     // The same parent on another left page is counted there too.
     d = { ...d, pages: d.pages.map((p, k) => (k === 3 ? { ...p, parent: 'pl1' } : p)) }
-    expect(beats(d)[3].beat).toBe('bleed')
+    expect(beats(d)[3].beat).toBe('colour')
     expect(gutterIssues(d).map((x) => x.page)).toEqual([1, 3])
   })
 })

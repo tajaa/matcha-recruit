@@ -36,6 +36,10 @@ describe('what moves together, and where a drop lands', () => {
     const linked = doc({ items: [frame('i1', 'p4', { x: 0, y: 0, w: 600, h: 800 }, { link: 'lk1' }),
       frame('i2', 'p5', { x: 0, y: 0, w: 600, h: 800 }, { link: 'lk1' })] })
     expect(boundPages(linked, ['p5'])).toEqual(['p4', 'p5'])
+    // A full-bleed background (out to the bleed, not past it) stays on its own page.
+    const backgrounds = doc({ items: [{ ...rect('b1', 'p2', -9, 618), y: -9, h: 818 }, { ...rect('b2', 'p3', -9, 618), y: -9, h: 818 }] })
+    expect(boundPages(backgrounds, ['p2'])).toEqual(['p2'])
+    expect(boundPages(backgrounds, ['p3'])).toEqual(['p3'])
     // Without facing pages nothing is bound.
     expect(boundPages({ ...d, facing: false }, ['p2'])).toEqual(['p2'])
   })
@@ -190,12 +194,51 @@ describe('the issue board', () => {
       return { left: n * 100, right: n * 100 + 90, top: 0, bottom: 120, width: 90, height: 120, x: n * 100, y: 0, toJSON: () => ({}) } as DOMRect
     })
     fireEvent.pointerDown(tile(1), { button: 0, clientX: 40, clientY: 50 })
-    act(() => { window.dispatchEvent(new PointerEvent('pointermove', { clientX: 380, clientY: 50 })) })
+    act(() => { window.dispatchEvent(new PointerEvent('pointermove', { clientX: 380, clientY: 50, buttons: 1 })) })
     expect(screen.getByText('Moving 1 page')).toBeInTheDocument()
     act(() => { window.dispatchEvent(new PointerEvent('pointerup', { clientX: 380, clientY: 50 })) })
     // Dropped on page 4's right half: after it.
     expect(ids(store.get().doc)).toEqual(['p2', 'p3', 'p4', 'p1', 'p5'])
     expect(screen.queryByText('Moving 1 page')).toBeNull()
+  })
+
+  it('lets go of a drag whose release it never heard, or that the browser cancelled', () => {
+    const { store } = mount(doc())
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const n = Number(this.dataset.boardPage ?? -1)
+      return { left: n * 100, right: n * 100 + 90, top: 0, bottom: 120, width: 90, height: 120, x: n * 100, y: 0, toJSON: () => ({}) } as DOMRect
+    })
+    // Pressed, then the release happened outside the window: the next move has no button held.
+    fireEvent.pointerDown(tile(1), { button: 0, clientX: 40, clientY: 50 })
+    act(() => { window.dispatchEvent(new PointerEvent('pointermove', { clientX: 380, clientY: 50, buttons: 0 })) })
+    expect(screen.queryByText('Moving 1 page')).toBeNull()
+    // Dragging, then the browser cancels the pointer: nothing moves, and the next move isn't a drag.
+    fireEvent.pointerDown(tile(1), { button: 0, clientX: 40, clientY: 50 })
+    act(() => { window.dispatchEvent(new PointerEvent('pointermove', { clientX: 380, clientY: 50, buttons: 1 })) })
+    expect(screen.getByText('Moving 1 page')).toBeInTheDocument()
+    act(() => { window.dispatchEvent(new PointerEvent('pointercancel')) })
+    act(() => { window.dispatchEvent(new PointerEvent('pointermove', { clientX: 300, clientY: 50, buttons: 1 })) })
+    act(() => { window.dispatchEvent(new PointerEvent('pointerup', { clientX: 300, clientY: 50 })) })
+    expect(screen.queryByText('Moving 1 page')).toBeNull()
+    expect(ids(store.get().doc)).toEqual(['p1', 'p2', 'p3', 'p4', 'p5'])
+  })
+
+  it('offers to move a story earlier only past another story', () => {
+    const { store } = mount(doc({ sections: [{ id: 'st1', page: 'p2', name: 'One' }, { id: 'st2', page: 'p4', name: 'Two' }] }))
+    const earlier = screen.getAllByRole('button', { name: 'Move the story earlier' })
+    expect(earlier[0]).toBeDisabled() // only the pages before the first story are ahead of it
+    fireEvent.click(earlier[1])
+    expect(runs(store.get().doc).map((r) => r.section?.name ?? null)).toEqual([null, 'Two', 'One'])
+  })
+
+  it('moves a story with the facing page a picture runs onto, so the picture stays whole', () => {
+    // Story One ends on p2 (a left page); Two starts on p3, its facing page. A picture runs across them.
+    const d = doc({ sections: [{ id: 'st1', page: 'p2', name: 'One' }, { id: 'st2', page: 'p3', name: 'Two' }],
+      items: [frame('i1', 'p2', { x: 300, y: 0, w: 600, h: 400 })] })
+    const { store } = mount(d)
+    fireEvent.click(screen.getAllByRole('button', { name: 'Move the story later' })[0])
+    const now = ids(store.get().doc)
+    expect(now.indexOf('p3') - now.indexOf('p2')).toBe(1) // still side by side
   })
 
   it('lays out a spread with a paired layout', () => {

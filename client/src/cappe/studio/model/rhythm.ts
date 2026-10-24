@@ -30,10 +30,11 @@ const COLS = 24
 type Cover = 'pic' | 'text' | 'shape'
 
 /** What an item puts on a page, or null (lines, empty or paper-coloured
- *  shapes, text frames with no words). */
+ *  shapes, text frames with no words). A picture frame with no picture yet
+ *  is no picture: at most its colour. */
 function coverOf(doc: Doc, item: Item, worded: Set<string>): Cover | null {
   if (item.hidden || item.opacity === 0) return null
-  if (item.kind === 'image') return 'pic'
+  if (item.kind === 'image') return item.asset_id ? 'pic' : item.fill && item.fill !== doc.paper ? 'shape' : null
   if (item.kind === 'text') return worded.has(item.id) ? 'text' : item.fill && item.fill !== doc.paper ? 'shape' : null
   if (item.kind === 'graphic') return 'shape'
   if (item.kind === 'line') return null
@@ -128,7 +129,8 @@ export function beats(doc: Doc): PageBeat[] {
     const cells = rows * COLS
     const pictures = pic / cells, words = text / cells, ink = (pic + text + shape) / cells
     const weight = Math.min(1, pictures + 0.6 * (shape / cells) + 0.3 * words)
-    const big = [...picArea.entries()].filter(([, n]) => n / cells >= 0.08)
+    // The pictures that matter, largest first (it decides portrait or not).
+    const big = [...picArea.entries()].filter(([, n]) => n / cells >= 0.08).sort((a, b) => b[1] - a[1])
     let beat: Beat
     if (pictures >= 0.85) beat = 'bleed'
     else if (pictures >= 0.2 && big.length >= 2 && words < 0.2) beat = 'pictures'
