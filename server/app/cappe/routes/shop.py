@@ -400,6 +400,48 @@ async def list_products(site_id: UUID, account: CappeAccount = Depends(require_c
     return [_product_row(r, groups.get(r["id"]), variants.get(r["id"]), images.get(r["id"])) for r in rows]
 
 
+async def insert_product(conn, site_id: UUID, body: CappeProductCreate):
+    """Write a new product and everything that hangs off it (opening stock,
+    options, variants, slug, pictures); returns its row. The caller holds the
+    transaction and has already checked the plan sells `body.fulfillment`.
+    Shared by the Shop's create and the quick-store setup (routes/sites.py)."""
+    row = await conn.fetchrow(
+        f"""INSERT INTO cappe_products
+                (site_id, name, description, price_cents, currency, image_url, sku, inventory,
+                 low_stock_threshold, status, sort_order, fulfillment, digital_file_url,
+                 booking_type_id, requires_approval, intake_fields, category, subscription_intervals,
+                 subscription_discount_bps, brand, gtin, weight_g, shipping_surcharge_cents, ships_free)
+            VALUES ($1, $2, $3, $4,
+                    -- The store's currency, whatever the client sent:
+                    -- one store, one currency (services/shipping.py).
+                    COALESCE((SELECT currency FROM cappe_sites WHERE id = $1), $5),
+                    $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21,
+                    $22, $23, $24)
+            RETURNING {_PRODUCT_COLS}""",
+        site_id, body.name, body.description, body.price_cents, body.currency.upper(),
+        body.image_url, body.sku, body.inventory, body.low_stock_threshold, body.status,
+        body.sort_order, body.fulfillment, body.digital_file_url, body.booking_type_id,
+        body.requires_approval, json.dumps(body.intake_fields), body.category,
+        body.subscription_intervals, body.subscription_discount_bps, body.brand, body.gtin,
+        body.weight_g, body.shipping_surcharge_cents, body.ships_free,
+    )
+    if body.inventory is not None:
+        await log_adjustment(
+            conn, site_id=site_id, product_id=row["id"], delta=body.inventory,
+            balance_after=body.inventory, reason="adjustment", note="Opening stock",
+        )
+    await _replace_option_groups(conn, site_id, row["id"], body.option_groups)
+    await replace_variants(conn, site_id, row["id"], body.variants)
+    await assign_slug(conn, site_id, row["id"], body.name, body.slug)
+    if body.images is not None:
+        await replace_images(conn, site_id, row["id"], body.images)
+    elif body.image_url:
+        await set_cover(conn, site_id, row["id"], body.image_url)
+    return await conn.fetchrow(
+        f"SELECT {_PRODUCT_COLS} FROM cappe_products WHERE id = $1 AND site_id = $2", row["id"], site_id,
+    )
+
+
 @router.post("/sites/{site_id}/products", response_model=CappeProduct, status_code=status.HTTP_201_CREATED)
 async def create_product(
     site_id: UUID, body: CappeProductCreate, account: CappeAccount = Depends(require_cappe_account)
@@ -416,41 +458,7 @@ async def create_product(
         from ..services.recurring import validate_product_subscription
         await validate_product_subscription(conn, account.plan, body.model_dump())
         async with conn.transaction():
-            row = await conn.fetchrow(
-                f"""INSERT INTO cappe_products
-                        (site_id, name, description, price_cents, currency, image_url, sku, inventory,
-                         low_stock_threshold, status, sort_order, fulfillment, digital_file_url,
-                         booking_type_id, requires_approval, intake_fields, category, subscription_intervals,
-                         subscription_discount_bps, brand, gtin, weight_g, shipping_surcharge_cents, ships_free)
-                    VALUES ($1, $2, $3, $4,
-                            -- The store's currency, whatever the client sent:
-                            -- one store, one currency (services/shipping.py).
-                            COALESCE((SELECT currency FROM cappe_sites WHERE id = $1), $5),
-                            $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21,
-                            $22, $23, $24)
-                    RETURNING {_PRODUCT_COLS}""",
-                site_id, body.name, body.description, body.price_cents, body.currency.upper(),
-                body.image_url, body.sku, body.inventory, body.low_stock_threshold, body.status,
-                body.sort_order, body.fulfillment, body.digital_file_url, body.booking_type_id,
-                body.requires_approval, json.dumps(body.intake_fields), body.category,
-                body.subscription_intervals, body.subscription_discount_bps, body.brand, body.gtin,
-                body.weight_g, body.shipping_surcharge_cents, body.ships_free,
-            )
-            if body.inventory is not None:
-                await log_adjustment(
-                    conn, site_id=site_id, product_id=row["id"], delta=body.inventory,
-                    balance_after=body.inventory, reason="adjustment", note="Opening stock",
-                )
-            await _replace_option_groups(conn, site_id, row["id"], body.option_groups)
-            await replace_variants(conn, site_id, row["id"], body.variants)
-            await assign_slug(conn, site_id, row["id"], body.name, body.slug)
-            if body.images is not None:
-                await replace_images(conn, site_id, row["id"], body.images)
-            elif body.image_url:
-                await set_cover(conn, site_id, row["id"], body.image_url)
-            row = await conn.fetchrow(
-                f"SELECT {_PRODUCT_COLS} FROM cappe_products WHERE id = $1 AND site_id = $2", row["id"], site_id,
-            )
+            row = await insert_product(conn, site_id, body)
         out = await _product_out(conn, row)
         # Product names are indexed at weight D, so "cold brew" finds the cafe
         # that sells it even when its name and blurb say neither word.

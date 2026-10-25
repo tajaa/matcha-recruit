@@ -15,6 +15,7 @@ import ClientThread from './pages/ClientThread'
 import CappeBookingManage from './pages/CappeBookingManage'
 import CappeSites from './pages/CappeSites'
 import CappeOnboardingWizard from './onboarding/CappeOnboardingWizard'
+import StoreReady from './onboarding/StoreReady'
 import CappeTemplates from './pages/CappeTemplates'
 import CappeSiteEditor from './pages/CappeSiteEditor'
 import CreatorsLanding from './creators/CreatorsLanding'
@@ -132,6 +133,7 @@ export default function CappeRoutes() {
           <Route path="templates" element={<CappeTemplates />} />
           <Route path="billing" element={<CappeBilling />} />
           <Route path="sites/:siteId" element={<CappeSiteEditor />} />
+          <Route path="sites/:siteId/ready" element={<StoreReady />} />
           <Route path="sites/:siteId/pages/:pageId" element={<PageEditor />} />
           <Route path="sites/:siteId/shop" element={<Shop />} />
           <Route path="sites/:siteId/orders" element={<Orders />} />

@@ -19,6 +19,11 @@ Website-builder frontend for the consumer brand **Gummfit**, host-routed on gumm
   account's previews pass `premium=1` so it sees the polish it will keep.
 - `onboarding/CappeOnboardingWizard.tsx` asks the Discover category ONCE (step 3) — it sorts the
   shelf and seeds `directory_category` on `POST /sites/from-template`.
+  Its **Online only** answer is the quick store instead: store name + one line → first product
+  (photo, name, price, stock) → `POST /sites/quick-store` → `onboarding/StoreReady.tsx`
+  (`sites/:siteId/ready`): the product on sale, one-tap Publish, and the checklist's unfinished
+  optional items as "when you're ready" links (`utils/readinessAction.ts`, shared with `SetupGuide`).
+  No category, template, Merlin or checklist wall on that path: seeing a product on sale fast is the point.
 - `utils/plan.ts` — `isPremiumPlan`, the client mirror of the server's `design_gate.PREMIUM_PLANS`.
 - `magazine/` — photo-journalism magazines (server spec: `server/app/cappe/CLAUDE.md` §Magazines).
   `library/LibraryPanel.tsx` is the picture library with alt text, captions and credits (the

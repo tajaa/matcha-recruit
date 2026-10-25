@@ -988,6 +988,18 @@ set `CAPPE_META_APP_ID`, `CAPPE_META_APP_SECRET`, `CAPPE_META_VERIFY_TOKEN` (opt
 the permissions in `meta.SCOPES` need Meta App Review and business verification. Unset ⇒ Connect
 and Publish 503 with a setup message; the composer and queue still work.
 
+## Quick store (`POST /sites/quick-store`, `services/quick_store.py`)
+
+- **The wizard's "Online only" path makes a whole store in one transaction**: the site (listed
+  under `retail`), a Home page of the owner's name and line over a `store` block (built here, not
+  cloned: a template's "Replace this…" copy would go live with a one-tap publish), the first
+  product `active`, and the refund + shipping policies from our starter text, so the publish gate
+  passes at once. One transaction because a half-made store would spend a Free account's only site.
+- **The plan is asked before anything is written** (`require_fulfillment(…, "physical")`); `product`
+  may be null, which makes the store alone. The photo is uploaded after, by the client, onto the
+  new product (uploads belong to a site).
+- Products are written by `routes/shop.insert_product`, the same function the Shop's create uses.
+
 ## Site templates (`services/site_templates/`)
 
 - **The catalog is code, not the `cappe_templates` table.** One `SiteTemplate` per entry, one module

@@ -20,9 +20,13 @@ from ..models.cappe import (
     CappeSiteCreate,
     CappeSiteFromTemplate,
     CappeSiteUpdate,
+    CappeQuickStore,
+    CappeQuickStoreCreate,
+    CappeProductCreate,
 )
 from ..services.design_gate import gate_content, gate_theme
-from ..services.entitlements import resolve_entitlements
+from ..services.entitlements import require_fulfillment, resolve_entitlements
+from ..services import quick_store
 from ..services.directory import (
     CATEGORY_LABELS,
     apply_inferred_listing,
@@ -36,6 +40,7 @@ from ..services.readiness import compute_readiness, plan_has_magazine
 from ..services.render import render_site_html
 from ..services.site_templates import clone_structure, get_template, legacy_template_slug, template_theme
 from .render import invalidate_render_cache, tenant_security_headers
+from .shop import _product_out, insert_product
 from ._shared import (
     SUBDOMAIN_MAX_LEN,
     get_owned_site,
@@ -293,6 +298,64 @@ async def create_site_from_template(
                 inserted = 1
 
     return site_row_to_dict(site, page_count=inserted)
+
+
+@router.post("/sites/quick-store", response_model=CappeQuickStore, status_code=status.HTTP_201_CREATED)
+async def create_quick_store(
+    body: CappeQuickStoreCreate, account: CappeAccount = Depends(require_cappe_account)
+):
+    """An online store in one step: the site, a home page of its name over its
+    products, the first product on sale and the policies a store selling
+    parcels must publish, so it can go live in one tap
+    (services/quick_store.py).
+
+    One transaction: a store is never left half made, which on the Free plan
+    would spend its only site. The plan is asked about the product before
+    anything is written.
+    """
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Name your store.")
+    blocks = quick_store.home_blocks(name, body.tagline)
+    async with get_connection() as conn:
+        if body.product is not None:
+            require_fulfillment(await resolve_entitlements(account.plan, conn=conn), "physical")
+        async with conn.transaction():
+            await _lock_account_for_site_creation(conn, account.id)
+            await _enforce_site_limit(conn, account)
+
+            async def _insert(slug: str):
+                return await conn.fetchrow(
+                    f"""INSERT INTO cappe_sites
+                            (account_id, name, slug, subdomain, source_type, is_multi_location,
+                             directory_category, timezone)
+                        VALUES ($1, $2, $3, $3, 'blank', FALSE, $4, COALESCE($5, 'UTC'))
+                        RETURNING {_SITE_COLS}""",
+                    account.id, name, slug, quick_store.DIRECTORY_CATEGORY, body.timezone,
+                )
+
+            site = await _insert_site_with_free_slug(conn, name, _insert)
+            await conn.execute(
+                """INSERT INTO cappe_pages (site_id, title, slug, content, sort_order, status)
+                   VALUES ($1, 'Home', 'home', $2, 0, 'draft')""",
+                site["id"], json.dumps(gate_content({"blocks": blocks}, account.plan)),
+            )
+            for kind, text in quick_store.starter_policies():
+                await conn.execute(
+                    "INSERT INTO cappe_site_policies (site_id, kind, body) VALUES ($1, $2, $3)",
+                    site["id"], kind, text,
+                )
+            product = None
+            if body.product is not None:
+                row = await insert_product(conn, site["id"], CappeProductCreate(
+                    name=body.product.name.strip(), price_cents=body.product.price_cents,
+                    description=(body.product.description or "").strip() or None,
+                    inventory=body.product.inventory, fulfillment="physical", status="active",
+                ))
+                product = await _product_out(conn, row)
+        await refresh_site_search(conn, site["id"])
+    await invalidate_render_cache(site["id"])
+    return {"site": site_row_to_dict(site, page_count=1), "product": product}
 
 
 @router.post("/sites/{site_id}/theme/reset-to-template", response_model=CappeSite)

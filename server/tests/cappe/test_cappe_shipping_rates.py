@@ -271,7 +271,9 @@ def test_products_and_the_store_take_their_shipping_fields():
 
 
 def test_the_owner_routes_write_the_new_columns():
-    create = inspect.getsource(shop_routes.create_product)
+    # The Shop's create and the quick store both write through insert_product.
+    assert "insert_product(conn, site_id, body)" in inspect.getsource(shop_routes.create_product)
+    create = inspect.getsource(shop_routes.insert_product)
     assert "weight_g, shipping_surcharge_cents, ships_free)" in create and "body.ships_free" in create
     assert '"weight_g", "shipping_surcharge_cents", "ships_free"' in inspect.getsource(shop_routes.update_product)
     for col in ("weight_g", "shipping_surcharge_cents", "ships_free"):

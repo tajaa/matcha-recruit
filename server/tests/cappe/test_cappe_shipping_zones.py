@@ -631,7 +631,7 @@ def test_a_store_with_live_subscriptions_cant_change_currency(monkeypatch):
 
 
 def test_a_product_is_priced_in_its_stores_currency():
-    create_src = inspect.getsource(shop_routes.create_product)
+    create_src = inspect.getsource(shop_routes.insert_product)
     assert "COALESCE((SELECT currency FROM cappe_sites WHERE id = $1), $5)" in create_src
     update_src = inspect.getsource(shop_routes.update_product)
     assert '"name", "description", "price_cents",' in update_src and '"currency", "image_url"' not in update_src
