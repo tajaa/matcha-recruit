@@ -5,6 +5,7 @@ import CappeOnboardingWizard from './CappeOnboardingWizard'
 import type { CappeTemplateSummary } from '../types'
 
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), upload: vi.fn(), categories: vi.fn() }))
+vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
 vi.mock('../api', () => ({ cappeApi: api, fetchCappeTemplateCategories: api.categories }))
 
 // Whatever zone the test machine is in — the wizard sends the browser's.

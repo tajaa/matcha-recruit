@@ -207,3 +207,6 @@ an owner-only, sandboxed rendered preview, including draft products or clearly l
 Required readiness actions stay visible and disable publishing until complete. The general
 `TemplateGallery` prioritises store, portfolio/personal and blog designs for business, personal and
 writer accounts respectively; an explicit category takes precedence and the full shelf stays available.
+The wizard's three design cards share `TemplateGallery`'s `TemplatePreview`: scaled, sandboxed live
+renders of the actual designs, with inert sample photography. They replace approximate colour swatches
+so the chosen layout matches the draft storefront. Preview load failure never blocks store creation.

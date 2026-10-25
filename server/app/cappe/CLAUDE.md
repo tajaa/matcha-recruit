@@ -1001,6 +1001,14 @@ and Publish 503 with a setup message; the composer and queue still work.
   surface the refund/shipping policy requirement; policies must be saved by the owner in Shop. Other
   sites retain their ordinary brochure/portfolio readiness rules. Existing plan fulfillment gates remain.
 - The first product's optional photo uploads after creation. Products use `routes/shop.insert_product`.
+- Each starter has its own responsive art direction in `render/assets/storefront.css`, enabled only
+  by the allowlisted `theme_config.template` marker. It applies on free and paid plans, private
+  previews and the live store; the shared public store widget still owns product links and checkout.
+  Theme colours and fonts remain editable. Other templates do not load these styles.
+- Sample photography is bundled as three optimised WebP files in `site_templates/assets/` (prompts
+  and provenance in its README). The versioned, allowlisted `/templates/starter-media/{key}` route
+  serves them without DB or external-storage access. Only `quick_store.sample_products()` references
+  them; no example name, price or picture is saved into the site or rendered publicly.
 
 ## Site templates (`services/site_templates/`)
 

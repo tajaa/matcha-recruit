@@ -2,11 +2,12 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Loader2, Globe, ImagePlus, MapPin, MapPinned, ArrowRight, ArrowLeft } from 'lucide-react'
 import { cappeApi, fetchCappeTemplateCategories } from '../api'
-import TemplateGallery from '../components/TemplateGallery'
+import TemplateGallery, { TemplatePreview } from '../components/TemplateGallery'
 import { useCappeMe } from '../hooks/useCappeMe'
 import { CAPPE_HOST } from '../host'
 import { creatorPaths } from '../creators/creatorPaths'
 import { subdomainPreview } from '../utils/slug'
+import { isPremiumPlan } from '../utils/plan'
 import type { CappeEntitlements, CappeLocation, CappeProduct, CappeSite, CappeTemplateSummary } from '../types'
 
 // Post-signup business-setup wizard. account_type is already chosen at signup;
@@ -360,16 +361,16 @@ export default function CappeOnboardingWizard() {
             >
               <fieldset className="mb-6">
                 <legend className="mb-3 text-sm font-medium text-zinc-200">Start with a store design</legend>
-                <div className="grid grid-cols-3 gap-2">
-                  {(storeTemplates.length ? storeTemplates : [{ slug: 'online-studio', name: 'Studio', description: 'A warm, quiet shop.', swatch: { bg: '#faf7f2', surface: '#eee7dd', brand: '#895b3b', text: '#29231e' } }]).map((t) => (
+                <div className="grid grid-cols-3 gap-2 sm:gap-3">
+                  {(storeTemplates.length ? storeTemplates : [{ slug: 'online-studio', name: 'Studio' }]).map((t) => (
                     <button key={t.slug} type="button" aria-pressed={storeTemplate === t.slug}
                       aria-label={`Choose ${t.name}`} disabled={submitting} onClick={() => setStoreTemplate(t.slug)}
-                      className={`overflow-hidden rounded-xl border text-left ${storeTemplate === t.slug ? 'border-lime-400 ring-1 ring-lime-400' : 'border-zinc-700'}`}>
-                      <div className="p-3" style={{ background: t.swatch.bg, color: t.swatch.text }}>
-                        <p className="mb-2 truncate text-xs font-semibold">{name || 'Your store'}</p>
-                        <div className="grid grid-cols-3 gap-1">{[0, 1, 2].map((k) => <span key={k} className="aspect-square rounded" style={{ background: k === 1 ? t.swatch.brand : t.swatch.surface }} />)}</div>
-                      </div>
-                      <span className="block p-2 text-xs text-zinc-200">{t.name.replace(' — Online shop', '')}</span>
+                      className={`overflow-hidden rounded-xl border bg-zinc-900 text-left transition-shadow ${storeTemplate === t.slug ? 'border-lime-400 ring-1 ring-lime-400 shadow-lg shadow-lime-400/10' : 'border-zinc-700 hover:border-zinc-500'}`}>
+                      <TemplatePreview slug={t.slug} name={t.name} premium={isPremiumPlan(account?.plan)} />
+                      <span className="flex items-center justify-between gap-1 p-2 text-xs font-medium text-zinc-200 sm:px-3">
+                        {t.name.replace(' — Online shop', '')}
+                        <span aria-hidden="true" className={`h-2 w-2 shrink-0 rounded-full ${storeTemplate === t.slug ? 'bg-lime-400' : 'bg-zinc-600'}`} />
+                      </span>
                     </button>
                   ))}
                 </div>

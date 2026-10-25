@@ -1,10 +1,13 @@
 """Draft online stores: choose a look now, review the details before launch."""
+from pathlib import Path
 from typing import Any
 
 from .site_templates import clone_structure, get_template
 
 DIRECTORY_CATEGORY = "retail"
 DEFAULT_TEMPLATE = "online-studio"
+SAMPLE_ASSETS = {f"{name}-v1.webp": Path(__file__).parent / "site_templates" / "assets" / f"{name}-v1.webp"
+                 for name in ("vessel", "tote", "lamp")}
 
 
 def is_store_template(slug: Any) -> bool:
@@ -30,5 +33,8 @@ def home_blocks(name: str, tagline: str | None) -> list[dict[str, Any]]:
 
 def sample_products() -> list[dict]:
     """Illustrative cards only. Never inserted as products or exposed to shoppers."""
-    return [{"name": name, "price_cents": price, "currency": "USD", "image_url": None}
-            for name, price in (("Your first product", 2400), ("Your next product", 3800), ("A new favourite", 1800))]
+    return [{"name": name, "price_cents": price, "currency": "USD",
+             "image_url": f"/api/cappe/templates/starter-media/{image}-v1.webp"}
+            for name, price, image in (("The ceramic vessel", 4800, "vessel"),
+                                       ("The everyday tote", 3800, "tote"),
+                                       ("The little blue lamp", 7200, "lamp"))]

@@ -18,7 +18,7 @@ render anything, and the gallery fans out to one request per card.
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response, status
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
 from ...core.services.redis_cache import check_rate_limit, client_ip
 from ..models.cappe import CappeTemplateSummary
@@ -32,6 +32,7 @@ from ..services.site_templates.imagery import (
     placeholder_svg,
 )
 from ..services.site_templates.preview import render_template_preview
+from ..services.quick_store import SAMPLE_ASSETS
 from .render import tenant_security_headers
 
 router = APIRouter()
@@ -41,6 +42,16 @@ router = APIRouter()
 _PREVIEW_LIMIT_PER_MIN = 240
 # One placeholder per image slot per card; a gallery load is ~80 of these.
 _PLACEHOLDER_LIMIT_PER_MIN = 600
+
+
+@router.get("/templates/starter-media/{key}")
+async def starter_media(key: str, request: Request):
+    """Bundled example-product photography. Only a fixed, versioned allowlist resolves."""
+    path = SAMPLE_ASSETS.get(key)
+    if path is None:
+        raise HTTPException(status_code=404, detail="Unknown image")
+    await check_rate_limit(client_ip(request), "cappe_tpl_starter", _PLACEHOLDER_LIMIT_PER_MIN, 60)
+    return FileResponse(path, media_type="image/webp", headers={"Cache-Control": "public, max-age=86400"})
 
 
 @router.get("/templates", response_model=list[CappeTemplateSummary])

@@ -19,7 +19,7 @@ function templatePreviewUrl(slug: string, page = 'home', premium = false): strin
 }
 
 /** Scaled, non-interactive live preview of a template's rendered home page. */
-function PreviewFrame({ slug, name, premium }: { slug: string; name: string; premium: boolean }) {
+export function TemplatePreview({ slug, name, premium }: { slug: string; name: string; premium: boolean }) {
   const boxRef = useRef<HTMLDivElement>(null)
   const [scale, setScale] = useState(0.25)
   const [loaded, setLoaded] = useState(false)
@@ -256,7 +256,7 @@ export default function TemplateGallery({ category, busySlug, disabled = false, 
             const busy = busySlug === t.slug
             return (
               <div key={t.slug} className="group flex flex-col overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900 transition hover:border-zinc-700">
-                <PreviewFrame slug={t.slug} name={t.name} premium={premium} />
+                <TemplatePreview slug={t.slug} name={t.name} premium={premium} />
                 <div className="flex flex-1 flex-col p-5">
                   <div className="mb-1 flex items-start justify-between gap-2">
                     <h3 className="font-medium text-zinc-100">{t.name}</h3>

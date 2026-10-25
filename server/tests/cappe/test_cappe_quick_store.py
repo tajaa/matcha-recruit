@@ -149,11 +149,12 @@ def _body(**over):
 
 def test_home_page_is_the_name_the_line_and_the_shop():
     hero, store = quick_store.home_blocks("Karajan Goods", "  Small-batch ceramics. ")
-    assert hero == {"type": "hero", "style": "centered", "heading": "Karajan Goods",
-                    "subheading": "Small-batch ceramics.", "cta": "Shop now", "ctaHref": "#shop"}
+    assert hero["heading"] == "Karajan Goods"
+    assert hero["subheading"] == "Small-batch ceramics."
+    assert hero["ctaHref"] == "#shop"
     assert store["type"] == "store"
-    # No line given: no line printed, never placeholder copy.
-    assert "subheading" not in quick_store.home_blocks("Karajan Goods", " ")[0]
+    # No line given: the template's neutral invitation, never a fictitious claim.
+    assert quick_store.home_blocks("Karajan Goods", " ")[0]["subheading"] == get_template("online-studio").pages[0]["content"]["blocks"][0]["subheading"]
 
 
 def test_the_starter_has_content_and_a_shop_without_accepting_policies():
@@ -199,7 +200,7 @@ async def test_the_store_can_be_made_without_its_product(setup):
     setup.state["ent"] = _ent("digital", "service", "booking")
     out = await sites.create_quick_store(_body(product=None, tagline=None), setup.account)
     assert out["product"] is None and setup.made == []
-    assert "subheading" not in setup.conn.page["blocks"][0]
+    assert setup.conn.page["blocks"][0]["heading"] == "Karajan Goods"
     assert setup.conn.policies == {}
 
 
@@ -218,7 +219,8 @@ async def test_the_chosen_starter_is_saved_without_example_merchandise(setup, sl
     assert out["site"]["theme_config"]["template"] == slug
     assert out["site"]["theme_config"]["colors"] == get_template(slug).theme["colors"]
     assert setup.made == [] and setup.conn.policies == {}
-    assert "Your first product" not in json.dumps(setup.conn.page)
+    assert "The ceramic vessel" not in json.dumps(setup.conn.page)
+    assert "starter-media" not in json.dumps(setup.conn.page)
 
 
 @pytest.mark.asyncio
@@ -234,8 +236,8 @@ def test_example_cards_are_inert_and_only_render_in_private_previews():
     page = {"title": "Home", "content": {"blocks": quick_store.home_blocks("My shop", None)}}
     private = render_site_html(site, page, [], preview=True)
     public = render_site_html(site, page, [], preview=False)
-    assert 'class="cz-store-grid"' in private and "Your first product" in private
-    assert "Your first product" not in public
+    assert 'class="cz-store-grid"' in private and "The ceramic vessel" in private
+    assert "The ceramic vessel" not in public and "starter-media" not in public
     assert "data-go" not in private and 'class="cz-product"' in private
     site["preview_products"] = [{"name": '<script>alert(1)</script>', "price_cents": 2400,
                                  "image_url": 'javascript:alert(1)', "currency": "USD"}]
@@ -271,3 +273,48 @@ async def test_owner_preview_reads_draft_cards_only_after_checking_ownership(mon
     with pytest.raises(HTTPException):
         await sites.preview_site_page(site_id, body, SimpleNamespace(id=uuid4(), plan="free"))
     conn.fetch.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("key", list(quick_store.SAMPLE_ASSETS))
+async def test_bundled_sample_photography_is_served_with_caching(monkeypatch, key):
+    from unittest.mock import AsyncMock
+
+    from starlette.requests import Request
+    from app.cappe.routes import templates
+
+    monkeypatch.setattr(templates, "check_rate_limit", AsyncMock())
+    request = Request({"type": "http", "client": ("192.0.2.1", 1234), "headers": []})
+    response = await templates.starter_media(key, request)
+    assert response.media_type == "image/webp"
+    assert response.path == quick_store.SAMPLE_ASSETS[key]
+    assert response.path.read_bytes().startswith(b"RIFF")
+    assert response.path.stat().st_size < 100_000
+    assert response.headers["cache-control"] == "public, max-age=86400"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("key", ["../CLAUDE.md", "unknown.webp", "vessel-v1.webp/../../secrets"])
+async def test_sample_media_cannot_resolve_an_arbitrary_path(key):
+    from app.cappe.routes import templates
+
+    with pytest.raises(HTTPException) as exc:
+        await templates.starter_media(key, None)
+    assert exc.value.status_code == 404
+
+
+@pytest.mark.parametrize("slug,variant", [("online-studio", "studio"), ("online-edit", "edit"), ("online-pop", "pop")])
+@pytest.mark.parametrize("plan", ["free", "business"])
+def test_storefront_layout_survives_plan_gating_without_example_products(slug, variant, plan):
+    theme, pages = quick_store.store_structure("My own shop", None, slug, plan)
+    html = render_site_html({"name": "My own shop", "theme_config": theme}, pages[0], [])
+    assert f"cz-shop cz-shop--{variant}" in html
+    assert "My own shop" in html
+    assert "The ceramic vessel" not in html and "starter-media" not in html
+
+
+@pytest.mark.parametrize("marker", [None, "unknown", '<script>alert(1)</script>', ["online-studio"]])
+def test_storefront_layout_is_not_applied_to_other_sites_or_unsafe_markers(marker):
+    html = render_site_html({"name": "Ordinary site", "theme_config": {"template": marker}},
+                            {"title": "Home", "content": {}}, [])
+    assert "cz-shop--" not in html and '<script>alert(1)</script>' not in html
