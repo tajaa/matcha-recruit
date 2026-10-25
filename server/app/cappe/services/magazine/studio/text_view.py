@@ -19,7 +19,7 @@ from typing import Optional
 from ..rt import RtError, md_to_rt, normalize_rt, rt_to_md
 from ..story_schema import MAX_BLOCKS
 from .limits import CHAR_DEFAULTS, MAX_DOC_CHARS, PARA_DEFAULTS
-from .schema import flow_frame, len16, para_text, slice16
+from .schema import flow_frame, is_partner, len16, para_text, slice16
 from .identity import resolved_threads
 
 _HEADING = {"h1": 2, "h2": 2, "h3": 3}
@@ -31,8 +31,9 @@ def cover_image(doc: dict) -> Optional[dict]:
     if not doc.get("pages"):
         return None
     first = doc["pages"][0]["id"]
-    pics = [i for i in doc.get("items") or [] if i["kind"] == "image" and i.get("asset_id") and i["page"] == first
-            and not i.get("hidden") and not i.get("cutout")]
+    items = doc.get("items") or []
+    pics = [i for i in items if i["kind"] == "image" and i.get("asset_id") and i["page"] == first
+            and not i.get("hidden") and not is_partner(i, items)]
     return max(pics, key=lambda i: i["w"] * i["h"], default=None)
 
 
@@ -195,7 +196,7 @@ def text_blocks(doc: dict, paywall: Optional[int] = None) -> list[dict]:
                             dropcap[0] = True
                         nodes.append(_node(p))
             # The subject in front is its photo's cut-out: the photo is the picture.
-            elif item["kind"] == "image" and item.get("asset_id") and item is not cover and not item.get("cutout"):
+            elif item["kind"] == "image" and item.get("asset_id") and item is not cover and not is_partner(item, doc.get("items") or []):
                 if len(blocks) >= MAX_BLOCKS - 2:
                     continue
                 flush()

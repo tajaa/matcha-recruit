@@ -40,7 +40,7 @@ from . import graphics
 from .fonts import showing
 from .identity import parent_doc, resolve_char, resolve_item, resolved_threads
 from .limits import CHAR_DEFAULTS, PARA_DEFAULTS
-from .schema import flow_frame, len16, para_text, slice16, spreads
+from .schema import flow_frame, is_partner, len16, para_text, slice16, spreads
 
 CSS = (Path(__file__).resolve().parent / "layout.css").read_text(encoding="utf-8")
 
@@ -225,7 +225,7 @@ def _img(asset: dict, *, sizes: str, eager: bool, style: str) -> str:
     return f"<img {' '.join(attrs)} />"
 
 
-def _image_html(item: dict, assets: dict[str, dict], page_w: float, eager: bool) -> str:
+def _image_html(item: dict, assets: dict[str, dict], page_w: float, eager: bool, partner: bool = False) -> str:
     radius = u(item["radius"]) if item.get("radius") else ""
     style = _box(item)
     if item.get("fill"):
@@ -240,7 +240,7 @@ def _image_html(item: dict, assets: dict[str, dict], page_w: float, eager: bool)
             pic += f";transform:scale({n(item['zoom'] / 100)});transform-origin:{n(item['fx'])}% {n(item['fy'])}%"
         img = _img(asset, sizes=_image_sizes(item, page_w), eager=eager, style=pic)
         # The subject in front is its picture's cut-out: the picture behind it prints the credit.
-        credit = "" if item.get("cutout") else credit_html(asset)
+        credit = "" if partner else credit_html(asset)
         if img:
             inner = img + (f'<figcaption class="lyt-credit">{credit}</figcaption>' if credit else "")
     return f'<figure class="lyt-item lyt-img" style="{style}">{inner}{_stroke(item, radius)}</figure>'
@@ -289,7 +289,7 @@ def item_html(item: dict, doc: dict, assets: dict[str, dict], threads: Threads, 
     if kind == "text":
         return _text_html(item, threads, used)
     if kind == "image":
-        return _image_html(item, assets, doc["size"]["w"], eager)
+        return _image_html(item, assets, doc["size"]["w"], eager, is_partner(item, doc.get("items") or []))
     if kind == "line":
         return _line_html(item)
     if kind == "graphic":

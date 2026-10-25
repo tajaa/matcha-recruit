@@ -1,7 +1,7 @@
 import { AlignCenter, AlignJustify, AlignLeft, AlignRight, Underline } from 'lucide-react'
 import { hasItalic, weightsOf } from '../../../magazine/design/fontStack'
 import FontField from '../../../magazine/workspace/FontField'
-import { CUTS } from '../../fonts/cuts'
+import { CUTS, CUT_BY_NAME } from '../../fonts/cuts'
 import { WEIGHT_NAMES } from '../../../magazine/workspace/fontPreview'
 import { ColorField, IconBtn, NumberField, Row, Section, Seg, Select } from '../../../magazine/workspace/controls'
 import { CUSTOM_FAMILY, customFamily } from '../../model/doc'
@@ -32,16 +32,20 @@ const OT_NAMES: Record<string, string> = {
   ...Object.fromEntries(Array.from({ length: 20 }, (_, k) => [`ss${String(k + 1).padStart(2, '0')}`, `Set ${k + 1}`])),
 }
 
-/** The face's own weights and italics: a catalog font's, or one of the magazine's. */
+/** The face's own weights and italics: a catalog font's, a Gummfit cut's, or one of the magazine's. */
 function stylesOf(font: string): { key: string; label: string }[] {
   const own = CUSTOM_FAMILY.test(font) ? customFamily(font) : undefined
   if (own) {
-    return [...own].sort((a, b) => a.weight - b.weight || Number(a.italic) - Number(b.italic))
+    // A replaced face and its replacement are one style.
+    const styles = new Map(own.map((f) => [styleKey(f.weight, f.italic), f]))
+    return [...styles.values()].sort((a, b) => a.weight - b.weight || Number(a.italic) - Number(b.italic))
       .map((f) => ({ key: styleKey(f.weight, f.italic), label: `${WEIGHT_NAMES[f.weight] ?? f.weight}${f.italic ? ' italic' : ''}` }))
   }
-  return weightsOf(font).flatMap((w) => [
+  // A Gummfit cut isn't in the catalog: its own weights and italics.
+  const cut = CUT_BY_NAME.get(font)
+  return (cut ? cut.w : weightsOf(font)).flatMap((w) => [
     { key: styleKey(w, false), label: WEIGHT_NAMES[w] ?? String(w) },
-    ...(hasItalic(font, w) ? [{ key: styleKey(w, true), label: `${WEIGHT_NAMES[w] ?? w} italic` }] : []),
+    ...((cut ? cut.i.includes(w) : hasItalic(font, w)) ? [{ key: styleKey(w, true), label: `${WEIGHT_NAMES[w] ?? w} italic` }] : []),
   ])
 }
 
@@ -86,7 +90,7 @@ export function CharacterPanel() {
         <NumberField label="Tracking" short="VA" value={char.track} min={-500} max={2000} step={5} places={0}
           onChange={(track) => set({ track })} />
         <NumberField label="Kerning (⌥← ⌥→ at the caret)" short="AV" value={char.kern} min={LIMITS.KERN_MIN} max={LIMITS.KERN_MAX} step={5} places={0}
-          onChange={(kern) => set({ kern })} />
+          onChange={(kern) => { if (!(s.editing && c.editor.kernTo(kern))) set({ kern }) }} />
       </Row>
       <div className="flex items-center justify-end">
         <IconBtn title="Underline" active={char.u} onClick={() => set({ u: !char.u })}><Underline className="h-3.5 w-3.5" /></IconBtn>

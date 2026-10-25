@@ -395,8 +395,11 @@ def _own(font=OWN, wt=400, it=True):
 
 
 def test_a_magazines_own_font_is_set_at_its_nearest_face_and_carried_with_the_story():
-    doc = S.normalize_doc(_own(), None, {OWN: [FACE, {**FACE, "weight": 300, "italic": False, "sha": "5" * 64}]})
-    assert doc["threads"][0]["paras"][0]["runs"][0] == {"t": "Mast", "font": OWN, "wt": 300}  # nearest; it has no italic
+    faces = {OWN: [FACE, {**FACE, "weight": 300, "italic": False, "sha": "5" * 64}]}
+    doc = S.normalize_doc(_own(), None, faces)
+    assert doc["threads"][0]["paras"][0]["runs"][0] == {"t": "Mast", "font": OWN, "wt": 700, "it": True}  # the style first
+    doc = S.normalize_doc(_own(it=False), None, faces)
+    assert doc["threads"][0]["paras"][0]["runs"][0] == {"t": "Mast", "font": OWN, "wt": 300}  # its only upright weight
     assert [f["sha"] for f in doc["faces"]] == ["5" * 64, "4" * 64]
     assert set(doc["faces"][0]) == set(S.FACE_KEYS)
 

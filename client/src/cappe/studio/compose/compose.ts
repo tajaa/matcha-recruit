@@ -191,6 +191,21 @@ export function compose(paras: Para[], frames: TextItem[], m: Measure, wraps?: W
       cap = { n, w: m.width({ ...c, size }, capText) + c.size * 0.35, size, reg: -1, x: 0, lead }
     }
     const k0 = lines.length
+    /** Record the cap of the lines set (also when the text ran out of room). A
+     *  paragraph shorter than the cap ends below it, so the next one clears it. */
+    const finishCap = () => {
+      if (!cap || cap.reg < 0) return
+      const deep = lines.length - k0 >= pa.dc && regOf[k0 + pa.dc - 1] === cap.reg
+      caps.push({ p, n: cap.n, x: cap.x, size: cap.size, k0, ref: deep ? k0 + pa.dc - 1 : -1,
+        below: deep ? 0 : (pa.dc - 1) * cap.lead })
+      const last = lines.length - 1
+      if (deep || regOf[last] !== cap.reg) return
+      const bottom = lines[k0][5] + (pa.dc - 1) * cap.lead
+      if (base !== null && bottom > base) {
+        descs[last] += bottom - base
+        base = bottom
+      }
+    }
     let i = 0
     let first = true
     let lineNo = 0
@@ -198,7 +213,7 @@ export function compose(paras: Para[], frames: TextItem[], m: Measure, wraps?: W
     let drop = 0 // how far a line was moved down to find room beside what text wraps
     let broke = false
     while (i < toks.length || trailingEmpty) {
-      if (r >= regs.length) return false
+      if (r >= regs.length) { finishCap(); return false }
       const reg = regs[r]
       if (mend.breakAt === lineNo && !broke) {
         broke = true
@@ -267,11 +282,7 @@ export function compose(paras: Para[], frames: TextItem[], m: Measure, wraps?: W
       if (i >= toks.length) break
       i = line.next
     }
-    if (cap && cap.reg >= 0) {
-      const deep = lines.length - k0 >= pa.dc && regOf[k0 + pa.dc - 1] === cap.reg
-      caps.push({ p, n: cap.n, x: cap.x, size: cap.size, k0, ref: deep ? k0 + pa.dc - 1 : -1,
-        below: deep ? 0 : (pa.dc - 1) * cap.lead })
-    }
+    finishCap()
     return true
   }
 

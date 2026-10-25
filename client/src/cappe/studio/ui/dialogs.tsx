@@ -200,12 +200,12 @@ export function PictureDialog({ cutout, subject }: { cutout?: boolean; subject?:
   }
   return (
     <PictureEditor siteId={c.siteId} asset={target.asset} startIn={cutout || subject ? 'cutout' : 'adjust'} onClose={close}
-      onHelp={(section) => c.store.set({ guide: section })}
-      onDone={(saved) => {
+      onHelp={(section) => c.store.set({ guide: section })} backing={subject}
+      onDone={(saved, backing) => {
         const asset = toAsset(saved)
-        c.store.set((s) => ({ assets: { ...s.assets, [saved.id]: asset } }))
-        // The subject in front: the photo stays, its cut-out goes over the text.
-        if (subject && isCutout(asset)) void placeSubject(c, target.frame, asset)
+        c.store.set((s) => ({ assets: { ...s.assets, [saved.id]: asset, ...(backing ? { [backing.id]: toAsset(backing) } : {}) } }))
+        // The subject in front: the photo (as edited, without the cut-out) stays, its cut-out goes over the text.
+        if (subject && isCutout(asset)) void placeSubject(c, target.frame, asset, backing?.id)
         else c.store.edit((d) => patchItems(d, [target.frame], { asset_id: saved.id }))
         close()
       }} />

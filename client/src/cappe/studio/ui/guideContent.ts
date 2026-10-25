@@ -201,7 +201,8 @@ export const GUIDE: GuideSection[] = [
       'Upload a TTF, OTF, WOFF or WOFF2 file (up to 10 MB) and give it a name. Add each weight and italic of a family under the same name, and they become one font with its styles.',
       'Tick that you hold a licence that lets you use it on a website: readers’ pages load it from Gummfit, as they load the Studio’s own fonts.',
       'The Studio keeps a cleaned copy of the file, never under its real name. Your fonts are this magazine’s, offered in Your fonts in every story of it.',
-      'Remove takes a font off the list. Pages that already set it keep it; editorial collections and other magazines set its text in the default face instead.',
+      'Remove takes a font off the list. Pages that already set it keep it, even after you add a replacement in the same weight and style: the replacement is for text you set from then on. Editorial collections and other magazines set its text in the default face instead.',
+      'A font with only italics (or only upright styles) sets any text you give it in the style it has.',
     ],
   },
   {
@@ -257,10 +258,10 @@ export const GUIDE: GuideSection[] = [
     id: 'subject', group: 'Pictures', icon: PersonStanding, title: 'The subject in front of the lettering',
     body: 'For covers: the model stands in front of the masthead, with the letters behind them.',
     points: [
-      'Put the photo behind the masthead, select it, and click Put the subject in front in the Object panel. If the photo has no cut-out yet, the Picture Editor opens at Cut out: click the person, then Done.',
+      'Put the photo behind the masthead, select it, and click Put the subject in front in the Object panel. If the photo has no cut-out yet, the Picture Editor opens at Cut out: click the person, then Done. A crop, turn or look made there goes on the photo behind as well, so the two still line up.',
       'The photo stays behind the text, and a frame showing its cut-out goes over the text at exactly the same place. The two are linked, so changing the photo’s focus or zoom moves both.',
       'Resize the new frame to choose which letters the subject covers: shrink it to the head, say, so they cross only the middle of the masthead.',
-      'It’s clicked only on the subject, so the lettering around it stays easy to select and type in. Its credit is the photo’s, printed once.',
+      'It’s clicked only on the subject, so the lettering around it stays easy to select and type in. Its credit is the photo’s, printed once; delete or hide the photo and the cut-out prints its own.',
     ],
   },
   {

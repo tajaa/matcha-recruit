@@ -230,9 +230,9 @@ export function applyPara(paras: Para[], from: number, to: number, attrs: ParaAt
  *  font's own kerning of each pair in it is written into its letters
  *  (`width`: a run's text measured as the composer measures it; `resolve`:
  *  the type a run is set in): what was set stays set, and the step starts
- *  from there. */
+ *  from there. `absolute`: `step` is the kerning itself (the panel's field). */
 export function kernAt(paras: Para[], p: number, offset: number, step: number,
-  width: (c: FullChar, text: string) => number, resolve: (r: CharAttrs) => FullChar = charOf): Para[] {
+  width: (c: FullChar, text: string) => number, resolve: (r: CharAttrs) => FullChar = charOf, absolute = false): Para[] {
   const text = paraText(paras[p])
   const chars: { s: number; e: number }[] = []
   for (let at = 0; at < text.length;) {
@@ -249,7 +249,7 @@ export function kernAt(paras: Para[], p: number, offset: number, step: number,
   const typeAt = (c: { s: number; e: number }) => resolve(charAt(out[p], c.e))
   for (let j = a; j <= b; j++) {
     const here = typeAt(chars[j])
-    if (here.kern) return applyKern(out, p, chars[k], step, typeAt) // kerned by hand already: the font's pairs are in it
+    if (here.kern) return applyKern(out, p, chars[k], step, typeAt, absolute) // kerned by hand already: the font's pairs are in it
   }
   for (let j = a; j < b; j++) {
     const x = chars[j], y = chars[j + 1]
@@ -259,11 +259,12 @@ export function kernAt(paras: Para[], p: number, offset: number, step: number,
     const pair = Math.round(((width(c, one + two) - width(c, one) - width(d, two)) / c.size) * 1000)
     if (pair) out = applyChar(out, [p, x.s], [p, x.e], { kern: clamp(pair, LIMITS.KERN_MIN, LIMITS.KERN_MAX) })
   }
-  return applyKern(out, p, chars[k], step, typeAt)
+  return applyKern(out, p, chars[k], step, typeAt, absolute)
 }
 
-function applyKern(paras: Para[], p: number, c: { s: number; e: number }, step: number, typeAt: (c: { s: number; e: number }) => FullChar): Para[] {
-  return applyChar(paras, [p, c.s], [p, c.e], { kern: clamp(typeAt(c).kern + step, LIMITS.KERN_MIN, LIMITS.KERN_MAX) })
+function applyKern(paras: Para[], p: number, c: { s: number; e: number }, step: number,
+  typeAt: (c: { s: number; e: number }) => FullChar, absolute: boolean): Para[] {
+  return applyChar(paras, [p, c.s], [p, c.e], { kern: clamp(absolute ? step : typeAt(c).kern + step, LIMITS.KERN_MIN, LIMITS.KERN_MAX) })
 }
 
 /** The attributes at a place: of the character before it (as typing takes). */

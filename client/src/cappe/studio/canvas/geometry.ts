@@ -3,6 +3,7 @@
 // centre), what is under a point, and what a moving edge snaps to.
 
 import { onSubject } from '../compose/wrap'
+import { isPartner } from '../model/subject'
 import { pageSide, spreads as spreadsOf } from '../model/doc'
 import type { Doc, Item } from '../model/types'
 
@@ -95,7 +96,7 @@ export function hitItem(doc: Doc, lay: Layout, p: Pt, slop = 0, held?: ReadonlyS
     // The subject in front (model/subject.ts) is clicked only on the subject:
     // the lettering under the rest of its frame stays in reach. A selected
     // one is held whole, so it can be moved and resized.
-    if (o && hits(item, o, p, slop) && (item.kind !== 'image' || !item.cutout || held?.has(item.id)
+    if (o && hits(item, o, p, slop) && (!isPartner(item, doc.items) || held?.has(item.id)
       || onSubject(item, p.x - o.x - item.x, p.y - o.y - item.y))) return item
   }
   return null

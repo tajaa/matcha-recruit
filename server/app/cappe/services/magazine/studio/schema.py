@@ -498,6 +498,16 @@ _FONT_KEY = re.compile(r'"font":"(u-[0-9a-f]{16})"')
 FACE_KEYS = ("family", "name", "weight", "italic", "sha", "bytes", "upm", "asc", "desc", "cap", "x", "features")
 
 
+def is_partner(item: dict, items: list) -> bool:
+    """A cut-out frame set over its photo (the subject in front, client
+    model/subject.ts `isPartner`) while that photo is there: one whose photo
+    was deleted or hidden is a picture of its own, credit and all."""
+    link = item.get("link")
+    return bool(item.get("cutout") and link) and any(
+        o is not item and o.get("kind") == "image" and o.get("link") == link and not o.get("cutout") and not o.get("hidden")
+        for o in items)
+
+
 def normalize_doc(raw: Any, bank: Optional[Mapping[str, dict]] = None,
                   faces_map: Optional[Mapping[str, list]] = None) -> dict:
     """The storable form of a paged story's document. Raises `DocError` for

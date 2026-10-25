@@ -12,14 +12,46 @@ import type { Asset, Doc, ImageItem, Item, Shape } from './types'
 /** Whether a library picture is a cut-out (a Picture Editor edit with one). */
 export const isCutout = (a: Asset | undefined): boolean => !!a && a.kind === 'edit' && !!a.recipe?.cutout
 
+const canon = (v: unknown): string => Array.isArray(v) ? `[${v.map(canon).join(',')}]`
+  : v && typeof v === 'object' ? `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${canon((v as Record<string, unknown>)[k])}`).join(',')}}`
+    : JSON.stringify(v)
+
+/** What an edit did besides its cut-out (its crop, turn, flip and look), as a key. */
+function unmaskedKey(a: Asset): string {
+  const rest: Record<string, unknown> = { ...(a.recipe ?? {}) }
+  delete rest.cutout
+  return canon(rest)
+}
+
+/** The picture behind a cut-out: its photo as it was when cut out, so the two
+ *  line up pixel for pixel. The photo itself when the cut-out did nothing
+ *  else to it, else an edit of it made the same way without the cut-out
+ *  (the Picture Editor saves one with it); null when there is none. */
+export function backingFor(assets: Record<string, Asset>, cutout: Asset): string | null {
+  if (!isCutout(cutout) || !cutout.parent) return null
+  const key = unmaskedKey(cutout)
+  if (key === '{}') return cutout.parent
+  const same = Object.values(assets).filter((a) => a.kind === 'edit' && !isCutout(a) && a.parent === cutout.parent && unmaskedKey(a) === key)
+  return same.length ? same[same.length - 1].id : null
+}
+
 /** The cut-out to set in front of a frame's picture: the picture itself when
- *  it is one (its photo is its parent), else the newest cut-out made of it. */
+ *  it is one (with a picture to go behind it), else the newest cut-out made
+ *  of exactly that picture. */
 export function cutoutFor(assets: Record<string, Asset>, assetId: string | null): Asset | null {
   if (!assetId) return null
   const own = assets[assetId]
-  if (isCutout(own)) return own!.parent && assets[own!.parent] ? own! : null
-  const made = Object.values(assets).filter((a) => isCutout(a) && a.parent === assetId)
+  if (isCutout(own)) return backingFor(assets, own!) ? own! : null
+  const made = Object.values(assets).filter((a) => isCutout(a) && backingFor(assets, a) === assetId)
   return made.length ? made[made.length - 1] : null
+}
+
+/** A cut-out frame set over its photo (the subject in front, server
+ *  schema.is_partner) while that photo is there: one whose photo was deleted
+ *  or hidden is a picture of its own, credit and all. */
+export function isPartner(item: Item, items: Item[]): item is ImageItem {
+  if (item.kind !== 'image' || !item.cutout || !item.link) return false
+  return items.some((o) => o !== item && o.kind === 'image' && o.link === item.link && !o.cutout && !o.hidden)
 }
 
 const overlaps = (a: Item, b: Item) => a.page === b.page && a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
@@ -35,16 +67,17 @@ export function subjectProblem(doc: Doc, id: string): string | null {
   return null
 }
 
-/** The photo in frame `id` kept behind the text it overlaps, and a linked
- *  frame over that text showing `cutout` (its silhouette `shape`). Returns
- *  the partner's id. */
-export function putSubjectInFront(doc: Doc, id: string, cutout: Asset, shape: Shape): { doc: Doc; id: string } | null {
-  if (subjectProblem(doc, id) || !cutout.parent) return null
+/** The photo in frame `id` kept behind the text it overlaps (as `backing`,
+ *  backingFor: the picture the cut-out lines up with), and a linked frame
+ *  over that text showing `cutout` (its silhouette `shape`). Returns the
+ *  partner's id. */
+export function putSubjectInFront(doc: Doc, id: string, cutout: Asset, shape: Shape, backing: string): { doc: Doc; id: string } | null {
+  if (subjectProblem(doc, id) || !isCutout(cutout)) return null
   const photo = doc.items.find((i): i is ImageItem => i.id === id && i.kind === 'image')!
   const taken = doc.items.flatMap((i) => (i.kind === 'image' && i.link ? [i.link] : []))
   const link = photo.link ?? newId('lk', taken)
   const partnerId = newId('i', allIds(doc))
-  const base: ImageItem = { ...photo, asset_id: cutout.parent, link, shape }
+  const base: ImageItem = { ...photo, asset_id: backing, link, shape }
   const partner: ImageItem = { ...photo, id: partnerId, asset_id: cutout.id, link, cutout: true, shape, caption: '', fill: null,
     stroke: null, locked: false, hidden: false, name: 'Subject in front' }
   delete partner.wrap

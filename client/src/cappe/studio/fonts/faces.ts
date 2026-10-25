@@ -24,11 +24,14 @@ export class FaceBook {
   }
 
   /** Faces besides the manifest's: the magazine's own fonts (a story carries
-   *  those it names, `doc.faces`; the Studio lists the site's). */
+   *  those it names, `doc.faces`; the Studio lists the site's). The first face
+   *  of a style stays: a story opened in a face that has since been replaced
+   *  keeps it, as the server keeps the face a page carries (custom_fonts.doc_faces). */
   add(faces: Iterable<Face>): void {
     const list = [...faces]
     for (const f of list) {
-      this.byStyle.set(`${f.family}|${f.weight}|${f.italic ? 1 : 0}`, f)
+      const key = `${f.family}|${f.weight}|${f.italic ? 1 : 0}`
+      if (!this.byStyle.has(key)) this.byStyle.set(key, f)
       this.bySha.set(f.sha, f)
     }
     registerFaces(list)

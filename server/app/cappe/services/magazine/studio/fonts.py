@@ -119,6 +119,9 @@ def custom_face(family_key: Any, weight: Any, italic: Any) -> Optional[tuple[str
     faces = scope.get(family_key) or []
     if not faces:
         return None
-    # Ties go to the heavier, as nearest_weight.
-    wt = min((int(f["weight"]) for f in faces), key=lambda x: (abs(x - want), -x))
-    return family_key, wt, bool(italic) and any(int(f["weight"]) == wt and f["italic"] for f in faces)
+    # The style asked for when the family has it, else the other (an
+    # italic-only family sets upright text in italic); ties go to the
+    # heavier, as nearest_weight.
+    style = [f for f in faces if bool(f["italic"]) == bool(italic)] or faces
+    wt = min((int(f["weight"]) for f in style), key=lambda x: (abs(x - want), -x))
+    return family_key, wt, bool(style[0]["italic"])

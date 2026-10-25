@@ -129,13 +129,16 @@ def _cases() -> list[dict]:
                    {"t": "Vogue", "font": "Playfair Poster", "wt": 300, "size": 72},  # faces not built here: its stand-in
                    {"t": " Spring", "font": "Bodoni Moda Display", "wt": 700, "it": True, "size": 72}]}],
                    "comp": {"lines": [[0, 0, 0, len(cut_text), 0, 70, 400, 0]]}}]}
+    # The subject in front, its photo hidden: a picture of its own, credit and all.
+    lone = {**editorial, "items": [{**editorial["items"][1], "hidden": True}, editorial["items"][3]], "threads": []}
     out = []
     for name, raw, locked_from in [("composed text", composed, None), ("flowed text", flowed, None),
                                    ("pictures and shapes", pictures, None), ("locked pages", locked, 2),
                                    ("a4 pages", a4, None), ("uncomposed past the wall", flowed, 2),
                                    ("graphics", graphic_page, None), ("magazine identity", branded, None),
                                    ("identity locked pages", branded, 2), ("editorial type", editorial, None),
-                                   ("gummfit cuts", gummfit, None)]:
+                                   ("gummfit cuts", gummfit, None),
+                                   ("a cut-out alone", lone, None)]:
         doc = S.normalize_doc(raw, None, {OWN: [OWN_FACE]} if name == "editorial type" else None)
         html, used = R.pages_html(doc, ASSETS, locked_from=locked_from, label="Pages of 'Tide'")
         out.append({"name": name, "doc": doc, "locked_from": locked_from, "html": html,
@@ -173,6 +176,7 @@ def test_the_fixture_covers_what_it_says():
     assert 'class="lyt-dc"' in e["html"] and "font-feature-settings:'kern' 1,'liga' 1,'calt' 1,'onum' 1,'smcp' 1" in e["html"]
     assert "letter-spacing:calc(-0.1 * var(--u))" in e["html"]  # tracking 20 and kerning -30, at 10.5 pt
     assert e["html"].count("Photo: Ana") == 1  # the subject in front prints no credit of its own
+    assert cases["a cut-out alone"]["html"].count("Photo: Ana") == 1  # its photo hidden: it prints the credit
     assert e["doc"]["faces"] == [{k: OWN_FACE[k] for k in S.FACE_KEYS}] and "4" * 64 in e["faces_css"]
     cut = cases["gummfit cuts"]
     assert "font-family:'Playfair Display', Georgia" in cut["html"] and "f-6666666666666666" in cut["html"]
