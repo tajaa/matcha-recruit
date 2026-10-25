@@ -366,7 +366,7 @@ export function usePointer(scroller: RefObject<HTMLDivElement | null>, board: Re
     }
     const handle = target.closest<HTMLElement>('[data-handle]')?.dataset.handle
     if (handle) { e.preventDefault(); if (handle === 'rot') rotateItem(e, p); else resizeItem(e, p, handle); return }
-    const hit = hitItem(s.doc, lay, p, 3 / zoom())
+    const hit = hitItem(s.doc, lay, p, 3 / zoom(), new Set(s.selection))
     if (hit) {
       e.preventDefault()
       if (e.shiftKey) {

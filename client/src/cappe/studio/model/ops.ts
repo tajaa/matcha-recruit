@@ -2,8 +2,8 @@
 // document (or the same one when nothing changed). The canvas, the panels,
 // the menus and the keys all go through these.
 
-import { LIMITS, round } from './limits'
-import { allIds, mergeRuns, newId, newItem, paraText, sparseChar, sparsePara } from './doc'
+import { LIMITS, clamp, round } from './limits'
+import { LOCAL_KEYS, allIds, charOf, mergeRuns, newId, newItem, paraText, sparseChar, sparsePara, type FullChar } from './doc'
 import type { CharAttrs, Doc, Guide, Item, Kind, Para, ParaAttrs, Thread } from './types'
 
 type Box = { x: number; y: number; w: number; h: number }
@@ -193,7 +193,7 @@ export function applyChar(paras: Para[], from: Pos, to: Pos, attrs: CharAttrs): 
     if (start >= end && paraText(p).length) return p
     const runs = []
     const change = (r: CharAttrs) => {
-      const merged = { ...('style' in attrs ? {} : r), ...attrs }
+      const merged = { ...('style' in attrs ? local(r) : r), ...attrs }
       if ('color' in attrs && !('swatch' in attrs)) delete merged.swatch
       return sparseChar(merged, !!p.style)
     }
@@ -212,12 +212,59 @@ export function applyChar(paras: Para[], from: Pos, to: Pos, attrs: CharAttrs): 
   })
 }
 
+/** What a run keeps when a style is applied over it (doc.LOCAL_KEYS). */
+const local = (r: CharAttrs): CharAttrs => Object.fromEntries(LOCAL_KEYS.filter((k) => r[k]).map((k) => [k, r[k]]))
+
 /** Paragraph attributes set on the paragraphs `from` to `to`. */
 export function applyPara(paras: Para[], from: number, to: number, attrs: ParaAttrs): Para[] {
   const [a, b] = from <= to ? [from, to] : [to, from]
   return paras.map((p, k) => (k < a || k > b ? p : 'style' in attrs
-    ? { ...sparsePara(attrs), runs: p.runs.map((r) => ({ t: r.t, ...(r.style ? { style: r.style } : {}) })) }
+    ? { ...sparsePara(attrs), runs: p.runs.map((r) => ({ t: r.t, ...local(r), ...(r.style ? { style: r.style } : {}) })) }
     : { runs: p.runs, ...sparsePara({ ...p, ...attrs }) }))
+}
+
+/** Manual kerning: the space after the character before `offset` changed by
+ *  `step` thousandths of an em. A kerned letter is a span of its own, and no
+ *  browser kerns across a change of letter-spacing (the composer doesn't
+ *  across runs either), so the first time a word is kerned by hand the
+ *  font's own kerning of each pair in it is written into its letters
+ *  (`width`: a run's text measured as the composer measures it; `resolve`:
+ *  the type a run is set in): what was set stays set, and the step starts
+ *  from there. `absolute`: `step` is the kerning itself (the panel's field). */
+export function kernAt(paras: Para[], p: number, offset: number, step: number,
+  width: (c: FullChar, text: string) => number, resolve: (r: CharAttrs) => FullChar = charOf, absolute = false): Para[] {
+  const text = paraText(paras[p])
+  const chars: { s: number; e: number }[] = []
+  for (let at = 0; at < text.length;) {
+    const len = text.codePointAt(at)! > 0xffff ? 2 : 1
+    chars.push({ s: at, e: at + len })
+    at += len
+  }
+  const k = chars.findIndex((c) => c.e === offset)
+  if (k === -1 || /\s/.test(text.slice(chars[k].s, chars[k].e))) return paras
+  let a = k, b = k
+  while (a > 0 && !/\s/.test(text.slice(chars[a - 1].s, chars[a - 1].e))) a--
+  while (b < chars.length - 1 && !/\s/.test(text.slice(chars[b + 1].s, chars[b + 1].e))) b++
+  let out = paras
+  const typeAt = (c: { s: number; e: number }) => resolve(charAt(out[p], c.e))
+  for (let j = a; j <= b; j++) {
+    const here = typeAt(chars[j])
+    if (here.kern) return applyKern(out, p, chars[k], step, typeAt, absolute) // kerned by hand already: the font's pairs are in it
+  }
+  for (let j = a; j < b; j++) {
+    const x = chars[j], y = chars[j + 1]
+    const c = typeAt(x), d = typeAt(y)
+    if (c.font !== d.font || c.wt !== d.wt || c.it !== d.it || c.size !== d.size || c.ot !== d.ot) continue // set apart already
+    const one = text.slice(x.s, x.e), two = text.slice(y.s, y.e)
+    const pair = Math.round(((width(c, one + two) - width(c, one) - width(d, two)) / c.size) * 1000)
+    if (pair) out = applyChar(out, [p, x.s], [p, x.e], { kern: clamp(pair, LIMITS.KERN_MIN, LIMITS.KERN_MAX) })
+  }
+  return applyKern(out, p, chars[k], step, typeAt, absolute)
+}
+
+function applyKern(paras: Para[], p: number, c: { s: number; e: number }, step: number,
+  typeAt: (c: { s: number; e: number }) => FullChar, absolute: boolean): Para[] {
+  return applyChar(paras, [p, c.s], [p, c.e], { kern: clamp(absolute ? step : typeAt(c).kern + step, LIMITS.KERN_MIN, LIMITS.KERN_MAX) })
 }
 
 /** The attributes at a place: of the character before it (as typing takes). */

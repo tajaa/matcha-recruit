@@ -10,7 +10,7 @@ export const IDENTITY_LIMITS = { styles: 32, swatches: 24, parents: 8, parentIte
 export function starterIdentity(): MagazineIdentity {
   return { v: 1, name: 'Magazine identity',
     paragraphs: [
-      { id: 'ps1', name: 'Body', char: charOf({}), para: paraOf({ sa: 6 }) },
+      { id: 'ps1', name: 'Body', char: charOf({}), para: paraOf({ sa: 6, kw: 2, ko: 2 }) },
       { id: 'ps2', name: 'Heading', char: charOf({ font: 'Inter', wt: 600, size: 28 }), para: paraOf({ role: 'h2', sa: 12 }) },
       { id: 'ps3', name: 'Caption', char: { ...charOf({ font: 'Inter', size: 8 }), swatch: 'sw2' }, para: paraOf({ role: 'caption', sa: 4 }) },
     ],

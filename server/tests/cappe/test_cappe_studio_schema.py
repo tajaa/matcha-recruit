@@ -306,3 +306,126 @@ def test_a_picture_frame_keeps_its_link_only_when_it_has_one():
     assert by["i1"]["link"] == "lk1"
     assert "link" not in by["i2"] and "link" not in by["i3"] and "link" not in by["i4"]
 
+
+
+# ── editorial type (feature 4) ───────────────────────────────────────────────
+
+def test_kerning_and_opentype_features_are_kept_clamped_and_sorted():
+    a = S.char_attrs({"kern": 900, "ot": "swsh,smcp,bogus,smcp,kern"})
+    assert a["kern"] == L.KERN_MAX and a["ot"] == "smcp,swsh"
+    assert S.char_attrs({"kern": "x", "ot": ["smcp"]})["kern"] == 0
+    assert S.char_attrs({"ot": ["smcp"]})["ot"] == ""
+    doc = S.normalize_doc(_doc(threads=[{"id": "s1", "frames": ["t1"], "paras": [
+        {"runs": [{"t": "A", "kern": -40}, {"t": "V"}, {"t": "1984", "ot": "onum"}]}]}]))
+    assert doc["threads"][0]["paras"][0]["runs"] == [{"t": "A", "kern": -40}, {"t": "V"}, {"t": "1984", "ot": "onum"}]
+
+
+def test_drop_caps_and_keep_options_are_clamped():
+    p = S.para_attrs({"dc": 1, "dcn": 9, "kw": 0, "ko": 7, "runt": 2})
+    assert (p["dc"], p["dcn"], p["kw"], p["ko"], p["runt"]) == (0, L.DROPCAP_CHARS, 1, L.KEEP_MAX, 2)
+    assert S.para_attrs({"dc": 40})["dc"] == L.DROPCAP_LINES
+    doc = S.normalize_doc(_doc(threads=[{"id": "s1", "frames": ["t1"], "paras": [{"runs": [{"t": "Once"}], "dc": 3, "kw": 1}]}]))
+    assert doc["threads"][0]["paras"][0] == {"runs": [{"t": "Once"}], "dc": 3}  # defaults left out
+
+
+CAP_PARAS = [{"runs": [{"t": "Once upon"}]}, {"runs": [{"t": "😀 then"}]}]
+
+
+def test_a_drop_cap_is_kept_with_its_composition():
+    comp = {"lines": [[0, 0, 0, 9, 30, 12, 100, 0], [0, 1, 0, 7, 30, 30, 100, 0]], "caps": [[0, 1, 0, 36.123, 40]]}
+    assert S.valid_comp(comp, CAP_PARAS, 1)["caps"] == [[0, 1, 0, 36.12, 40]]
+    whole = {"lines": comp["lines"], "caps": [[1, 2, 0, 50, 40]]}  # the emoji, counted whole
+    assert S.valid_comp(whole, CAP_PARAS, 1)["caps"] == [[1, 2, 0, 50, 40]]
+    assert "caps" not in S.valid_comp({"lines": comp["lines"], "caps": []}, CAP_PARAS, 1)
+
+
+@pytest.mark.parametrize("caps", [
+    [[0, 4, 0, 36, 40]],  # more than three characters
+    [[1, 1, 0, 36, 40]],  # half the emoji
+    [[0, 1, 0, 36, 40], [0, 1, 0, 36, 40]],  # the same paragraph twice
+    [[2, 1, 0, 36, 40]],  # no such paragraph
+    [[0, 1, 0, 36, 0]],  # no size
+    [[0, 1, 0, float("nan"), 40]],
+    [[0, 1, 0, 36]],
+    "caps",
+])
+def test_a_drop_cap_that_isnt_of_this_text_drops_the_composition(caps):
+    comp = {"lines": [[0, 0, 0, 9, 30, 12, 100, 0], [0, 1, 0, 7, 30, 30, 100, 0]], "caps": caps}
+    assert S.valid_comp(comp, CAP_PARAS, 1) is None
+
+
+def _pic(**over):
+    return {"id": "i1", "kind": "image", "page": "p1", "x": 0, "y": 0, "w": 100, "h": 100, **over}
+
+
+def test_text_wrap_and_the_subject_in_front_are_checked():
+    shape = {"ar": 1.5, "rows": [[0.25, 0.75], [1, 0], [0.1234, 2]]}
+    items = S.normalize_doc(_doc(items=[
+        _pic(link="lk1", shape=shape, wrap={"m": "subject", "o": 999}),
+        _pic(id="i2", link="lk1", cutout=True, shape=shape),
+        _pic(id="i3", cutout=True, wrap={"m": "subject"}),  # no link: not a partner; no shape: its box
+        {"id": "r1", "kind": "rect", "page": "p1", "w": 10, "h": 10, "wrap": {"m": "subject", "o": 3}},
+        {"id": "l1", "kind": "line", "page": "p1", "w": 10, "h": 10, "wrap": {"m": "box"}},
+        {"id": "t1", "kind": "text", "page": "p1", "w": 10, "h": 10, "wrap": {"m": "box"}},
+        _pic(id="i4", wrap={"m": "around"}, shape={"ar": 1, "rows": []}),
+    ], threads=[]))["items"]
+    i1, i2, i3, r1, l1, t1, i4 = items
+    assert i1["shape"] == {"ar": 1.5, "rows": [[0.25, 0.75], [1, 0], [0.123, 1]]}
+    assert i1["wrap"] == {"m": "subject", "o": L.WRAP_OFFSET_MAX} and "cutout" not in i1
+    assert i2["cutout"] is True and "wrap" not in i2
+    assert "cutout" not in i3 and i3["wrap"] == {"m": "box", "o": 0}
+    assert r1["wrap"] == {"m": "box", "o": 3}
+    assert "wrap" not in l1 and "wrap" not in t1
+    assert "wrap" not in i4 and "shape" not in i4
+
+
+def test_a_shape_with_too_many_rows_or_bad_numbers_is_dropped():
+    assert S._shape({"ar": 1, "rows": [[0, 1]] * (L.WRAP_ROWS + 1)}) is None
+    assert S._shape({"ar": 1, "rows": [[0, "x"]]}) is None
+    assert S._shape({"ar": float("inf"), "rows": [[0, 1]]}) is None
+
+
+OWN = "u-0123456789abcdef"
+FACE = {"family": OWN, "name": "Canela", "weight": 700, "italic": True, "sha": "4" * 64, "bytes": 10, "upm": 1000,
+        "asc": 900, "desc": -250, "cap": 700, "x": 480, "features": ["smcp"], "id": "not stored"}
+
+
+def _own(font=OWN, wt=400, it=True):
+    return _doc(threads=[{"id": "s1", "frames": ["t1"], "paras": [{"runs": [{"t": "Mast", "font": font, "wt": wt, "it": it}]}]}])
+
+
+def test_a_magazines_own_font_is_set_at_its_nearest_face_and_carried_with_the_story():
+    faces = {OWN: [FACE, {**FACE, "weight": 300, "italic": False, "sha": "5" * 64}]}
+    doc = S.normalize_doc(_own(), None, faces)
+    assert doc["threads"][0]["paras"][0]["runs"][0] == {"t": "Mast", "font": OWN, "wt": 700, "it": True}  # the style first
+    doc = S.normalize_doc(_own(it=False), None, faces)
+    assert doc["threads"][0]["paras"][0]["runs"][0] == {"t": "Mast", "font": OWN, "wt": 300}  # its only upright weight
+    assert [f["sha"] for f in doc["faces"]] == ["5" * 64, "4" * 64]
+    assert set(doc["faces"][0]) == set(S.FACE_KEYS)
+
+
+def test_a_font_the_site_doesnt_have_falls_back_to_the_default():
+    doc = S.normalize_doc(_own(font="u-ffffffffffffffff"), None, {OWN: [FACE]})
+    assert "font" not in doc["threads"][0]["paras"][0]["runs"][0] and "faces" not in doc
+    assert "faces" not in S.normalize_doc(_own())  # no fonts given: none of the site's
+    assert "font" not in S.normalize_doc(_own())["threads"][0]["paras"][0]["runs"][0]
+    assert S.normalize_doc(_own(font="u-NOTAKEY0000000"), None, {})["threads"][0]["paras"][0]["runs"][0].get("font") is None
+
+
+def test_a_stored_page_names_its_own_fonts_as_it_was_saved():
+    # Rendering checks nothing more: the stored document was checked when saved.
+    a = S.char_attrs({"font": OWN, "wt": 649, "it": True})
+    assert (a["font"], a["wt"], a["it"]) == (OWN, 600, True)
+    from app.cappe.services.magazine.studio import fonts as F
+    with F.checking({}):
+        assert S.char_attrs({"font": OWN})["font"] == L.CHAR_DEFAULTS["font"]
+    with F.showing({"faces": [FACE]}):
+        assert F.face(OWN, 700, True) is FACE
+    assert F.face(OWN, 700, True) is None
+
+
+def test_an_identitys_own_fonts_are_checked_against_the_site():
+    from app.cappe.services.magazine.studio.identity import normalize_identity
+    raw = {"name": "House", "paragraphs": [{"id": "ps1", "name": "Masthead", "char": {"font": OWN, "wt": 700}}]}
+    assert normalize_identity(raw, None, {OWN: [FACE]})["paragraphs"][0]["char"]["font"] == OWN
+    assert normalize_identity(raw)["paragraphs"][0]["char"]["font"] == L.CHAR_DEFAULTS["font"]

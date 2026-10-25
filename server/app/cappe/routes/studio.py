@@ -39,6 +39,7 @@ from ..services.magazine.stories import POST_COLS, post_row, sync_post_assets
 from ..services.magazine.story_schema import referenced_asset_ids
 from ..services.magazine.studio import ask
 from ..services.magazine.studio import bank as studio_bank
+from ..services.magazine.studio import custom_fonts
 from ..services.magazine.studio.identity import portable_identity
 from ..services.magazine.studio.collections import MAX_COLLECTION_BYTES, MAX_COLLECTIONS, collection_doc
 from ..services.magazine.studio.schema import DocError
@@ -126,7 +127,7 @@ async def save_identity(site_id: UUID, body: StudioIdentitySave, account: CappeA
         await get_owned_site(conn, site_id, account.id)
         try:
             bank = await studio_bank.doc_graphics(conn, {"identity": body.identity})
-            identity = portable_identity(body.identity, bank)
+            identity = portable_identity(body.identity, bank, await custom_fonts.doc_faces(conn, site_id, {"identity": body.identity}))
         except DocError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         async with conn.transaction():

@@ -7,8 +7,8 @@
 
 import type { LucideIcon } from 'lucide-react'
 import {
-  BookOpen, Columns2, FileStack, Image, Keyboard, LayoutGrid, LayoutTemplate, Link2, MousePointer2, Move, PanelsTopLeft, Ruler, Save,
-  Scissors, Shapes, SlidersHorizontal, Smartphone, Sparkles, Type, ZoomIn,
+  BookOpen, CaseSensitive, Columns2, FileStack, FileType, Image, Keyboard, LayoutGrid, LayoutTemplate, Link2, MousePointer2, Move, PanelsTopLeft,
+  PersonStanding, Ruler, Save, Scissors, Shapes, SlidersHorizontal, Smartphone, Sparkles, Type, WrapText, ZoomIn,
 } from 'lucide-react'
 
 export type GuideSection = {
@@ -166,7 +166,7 @@ export const GUIDE: GuideSection[] = [
     id: 'text', group: 'Words', icon: Type, title: 'Type',
     points: [
       'With the Type tool (T), click a page or drag out a frame, then type. Click any text frame later to type in it again.',
-      'Select words and use the Character panel: the font (95 faces, each with its weights and italics), size, leading, tracking, colour and underline.',
+      'Select words and use the Character panel: the font (95 faces, each with its weights and italics, or one of your own), size, leading, tracking, kerning, colour and underline.',
       'The Paragraph panel sets a paragraph’s alignment (left, centre, right or justified), indents, and space before and after.',
       'Paragraph styles (Body text, Headline, Heading, Subheading, Pull quote, Caption) also say what each paragraph is in the Text view readers get on phones.',
       'Select a text frame (not its words) to set its columns, gutter, inset and vertical alignment in the Object panel.',
@@ -180,6 +180,28 @@ export const GUIDE: GuideSection[] = [
       'Click a frame’s bottom-right box, then click another text frame: the text continues there. The status bar reminds you while you choose; Esc stops.',
       'A red + in that box, and “Some text doesn’t fit” in the status bar, mean there’s more text than room. Make the frame bigger or flow it into another one.',
       'Stop the text flowing on from here, in the Object panel, ends the chain at that frame.',
+    ],
+  },
+  {
+    id: 'editorial', group: 'Words', icon: CaseSensitive, title: 'Editorial type',
+    body: 'The finer controls a magazine’s type needs, in the Character and Paragraph panels.',
+    points: [
+      'Kerning: click between two letters and press ⌥→ to open the space or ⌥← to close it (with ⌘, five times as far). The Kerning field shows and sets it; with letters selected, ⌥← and ⌥→ change their tracking. A headline’s spacing is set pair by pair this way.',
+      'Alternates and figures: select letters and turn on what their font offers, such as small caps, old-style or tabular figures, fractions, swashes, rare ligatures or a stylistic set. Select a single letter and try Alternates or a Set to swap in another drawing of it.',
+      'Drop cap: in the Paragraph panel, choose how many lines deep (2 to 6) and how many letters (1 to 3). The cap grows to fill those lines and the lines beside it move over.',
+      'Keep last lines and Keep first lines stop a column or frame break from leaving one or two of a paragraph’s lines alone at the top or foot of a column (widows and orphans). Last line words stops a paragraph ending on a single short word. They change where lines break, so the text may run a little longer.',
+      'A style applied over letters keeps their kerning and alternates: those are choices made letter by letter.',
+    ],
+  },
+  {
+    id: 'fonts', group: 'Words', icon: FileType, title: 'Your own fonts',
+    body: 'Fonts you hold a licence for can be added to your magazine and set like any other. Character panel → Add your own font (or Manage).',
+    points: [
+      'Upload a TTF, OTF, WOFF or WOFF2 file (up to 10 MB) and give it a name. Add each weight and italic of a family under the same name, and they become one font with its styles.',
+      'Tick that you hold a licence that lets you use it on a website: readers’ pages load it from Gummfit, as they load the Studio’s own fonts.',
+      'The Studio keeps a cleaned copy of the file, never under its real name. Your fonts are this magazine’s, offered in Your fonts in every story of it.',
+      'Remove takes a font off the list. Pages that already set it keep it, even after you add a replacement in the same weight and style: the replacement is for text you set from then on. Editorial collections and other magazines set its text in the default face instead.',
+      'A font with only italics (or only upright styles) sets any text you give it in the style it has.',
     ],
   },
   {
@@ -223,6 +245,25 @@ export const GUIDE: GuideSection[] = [
     ],
   },
   {
+    id: 'wrap', group: 'Pictures', icon: WrapText, title: 'Text around pictures',
+    body: 'Select a picture, shape or graphic and choose a Text wrap in the Object panel: text on the same page keeps away from it.',
+    points: [
+      'Around the box keeps text off the frame’s whole rectangle. Around the subject (for a picture with a cut-out) follows the person or thing in it, line by line, wherever the crop puts them.',
+      'Distance sets how much room is kept around it. Each line takes the widest space left beside the picture at its height.',
+      'Moving the picture sets the text again around it. Text in a frame that wraps something isn’t centred or spread vertically.',
+    ],
+  },
+  {
+    id: 'subject', group: 'Pictures', icon: PersonStanding, title: 'The subject in front of the lettering',
+    body: 'For covers: the model stands in front of the masthead, with the letters behind them.',
+    points: [
+      'Put the photo behind the masthead, select it, and click Put the subject in front in the Object panel. If the photo has no cut-out yet, the Picture Editor opens at Cut out: click the person, then Done. A crop, turn or look made there goes on the photo behind as well, so the two still line up.',
+      'The photo stays behind the text, and a frame showing its cut-out goes over the text at exactly the same place. The two are linked, so changing the photo’s focus or zoom moves both.',
+      'Resize the new frame to choose which letters the subject covers: shrink it to the head, say, so they cross only the middle of the masthead.',
+      'It’s clicked only on the subject, so the lettering around it stays easy to select and type in. Its credit is the photo’s, printed once; delete or hide the photo and the cut-out prints its own.',
+    ],
+  },
+  {
     id: 'save', group: 'Finish', icon: Save, title: 'Saving, versions and publishing',
     points: [
       'Changes save a moment after you make them; the status bar says Saved.',
@@ -255,6 +296,7 @@ export const MORE_KEYS: [string, string][] = [
   ['Alt + drag', 'Move a copy'],
   ['Double-click', 'Type in a text frame, edit a picture'],
   ['\\ (Picture Editor)', 'Hold to see the picture before'],
+  ['⌥← / ⌥→ (typing)', 'Kern the two letters at the caret (⌥⌘: ×5); with letters selected, their tracking'],
   ['⌥← / ⌥→ (issue board)', 'Move the selected pages a spread earlier or later'],
   ['Shift-click / ⌘-click (issue board)', 'Select a run of pages / add a page'],
 ]

@@ -3,6 +3,8 @@
 
 import { boardOffset } from '../canvas/geometry'
 import { acrossSpread, facingPage, groupOf, linkFrames, linkProblem, unlinkFrames } from '../model/crops'
+import { cutoutFor, subjectProblem } from '../model/subject'
+import { placeSubject } from './subject'
 import { allIds, newId } from '../model/doc'
 import { SPINE_CLEAR } from '../model/gutter'
 import { resolveItem, resolveParas } from '../model/identity'
@@ -198,6 +200,15 @@ export const COMMANDS: Command[] = [
   { id: 'place', label: 'Place a picture…', keys: '⌘P', run: ({ store }) => store.set({ dialog: 'library' }) },
   { id: 'edit-picture', label: 'Edit picture…', keys: '⇧⌘E', enabled: pictureSelected, run: ({ store }) => store.set({ dialog: 'picture' }) },
   { id: 'cut-out', label: 'Cut out the subject…', enabled: pictureSelected, run: ({ store }) => store.set({ dialog: 'cutout' }) },
+  { id: 'subject-front', label: 'Put the subject in front…', enabled: (s) => pictureSelected(s) && !subjectProblem(s.doc, s.selection[0]),
+    run: (c) => {
+      const s = c.store.get()
+      const frame = s.doc.items.find((i) => i.id === s.selection[0])
+      const cut = frame?.kind === 'image' ? cutoutFor(s.assets, frame.asset_id) : null
+      if (cut) void placeSubject(c, frame!.id, cut)
+      else c.store.set({ dialog: 'subject' })
+    } },
+  { id: 'fonts', label: 'Your fonts…', run: ({ store }) => store.set({ dialog: 'fonts' }) },
   { id: 'across-spread', label: 'Run the picture across the spread', enabled: spreadable, run: (c) => across(c, 0) },
   { id: 'spine-clear', label: 'Split the picture clear of the spine', enabled: spreadable, run: (c) => across(c, SPINE_CLEAR) },
   { id: 'link-crops', label: 'Link crops (one picture through the frames)', enabled: linkable,

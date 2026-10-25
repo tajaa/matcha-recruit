@@ -30,10 +30,16 @@ def _rows(raw, key, limit):
     return rows
 
 
-def normalize_identity(raw, bank=None):
+def normalize_identity(raw, bank=None, faces_map=None):
+    """`faces_map`: the site's own fonts it names (`custom_fonts.doc_faces`),
+    when it is checked on its own rather than inside a story."""
+    from . import fonts
     from .schema import DocError
     try:
-        return _normalize_identity(raw, bank)
+        if faces_map is None and fonts.checking_faces() is not None:
+            return _normalize_identity(raw, bank)
+        with fonts.checking(faces_map):
+            return _normalize_identity(raw, bank)
     except (TypeError, OverflowError) as exc:
         raise DocError("This magazine identity contains malformed design data.") from exc
 
@@ -151,10 +157,10 @@ def parent_doc(doc, parent):
             "threads": parent["threads"], "identity": identity, "paywall_page": None}
 
 
-def portable_identity(raw, bank=None):
+def portable_identity(raw, bank=None, faces_map=None):
     # Compositions belong to the source font context; the Studio composes the
     # shared snapshot on import. Paragraph/character references remain live.
-    out = deepcopy(normalize_identity(raw, bank))
+    out = deepcopy(normalize_identity(raw, bank, faces_map))
     for p in out["parents"]:
         for t in p["threads"]:
             t.pop("comp", None)

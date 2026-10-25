@@ -26,6 +26,13 @@ export const LIMITS = {
   SIZE_MAX: 1296,
   TRACK_MIN: -500,
   TRACK_MAX: 2000,
+  KERN_MIN: -500,
+  KERN_MAX: 500,
+  DROPCAP_LINES: 6,
+  DROPCAP_CHARS: 3,
+  KEEP_MAX: 3,
+  WRAP_ROWS: 64,
+  WRAP_OFFSET_MAX: 144,
   INDENT_MAX: 1000,
   LEAD_MAX: 2000,
   GUTTER_MAX: 288,
@@ -43,8 +50,10 @@ export const LIMITS = {
   VALIGNS: ['top', 'center', 'bottom', 'justify'],
   FITS: ['fill', 'fit', 'stretch'],
   GRAPHIC_FITS: ['contain', 'stretch', 'tile'],
-  CHAR_DEFAULTS: { font: 'Source Serif 4', wt: 400, it: false, size: 10.5, track: 0, color: '#1a1a1a', u: false },
-  PARA_DEFAULTS: { align: 'l', li: 0, ri: 0, fi: 0, sb: 0, sa: 0, lead: 0, role: 'p' },
+  WRAP_MODES: ['box', 'subject'],
+  OT_TAGS: ['c2sc', 'case', 'dlig', 'frac', 'hlig', 'lnum', 'onum', 'ordn', 'pnum', 'salt', 'sinf', 'smcp', 'ss01', 'ss02', 'ss03', 'ss04', 'ss05', 'ss06', 'ss07', 'ss08', 'ss09', 'ss10', 'ss11', 'ss12', 'ss13', 'ss14', 'ss15', 'ss16', 'ss17', 'ss18', 'ss19', 'ss20', 'sups', 'swsh', 'titl', 'tnum', 'zero'],
+  CHAR_DEFAULTS: { font: 'Source Serif 4', wt: 400, it: false, size: 10.5, track: 0, color: '#1a1a1a', u: false, kern: 0, ot: '' },
+  PARA_DEFAULTS: { align: 'l', li: 0, ri: 0, fi: 0, sb: 0, sa: 0, lead: 0, role: 'p', dc: 0, dcn: 1, kw: 1, ko: 1, runt: 1 },
 } as const
 
 export const CHAR_DEFAULTS = LIMITS.CHAR_DEFAULTS

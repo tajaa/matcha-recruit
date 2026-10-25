@@ -41,6 +41,7 @@ from typing import Any, Iterable, Mapping, Optional
 from uuid import UUID
 
 from ..fonts import FONTS, has_italic, nearest_weight
+from . import fonts as faces
 from . import graphics
 from . import limits as L
 
@@ -140,19 +141,36 @@ def _clean_text(value: Any) -> str:
     return _DROP.sub("", value.replace("\t", " ").replace("\r\n", "\n").replace("\r", "\n"))
 
 
+def ot_tags(value: Any) -> str:
+    """OpenType tags as stored: allowed ones, each once, sorted, comma-separated."""
+    if not isinstance(value, str) or not value:
+        return ""
+    return ",".join(sorted({t for t in value.split(",") if t in L.OT_TAGS}))
+
+
+def _face(raw: dict) -> tuple[str, int, bool]:
+    custom = faces.custom_face(raw.get("font"), raw.get("wt", L.CHAR_DEFAULTS["wt"]), raw.get("it"))
+    if custom:
+        return custom
+    font = raw.get("font") if raw.get("font") in FONTS else L.CHAR_DEFAULTS["font"]
+    wt = nearest_weight(font, raw.get("wt", L.CHAR_DEFAULTS["wt"]))
+    return font, wt, bool(raw.get("it")) and has_italic(font, wt)
+
+
 def char_attrs(raw: dict) -> dict:
     """A run's character attributes, every one present."""
     d = L.CHAR_DEFAULTS
-    font = raw.get("font") if raw.get("font") in FONTS else d["font"]
-    wt = nearest_weight(font, raw.get("wt", d["wt"]))
+    font, wt, it = _face(raw)
     return {
         "font": font,
         "wt": wt,
-        "it": bool(raw.get("it")) and has_italic(font, wt),
+        "it": it,
         "size": num(raw.get("size"), 1, L.SIZE_MAX, d["size"]),
         "track": _int(raw.get("track"), L.TRACK_MIN, L.TRACK_MAX, d["track"]),
         "color": _colour(raw.get("color"), d["color"]),
         "u": bool(raw.get("u")),
+        "kern": _int(raw.get("kern"), L.KERN_MIN, L.KERN_MAX, d["kern"]),
+        "ot": ot_tags(raw.get("ot")),
     }
 
 
@@ -160,6 +178,7 @@ def para_attrs(raw: dict) -> dict:
     """A paragraph's own attributes, every one present."""
     d = L.PARA_DEFAULTS
     li = num(raw.get("li"), 0, L.INDENT_MAX, d["li"])
+    dc = _int(raw.get("dc"), 0, L.DROPCAP_LINES, d["dc"])
     return {
         "align": _choice(raw.get("align"), L.ALIGNS),
         "li": li,
@@ -169,6 +188,11 @@ def para_attrs(raw: dict) -> dict:
         "sa": num(raw.get("sa"), 0, L.INDENT_MAX, d["sa"]),
         "lead": num(raw.get("lead"), 0, L.LEAD_MAX, d["lead"]),
         "role": _choice(raw.get("role"), L.ROLES),
+        "dc": 0 if dc == 1 else dc,
+        "dcn": _int(raw.get("dcn"), 1, L.DROPCAP_CHARS, d["dcn"]),
+        "kw": _int(raw.get("kw"), 1, L.KEEP_MAX, d["kw"]),
+        "ko": _int(raw.get("ko"), 1, L.KEEP_MAX, d["ko"]),
+        "runt": _int(raw.get("runt"), 1, L.KEEP_MAX, d["runt"]),
     }
 
 
@@ -271,7 +295,42 @@ def valid_comp(raw: Any, paras: list[dict], frames: int) -> Optional[dict]:
         out.append([f, p, s, e, num(x, -L.COORD, L.COORD, 0), num(b, -L.COORD, L.COORD, 0),
                     num(w, 0, L.COORD, 0), a])
         pf, pp, pe = f, p, e
-    return {"lines": out}
+    comp: dict = {"lines": out}
+    caps = _caps(raw.get("caps"), out, texts)
+    if caps is None:
+        return None
+    if caps:
+        comp["caps"] = caps
+    return comp
+
+
+def _caps(raw: Any, lines: list[list], texts: list[str]) -> Optional[list]:
+    """A composition's drop caps, `[para, length, x, baseline, size]`: each the
+    start of a paragraph's first line, in paragraph order, at most
+    `DROPCAP_CHARS` characters (counted whole). None: not drop caps of this text."""
+    if raw is None:
+        return []
+    if not isinstance(raw, list) or len(raw) > len(lines):
+        return None
+    first = {}
+    for ln in lines:
+        first.setdefault(ln[1], ln)
+    out, last = [], -1
+    for cap in raw:
+        if not isinstance(cap, list) or len(cap) != 5:
+            return None
+        p, n16, x, b, size = cap
+        if not (_is_int(p) and _is_int(n16)) or not all(_is_num(v) for v in (x, b, size)):
+            return None
+        line = first.get(p)
+        if line is None or p <= last or line[2] != 0 or not (1 <= n16 <= line[3]):
+            return None
+        head = slice16(texts[p], 0, n16)
+        if not head or len(head) > L.DROPCAP_CHARS or size <= 0:
+            return None
+        out.append([p, n16, num(x, -L.COORD, L.COORD, 0), num(b, -L.COORD, L.COORD, 0), num(size, 1, L.COORD, 1)])
+        last = p
+    return out
 
 
 def overset(thread: dict) -> bool:
@@ -331,6 +390,11 @@ def _item(raw: Any, pages: set[str], bank: Mapping[str, dict], identity=None) ->
         link = raw.get("link")  # frames showing one picture across a spread (client model/crops.ts); kept only when set
         if isinstance(link, str) and _ID.match(link):
             out["link"] = link
+        shape = _shape(raw.get("shape"))
+        if shape:
+            out["shape"] = shape
+        if raw.get("cutout") is True and link:  # the subject in front: a linked frame showing the cut-out
+            out["cutout"] = True
     elif kind in ("rect", "ellipse"):
         out.update(fill=_colour(raw.get("fill"), None), stroke=_stroke(raw.get("stroke")))
         if kind == "rect":
@@ -345,7 +409,27 @@ def _item(raw: Any, pages: set[str], bank: Mapping[str, dict], identity=None) ->
                    tile=num(raw.get("tile"), L.TILE_MIN, L.TILE_MAX, L.TILE_DEFAULT))
     else:  # a line, from its box's top-left corner to its bottom-right (or, flipped, bottom-left to top-right)
         out.update(stroke=_stroke(raw.get("stroke"), {"c": "#1a1a1a", "w": 1.0}), flip=bool(raw.get("flip")))
+    wrap = raw.get("wrap")
+    if kind != "text" and kind != "line" and isinstance(wrap, dict) and wrap.get("m") in L.WRAP_MODES:
+        # Text keeps away from this frame's box, or (a picture with a cut-out shape) from its subject.
+        mode = wrap["m"] if kind == "image" and "shape" in out else "box"
+        out["wrap"] = {"m": mode, "o": num(wrap.get("o"), 0, L.WRAP_OFFSET_MAX, 0)}
     return out
+
+
+def _shape(raw: Any) -> Optional[dict]:
+    """A picture's cut-out subject, row by row (client compose/wrap.ts), or None."""
+    if not isinstance(raw, dict) or not isinstance(raw.get("rows"), list):
+        return None
+    rows = raw["rows"]
+    if not 1 <= len(rows) <= L.WRAP_ROWS or not _is_num(raw.get("ar")):
+        return None
+    out = []
+    for row in rows:
+        if not isinstance(row, list) or len(row) != 2 or not all(_is_num(v) for v in row):
+            return None
+        out.append([num(row[0], 0, 1, 0, 3), num(row[1], 0, 1, 0, 3)])
+    return {"ar": num(raw["ar"], 0.05, 20, 1, 4), "rows": out}
 
 
 def _thread(raw: Any, text_frames: set[str], used: set[str], budget: list[int], identity=None) -> dict:
@@ -405,10 +489,43 @@ def _unique(ids: Iterable[str], what: str) -> None:
         seen.add(i)
 
 
-def normalize_doc(raw: Any, bank: Optional[Mapping[str, dict]] = None) -> dict:
+_FONT_KEY = re.compile(r'"font":"(u-[0-9a-f]{16})"')
+FACE_KEYS = ("family", "name", "weight", "italic", "sha", "bytes", "upm", "asc", "desc", "cap", "x", "features")
+
+
+def is_partner(item: dict, items: list) -> bool:
+    """A cut-out frame set over its photo (the subject in front, client
+    model/subject.ts `isPartner`) while that photo is there: one whose photo
+    was deleted or hidden is a picture of its own, credit and all."""
+    link = item.get("link")
+    return bool(item.get("cutout") and link) and any(
+        o is not item and o.get("kind") == "image" and o.get("link") == link and not o.get("cutout") and not o.get("hidden")
+        for o in items)
+
+
+def normalize_doc(raw: Any, bank: Optional[Mapping[str, dict]] = None,
+                  faces_map: Optional[Mapping[str, list]] = None) -> dict:
     """The storable form of a paged story's document. Raises `DocError` for
     anything the owner has to fix. `bank`: the curated bank's graphics the
-    document names (`bank.doc_graphics`), besides the built-in ones."""
+    document names (`bank.doc_graphics`), besides the built-in ones.
+    `faces_map`: the site's own fonts it names (`custom_fonts.doc_faces`); a
+    font the site doesn't have is set in the default face. The faces the
+    document uses are stored with it (`faces`), so its pages set them."""
+    if faces_map is None and faces.checking_faces() is not None:
+        return _normalize_doc(raw, bank)  # inside another check (a parent layout): its fonts
+    with faces.checking(faces_map):
+        out = _normalize_doc(raw, bank)
+        used = set(_FONT_KEY.findall(json.dumps(out, separators=(",", ":"))))
+        own = sorted((f for key in used for f in (faces_map or {}).get(key) or []),
+                     key=lambda f: (f["family"], int(f["weight"]), bool(f["italic"]), f["sha"]))
+    if own:
+        out["faces"] = [{k: f.get(k) for k in FACE_KEYS} for f in own]
+        if len(json.dumps(out, separators=(",", ":"))) > L.MAX_DOC_BYTES:
+            raise DocError("This story is too big to save. Split it into two.")
+    return out
+
+
+def _normalize_doc(raw: Any, bank: Optional[Mapping[str, dict]] = None) -> dict:
     if not isinstance(raw, dict):
         raise DocError("A paged story is a document of pages.")
     from .identity import normalize_identity, ref

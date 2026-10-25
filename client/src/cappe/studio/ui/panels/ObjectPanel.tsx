@@ -1,11 +1,13 @@
-import { ArrowDownToLine, ArrowUpToLine, ChevronDown, ChevronUp, Columns2, Eye, EyeOff, Image as ImageIcon, Link2, Link2Off, Lock, Scissors, SeparatorVertical,
+import { ArrowDownToLine, ArrowUpToLine, ChevronDown, ChevronUp, Columns2, Eye, EyeOff, Image as ImageIcon, Link2, Link2Off, Lock, PersonStanding, Scissors, SeparatorVertical,
   SlidersHorizontal, Unlock } from 'lucide-react'
 import { ColorField, IconBtn, NumberField, Row, Section, Seg, Slider } from '../../../magazine/workspace/controls'
 import { groupOf, linkProblem } from '../../model/crops'
 import { round } from '../../model/limits'
 import { resolveItem } from '../../model/identity'
 import { arrange, patchItems, unlinkAfter, type Arrange } from '../../model/ops'
-import type { Fit, GraphicFit, GraphicItem, Item, Stroke, VAlign } from '../../model/types'
+import { cutoutFor, isCutout, subjectProblem } from '../../model/subject'
+import type { Fit, GraphicFit, GraphicItem, Item, Shape, Stroke, VAlign, Wrap } from '../../model/types'
+import { placeSubject, subjectShape } from '../subject'
 import { useStudio } from '../../store/store'
 import { command } from '../commands'
 import { useCtx } from '../context'
@@ -22,7 +24,8 @@ const VALIGNS: { key: VAlign; label: string }[] = [
 /** What the selection is and how it sits: place, size, turn, and its own
  *  options (a text frame's columns, a picture's fit, fills and strokes). */
 export function ObjectPanel() {
-  const { store } = useCtx()
+  const c = useCtx()
+  const { store } = c
   const doc = useStudio(store, (s) => s.doc)
   const selection = useStudio(store, (s) => s.selection)
   const overset = useStudio(store, (s) => s.overset)
@@ -128,7 +131,31 @@ export function ObjectPanel() {
         </Section>
       )}
 
+      {only === 'image' && one.kind === 'image' && one.asset_id && !one.cutout && items.length === 1 && (
+        <Section title="Subject in front">
+          <p className="text-[11px] leading-relaxed text-zinc-500">The person in the photo stands in front of the lettering over it: the photo
+            stays behind the text, and its cut-out goes on top. Resize the new frame to choose which letters they cover.</p>
+          <button type="button" disabled={!!subjectProblem(doc, one.id)} title={subjectProblem(doc, one.id) ?? undefined}
+            onClick={() => {
+              const cut = cutoutFor(assets, one.asset_id)
+              if (cut) void placeSubject(c, one.id, cut)
+              else store.set({ dialog: 'subject' })
+            }}
+            className="flex w-full items-center justify-center gap-1.5 rounded-md border border-zinc-700 py-1.5 text-xs text-zinc-200 hover:border-emerald-500 disabled:opacity-40">
+            <PersonStanding className="h-3.5 w-3.5" />{cutoutFor(assets, one.asset_id) ? 'Put the subject in front' : 'Cut out the subject and put it in front…'}
+          </button>
+        </Section>
+      )}
+
       {only === 'image' && <SpreadSection ids={ids} />}
+
+      {only && only !== 'text' && only !== 'line' && <WrapSection items={items} set={set} units={units}
+        subject={only === 'image' && items.every((i) => i.kind === 'image' && (!!i.shape || (items.length === 1 && isCutout(i.asset_id ? assets[i.asset_id] : undefined))))}
+        shapeIt={async () => {
+          // A frame showing a cut-out, with no silhouette yet: read it from the picture.
+          if (one.kind !== 'image' || one.shape || !one.asset_id) return undefined
+          try { return await subjectShape(c.siteId, one.asset_id) } catch { store.set({ notice: 'The cut-out couldn’t be read.' }); return null }
+        }} />}
 
       {only === 'graphic' && one.kind === 'graphic' && (
         <Section title="Look">
@@ -168,6 +195,35 @@ export function ObjectPanel() {
           onFlip={() => set({ flip: one.kind === 'line' && !one.flip })} />
       )}
     </>
+  )
+}
+
+const WRAPS: { key: 'none' | Wrap['m']; label: string }[] = [
+  { key: 'none', label: 'None' }, { key: 'box', label: 'Around the box' }, { key: 'subject', label: 'Around the subject' },
+]
+
+/** Text wrap: text on the page keeps away from the box, or from the cut-out
+ *  subject of a picture (one with a shape, from Subject in front or a cut-out). */
+function WrapSection({ items, set, subject, units, shapeIt }: { items: Item[]; set: (patch: Record<string, unknown>) => void; subject: boolean
+  units: import('../../model/types').Units; shapeIt: () => Promise<Shape | null | undefined> }) {
+  const wrap = 'wrap' in items[0] ? items[0].wrap : undefined
+  const mode = wrap?.m ?? 'none'
+  const choose = async (m: 'none' | Wrap['m']) => {
+    if (m === 'none') { set({ wrap: undefined }); return }
+    const next = { m, o: wrap?.o ?? 6 }
+    if (m !== 'subject') { set({ wrap: next }); return }
+    const shape = await shapeIt()
+    if (shape === null) return
+    set(shape ? { wrap: next, shape } : { wrap: next })
+  }
+  return (
+    <Section title="Text wrap">
+      <Seg label="Text wrap" value={mode} options={WRAPS.filter((w) => w.key !== 'subject' || subject)}
+        onChange={(m) => void choose(m)} />
+      {wrap && <LengthField label="Distance" short="↔" units={units} value={wrap.o} min={0} max={144}
+        onChange={(o) => set({ wrap: { ...wrap, o } })} />}
+      {!subject && items[0].kind === 'image' && <p className="text-[11px] text-zinc-500">To wrap the person in a photo, put the subject in front, or cut it out first.</p>}
+    </Section>
   )
 }
 

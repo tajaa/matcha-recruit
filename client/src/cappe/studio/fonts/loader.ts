@@ -43,6 +43,7 @@ export class FontLoader {
 
   /** Every face a document sets, and the default. */
   async ensureDoc(doc: Doc): Promise<void> {
+    if (doc.faces?.length) this.book.add(doc.faces)
     const faces = new Map<string, Face>()
     const add = (c: FullChar) => { const f = this.faceOf(c); if (f) faces.set(f.sha, f) }
     add(charOf({}))
@@ -56,11 +57,11 @@ export class FontLoader {
   measure: Measure = {
     width: (c, text) => {
       const face = this.faceOf(c)
-      return face ? this.shaper.width(face, text, c.size, c.track) : text.length * 0.5 * c.size
+      return face ? this.shaper.width(face, text, c.size, c.track + c.kern, c.ot) : text.length * 0.5 * c.size
     },
     metrics: (c) => {
       const face = this.faceOf(c)
-      return face ? Shaper.metrics(face, c.size) : { asc: 0.8 * c.size, desc: 0.2 * c.size }
+      return face ? Shaper.metrics(face, c.size) : { asc: 0.8 * c.size, desc: 0.2 * c.size, cap: 0.7 * c.size }
     },
   }
 }

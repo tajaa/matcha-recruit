@@ -19,19 +19,21 @@ from typing import Optional
 from ..rt import RtError, md_to_rt, normalize_rt, rt_to_md
 from ..story_schema import MAX_BLOCKS
 from .limits import CHAR_DEFAULTS, MAX_DOC_CHARS, PARA_DEFAULTS
-from .schema import flow_frame, len16, para_text, slice16
+from .schema import flow_frame, is_partner, len16, para_text, slice16
 from .identity import resolved_threads
 
 _HEADING = {"h1": 2, "h2": 2, "h3": 3}
 
 
 def cover_image(doc: dict) -> Optional[dict]:
-    """The picture that stands for the story: the biggest on its first page."""
+    """The picture that stands for the story: the biggest on its first page
+    (not a subject in front: that is its photo's cut-out)."""
     if not doc.get("pages"):
         return None
     first = doc["pages"][0]["id"]
-    pics = [i for i in doc.get("items") or [] if i["kind"] == "image" and i.get("asset_id") and i["page"] == first
-            and not i.get("hidden")]
+    items = doc.get("items") or []
+    pics = [i for i in items if i["kind"] == "image" and i.get("asset_id") and i["page"] == first
+            and not i.get("hidden") and not is_partner(i, items)]
     return max(pics, key=lambda i: i["w"] * i["h"], default=None)
 
 
@@ -72,13 +74,13 @@ def _node(p: dict) -> dict:
     return {"type": "paragraph", **content}
 
 
-def _text_block(nodes: list[dict]) -> dict:
+def _text_block(nodes: list[dict], dropcap: bool = False) -> dict:
     raw = {"type": "doc", "content": nodes}
     try:
         doc = normalize_rt(raw, max_chars=MAX_DOC_CHARS) or md_to_rt("")
     except RtError:
         doc = md_to_rt("\n\n".join(_plain(n) for n in nodes))
-    return {"type": "text", "md": rt_to_md(doc), "rt": doc, "dropcap": False, "columns": 1, "variant": "body",
+    return {"type": "text", "md": rt_to_md(doc), "rt": doc, "dropcap": dropcap, "columns": 1, "variant": "body",
             "align": "left", "font": "body", "size": 1, "color": "", "leading": 0}
 
 
@@ -164,11 +166,13 @@ def text_blocks(doc: dict, paywall: Optional[int] = None) -> list[dict]:
                        "focal": {"x": round(cover["fx"]), "y": round(cover["fy"])}, "design": None})
     starts = _thread_paras(doc, paywall)
     nodes: list[dict] = []
+    dropcap = [False]  # the block's first paragraph has a drop cap on its page
 
     def flush() -> None:
         if any(_plain(n) for n in nodes):
-            blocks.append(_text_block(list(nodes)))
+            blocks.append(_text_block(list(nodes), dropcap[0]))
         nodes.clear()
+        dropcap[0] = False
 
     page_w = (doc.get("size") or {}).get("w") or 612
     for number, page in enumerate(doc.get("pages") or [], start=1):
@@ -188,8 +192,11 @@ def text_blocks(doc: dict, paywall: Optional[int] = None) -> list[dict]:
                         if text and len(blocks) < MAX_BLOCKS - 2:
                             blocks.append({"type": "quote", "text": text, "attribution": "", "style": "big"})
                     elif text:
+                        if not nodes and p.get("dc", 0) >= 2:
+                            dropcap[0] = True
                         nodes.append(_node(p))
-            elif item["kind"] == "image" and item.get("asset_id") and item is not cover:
+            # The subject in front is its photo's cut-out: the photo is the picture.
+            elif item["kind"] == "image" and item.get("asset_id") and item is not cover and not is_partner(item, doc.get("items") or []):
                 if len(blocks) >= MAX_BLOCKS - 2:
                     continue
                 flush()

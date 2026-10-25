@@ -18,6 +18,7 @@
 
 import { allIds, newId, spreads } from './doc'
 import { LIMITS, clamp, round } from './limits'
+import { backingFor } from './subject'
 import type { Asset, Doc, ImageItem, Item } from './types'
 
 export type Rect = { x: number; y: number; w: number; h: number }
@@ -213,7 +214,8 @@ export function linkProblem(doc: Doc, ids: string[]): string | null {
   if (items.some((i) => i.rot !== 0)) return 'Turned frames can’t share a picture.'
   const places = spreadPlaces(doc)
   if (new Set(items.map((i) => places.get(i.page)?.spread)).size !== 1) return 'Linked frames have to be on one spread.'
-  const pics = new Set(items.map((i) => (i as ImageItem).asset_id).filter(Boolean))
+  // A cut-out partner (model/subject.ts) shows its picture's cut-out: its own asset.
+  const pics = new Set(items.filter((i) => !(i as ImageItem).cutout).map((i) => (i as ImageItem).asset_id).filter(Boolean))
   if (pics.size > 1) return 'Those frames hold different pictures. Empty all but one first.'
   return null
 }
@@ -305,7 +307,7 @@ export function keepLinks(before: Doc, after: Doc, assets: Record<string, Asset>
   for (const g of linkGroups(doc)) {
     const was = oldGroups.get(`${g.link}|${g.spread}`)
     for (const m of g.members) {
-      if (m.rot !== 0 || m.fit !== 'fill' || (was && !old.has(m.id))) leave.add(m.id)
+      if (m.rot !== 0 || m.fit !== 'fill' || (was && !old.has(m.id) && !m.cutout)) leave.add(m.id)
     }
   }
   if (leave.size) doc = patch(doc, leave, withoutLink)
@@ -315,13 +317,20 @@ export function keepLinks(before: Doc, after: Doc, assets: Record<string, Asset>
     const prev = g.members.map((m) => old.get(m.id) as ImageItem | undefined)
     // A picture placed or changed in one frame goes into all of them; a
     // locked frame keeps its own, and holds the group's picture where it is.
-    const locked = g.members.findIndex((m) => m.locked)
-    const pics = g.members.map((m) => m.asset_id)
-    const changedPic = g.members.find((m, k) => m.asset_id && m.asset_id !== prev[k]?.asset_id)?.asset_id
+    // A cut-out partner keeps its own picture (the cut-out of the group's).
+    const locked = g.members.findIndex((m) => m.locked && !m.cutout)
+    const pics = g.members.map((m) => (m.cutout ? null : m.asset_id))
+    const changedPic = g.members.find((m, k) => !m.cutout && m.asset_id && m.asset_id !== prev[k]?.asset_id)?.asset_id
     const pic = (locked !== -1 ? g.members[locked].asset_id : null) ?? changedPic ?? pics.find(Boolean) ?? null
-    if (pics.some((p) => p !== pic)) {
-      const ids = new Set(g.members.filter((m) => !m.locked).map((m) => m.id))
+    if (g.members.some((m) => !m.cutout && m.asset_id !== pic)) {
+      const ids = new Set(g.members.filter((m) => !m.locked && !m.cutout).map((m) => m.id))
       doc = patch(doc, ids, (i) => (i.asset_id === pic ? i : { ...i, asset_id: pic }))
+    }
+    // A partner whose picture isn't the cut-out of the group's any more goes its own way.
+    const stale = g.members.filter((m) => m.cutout && (!pic || !m.asset_id || (assets[m.asset_id] && backingFor(assets, assets[m.asset_id]) !== pic)))
+    if (stale.length) {
+      doc = patch(doc, new Set(stale.map((m) => m.id)), withoutLink)
+      if (g.members.length - stale.length < 2) continue
     }
     const size = sizeOf(assets, pic)
     if (!size) continue
@@ -329,8 +338,14 @@ export function keepLinks(before: Doc, after: Doc, assets: Record<string, Asset>
     // Frames that were in the group before this edit, as they were.
     const stayed = g.members.findIndex((_, k) => !!was && !!prev[k] && was.members.includes(prev[k]!))
     let want: Placement | null = null
+    // A group just made around a frame that was there (a cut-out partner set
+    // over it): the picture stays where that frame showed it.
+    const kept = was ? -1 : g.members.findIndex((m) => !m.cutout && old.has(m.id) && old.get(m.id)!.kind === 'image'
+      && !(old.get(m.id) as ImageItem).link && cropKey(m) === cropKey(old.get(m.id) as ImageItem))
     if (locked !== -1 && g.members[locked].asset_id === pic) {
       want = shown(g.rects[locked], g.members[locked], size)
+    } else if (kept !== -1 && g.members.some((m) => m.cutout)) {
+      want = shown(g.rects[kept], g.members[kept], size)
     } else if (!same && !changedPic && was && stayed !== -1) {
       // Frames left or joined (unlinked, deleted, turned): the picture stays
       // where the frames still in the group showed it. Frames that all were

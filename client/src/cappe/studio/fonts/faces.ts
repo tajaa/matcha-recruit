@@ -3,6 +3,7 @@
 // origin. The Studio measures those bytes (compose/shaper.ts) and shows them
 // under a name of their own (`f-<sha>`), the name a reader's page uses too.
 
+import { registerFaces } from '../model/doc'
 import { CHAR_DEFAULTS } from '../model/limits'
 import type { Face } from '../model/types'
 
@@ -19,10 +20,21 @@ export class FaceBook {
 
   constructor(manifest: Manifest) {
     this.manifest = manifest
-    for (const f of manifest.faces) {
-      this.byStyle.set(`${f.family}|${f.weight}|${f.italic ? 1 : 0}`, f)
+    this.add(manifest.faces)
+  }
+
+  /** Faces besides the manifest's: the magazine's own fonts (a story carries
+   *  those it names, `doc.faces`; the Studio lists the site's). The first face
+   *  of a style stays: a story opened in a face that has since been replaced
+   *  keeps it, as the server keeps the face a page carries (custom_fonts.doc_faces). */
+  add(faces: Iterable<Face>): void {
+    const list = [...faces]
+    for (const f of list) {
+      const key = `${f.family}|${f.weight}|${f.italic ? 1 : 0}`
+      if (!this.byStyle.has(key)) this.byStyle.set(key, f)
       this.bySha.set(f.sha, f)
     }
+    registerFaces(list)
   }
 
   face: FaceLookup = (family, weight, italic) => this.byStyle.get(`${family}|${weight}|${italic ? 1 : 0}`)

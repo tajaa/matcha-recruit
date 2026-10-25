@@ -2,6 +2,8 @@
 // pasteboard, each page's origin, an item's corners (turned about its
 // centre), what is under a point, and what a moving edge snaps to.
 
+import { onSubject } from '../compose/wrap'
+import { isPartner } from '../model/subject'
 import { pageSide, spreads as spreadsOf } from '../model/doc'
 import type { Doc, Item } from '../model/types'
 
@@ -85,13 +87,17 @@ export function hits(item: Item, origin: Pt, p: Pt, slop = 0): boolean {
 }
 
 /** The topmost visible item under `p`. */
-export function hitItem(doc: Doc, lay: Layout, p: Pt, slop = 0): Item | null {
+export function hitItem(doc: Doc, lay: Layout, p: Pt, slop = 0, held?: ReadonlySet<string>): Item | null {
   const pageIdx = new Map(doc.pages.map((pg, i) => [pg.id, i]))
   for (let k = doc.items.length - 1; k >= 0; k--) {
     const item = doc.items[k]
     if (item.hidden) continue
     const o = lay.origin[pageIdx.get(item.page) ?? -1]
-    if (o && hits(item, o, p, slop)) return item
+    // The subject in front (model/subject.ts) is clicked only on the subject:
+    // the lettering under the rest of its frame stays in reach. A selected
+    // one is held whole, so it can be moved and resized.
+    if (o && hits(item, o, p, slop) && (!isPartner(item, doc.items) || held?.has(item.id)
+      || onSubject(item, p.x - o.x - item.x, p.y - o.y - item.y))) return item
   }
   return null
 }

@@ -21,7 +21,20 @@ describe('the shaper', () => {
     expect(shaper.width(face, 'AV', 10, 100)).toBeCloseTo(av + 2, 5)
     expect(shaper.width(face, '', 10)).toBe(0)
     expect(shaper.em('test', 'Hello')).toBe(shaper.em('test', 'Hello')) // cached
-    expect(Shaper.metrics(face, 10)).toEqual({ asc: 10.36, desc: 3.35 })
+    expect(Shaper.metrics(face, 10)).toEqual({ asc: 10.36, desc: 3.35, cap: 7 }) // no cap height: 70% of the size
+    expect(Shaper.metrics({ ...face, cap: 650 }, 10).cap).toBe(6.5)
+  })
+
+  it('shapes with a run\'s OpenType features on, each set measured apart', async () => {
+    const hb = await loadHarfBuzz()
+    const seen: (string[] | undefined)[] = []
+    const spy = { ...hb, shape: ((font, buf, features) => { seen.push(features?.map((f) => f.tag)); hb.shape(font, buf, features) }) as typeof hb.shape }
+    const shaper = new Shaper(spy)
+    shaper.add(face, buffer())
+    const plain = shaper.width(face, 'office', 10)
+    expect(shaper.width(face, 'office', 10, 0, 'onum,smcp')).toBeCloseTo(plain, 5) // this cut has neither
+    shaper.width(face, 'office', 10, 0, 'onum,smcp') // cached apart from the plain one
+    expect(seen).toEqual([undefined, ['onum', 'smcp']])
   })
 
   it('hands text the face lacks to the browser', async () => {

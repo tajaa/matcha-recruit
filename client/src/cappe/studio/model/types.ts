@@ -22,6 +22,12 @@ export type CharAttrs = {
   track?: number
   color?: string
   u?: boolean
+  /** Manual kerning: thousandths of an em added after each character (with
+   *  `track`), set at the caret on the one character before it. */
+  kern?: number
+  /** OpenType features turned on (LIMITS.OT_TAGS), sorted, comma-separated:
+   *  small caps, old-style figures, swashes, stylistic sets (alternate glyphs). */
+  ot?: string
 }
 export type Run = CharAttrs & { t: string }
 
@@ -37,12 +43,24 @@ export type ParaAttrs = {
   sa?: number
   lead?: number
   role?: Role
+  /** A drop cap `dc` lines deep (0: none), of its first `dcn` characters. */
+  dc?: number
+  dcn?: number
+  /** At a column or frame break, the fewest lines left at the top of the next
+   *  column (widows) and at the bottom of this one (orphans); 1 allows any. */
+  kw?: number
+  ko?: number
+  /** The fewest words the last line may hold (1 allows any). */
+  runt?: number
 }
 export type Para = ParaAttrs & { runs: Run[] }
 
 /** [frame index, para, start, end (UTF-16), x, baseline, width, align (0 l, 1 c, 2 r, 3 justified)] */
 export type Line = [number, number, number, number, number, number, number, number]
-export type Comp = { lines: Line[] }
+/** A drop cap: [para, its length (UTF-16), x, baseline (in its first line's
+ *  frame), size]; drawn inside the paragraph's first line. */
+export type Cap = [number, number, number, number, number]
+export type Comp = { lines: Line[]; caps?: Cap[] }
 
 export type Thread = { id: string; frames: string[]; paras: Para[]; comp?: Comp }
 
@@ -86,14 +104,28 @@ export type ImageItem = Base & {
   /** Frames with the same link on one spread show one picture through them
    *  (model/crops.ts): moving a frame moves the window, not the picture. */
   link?: string
+  /** Text around it keeps away from its box or from the subject in its picture. */
+  wrap?: Wrap
+  /** The silhouette of the cut-out subject in its picture (compose/wrap.ts). */
+  shape?: Shape
+  /** A linked frame showing its picture's cut-out, set over lettering so the
+   *  subject stands in front of it: no credit of its own, clicked only on the subject. */
+  cutout?: boolean
 }
-export type RectItem = Base & { kind: 'rect'; fill: string | null; stroke: Stroke | null; radius: number }
-export type EllipseItem = Base & { kind: 'ellipse'; fill: string | null; stroke: Stroke | null }
+export type WrapMode = 'box' | 'subject'
+/** Text wrap: `o` pt of room kept around the box or the subject. */
+export type Wrap = { m: WrapMode; o: number }
+/** A picture's subject, row by row from the top: each row's [left, right] as
+ *  fractions of the picture's width (left > right: nothing in that row);
+ *  `ar`: the picture's width / height, so the rows follow any crop. */
+export type Shape = { ar: number; rows: [number, number][] }
+export type RectItem = Base & { kind: 'rect'; fill: string | null; stroke: Stroke | null; radius: number; wrap?: Wrap }
+export type EllipseItem = Base & { kind: 'ellipse'; fill: string | null; stroke: Stroke | null; wrap?: Wrap }
 export type LineItem = Base & { kind: 'line'; stroke: Stroke; flip: boolean }
 export type GraphicFit = 'contain' | 'stretch' | 'tile'
 /** One of the bank's graphics (server studio/graphics.py), by its file's sha:
  *  a one-colour one takes `color`; `tile` is a pattern's repeat, in pt. */
-export type GraphicItem = Base & { kind: 'graphic'; src: string; color: string | null; fit: GraphicFit; tile: number }
+export type GraphicItem = Base & { kind: 'graphic'; src: string; color: string | null; fit: GraphicFit; tile: number; wrap?: Wrap }
 export type Item = TextItem | ImageItem | RectItem | EllipseItem | LineItem | GraphicItem
 export type Kind = Item['kind']
 
@@ -131,6 +163,9 @@ export type Doc = {
   paywall_page: number | null
   /** The issue's stories, in page order; left out when there are none. */
   sections?: Section[]
+  /** The magazine's own fonts this story names (uploaded, fonts/custom.ts),
+   *  carried with it so every page sets them; left out when there are none. */
+  faces?: Face[]
 }
 
 /** A library picture as the renderer needs it (`cappe_assets` row). */
@@ -151,9 +186,11 @@ export type Asset = {
   recipe?: Recipe | null
 }
 
-/** A face of the Studio's own (fonts_manifest.json). */
+/** A face of the Studio's own (fonts_manifest.json), or one of the
+ *  magazine's own fonts (`family` a key `u-<16 hex>`, `name` what it's called). */
 export type Face = {
   family: string
+  name?: string
   weight: number
   italic: boolean
   sha: string

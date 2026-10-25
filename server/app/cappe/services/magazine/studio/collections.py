@@ -23,8 +23,12 @@ def collection_doc(raw: dict[str, Any], bank: Optional[Mapping[str, dict]] = Non
         raise DocError(f"A collection holds at most {MAX_COLLECTION_PAGES} pages.")
     portable = {**raw, "paywall_page": None}
     if isinstance(raw.get("items"), list):
+        # A picture's cut-out subject is its photo's: the frames stay, empty and plain. The
+        # magazine's own fonts are its site's, so the text falls back to the default face
+        # (normalize_doc is given none).
         portable["items"] = [
-            {**i, "asset_id": None, "caption": ""} if isinstance(i, dict) and i.get("kind") == "image" else i
+            {**{k: v for k, v in i.items() if k not in ("cutout", "shape")}, "asset_id": None, "caption": ""}
+            if isinstance(i, dict) and i.get("kind") == "image" else i
             for i in raw["items"]
         ]
     if isinstance(raw.get("threads"), list):
