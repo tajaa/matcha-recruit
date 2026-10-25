@@ -37,6 +37,7 @@ from . import (
     fitness,
     food_drink,
     music_audio,
+    online,
     other,
     pets,
     photo_video,
@@ -66,7 +67,7 @@ __all__ = [
 # the old table did, so the shelf reads as grouped.
 _MODULES = (
     art_design, automotive, beauty_grooming, education, events, fitness, food_drink, music_audio,
-    other, pets, photo_video, professional, retail, tech, trades_home, wellness,
+    online, other, pets, photo_video, professional, retail, tech, trades_home, wellness,
 )
 
 SITE_TEMPLATES: tuple[SiteTemplate, ...] = tuple(

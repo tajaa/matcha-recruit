@@ -304,19 +304,18 @@ async def create_site_from_template(
 async def create_quick_store(
     body: CappeQuickStoreCreate, account: CappeAccount = Depends(require_cappe_account)
 ):
-    """An online store in one step: the site, a home page of its name over its
-    products, the first product on sale and the policies a store selling
-    parcels must publish, so it can go live in one tap
-    (services/quick_store.py).
+    """Create a designed draft store and an optional draft first product.
 
-    One transaction: a store is never left half made, which on the Free plan
-    would spend its only site. The plan is asked about the product before
-    anything is written.
+    The owner previews immediately; products and policies are reviewed before
+    launch. One transaction prevents a partial setup spending the site cap.
     """
     name = body.name.strip()
     if not name:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Name your store.")
-    blocks = quick_store.home_blocks(name, body.tagline)
+    try:
+        theme, pages = quick_store.store_structure(name, body.tagline, body.template_slug, account.plan)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     async with get_connection() as conn:
         if body.product is not None:
             require_fulfillment(await resolve_entitlements(account.plan, conn=conn), "physical")
@@ -328,29 +327,25 @@ async def create_quick_store(
                 return await conn.fetchrow(
                     f"""INSERT INTO cappe_sites
                             (account_id, name, slug, subdomain, source_type, is_multi_location,
-                             directory_category, timezone)
-                        VALUES ($1, $2, $3, $3, 'blank', FALSE, $4, COALESCE($5, 'UTC'))
+                             directory_category, timezone, template_slug, theme_config)
+                        VALUES ($1, $2, $3, $3, 'template', FALSE, $4, COALESCE($5, 'UTC'), $6, $7)
                         RETURNING {_SITE_COLS}""",
                     account.id, name, slug, quick_store.DIRECTORY_CATEGORY, body.timezone,
+                    body.template_slug, json.dumps(theme),
                 )
 
             site = await _insert_site_with_free_slug(conn, name, _insert)
             await conn.execute(
                 """INSERT INTO cappe_pages (site_id, title, slug, content, sort_order, status)
                    VALUES ($1, 'Home', 'home', $2, 0, 'draft')""",
-                site["id"], json.dumps(gate_content({"blocks": blocks}, account.plan)),
+                site["id"], json.dumps(pages[0]["content"]),
             )
-            for kind, text in quick_store.starter_policies():
-                await conn.execute(
-                    "INSERT INTO cappe_site_policies (site_id, kind, body) VALUES ($1, $2, $3)",
-                    site["id"], kind, text,
-                )
             product = None
             if body.product is not None:
                 row = await insert_product(conn, site["id"], CappeProductCreate(
                     name=body.product.name.strip(), price_cents=body.product.price_cents,
                     description=(body.product.description or "").strip() or None,
-                    inventory=body.product.inventory, fulfillment="physical", status="active",
+                    inventory=body.product.inventory, fulfillment="physical", status="draft",
                 ))
                 product = await _product_out(conn, row)
         await refresh_site_search(conn, site["id"])
@@ -403,6 +398,13 @@ async def preview_site_page(
             "SELECT title, slug FROM cappe_pages WHERE site_id = $1 ORDER BY sort_order, created_at",
             site_id,
         )
+        preview_products = None
+        if body.include_draft_products:
+            preview_products = [dict(r) for r in await conn.fetch(
+                "SELECT name, price_cents, currency, image_url FROM cappe_products "
+                "WHERE site_id = $1 AND status IN ('active', 'draft') ORDER BY sort_order, created_at LIMIT 60",
+                site_id,
+            )]
     # Gate premium design in the preview too, so a non-premium plan sees exactly
     # what will persist on Save (no premium-looking preview that vanishes on save).
     theme_cfg = body.theme_config if body.theme_config is not None else loads(site["theme_config"])
@@ -414,13 +416,16 @@ async def preview_site_page(
         # Unsaved meta override (live promos editing) wins over the saved meta.
         "meta_config": body.meta_config if body.meta_config is not None else loads(site["meta_config"]),
     }
+    if preview_products is not None:
+        site_dict["preview_products"] = preview_products or quick_store.sample_products()
     nav = [{"slug": r["slug"], "title": r["title"]} for r in nav_rows] or [{"slug": "home", "title": "Home"}]
     page = {"title": body.title or "Page", "slug": body.slug or "home",
             "content": gate_content(body.content or {}, account.plan)}
     # Tenant CSP (inline widget scripts + fonts) — the app-wide middleware only
     # applies the strict default when no policy is set here.
     return HTMLResponse(
-        render_site_html(site_dict, page, nav, preview=site["status"] != "published", editable=body.editable),
+        render_site_html(site_dict, page, nav,
+                         preview=body.include_draft_products or site["status"] != "published", editable=body.editable),
         headers={**tenant_security_headers(), "Cache-Control": "no-store"},
     )
 

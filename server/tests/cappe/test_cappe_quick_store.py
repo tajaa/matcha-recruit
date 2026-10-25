@@ -20,7 +20,8 @@ from app.cappe.models.cappe import CappeQuickStoreCreate  # noqa: E402
 from app.cappe.routes import sites  # noqa: E402
 from app.cappe.services import quick_store, readiness  # noqa: E402
 from app.cappe.services.entitlements import Entitlements  # noqa: E402
-from app.cappe.services.policies import REQUIRED_FOR_PHYSICAL, starter  # noqa: E402
+from app.cappe.services.render import render_site_html  # noqa: E402
+from app.cappe.services.site_templates import get_template  # noqa: E402
 
 
 class _Tx:
@@ -68,8 +69,8 @@ class _Conn:
         now = datetime(2026, 10, 25, tzinfo=timezone.utc)
         return {
             "id": self.site_id, "account_id": self.account_id, "name": args[1], "slug": args[2],
-            "subdomain": args[2], "custom_domain": None, "source_type": "blank", "template_id": None,
-            "template_slug": None, "status": "draft", "theme_config": "{}", "meta_config": "{}",
+            "subdomain": args[2], "custom_domain": None, "source_type": "template", "template_id": None,
+            "template_slug": args[5], "status": "draft", "theme_config": args[6], "meta_config": "{}",
             "timezone": args[4] or "UTC", "is_multi_location": False, "tax_rate_bps": 0,
             "tax_label": "Tax", "shipping_flat_cents": 0, "shipping_free_threshold_cents": None,
             "shipping_label": "Shipping", "receipt_prefix": "ORDER", "listed": False,
@@ -155,12 +156,12 @@ def test_home_page_is_the_name_the_line_and_the_shop():
     assert "subheading" not in quick_store.home_blocks("Karajan Goods", " ")[0]
 
 
-def test_the_home_page_and_policies_meet_the_publish_checklist():
+def test_the_starter_has_content_and_a_shop_without_accepting_policies():
     hero, store = quick_store.home_blocks("Karajan Goods", None)
     assert hero["type"] in readiness._CONTENT_BLOCKS
     assert readiness._block_has_text({k: v for k, v in hero.items() if k != "type"})
     assert store["type"] in readiness._SELL_BLOCKS
-    assert {k for k, _ in quick_store.starter_policies()} == set(REQUIRED_FOR_PHYSICAL)
+    assert quick_store.is_store_template(quick_store.DEFAULT_TEMPLATE)
 
 
 @pytest.mark.asyncio
@@ -175,10 +176,12 @@ async def test_makes_the_whole_store_in_one_transaction(setup):
     assert setup.conn.site_args[3] == "retail"
     assert setup.conn.site_args[4] == "America/New_York"
     assert setup.conn.page == {"blocks": quick_store.home_blocks("Karajan Goods", "Small-batch ceramics.")}
-    assert setup.conn.policies == {k: starter(k) for k in REQUIRED_FOR_PHYSICAL}
+    assert setup.conn.policies == {}
+    assert out["site"]["status"] == "draft"
+    assert out["site"]["template_slug"] == "online-studio"
     (product,) = setup.made
     assert (product.name, product.price_cents, product.inventory) == ("Moon mug", 2400, 12)
-    assert product.fulfillment == "physical" and product.status == "active"
+    assert product.fulfillment == "physical" and product.status == "draft"
     assert out["product"] is not None and out["site"]["name"] == "Karajan Goods"
 
 
@@ -197,7 +200,7 @@ async def test_the_store_can_be_made_without_its_product(setup):
     out = await sites.create_quick_store(_body(product=None, tagline=None), setup.account)
     assert out["product"] is None and setup.made == []
     assert "subheading" not in setup.conn.page["blocks"][0]
-    assert set(setup.conn.policies) == set(REQUIRED_FOR_PHYSICAL)
+    assert setup.conn.policies == {}
 
 
 @pytest.mark.asyncio
@@ -206,3 +209,65 @@ async def test_a_blank_name_is_refused(setup):
         await sites.create_quick_store(_body(name="   "), setup.account)
     assert exc.value.status_code == 422
     assert setup.conn.events == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("slug", ["online-studio", "online-edit", "online-pop"])
+async def test_the_chosen_starter_is_saved_without_example_merchandise(setup, slug):
+    out = await sites.create_quick_store(_body(template_slug=slug, product=None), setup.account)
+    assert out["site"]["theme_config"]["template"] == slug
+    assert out["site"]["theme_config"]["colors"] == get_template(slug).theme["colors"]
+    assert setup.made == [] and setup.conn.policies == {}
+    assert "Your first product" not in json.dumps(setup.conn.page)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("slug", ["bloom-store", "not-a-template"])
+async def test_a_non_store_starter_is_rejected_before_writing(setup, slug):
+    with pytest.raises(HTTPException) as exc:
+        await sites.create_quick_store(_body(template_slug=slug), setup.account)
+    assert exc.value.status_code == 422 and setup.conn.events == []
+
+
+def test_example_cards_are_inert_and_only_render_in_private_previews():
+    site = {"name": "My shop", "slug": "my-shop", "preview_products": quick_store.sample_products()}
+    page = {"title": "Home", "content": {"blocks": quick_store.home_blocks("My shop", None)}}
+    private = render_site_html(site, page, [], preview=True)
+    public = render_site_html(site, page, [], preview=False)
+    assert 'class="cz-store-grid"' in private and "Your first product" in private
+    assert "Your first product" not in public
+    assert "data-go" not in private and 'class="cz-product"' in private
+    site["preview_products"] = [{"name": '<script>alert(1)</script>', "price_cents": 2400,
+                                 "image_url": 'javascript:alert(1)', "currency": "USD"}]
+    html = render_site_html(site, page, [], preview=True)
+    assert '&lt;script&gt;alert(1)&lt;/script&gt;' in html
+    assert 'src="javascript:' not in html
+
+
+@pytest.mark.asyncio
+async def test_owner_preview_reads_draft_cards_only_after_checking_ownership(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from app.cappe.models.sites import CappePagePreview
+
+    site_id, account_id = uuid4(), uuid4()
+    conn = SimpleNamespace(fetch=AsyncMock(side_effect=[
+        [{"title": "Home", "slug": "home"}],
+        [{"name": "Private draft mug", "price_cents": 2400, "currency": "USD", "image_url": None}],
+    ]))
+    owned = AsyncMock(return_value={"name": "My shop", "slug": "my-shop", "theme_config": {},
+                                  "meta_config": {}, "status": "draft"})
+    monkeypatch.setattr(sites, "get_connection", lambda: _Ctx(conn))
+    monkeypatch.setattr(sites, "get_owned_site", owned)
+    body = CappePagePreview(content={"blocks": [{"type": "store"}]}, include_draft_products=True)
+    response = await sites.preview_site_page(site_id, body, SimpleNamespace(id=account_id, plan="free"))
+    owned.assert_awaited_once_with(conn, site_id, account_id)
+    sql, query_site = conn.fetch.call_args.args
+    assert "site_id = $1" in sql and "'draft'" in sql and query_site == site_id
+    assert "Private draft mug" in response.body.decode()
+    assert response.headers["cache-control"] == "no-store"
+    owned.side_effect = HTTPException(status_code=404)
+    conn.fetch.reset_mock()
+    with pytest.raises(HTTPException):
+        await sites.preview_site_page(site_id, body, SimpleNamespace(id=uuid4(), plan="free"))
+    conn.fetch.assert_not_awaited()

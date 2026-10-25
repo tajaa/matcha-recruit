@@ -68,6 +68,9 @@ def _render_cached(slug: str, page_slug: str, premium: bool) -> str:
         "theme_config": gate_theme(t.theme, plan),
         "meta_config": {},
     }
+    if "online-store" in t.tags:
+        from ..quick_store import sample_products
+        site["preview_products"] = sample_products()
     content = gate_content(substitute_tokens(page.get("content") or {}, values), plan)
     html = render_site_html(
         site,

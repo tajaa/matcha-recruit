@@ -260,6 +260,8 @@ def render_site_html(site: dict, page: dict, nav_pages: list[dict], preview: boo
     t["meta"] = meta if isinstance(meta, dict) else {}
     t["locations"] = locations
     t["site_name"] = site.get("name") or ""
+    if preview and "preview_products" in site:
+        t["preview_products"] = site["preview_products"]
 
     content = page.get("content") or {}
     blocks = content.get("blocks") if isinstance(content, dict) else None

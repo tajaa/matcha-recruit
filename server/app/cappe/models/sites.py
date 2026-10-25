@@ -295,6 +295,8 @@ class CappePagePreview(_SnapshotSizeLimit):
     meta_config: Optional[dict[str, Any]] = None
     # When true, render with the canvas selection/edit runtime (Business editor).
     editable: bool = False
+    # Owner-only, inert storefront preview. Draft products never reach public APIs.
+    include_draft_products: bool = False
 
 
 class CappePage(BaseModel):
@@ -342,6 +344,7 @@ class CappeQuickStoreCreate(BaseModel):
     # One line under the store's name on its home page; none = no line.
     tagline: Optional[str] = Field(default=None, max_length=200)
     timezone: Optional[str] = Field(default=None, max_length=64)
+    template_slug: str = Field(default="online-studio", max_length=160, pattern=r"^[a-z0-9-]+$")
     # None = make the store now and add the product later (a plan that
     # doesn't sell physical goods yet).
     product: Optional[CappeQuickStoreProduct] = None

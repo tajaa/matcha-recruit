@@ -168,6 +168,13 @@ interface Props {
 
 const ALL = 'all'
 
+function templateScore(t: CappeTemplateSummary, category?: string | null, accountType?: string): number {
+  if (category) return Number(t.category === category)
+  const tags = accountType === 'personal' ? ['personal', 'portfolio']
+    : accountType === 'writer' ? ['blog'] : accountType === 'business' ? ['store'] : []
+  return Number(t.tags.some((tag) => tags.includes(tag)))
+}
+
 /** The template catalog as preview cards with category filter chips and a
  *  full-site preview. Shared by the Templates page and the onboarding wizard's
  *  "how do you want to start?" step. Every template is available on every
@@ -201,9 +208,9 @@ export default function TemplateGallery({ category, busySlug, disabled = false, 
   const ordered = useMemo(() => {
     if (!templates) return null
     const shown = activeFilter === ALL ? templates : templates.filter((t) => t.category === activeFilter)
-    if (!category) return shown
-    return [...shown].sort((a, b) => Number(b.category === category) - Number(a.category === category))
-  }, [templates, activeFilter, category])
+    const score = (t: CappeTemplateSummary) => templateScore(t, category, account?.account_type)
+    return [...shown].sort((a, b) => score(b) - score(a))
+  }, [templates, activeFilter, category, account?.account_type])
 
   if (error) return <p role="alert" className="text-sm text-red-400">{error}</p>
   if (ordered === null) {
@@ -245,7 +252,7 @@ export default function TemplateGallery({ category, busySlug, disabled = false, 
       ) : (
         <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
           {ordered.map((t) => {
-            const recommended = !!category && t.category === category
+            const forYou = templateScore(t, category, account?.account_type) > 0
             const busy = busySlug === t.slug
             return (
               <div key={t.slug} className="group flex flex-col overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900 transition hover:border-zinc-700">
@@ -254,7 +261,7 @@ export default function TemplateGallery({ category, busySlug, disabled = false, 
                   <div className="mb-1 flex items-start justify-between gap-2">
                     <h3 className="font-medium text-zinc-100">{t.name}</h3>
                     <span className="flex shrink-0 items-center gap-2">
-                      {recommended && (
+                      {forYou && (
                         <span className="flex items-center gap-1 rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-300">
                           <Sparkles className="h-3 w-3" />
                           For you

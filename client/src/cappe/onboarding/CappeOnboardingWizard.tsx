@@ -18,10 +18,8 @@ import type { CappeEntitlements, CappeLocation, CappeProduct, CappeSite, CappeTe
 // Free plan includes one site, so a wizard that only made blank sites spent it
 // before the gallery was reachable. Mounted at /cappe/onboarding inside
 // CappeLayout; CappeSites redirects here on first run (zero sites).
-// 'online' is the quick store: name, a line about it, the first product, and
-// the owner lands on a store that can go live in one tap
-// (POST /sites/quick-store). Templates, the category and everything else come
-// later, from the dashboard: the point is to see a product on sale fast.
+// Online sellers get a designed draft storefront immediately; product details
+// can be completed later, before products and the site are published.
 type Mode = 'online' | 'single' | 'multi'
 type Step = 1 | 2 | 3 | 4
 type Category = { slug: string; label: string }
@@ -52,6 +50,8 @@ export default function CappeOnboardingWizard() {
   const [error, setError] = useState<string | null>(null)
   // The quick store's line and first product.
   const [tagline, setTagline] = useState('')
+  const [storeTemplate, setStoreTemplate] = useState('online-studio')
+  const [storeTemplates, setStoreTemplates] = useState<CappeTemplateSummary[]>([])
   const [product, setProduct] = useState({ name: '', price: '', stock: '' })
   const [photo, setPhoto] = useState<File | null>(null)
   const [photoUrl, setPhotoUrl] = useState<string | null>(null)
@@ -69,9 +69,14 @@ export default function CappeOnboardingWizard() {
   }, [])
 
   useEffect(() => {
-    if (mode !== 'online' || plan) return
-    cappeApi.get<CappeEntitlements>('/billing/entitlements').then(setPlan).catch(() => {})
-  }, [mode, plan])
+    if (mode !== 'online') return
+    let alive = true
+    cappeApi.get<CappeEntitlements>('/billing/entitlements').then((p) => { if (alive) setPlan(p) }).catch(() => {})
+    cappeApi.get<CappeTemplateSummary[]>('/templates').then((templates) => {
+      if (alive) setStoreTemplates(templates.filter((t) => t.tags.includes('online-store')))
+    }).catch(() => {})
+    return () => { alive = false }
+  }, [mode])
 
   useEffect(() => () => { if (photoUrl) URL.revokeObjectURL(photoUrl) }, [photoUrl])
 
@@ -101,6 +106,7 @@ export default function CappeOnboardingWizard() {
         name: name.trim(),
         tagline: tagline.trim() || null,
         timezone: browserTimezone(),
+        template_slug: storeTemplate,
         product: withProduct
           ? {
               name: product.name.trim(),
@@ -205,20 +211,20 @@ export default function CappeOnboardingWizard() {
   const TITLES: Record<Step, string> = {
     1: `Hi${account?.name ? ` ${account.name.split(' ')[0]}` : ''} — let's set up`,
     2: online ? 'Name your store' : 'Name your business',
-    3: online ? 'Add your first product' : personal ? "What's the site for?" : 'What kind of business is it?',
+    3: online ? 'Make it your store' : personal ? "What's the site for?" : 'What kind of business is it?',
     4: 'How do you want to start?',
   }
   const BLURBS: Record<Step, string> = {
     1: 'A couple of quick questions so we can shape everything around how you work.',
     2: 'This becomes your web address. You can change it later.',
     3: online
-      ? 'Just the basics. Options, more photos and shipping can wait.'
+      ? 'Choose a look and optionally add a product. Everything starts as a private draft.'
       : personal
       ? "We'll put the templates made for it first."
       : "We'll put the templates made for it first, and list you under it in Discover.",
     4: 'Pick a design to start from, or begin with an empty site. Either way, everything is editable.',
   }
-  const width = step === 4 ? 'max-w-4xl' : step === 3 ? 'max-w-xl' : 'max-w-md'
+  const width = step === 4 ? 'max-w-4xl' : step === 3 ? 'max-w-2xl' : 'max-w-md'
   const steps: Step[] = online ? [1, 2, 3] : [1, 2, 3, 4]
 
   return (
@@ -352,6 +358,24 @@ export default function CappeOnboardingWizard() {
                 if (productReady && sellsGoods) void finishStore(true)
               }}
             >
+              <fieldset className="mb-6">
+                <legend className="mb-3 text-sm font-medium text-zinc-200">Start with a store design</legend>
+                <div className="grid grid-cols-3 gap-2">
+                  {(storeTemplates.length ? storeTemplates : [{ slug: 'online-studio', name: 'Studio', description: 'A warm, quiet shop.', swatch: { bg: '#faf7f2', surface: '#eee7dd', brand: '#895b3b', text: '#29231e' } }]).map((t) => (
+                    <button key={t.slug} type="button" aria-pressed={storeTemplate === t.slug}
+                      aria-label={`Choose ${t.name}`} disabled={submitting} onClick={() => setStoreTemplate(t.slug)}
+                      className={`overflow-hidden rounded-xl border text-left ${storeTemplate === t.slug ? 'border-lime-400 ring-1 ring-lime-400' : 'border-zinc-700'}`}>
+                      <div className="p-3" style={{ background: t.swatch.bg, color: t.swatch.text }}>
+                        <p className="mb-2 truncate text-xs font-semibold">{name || 'Your store'}</p>
+                        <div className="grid grid-cols-3 gap-1">{[0, 1, 2].map((k) => <span key={k} className="aspect-square rounded" style={{ background: k === 1 ? t.swatch.brand : t.swatch.surface }} />)}</div>
+                      </div>
+                      <span className="block p-2 text-xs text-zinc-200">{t.name.replace(' — Online shop', '')}</span>
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-2 text-xs text-zinc-500">No address, opening hours or physical storefront needed. You can change the design later.</p>
+              </fieldset>
+              <h2 className="mb-3 text-sm font-medium text-zinc-200">Your first product <span className="font-normal text-zinc-500">(optional)</span></h2>
               {!sellsGoods ? (
                 <div className="rounded-xl border border-amber-500/30 bg-amber-500/[0.06] p-4 text-sm leading-relaxed text-zinc-300">
                   Physical products are sold on the Business plan. Your {plan?.plan_name} plan sells downloads,
@@ -423,6 +447,7 @@ export default function CappeOnboardingWizard() {
                   </div>
                 </div>
               )}
+              <p className="mt-4 text-xs text-zinc-500">Your store and product stay drafts. Review the product and your policies before going live.</p>
               {error && <p role="alert" className="mt-4 text-sm text-red-400">{error}</p>}
               <div className="mt-5 flex items-center gap-2">
                 <button
@@ -454,6 +479,8 @@ export default function CappeOnboardingWizard() {
                   </button>
                 )}
               </div>
+              {sellsGoods && <button type="button" disabled={submitting} onClick={() => void finishStore(false)}
+                className="mt-3 w-full py-2 text-sm text-zinc-400 underline hover:text-zinc-200">See my store, add products later</button>}
             </form>
           ) : step === 3 ? (
             <>

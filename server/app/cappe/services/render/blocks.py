@@ -351,6 +351,20 @@ def _reviews(b, t, editable=False):
 def _store(b, t, editable=False):
     # `id="shop"` is a stable anchor any CTA/nav can link to (#shop) regardless
     # of the seller's vocation — the generalizable "go buy" destination.
+    if "preview_products" in t:
+        from ..email import fmt_money
+
+        cards = []
+        for product in t["preview_products"]:
+            image = _safe_image(product.get("image_url"))
+            picture = (f'<img class="cz-product__img" src="{_esc(image)}" alt="" />' if image else
+                       '<div class="cz-product__img" style="background:linear-gradient(135deg,var(--surface),var(--accent));'
+                       'display:grid;place-items:center;font-size:3rem" aria-hidden="true">✦</div>')
+            cards.append(f'<article class="cz-product">{picture}<div class="cz-product__body">'
+                         f'<h3>{_esc(product.get("name"))}</h3><span class="cz-price">'
+                         f'{_esc(fmt_money(product.get("price_cents"), product.get("currency")))}</span></div></article>')
+        return (f'<section id="shop" class="cz-store"><div class="cz-wrap">{_head(b, editable)}'
+                f'<div class="cz-store-grid">{"".join(cards)}</div></div></section>')
     wid = "st" + str(_uid())
     return (f'<section id="shop" class="cz-store"><div class="cz-wrap">{_head(b, editable)}'
             f'<div id="{wid}" class="cz-store-box"><p style="color:var(--muted)">Loading products...</p></div></div></section>'

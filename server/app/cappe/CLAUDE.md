@@ -990,15 +990,17 @@ and Publish 503 with a setup message; the composer and queue still work.
 
 ## Quick store (`POST /sites/quick-store`, `services/quick_store.py`)
 
-- **The wizard's "Online only" path makes a whole store in one transaction**: the site (listed
-  under `retail`), a Home page of the owner's name and line over a `store` block (built here, not
-  cloned: a template's "Replace this…" copy would go live with a one-tap publish), the first
-  product `active`, and the refund + shipping policies from our starter text, so the publish gate
-  passes at once. One transaction because a half-made store would spend a Free account's only site.
-- **The plan is asked before anything is written** (`require_fulfillment(…, "physical")`); `product`
-  may be null, which makes the store alone. The photo is uploaded after, by the client, onto the
-  new product (uploads belong to a site).
-- Products are written by `routes/shop.insert_product`, the same function the Shop's create uses.
+- Online sellers choose Studio, Edit or Pop (`site_templates/online.py`), then optionally add a first
+  product. One transaction stores the template/theme, personalised Home page and a **draft** product.
+  No physical location or policy is invented. No migration or seeded catalog rows are needed.
+- The ready page renders the owned Home through `POST /sites/{id}/preview` with
+  `include_draft_products:true`: ownership is checked before reading the site's draft/active products.
+  The renderer draws inert cards, with no buy buttons or checkout. Empty catalogs show clearly labelled
+  example cards only in previews; examples are never inserted or included in a public render.
+- Online starter sites require an active, reviewed product before publishing. Physical drafts also
+  surface the refund/shipping policy requirement; policies must be saved by the owner in Shop. Other
+  sites retain their ordinary brochure/portfolio readiness rules. Existing plan fulfillment gates remain.
+- The first product's optional photo uploads after creation. Products use `routes/shop.insert_product`.
 
 ## Site templates (`services/site_templates/`)
 

@@ -6,7 +6,7 @@ import type { CappeTemplateSummary } from '../types'
 const api = vi.hoisted(() => ({ get: vi.fn() }))
 vi.mock('../api', () => ({ cappeApi: api }))
 
-const me = vi.hoisted(() => ({ account: { plan: 'free' } as { plan: string } }))
+const me = vi.hoisted(() => ({ account: { plan: 'free' } as { plan: string; account_type?: string } }))
 vi.mock('../hooks/useCappeMe', () => ({ useCappeMe: () => ({ account: me.account }) }))
 
 const SWATCH = { bg: '#fff', surface: '#eee', brand: '#0a0', text: '#111' }
@@ -123,4 +123,21 @@ describe('TemplateGallery', () => {
     render(<TemplateGallery busySlug={null} onPick={() => {}} />)
     expect(await screen.findByRole('alert')).toHaveTextContent('offline')
   })
+})
+
+
+it.each([
+  ['business', 'Shop'], ['personal', 'Portfolio'], ['writer', 'Journal'],
+])('puts %s quick-start designs first without hiding other templates', async (accountType, first) => {
+  me.account = { plan: 'free', account_type: accountType }
+  api.get.mockResolvedValue([
+    { ...MARGIN, slug: 'journal', name: 'Journal', tags: ['blog'] },
+    { ...MARGIN, slug: 'shop', name: 'Shop', tags: ['store', 'online-store'] },
+    { ...MARGIN, slug: 'portfolio', name: 'Portfolio', tags: ['portfolio'] },
+  ])
+  render(<TemplateGallery busySlug={null} onPick={() => {}} />)
+  await screen.findAllByRole('button', { name: /^Use the/ })
+  expect(pickButtons()[0]).toBe(`Use the ${first} template`)
+  expect(pickButtons()).toHaveLength(3)
+  expect(screen.getAllByText('For you')).toHaveLength(1)
 })

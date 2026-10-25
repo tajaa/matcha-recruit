@@ -19,11 +19,10 @@ Website-builder frontend for the consumer brand **Gummfit**, host-routed on gumm
   account's previews pass `premium=1` so it sees the polish it will keep.
 - `onboarding/CappeOnboardingWizard.tsx` asks the Discover category ONCE (step 3) — it sorts the
   shelf and seeds `directory_category` on `POST /sites/from-template`.
-  Its **Online only** answer is the quick store instead: store name + one line → first product
-  (photo, name, price, stock) → `POST /sites/quick-store` → `onboarding/StoreReady.tsx`
-  (`sites/:siteId/ready`): the product on sale, one-tap Publish, and the checklist's unfinished
-  optional items as "when you're ready" links (`utils/readinessAction.ts`, shared with `SetupGuide`).
-  No category, template, Merlin or checklist wall on that path: seeing a product on sale fast is the point.
+  Its **Online only** answer is the quick store instead: store name + one line → starter design
+  and optional first product → `POST /sites/quick-store` → `onboarding/StoreReady.tsx`
+  (`sites/:siteId/ready`): private storefront preview, draft products, and required launch actions.
+  The owner reviews product details and policies before publishing; examples never become real products.
 - `utils/plan.ts` — `isPremiumPlan`, the client mirror of the server's `design_gate.PREMIUM_PLANS`.
 - `magazine/` — photo-journalism magazines (server spec: `server/app/cappe/CLAUDE.md` §Magazines).
   `library/LibraryPanel.tsx` is the picture library with alt text, captions and credits (the
@@ -199,3 +198,12 @@ Backend package is `server/app/cappe/` (own `CLAUDE.md`, cross-references `DOMAI
 ## Cross-cutting rules
 
 Placement rules and boundary rules between the three client apps live in `client/CLAUDE.md` — read that before adding a file here. DB/deploy/test-data rules are in root `CLAUDE.md`.
+
+## Quick-start storefronts
+
+`CappeOnboardingWizard` offers online-only sellers three product-first designs (the registry's
+`online-store` tag). A first product is optional; store and product remain drafts. `StoreReady` uses
+an owner-only, sandboxed rendered preview, including draft products or clearly labelled examples.
+Required readiness actions stay visible and disable publishing until complete. The general
+`TemplateGallery` prioritises store, portfolio/personal and blog designs for business, personal and
+writer accounts respectively; an explicit category takes precedence and the full shelf stays available.

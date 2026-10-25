@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import CappeOnboardingWizard from './CappeOnboardingWizard'
+import type { CappeTemplateSummary } from '../types'
 
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), upload: vi.fn(), categories: vi.fn() }))
 vi.mock('../api', () => ({ cappeApi: api, fetchCappeTemplateCategories: api.categories }))
@@ -13,7 +14,7 @@ const me = vi.hoisted(() => ({ account: { name: 'Pat Lee', account_type: 'busine
 vi.mock('../hooks/useCappeMe', () => ({ useCappeMe: () => ({ account: me.account }) }))
 
 const SWATCH = { bg: '#fff', surface: '#eee', brand: '#0a0', text: '#111' }
-const TEMPLATES = [
+const TEMPLATES: CappeTemplateSummary[] = [
   { slug: 'journal', name: 'Journal', category: 'other', category_label: 'Other', tags: [], description: 'Writing first.',
     mode: 'light', heading_font: 'Fraunces', swatch: SWATCH, pages: [{ slug: 'home', title: 'Home' }] },
   { slug: 'corner-cafe', name: 'Corner Cafe', category: 'food-drink', category_label: 'Food & Drink', tags: [], description: 'Menu and hours.',
@@ -130,9 +131,9 @@ describe('CappeOnboardingWizard', () => {
       vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
     })
 
-    async function toProductStep(plan: object = SELLS) {
+    async function toProductStep(plan: object = SELLS, templates = TEMPLATES) {
       api.get.mockImplementation((path: string) =>
-        Promise.resolve(path === '/billing/entitlements' ? plan : TEMPLATES))
+        Promise.resolve(path === '/billing/entitlements' ? plan : templates))
       api.post.mockResolvedValue({ site: { id: 'site-1' }, product: { id: 'prod-1' } })
       renderWizard()
       expect(screen.getByText('Where do customers find you?')).toBeInTheDocument()
@@ -142,8 +143,8 @@ describe('CappeOnboardingWizard', () => {
       fireEvent.change(screen.getByLabelText('Store name'), { target: { value: ' Tide Goods ' } })
       fireEvent.change(screen.getByLabelText(/What do you sell/), { target: { value: 'Linen, dyed by hand.' } })
       fireEvent.click(screen.getByRole('button', { name: /Continue/ }))
-      // Straight to the product: no category or template question on this path.
-      await screen.findByRole('heading', { name: 'Add your first product' })
+      // Design and optional product share the final step; no category question.
+      await screen.findByRole('heading', { name: 'Make it your store' })
     }
 
     it('makes the store with its first product in one call, then adds the photo', async () => {
@@ -160,7 +161,7 @@ describe('CappeOnboardingWizard', () => {
       await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/cappe/sites/site-1/ready'))
       expect(api.post).toHaveBeenCalledTimes(1)
       expect(api.post).toHaveBeenCalledWith('/sites/quick-store', {
-        name: 'Tide Goods', tagline: 'Linen, dyed by hand.', timezone: TZ,
+        name: 'Tide Goods', tagline: 'Linen, dyed by hand.', timezone: TZ, template_slug: 'online-studio',
         product: { name: 'Tea towel', price_cents: 1850, inventory: 30 },
       })
       expect(api.upload).toHaveBeenCalledWith('/sites/site-1/upload', expect.any(FormData))
@@ -195,6 +196,24 @@ describe('CappeOnboardingWizard', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Create my store, add products later' }))
       await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/cappe/sites/site-1/ready'))
       expect(api.post.mock.calls[0][1].product).toBeNull()
+    })
+
+    it('creates a designed draft without requiring product details', async () => {
+      await toProductStep()
+      expect(screen.getByRole('button', { name: /Choose Studio/ })).toHaveAttribute('aria-pressed', 'true')
+      fireEvent.click(screen.getByRole('button', { name: 'See my store, add products later' }))
+      await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/cappe/sites/site-1/ready'))
+      expect(api.post.mock.calls[0][1]).toMatchObject({ product: null, template_slug: 'online-studio' })
+      expect(api.upload).not.toHaveBeenCalled()
+    })
+
+    it('saves the selected online design', async () => {
+      const pop = { ...TEMPLATES[0], slug: 'online-pop', name: 'Pop — Online shop', tags: ['online-store'] }
+      await toProductStep(SELLS, [...TEMPLATES, pop])
+      fireEvent.click(await screen.findByRole('button', { name: 'Choose Pop — Online shop' }))
+      fireEvent.click(screen.getByRole('button', { name: 'See my store, add products later' }))
+      await waitFor(() => expect(api.post).toHaveBeenCalled())
+      expect(api.post.mock.calls[0][1]).toMatchObject({ template_slug: 'online-pop', product: null })
     })
 
     it('shows why the store could not be made', async () => {

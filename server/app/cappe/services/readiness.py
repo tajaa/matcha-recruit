@@ -3,6 +3,7 @@
 A site can't go live until the REQUIRED items are done (it has real content).
 Recommended items are nudges, not blockers: having something to book or buy is
 one of them, because a brochure, menu or portfolio site is a real site. The same
+Online-store starters require a reviewed, active product. The same
 computation backs the GET /readiness endpoint and the publish gate, so the UI
 and the server can never disagree about what's missing.
 
@@ -19,10 +20,13 @@ line and a logo are nudges. It has no shop, so none of the commerce items.
 from .common import loads
 from .entitlements import resolve_entitlements
 from .policies import REQUIRED_FOR_PHYSICAL
+from .quick_store import is_store_template
 
 # One round trip for everything the commerce items look at.
 _COMMERCE_SQL = """
 SELECT
+  (SELECT COUNT(*) FROM cappe_products
+    WHERE site_id = $1 AND status = 'draft' AND fulfillment = 'physical') AS draft_physical,
   (SELECT COUNT(*) FROM cappe_products
     WHERE site_id = $1 AND status = 'active' AND fulfillment = 'physical') AS physical,
   (SELECT COUNT(*) FROM cappe_products
@@ -53,7 +57,8 @@ def _commerce_items(facts, site_row) -> list[dict]:
             "label": "Take card payments",
             "hint": "Connect Stripe so buyers can pay by card at checkout.",
         })
-    if not _get(facts, "physical"):
+    if not (_get(facts, "physical") or
+            (is_store_template(_get(site_row, "template_slug")) and _get(facts, "draft_physical"))):
         return items
     kinds = set(_get(facts, "policy_kinds") or ())
     shipping_set = bool(
@@ -213,5 +218,9 @@ async def compute_readiness(conn, site_id, site_row) -> dict:
         },
     ]
     items += _commerce_items(await conn.fetchrow(_COMMERCE_SQL, site_id), site_row)
+    if is_store_template(_get(site_row, "template_slug")):
+        offering = next(i for i in items if i["key"] == "offering")
+        offering.update(required=True, done=(products or 0) > 0, label="Review and publish your first product",
+                        hint="Your starter products stay drafts until you confirm their details in Shop.")
     ready = all(i["done"] for i in items if i["required"])
     return {"ready": ready, "items": items}

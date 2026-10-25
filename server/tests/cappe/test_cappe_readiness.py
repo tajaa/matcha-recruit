@@ -52,3 +52,29 @@ def test_a_site_with_no_content_cannot_publish():
 
 def test_offering_is_still_tracked_as_a_suggestion():
     assert _item(_readiness(blocks=_INTRO, booking_types=1), "offering")["done"] is True
+
+
+def test_online_starter_requires_a_reviewed_product_and_physical_policies():
+    conn = _Conn(blocks=_INTRO, products=0)
+    conn.commerce = {"draft_physical": 1, "physical": 0, "policy_kinds": []}
+    site = {"meta_config": {}, "template_slug": "online-studio"}
+    result = asyncio.run(compute_readiness(conn, "site-id", site))
+    assert not result["ready"]
+    assert _item(result, "offering")["required"] and not _item(result, "offering")["done"]
+    assert _item(result, "policies")["required"] and not _item(result, "policies")["done"]
+    conn.counts["cappe_products"] = 1
+    conn.commerce.update(physical=1, policy_kinds=["refund", "shipping"])
+    assert asyncio.run(compute_readiness(conn, "site-id", site))["ready"]
+
+
+def test_draft_physical_products_do_not_block_an_ordinary_brochure_site():
+    conn = _Conn(blocks=_INTRO)
+    conn.commerce = {"draft_physical": 1, "physical": 0, "policy_kinds": []}
+    result = asyncio.run(compute_readiness(conn, "site-id", {"meta_config": {}}))
+    assert result["ready"] and not any(i["key"] == "policies" for i in result["items"])
+
+
+def test_bookings_do_not_replace_an_online_starters_first_product():
+    conn = _Conn(blocks=_INTRO, booking_types=1)
+    result = asyncio.run(compute_readiness(conn, "site-id", {"meta_config": {}, "template_slug": "online-pop"}))
+    assert not result["ready"] and not _item(result, "offering")["done"]
