@@ -330,11 +330,20 @@ async def doc_faces(conn, site_id: UUID, raw_doc: Any) -> dict[str, list[dict]]:
     """The site's faces of every family key the document names, as
     `schema.normalize_doc` takes them: {family: [face, ...]}, one face per
     weight and style (a visible one before a hidden one). Hidden faces count:
-    a page that set one keeps it."""
+    a page that set one keeps it. The face the document already carries
+    (`doc.faces`, the one its lines were set in) comes first while the site
+    has it, so replacing a face doesn't change a page set in the old one."""
     try:
         text = json.dumps(raw_doc, default=str)
     except (TypeError, ValueError):
         return {}
+    carried: set[tuple] = set()
+    for f in (raw_doc.get("faces") if isinstance(raw_doc, dict) else None) or []:
+        if isinstance(f, dict) and isinstance(f.get("sha"), str):
+            try:
+                carried.add((f.get("family"), int(f.get("weight")), bool(f.get("italic")), f["sha"]))
+            except (TypeError, ValueError):
+                continue
     keys = sorted(set(_FAMILY_ANY.findall(text)))[:200]
     if not keys:
         return {}
@@ -343,6 +352,8 @@ async def doc_faces(conn, site_id: UUID, raw_doc: Any) -> dict[str, list[dict]]:
         "ORDER BY family, weight, italic, (hidden_at IS NOT NULL), created_at, id",
         site_id, keys,
     )
+    rows = sorted(rows, key=lambda r: (r["family"], int(r["weight"]), bool(r["italic"]),
+                                       (r["family"], int(r["weight"]), bool(r["italic"]), r["sha"]) not in carried))
     out: dict[str, list[dict]] = {}
     seen: set[tuple] = set()
     for r in rows:

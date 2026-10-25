@@ -168,8 +168,10 @@ Website-builder frontend for the consumer brand **Gummfit**, host-routed on gumm
   `picturePlace`, the renderer's object-fit/position/scale arithmetic), joins the composition cache key, and the
   composer fills each line in the widest `room` at its height. **Subject in front** (`model/subject.ts`, `ui/subject.ts`):
   the photo stays under the lettering and a linked `cutout` partner showing its cut-out goes over it (`keepLinks` lets a
-  partner keep its own picture and drops it when the photo changes); `geometry.hitItem` clicks a partner only on its
-  `shape` unless it is selected. Collections leave own fonts and cut-out partners behind (`portableCollection`).
+  partner keep its own picture and drops it when the photo changes). The photo behind is `backingFor` the cut-out: its
+  parent, or an edit with the same recipe minus the mask, which the Picture Editor saves alongside (`backing`) so the
+  pair lines up pixel for pixel. `isPartner` (server `schema.is_partner`) holds only while a visible photo shares the
+  link: then no credit, and `geometry.hitItem` clicks it only on its `shape` unless it is selected. Collections leave own fonts and cut-out partners behind (`portableCollection`).
   **Magazine identity** (`studio/model/identity.ts`, `ui/panels/IdentityPanel.tsx`): named paragraph/character
   styles and swatches are references, with local attributes as overrides. `resolveParas` supplies effective
   type to composition/rendering/font loading; editable paragraphs and ProseMirror keep sparse references,

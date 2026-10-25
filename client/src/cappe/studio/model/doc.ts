@@ -35,18 +35,22 @@ const intIn = (v: unknown, lo: number, hi: number, d: number) =>
   typeof v === 'number' && Number.isFinite(v) ? Math.round(clamp(v, lo, hi)) : d
 
 /** A run's face as stored: a catalog font, or one of the magazine's own (its
- *  nearest weight among its faces; any weight, to the hundred, while they
- *  aren't known here, as the server reads a stored page). */
+ *  nearest weight among its faces of the style asked for, else of the other;
+ *  any weight, to the hundred, while they aren't known here, as the server
+ *  reads a stored page). */
 function faceOf(r: CharAttrs): { font: string; wt: number; it: boolean } {
   const want = typeof r.wt === 'number' && Number.isFinite(r.wt) ? r.wt : CHAR_DEFAULTS.wt
   if (r.font && CUSTOM_FAMILY.test(r.font)) {
     const faces = customFaces.get(r.font)
     if (!faces?.length) return { font: r.font, wt: clamp(Math.floor(want / 100 + 0.5) * 100, 100, 900), it: !!r.it }
-    const wt = faces.map((f) => f.weight).reduce((best, w) => {
+    // The style asked for when the family has it, else the other (as the server's custom_face).
+    const style = faces.filter((f) => f.italic === !!r.it)
+    const pick = style.length ? style : faces
+    const wt = pick.map((f) => f.weight).reduce((best, w) => {
       const d = Math.abs(w - want), bd = Math.abs(best - want)
       return d < bd || (d === bd && w > best) ? w : best
     })
-    return { font: r.font, wt, it: !!r.it && faces.some((f) => f.weight === wt && f.italic) }
+    return { font: r.font, wt, it: pick[0].italic }
   }
   const font = r.font && FONT_BY_NAME.has(r.font) ? r.font : CHAR_DEFAULTS.font
   const wt = nearestWeight(font, want)

@@ -168,12 +168,31 @@ export class TextEditor {
         this.store.edit((d) => setParas(d, thread, applyChar(t.paras, a, b, { track })), { key: `track:${thread}` })
         return true
       }
-      if (!a[1]) return true
-      const resolve = (r: CharAttrs) => resolveChar(r, base, identity)
-      this.store.edit((d) => setParas(d, thread, kernAt(t.paras, a[0], a[1], step, this.store.measure.width, resolve)),
-        { key: `kern:${thread}`, extra: { editing: sel } })
+      this.kernCaret(step, false)
       return true
     }
+  }
+
+  /** The kerning after the character before the caret set to `value`; false
+   *  when there is no caret (text is selected), so the selection takes it. */
+  kernTo(value: number): boolean {
+    const sel = this.selection()
+    if (!sel || sel.anchor[0] !== sel.head[0] || sel.anchor[1] !== sel.head[1]) return false
+    this.kernCaret(value, true)
+    return true
+  }
+
+  private kernCaret(step: number, absolute: boolean): void {
+    const t = this.threadObj()
+    const sel = this.selection()
+    if (!t || !sel || !sel.head[1]) return
+    const [p, o] = sel.head
+    const identity = this.store.get().doc.identity
+    const base = identity?.paragraphs.find((x) => x.id === t.paras[p].style)?.char
+    const resolve = (r: CharAttrs) => resolveChar(r, base, identity)
+    const thread = t.id
+    this.store.edit((d) => setParas(d, thread, kernAt(t.paras, p, o, step, this.store.measure.width, resolve, absolute)),
+      { key: `kern:${thread}`, extra: { editing: sel } })
   }
 
   private selection(): { thread: string; anchor: Pos; head: Pos } | null {

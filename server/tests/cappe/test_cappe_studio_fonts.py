@@ -209,6 +209,29 @@ def test_doc_faces_reads_only_the_families_a_document_names():
     assert "site_id = $1" in conn.sql_for("fetch")[0]
 
 
+def test_doc_faces_keeps_the_face_a_document_carries_over_its_replacement():
+    # Hidden and replaced: a page set in the old face keeps it; one that carries none takes the new.
+    conn = QueryConn(fetch={"FROM cappe_studio_fonts": [row(sha="b" * 64), row(sha="a" * 64, hidden_at=NOW)]})
+    raw = {"threads": [{"paras": [{"runs": [{"t": "x", "font": FAMILY}]}]}],
+           "faces": [{"family": FAMILY, "weight": 400, "italic": False, "sha": "a" * 64}]}
+    assert [f["sha"] for f in asyncio.run(C.doc_faces(conn, SITE, raw))[FAMILY]] == ["a" * 64]
+    del raw["faces"]
+    assert [f["sha"] for f in asyncio.run(C.doc_faces(conn, SITE, raw))[FAMILY]] == ["b" * 64]
+    # A carried face the site doesn't have counts for nothing.
+    raw["faces"] = [{"family": FAMILY, "weight": 400, "italic": False, "sha": "f" * 64}, "junk", {"weight": "x", "sha": "e"}]
+    assert [f["sha"] for f in asyncio.run(C.doc_faces(conn, SITE, raw))[FAMILY]] == ["b" * 64]
+
+
+def test_a_family_without_the_style_asked_for_sets_the_one_it_has():
+    italic_only = [C.doc_face(row(weight=700, italic=True))]
+    with faces.checking({FAMILY: italic_only}):
+        assert faces.custom_face(FAMILY, 400, False) == (FAMILY, 700, True)
+    both = [C.doc_face(row(weight=300)), C.doc_face(row(weight=700, italic=True, sha="b" * 64))]
+    with faces.checking({FAMILY: both}):
+        assert faces.custom_face(FAMILY, 700, False) == (FAMILY, 300, False)
+        assert faces.custom_face(FAMILY, 300, True) == (FAMILY, 700, True)
+
+
 def test_doc_faces_asks_nothing_when_no_family_is_named():
     conn = QueryConn()
     assert asyncio.run(C.doc_faces(conn, SITE, {"threads": [{"paras": [{"runs": [{"t": "u-xyz", "font": "Inter"}]}]}]})) == {}

@@ -725,8 +725,9 @@ normalized paragraphs itself; a thread with no valid composition prints its word
   ≤3 characters counted whole, else the whole composition is dropped) and drawn as `.lyt-dc` inside its first line, so
   text order holds. Items: `wrap` `{m: box|subject, o}` on pictures, rectangles, ellipses and graphics (subject only
   with a `shape`); an image's `shape` (a cut-out's silhouette, ≤`WRAP_ROWS` rows of `[left, right]` picture fractions
-  plus `ar`) and `cutout` (a linked frame showing its photo's cut-out over the lettering: no credit printed, skipped by
-  the Text view and the story's cover; dropped without a `link`). **The server never composes**: wrap, keep and runt
+  plus `ar`) and `cutout` (a linked frame showing its photo's cut-out over the lettering: while `schema.is_partner`,
+  i.e. a visible photo shares its link, no credit is printed and the Text view and the story's cover skip it; dropped
+  without a `link`). **The server never composes**: wrap, keep and runt
   are the Studio's composer only; the server checks the shapes. The Text view marks a drop cap (`dropcap`).
 - **Your own fonts** (`studio/custom_fonts.py`, `studio/font_build.py`, `routes/studio_fonts.py`, `cappefont01`): any plan
   with `magazine` uploads TTF/OTF/WOFF/WOFF2 (≤10 MB, licence attestation required, 30/h, 60 visible per site). An
@@ -738,8 +739,9 @@ normalized paragraphs itself; a thread with no valid composition prints its word
   `cappe_studio_fonts` sha). Fonts belong to the site. Pages name them by a family key `u-<16 hex>`, never their real
   name; an upload whose name matches a visible family joins its key. **Checking vs showing** (`studio/fonts.py`):
   `normalize_doc(raw, bank, faces_map)` puts the site's faces in scope (`fonts.checking`, from
-  `custom_fonts.doc_faces`, hidden faces included): a key the site has gets its nearest weight, one it doesn't (another
-  site's collection) falls back to the default face. The stored document embeds the faces it names (`doc.faces`,
+  `custom_fonts.doc_faces`, hidden faces included, and for each style the face the document already carries ahead of
+  a replacement, as the client `FaceBook` keeps the first face of a style): a key the site has gets the style asked for
+  (else the one it has) at its nearest weight, one it doesn't (another site's collection) falls back to the default face. The stored document embeds the faces it names (`doc.faces`,
   exactly `schema.FACE_KEYS`), and the renderers put them in scope (`fonts.showing`), so the reader, `/paid` and
   `faces_css` need no lookup. Every save path passes `doc_faces` (`blog.pages_fields`, the paged preview, the identity
   PUT); collections pass none on purpose. **A face is hidden, never deleted** (pages set it), so the table's downgrade

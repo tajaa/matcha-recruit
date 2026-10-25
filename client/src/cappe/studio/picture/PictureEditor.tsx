@@ -58,11 +58,14 @@ const errorText = (e: unknown, fallback: string) => (e instanceof Error && e.mes
  *  full size and saves it as a new picture made from this one (the server
  *  keeps the recipe, the source and its credit). Editing an edited picture
  *  starts again from its source, with its recipe. */
-export default function PictureEditor({ siteId, asset, startIn = 'adjust', onDone, onClose, onHelp }: {
+export default function PictureEditor({ siteId, asset, startIn = 'adjust', onDone, onClose, onHelp, backing = false }: {
   siteId: string
   asset: Asset
   startIn?: Mode
-  onDone: (saved: CappeAsset) => void
+  /** `behind`: with `backing`, the same edit saved without its cut-out too
+   *  (when it did more than cut out), for the subject in front to sit over. */
+  onDone: (saved: CappeAsset, behind?: CappeAsset) => void
+  backing?: boolean
   onClose: () => void
   /** Open the Studio's guide at this section (`picture` or `cutout`). */
   onHelp?: (section: 'picture' | 'cutout') => void
@@ -312,7 +315,20 @@ export default function PictureEditor({ siteId, asset, startIn = 'adjust', onDon
       const type = clean.cutout || src.png ? 'image/png' : 'image/jpeg'
       const blob = await new Promise<Blob>((resolve, reject) =>
         out.toBlob((b) => (b ? resolve(b) : reject(new Error('Couldn’t draw the picture.'))), type, 0.92))
-      onDone(await studioApi.saveEdit(siteId, src.id, blob, clean))
+      const saved = await studioApi.saveEdit(siteId, src.id, blob, clean)
+      const unmasked: Recipe = { ...clean }
+      delete unmasked.cutout
+      let behind: CappeAsset | undefined
+      if (backing && clean.cutout && Object.keys(unmasked).length) {
+        // The same picture without the cut-out, to go behind it (the subject in front).
+        g.setMask(null)
+        g.draw(unmasked, w, h)
+        const plain = await new Promise<Blob>((resolve, reject) =>
+          out.toBlob((b) => (b ? resolve(b) : reject(new Error('Couldn’t draw the picture.'))), src.png ? 'image/png' : 'image/jpeg', 0.92))
+        behind = await studioApi.saveEdit(siteId, src.id, plain, unmasked)
+      }
+      if (behind) onDone(saved, behind)
+      else onDone(saved)
     } catch (e) {
       saving.current = false
       setPhase('ready')

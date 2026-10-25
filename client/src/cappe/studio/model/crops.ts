@@ -18,6 +18,7 @@
 
 import { allIds, newId, spreads } from './doc'
 import { LIMITS, clamp, round } from './limits'
+import { backingFor } from './subject'
 import type { Asset, Doc, ImageItem, Item } from './types'
 
 export type Rect = { x: number; y: number; w: number; h: number }
@@ -326,7 +327,7 @@ export function keepLinks(before: Doc, after: Doc, assets: Record<string, Asset>
       doc = patch(doc, ids, (i) => (i.asset_id === pic ? i : { ...i, asset_id: pic }))
     }
     // A partner whose picture isn't the cut-out of the group's any more goes its own way.
-    const stale = g.members.filter((m) => m.cutout && (!pic || !m.asset_id || (assets[m.asset_id] && assets[m.asset_id].parent !== pic)))
+    const stale = g.members.filter((m) => m.cutout && (!pic || !m.asset_id || (assets[m.asset_id] && backingFor(assets, assets[m.asset_id]) !== pic)))
     if (stale.length) {
       doc = patch(doc, new Set(stale.map((m) => m.id)), withoutLink)
       if (g.members.length - stale.length < 2) continue

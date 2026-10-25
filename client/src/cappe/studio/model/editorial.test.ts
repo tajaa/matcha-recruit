@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { hitItem, layout } from '../canvas/geometry'
+import { FaceBook } from '../fonts/faces'
 import { portableCollection } from './collections'
 import { keepLinks, linkProblem } from './crops'
 import { charOf, newItem, paraOf, registerFaces } from './doc'
 import { applyChar, applyPara, kernAt, patchItems } from './ops'
-import { cutoutFor, putSubjectInFront, subjectProblem } from './subject'
+import { backingFor, cutoutFor, putSubjectInFront, subjectProblem } from './subject'
 import type { Asset, Doc, Face, ImageItem, Shape, TextItem } from './types'
 
 const doc = (over: Partial<Doc> = {}): Doc => ({
@@ -30,9 +31,21 @@ describe('type the server keeps', () => {
     const other = 'u-ffffffffffffffff'
     expect(charOf({ font: other, wt: 649, it: true })).toMatchObject({ font: other, wt: 600, it: true })
     registerFaces([face(300, false, '5'.repeat(64)), face(700, true, '4'.repeat(64))])
-    expect(charOf({ font: OWN, wt: 400, it: true })).toMatchObject({ font: OWN, wt: 300, it: false })
-    expect(charOf({ font: OWN, wt: 600, it: true })).toMatchObject({ font: OWN, wt: 700, it: true })
+    expect(charOf({ font: OWN, wt: 400, it: true })).toMatchObject({ font: OWN, wt: 700, it: true }) // the style first, as the server
+    expect(charOf({ font: OWN, wt: 600, it: false })).toMatchObject({ font: OWN, wt: 300, it: false })
+    const italics = 'u-1111111111111111'
+    registerFaces([{ ...face(700, true, '6'.repeat(64)), family: italics }])
+    expect(charOf({ font: italics, wt: 400 })).toMatchObject({ font: italics, wt: 700, it: true }) // all it has
     expect(charOf({ font: 'Nope' }).font).toBe('Source Serif 4')
+  })
+
+  it('a face replaced on the site doesn’t take over a story set in the old one', () => {
+    const book = new FaceBook({ version: 'v', faces: [] })
+    const old = face(400, false, '7'.repeat(64)), replacement = face(400, false, '8'.repeat(64))
+    book.add([old]) // the story's own (doc.faces)
+    book.add([replacement]) // the site's list
+    expect(book.face(OWN, 400, false)).toBe(old)
+    expect(book.sha(replacement.sha)).toBe(replacement)
   })
 
   it('a style applied over letters keeps their kerning and alternates', () => {
@@ -85,16 +98,37 @@ describe('the subject in front of the lettering', () => {
     expect(cutoutFor(assets, null)).toBeNull()
   })
 
+  it('goes over the photo as it was cut out: a cropped cut-out over the same crop, never the uncropped photo', () => {
+    const crop = { x: 0.25, y: 0, w: 0.5, h: 1, angle: 0, turn: 0, flip_h: false, flip_v: false }
+    const cut = { points: [], feather: 0, invert: false }
+    const lib: Record<string, Asset> = {
+      ...assets,
+      c2: { id: 'c2', url: '/c2.png', width: 500, height: 1000, kind: 'edit', parent: 'a1', recipe: { cutout: cut, crop } as never },
+    }
+    expect(backingFor(lib, lib.c2)).toBeNull() // no picture lines up with it
+    expect(cutoutFor(lib, 'c2')).toBeNull()
+    expect(cutoutFor(lib, 'a1')?.id).toBe('c1') // only cut-outs that line up with the photo
+    lib.e2 = { id: 'e2', url: '/e2.jpg', width: 500, height: 1000, kind: 'edit', parent: 'a1', recipe: { crop: { ...crop } } as never }
+    expect(backingFor(lib, lib.c2)).toBe('e2')
+    expect(cutoutFor(lib, 'e2')?.id).toBe('c2')
+    const made = putSubjectInFront(doc({ items: [photo({ asset_id: 'e2' }), text('t1')] }), 'i1', lib.c2, SHAPE, 'e2')!
+    const kept = keepLinks(doc({ items: [photo({ asset_id: 'e2' }), text('t1')] }), made.doc, lib)
+    const [base, , partner] = kept.items as ImageItem[]
+    expect(base.asset_id).toBe('e2')
+    expect(partner.link).toBe(base.link) // still a pair: the cut-out lines up with what is behind it
+    expect([partner.fx, partner.fy, partner.zoom]).toEqual([base.fx, base.fy, base.zoom])
+  })
+
   it('keeps the photo behind the text it covers and sets its cut-out over it, linked', () => {
     const d = doc({ items: [text('t1'), photo(), text('t2', { y: 600 })] })
-    const out = putSubjectInFront(d, 'i1', assets.c1, SHAPE)!
+    const out = putSubjectInFront(d, 'i1', assets.c1, SHAPE, 'a1')!
     expect(out.doc.items.map((i) => i.id)).toEqual(['i1', 't1', out.id, 't2']) // under the masthead, then the cut-out over it
     const [base, , partner] = out.doc.items as ImageItem[]
     expect(base).toMatchObject({ asset_id: 'a1', link: partner.link, shape: SHAPE })
     expect(partner).toMatchObject({ asset_id: 'c1', cutout: true, x: 100, y: 100, w: 300, h: 300, fx: 50, zoom: 100 })
     expect(linkProblem(out.doc, ['i1', out.id])).toBeNull() // a cut-out partner shows its own picture
     // A frame showing the cut-out goes back to its photo.
-    const shown = putSubjectInFront(doc({ items: [photo({ asset_id: 'c1' }), text('t1')] }), 'i1', assets.c1, SHAPE)!
+    const shown = putSubjectInFront(doc({ items: [photo({ asset_id: 'c1' }), text('t1')] }), 'i1', assets.c1, SHAPE, 'a1')!
     expect((shown.doc.items[0] as ImageItem).asset_id).toBe('a1')
   })
 
@@ -106,7 +140,7 @@ describe('the subject in front of the lettering', () => {
   })
 
   it('stays lined up with its photo: a narrower window shows the same picture, a new photo lets it go', () => {
-    const made = putSubjectInFront(doc({ items: [photo(), text('t1')] }), 'i1', assets.c1, SHAPE)!
+    const made = putSubjectInFront(doc({ items: [photo(), text('t1')] }), 'i1', assets.c1, SHAPE, 'a1')!
     const before = made.doc
     const fresh = keepLinks(doc({ items: [photo(), text('t1')] }), before, assets)
     expect(fresh.items.find((i) => i.id === 'i1')).toMatchObject({ fx: 50, fy: 50, zoom: 100 }) // the photo didn't move
@@ -120,7 +154,7 @@ describe('the subject in front of the lettering', () => {
   })
 
   it('is clicked only on the subject, unless it is selected', () => {
-    const made = putSubjectInFront(doc({ items: [text('t1', { x: 100, y: 100, w: 300, h: 300 }), photo()] }), 'i1', assets.c1, SHAPE)!
+    const made = putSubjectInFront(doc({ items: [text('t1', { x: 100, y: 100, w: 300, h: 300 }), photo()] }), 'i1', assets.c1, SHAPE, 'a1')!
     const lay = layout(made.doc)
     const o = lay.origin[0]
     const at = (x: number, y: number) => hitItem(made.doc, lay, { x: o.x + x, y: o.y + y })?.id

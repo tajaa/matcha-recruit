@@ -122,12 +122,15 @@ def _cases() -> list[dict]:
         {"runs": [{"t": "AV", "track": 20, "kern": -30}]},
     ], "comp": {"lines": [[0, 0, 0, 9, 30, 14, 210, 0], [0, 0, 10, 18, 30, 28, 210, 0], [0, 1, 0, 2, 0, 60, 240, 0]],
                 "caps": [[0, 1, 0, 42, 36.5]]}}]}
+    # The subject in front, its photo hidden: a picture of its own, credit and all.
+    lone = {**editorial, "items": [{**editorial["items"][1], "hidden": True}, editorial["items"][3]], "threads": []}
     out = []
     for name, raw, locked_from in [("composed text", composed, None), ("flowed text", flowed, None),
                                    ("pictures and shapes", pictures, None), ("locked pages", locked, 2),
                                    ("a4 pages", a4, None), ("uncomposed past the wall", flowed, 2),
                                    ("graphics", graphic_page, None), ("magazine identity", branded, None),
-                                   ("identity locked pages", branded, 2), ("editorial type", editorial, None)]:
+                                   ("identity locked pages", branded, 2), ("editorial type", editorial, None),
+                                   ("a cut-out alone", lone, None)]:
         doc = S.normalize_doc(raw, None, {OWN: [OWN_FACE]} if name == "editorial type" else None)
         html, used = R.pages_html(doc, ASSETS, locked_from=locked_from, label="Pages of 'Tide'")
         out.append({"name": name, "doc": doc, "locked_from": locked_from, "html": html,
@@ -165,6 +168,7 @@ def test_the_fixture_covers_what_it_says():
     assert 'class="lyt-dc"' in e["html"] and "font-feature-settings:'kern' 1,'liga' 1,'calt' 1,'onum' 1,'smcp' 1" in e["html"]
     assert "letter-spacing:calc(-0.1 * var(--u))" in e["html"]  # tracking 20 and kerning -30, at 10.5 pt
     assert e["html"].count("Photo: Ana") == 1  # the subject in front prints no credit of its own
+    assert cases["a cut-out alone"]["html"].count("Photo: Ana") == 1  # its photo hidden: it prints the credit
     assert e["doc"]["faces"] == [{k: OWN_FACE[k] for k in S.FACE_KEYS}] and "4" * 64 in e["faces_css"]
     g = cases["graphics"]["html"]
     assert "background:#b4532a;-webkit-mask:url(/api/cappe/public/graphics/" in g  # a one-colour graphic, recoloured

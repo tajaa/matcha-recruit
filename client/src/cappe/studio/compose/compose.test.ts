@@ -121,6 +121,26 @@ describe('the composer', () => {
     expect(text(p, comp.lines[0]).startsWith('Once')).toBe(true) // the cap's letter still begins the line's text
   })
 
+  it('keeps the drop cap of a paragraph that runs out of room', () => {
+    const p = para('Once upon a time there was a cap that sat beside three lines of words and more', { dc: 3 })
+    const capped: Measure = { ...mono, metrics: (c) => ({ asc: 0.8 * c.size, desc: 0.2 * c.size, cap: 0.7 * c.size }) }
+    const { comp, overset } = compose([p], [frame({ w: 100, h: 46 })], capped)
+    expect(overset).toBe(true)
+    expect(comp.lines.length).toBeGreaterThan(0)
+    expect(comp.caps?.length).toBe(1)
+    expect(comp.caps![0][3]).toBe(comp.lines[0][5] + 24) // two leadings under the first baseline
+  })
+
+  it('starts the next paragraph below the cap of a paragraph shorter than it', () => {
+    const capped: Measure = { ...mono, metrics: (c) => ({ asc: 0.8 * c.size, desc: 0.2 * c.size, cap: 0.7 * c.size }) }
+    const { comp } = compose([para('Once upon', { dc: 3 }), para('next')], [frame({ w: 100 })], capped)
+    expect(comp.lines).toHaveLength(2)
+    const capBase = comp.caps![0][3]
+    expect(capBase).toBe(comp.lines[0][5] + 24)
+    expect(comp.lines[1][5]).toBe(capBase + 12) // a leading under the cap's baseline
+    expect(comp.lines[1][4]).toBe(0)
+  })
+
   it('leaves out a drop cap that isn\'t asked for, or would take the whole paragraph', () => {
     expect(compose([para('Once upon a time')], [frame()], mono).comp.caps).toBeUndefined()
     expect(compose([para('A', { dc: 2 })], [frame()], mono).comp.caps).toBeUndefined()

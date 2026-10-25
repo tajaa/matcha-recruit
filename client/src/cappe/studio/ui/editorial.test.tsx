@@ -156,6 +156,22 @@ describe('kerning at the caret', () => {
     editor.destroy()
   })
 
+  it('takes the Kerning field at the caret, for the pair there', () => {
+    const d = doc({ items: [frame], threads: [{ id: 's1', frames: ['t1'], paras: [{ runs: [{ t: 'AVA' }] }] }] })
+    const { store, ctx } = studio(d)
+    const editor = new TextEditor(store, () => null)
+    ctx.editor = editor
+    editor.open('s1', [0, 1])
+    shown(ctx, <CharacterPanel />)
+    const field = screen.getByLabelText('Kerning (⌥← ⌥→ at the caret)')
+    fireEvent.change(field, { target: { value: '40' } })
+    fireEvent.blur(field)
+    expect(runs(store)).toEqual([{ t: 'A', kern: 40 }, { t: 'VA' }])
+    act(() => { editor.view!.dispatch(editor.view!.state.tr.insertText('x')) })
+    expect(runs(store)).toEqual([{ t: 'A', kern: 40 }, { t: 'xVA' }])
+    editor.destroy()
+  })
+
   it('changes tracking when letters are selected', () => {
     const d = doc({ items: [frame], threads: [{ id: 's1', frames: ['t1'], paras: [{ runs: [{ t: 'AVA' }] }] }] })
     const { store } = studio(d)
@@ -166,4 +182,3 @@ describe('kerning at the caret', () => {
     editor.destroy()
   })
 })
-

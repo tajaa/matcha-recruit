@@ -14,6 +14,7 @@ import { CHAR_DEFAULTS, PARA_DEFAULTS } from '../model/limits'
 import { spreads } from '../model/doc'
 import { parentDoc, resolveChar, resolveItem, resolvedThreads } from '../model/identity'
 import { graphicUrl } from '../model/graphics'
+import { isPartner } from '../model/subject'
 import type { Asset, CharAttrs, Doc, GraphicItem, ImageItem, Item, Para, Run, TextItem, Thread } from '../model/types'
 import { faceUrl, familyName, type FaceLookup } from '../fonts/faces'
 
@@ -203,7 +204,7 @@ function img(a: Asset, sizes: string, eager: boolean, style: string): string {
   return `<img ${attrs.join(' ')} />`
 }
 
-function imageHtml(item: ImageItem, d: Draw, pageW: number, eager: boolean): string {
+function imageHtml(item: ImageItem, d: Draw, pageW: number, eager: boolean, partner: boolean): string {
   const radius = item.radius ? u(item.radius) : ''
   let style = box(item)
   if (item.fill) style += `;background:${item.fill}`
@@ -215,7 +216,7 @@ function imageHtml(item: ImageItem, d: Draw, pageW: number, eager: boolean): str
     if (item.zoom !== 100) pic += `;transform:scale(${n(item.zoom / 100)});transform-origin:${n(item.fx)}% ${n(item.fy)}%`
     const tag = img(asset, imageSizes(item, pageW), eager, pic)
     // The subject in front is its picture's cut-out: the picture behind it prints the credit.
-    const credit = item.cutout ? '' : creditHtml(asset)
+    const credit = partner ? '' : creditHtml(asset)
     if (tag) inner = tag + (credit ? `<figcaption class="lyt-credit">${credit}</figcaption>` : '')
   }
   return `<figure class="lyt-item lyt-img" style="${style}">${inner}${stroke(item, radius)}</figure>`
@@ -254,7 +255,7 @@ export function itemHtml(item: Item, doc: Doc, d: Draw, eager = false): string {
   item = resolveItem(item, doc.identity)
   switch (item.kind) {
     case 'text': return textHtml(item, d)
-    case 'image': return imageHtml(item, d, doc.size.w, eager)
+    case 'image': return imageHtml(item, d, doc.size.w, eager, isPartner(item, doc.items))
     case 'line': return lineHtml(item)
     case 'graphic': return graphicHtml(item)
     default: return shapeHtml(item)
