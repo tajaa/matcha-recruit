@@ -16,6 +16,7 @@ import { parentDoc, resolveChar, resolveItem, resolvedThreads } from '../model/i
 import { graphicUrl } from '../model/graphics'
 import { isPartner } from '../model/subject'
 import type { Asset, CharAttrs, Doc, GraphicItem, ImageItem, Item, Para, Run, TextItem, Thread } from '../model/types'
+import { CUT_BY_NAME } from '../fonts/cuts'
 import { faceUrl, familyName, type FaceLookup } from '../fonts/faces'
 
 /** The faces set by name (not built), by family, as the server's `Uses`. */
@@ -63,8 +64,11 @@ export function runStyle(attrs: CharAttrs, used: Used, faces: FaceLookup): strin
   let family: string
   if (face) family = `'${familyName(face.sha)}'`
   else {
-    addUse(used, a.font, a.wt, a.it)
-    family = `${fontStack(a.font)};font-weight:${a.wt}${a.it ? ';font-style:italic' : ''}`
+    // Set by name from Google Fonts; a Gummfit cut by the family it is cut from.
+    const cut = CUT_BY_NAME.get(a.font)
+    const name = cut ? cut.fallback ?? cut.source : a.font
+    addUse(used, name, a.wt, a.it)
+    family = `${fontStack(name)};font-weight:${a.wt}${a.it ? ';font-style:italic' : ''}`
   }
   let style = `font-family:${family};font-size:${u(a.size)}`
   if (a.track || a.kern) style += `;letter-spacing:${u(((a.track + a.kern) / 1000) * a.size)}`

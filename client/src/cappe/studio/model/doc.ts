@@ -2,6 +2,7 @@
 // (schema.py): spreads, a run's full attributes, sparse storage, new items.
 
 import { FONT_BY_NAME, hasItalic, nearestWeight } from '../../magazine/design/fontStack'
+import { CUT_BY_NAME } from '../fonts/cuts'
 import { CHAR_DEFAULTS, LIMITS, PARA_DEFAULTS, clamp, round } from './limits'
 import type { Align, CharAttrs, Doc, Face, Item, Kind, Para, ParaAttrs, Role, Run, Thread } from './types'
 
@@ -34,10 +35,10 @@ export const customFamily = (key: string) => customFaces.get(key)
 const intIn = (v: unknown, lo: number, hi: number, d: number) =>
   typeof v === 'number' && Number.isFinite(v) ? Math.round(clamp(v, lo, hi)) : d
 
-/** A run's face as stored: a catalog font, or one of the magazine's own (its
- *  nearest weight among its faces of the style asked for, else of the other;
- *  any weight, to the hundred, while they aren't known here, as the server
- *  reads a stored page). */
+/** A run's face as stored: a catalog font, a Gummfit cut (fonts/cuts.ts), or
+ *  one of the magazine's own (its nearest weight among its faces of the style
+ *  asked for, else of the other; any weight, to the hundred, while they aren't
+ *  known here, as the server reads a stored page). */
 function faceOf(r: CharAttrs): { font: string; wt: number; it: boolean } {
   const want = typeof r.wt === 'number' && Number.isFinite(r.wt) ? r.wt : CHAR_DEFAULTS.wt
   if (r.font && CUSTOM_FAMILY.test(r.font)) {
@@ -51,6 +52,11 @@ function faceOf(r: CharAttrs): { font: string; wt: number; it: boolean } {
       return d < bd || (d === bd && w > best) ? w : best
     })
     return { font: r.font, wt, it: pick[0].italic }
+  }
+  const cut = r.font ? CUT_BY_NAME.get(r.font) : undefined
+  if (cut) {
+    const wt = cut.w.reduce((best, x) => { const d = Math.abs(x - want), bd = Math.abs(best - want); return d < bd || (d === bd && x > best) ? x : best })
+    return { font: cut.name, wt, it: !!r.it && cut.i.includes(wt) }
   }
   const font = r.font && FONT_BY_NAME.has(r.font) ? r.font : CHAR_DEFAULTS.font
   const wt = nearestWeight(font, want)

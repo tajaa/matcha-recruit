@@ -107,6 +107,13 @@ FONTS: dict[str, tuple[str, bool, tuple[int, ...], tuple[int, ...]]] = {
     "Righteous": ("display", False, (400,), ()),
     "Permanent Marker": ("handwriting", False, (400,), ()),
     "Shadows Into Light": ("handwriting", False, (400,), ()),
+    "Big Shoulders Stencil Display": ("display", False, (100, 200, 300, 400, 500, 600, 700, 800, 900), ()),
+    "Anybody": ("display", False, (100, 200, 300, 400, 500, 600, 700, 800, 900), (100, 200, 300, 400, 500, 600, 700, 800, 900)),
+    "Jost": ("sans", True, (100, 200, 300, 400, 500, 600, 700, 800, 900), (100, 200, 300, 400, 500, 600, 700, 800, 900)),
+    "Poiret One": ("display", False, (400,), ()),
+    "Great Vibes": ("handwriting", False, (400,), ()),
+    "Italianno": ("handwriting", False, (400,), ()),
+    "Pinyon Script": ("handwriting", False, (400,), ()),
 }
 
 # What a face falls back to while it loads, or if it can't.

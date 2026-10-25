@@ -39,6 +39,12 @@ describe('type the server keeps', () => {
     expect(charOf({ font: 'Nope' }).font).toBe('Source Serif 4')
   })
 
+  it('a Gummfit cut at its nearest style', () => {
+    expect(charOf({ font: 'Bodoni Moda Display', wt: 300, it: true })).toMatchObject({ font: 'Bodoni Moda Display', wt: 400, it: true })
+    expect(charOf({ font: 'Bricolage Grotesque Condensed', wt: 900, it: true })).toMatchObject({ wt: 800, it: false })
+    expect(charOf({ font: 'League Gothic Condensed', wt: 700 })).toMatchObject({ wt: 400 })
+  })
+
   it('a face replaced on the site doesn’t take over a story set in the old one', () => {
     const book = new FaceBook({ version: 'v', faces: [] })
     const old = face(400, false, '7'.repeat(64)), replacement = face(400, false, '8'.repeat(64))

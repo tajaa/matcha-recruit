@@ -9,6 +9,8 @@ with a full rebuild of the manifest.
 """
 from __future__ import annotations
 
+import re
+
 from fontTools import subset as _subset
 from fontTools.ttLib import TTFont
 from fontTools.varLib import instancer
@@ -18,15 +20,17 @@ LATIN = sorted({*range(0x20, 0x7F), *range(0xA0, 0x180), *range(0x2010, 0x2028),
                 0x2044, 0x20AC, 0x2122, 0x2212, 0xFB01, 0xFB02, 0x0131, 0x02C6, 0x02DA, 0x02DC})
 
 
-def instance(font: TTFont, weight: int | None = None) -> TTFont:
-    """A variable font fixed at `weight` (every other axis at its default; no
-    weight: the default too). A static font is returned as it is."""
+def instance(font: TTFont, weight: int | None = None, at: dict | None = None) -> TTFont:
+    """A variable font fixed at `weight` and at `at` (other axes, a Gummfit
+    cut's: `cuts.py`), every other axis at its default (no weight: the
+    default too). A static font is returned as it is."""
     if "fvar" not in font:
         return font
     axes = {a.axisTag: a for a in font["fvar"].axes}
     loc = {tag: a.defaultValue for tag, a in axes.items()}
-    if "wght" in axes and weight is not None:
-        loc["wght"] = max(axes["wght"].minValue, min(axes["wght"].maxValue, weight))
+    for tag, value in {**(at or {}), **({"wght": weight} if weight is not None else {})}.items():
+        if tag in axes:
+            loc[tag] = max(axes[tag].minValue, min(axes[tag].maxValue, value))
     return instancer.instantiateVariableFont(font, loc, updateFontNames=False)
 
 
@@ -46,10 +50,41 @@ def normalize_metrics(font: TTFont) -> TTFont:
     return font
 
 
-def build_face(font: TTFont, weight: int | None, *, subset: bool = True) -> TTFont:
-    """One face at `weight`: instanced, subset to Latin (every OpenType layout
-    feature kept, hinting dropped) when `subset`, and its metrics made one."""
-    font = instance(font, weight)
+WEIGHT_NAMES = {100: "Thin", 200: "ExtraLight", 300: "Light", 400: "Regular", 500: "Medium", 600: "SemiBold",
+                700: "Bold", 800: "ExtraBold", 900: "Black"}
+
+
+def rename(font: TTFont, family: str, weight: int, italic: bool) -> TTFont:
+    """A cut named as itself, inside its file: family and style (the four
+    classic styles under the family, any other weight as a family of its own,
+    typographic names beside them), full, unique and PostScript names.
+    Copyright, licence and designer stay as they are (SIL OFL 1.1: a modified
+    version keeps its licence and doesn't go by its source's name)."""
+    table = font["name"]
+    style = " ".join(x for x in (WEIGHT_NAMES.get(weight, str(weight)) if weight != 400 or not italic else "", "Italic" if italic else "") if x)
+    ribbi = weight in (400, 700)
+    names = {
+        1: family if ribbi else f"{family} {WEIGHT_NAMES.get(weight, weight)}",
+        2: ("Bold " if weight == 700 else "") + ("Italic" if italic else "Regular") if ribbi else ("Italic" if italic else "Regular"),
+        3: f"{family} {style}",
+        4: f"{family} {style}",
+        6: re.sub(r"[^A-Za-z0-9-]", "", f"{family}-{style}".replace(" ", ""))[:63],
+        16: family,
+        17: style,
+    }
+    names[2] = names[2].replace("Bold Regular", "Bold")
+    table.names = [r for r in table.names if r.nameID not in (*names, 21, 22, 25)]
+    for name_id, value in names.items():
+        table.setName(value, name_id, 3, 1, 0x409)
+        table.setName(value, name_id, 1, 0, 0)
+    return font
+
+
+def build_face(font: TTFont, weight: int | None, *, subset: bool = True, at: dict | None = None) -> TTFont:
+    """One face at `weight` (and a cut's other axes, `at`): instanced, subset
+    to Latin (every OpenType layout feature kept, hinting dropped) when
+    `subset`, and its metrics made one."""
+    font = instance(font, weight, at)
     if subset:
         opts = _subset.Options()
         opts.layout_features = ["*"]

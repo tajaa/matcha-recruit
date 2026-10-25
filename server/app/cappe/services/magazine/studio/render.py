@@ -34,6 +34,7 @@ from typing import Optional
 from ...render.sanitize import _safe_image
 from ..figures import _variants, credit_html
 from ..fonts import Uses, add_use, font_stack
+from . import cuts
 from . import fonts as faces
 from . import graphics
 from .fonts import showing
@@ -89,8 +90,10 @@ def run_style(attrs: dict, used: Uses) -> str:
     if face:
         family = f"'{faces.family(face['sha'])}'"
     else:
-        add_use(used, a["font"], a["wt"], a["it"])
-        family = font_stack(a["font"]) + (";font-weight:" + str(a["wt"])) + (";font-style:italic" if a["it"] else "")
+        # Set by name from Google Fonts; a Gummfit cut by the family it is cut from.
+        name = cuts.CUTS[a["font"]].stand_in if cuts.cut(a["font"]) else a["font"]
+        add_use(used, name, a["wt"], a["it"])
+        family = font_stack(name) + (";font-weight:" + str(a["wt"])) + (";font-style:italic" if a["it"] else "")
     style = f"font-family:{family};font-size:{u(a['size'])}"
     if a["track"] or a["kern"]:
         style += f";letter-spacing:{u((a['track'] + a['kern']) / 1000 * a['size'])}"

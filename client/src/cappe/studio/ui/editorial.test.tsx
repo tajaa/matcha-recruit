@@ -59,6 +59,16 @@ describe('the type panels', () => {
     expect(screen.getByRole('button', { name: 'Add your own font' })).toBeInTheDocument()
   })
 
+  it('offer a Gummfit cut’s own styles, italics included', () => {
+    const cut = doc({ items: [frame], threads: [{ id: 's1', frames: ['t1'], paras: [{ runs: [{ t: 'Cover', font: 'Bodoni Moda Display', wt: 700 }] }] }] })
+    const { ctx } = studio(cut)
+    shown(ctx, <CharacterPanel />)
+    const options = [...(screen.getByLabelText('Style') as HTMLSelectElement).options].map((o) => o.textContent)
+    expect(options).toContain('Bold italic')
+    expect(options[0]).toMatch(/^Regular/) // from 400: the cut has nothing lighter
+    expect(options).not.toContain('Thin')
+  })
+
   it('set a drop cap and keep lines together', () => {
     const { store, ctx } = studio(words())
     shown(ctx, <ParagraphPanel />)

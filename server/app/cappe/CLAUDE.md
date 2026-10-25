@@ -360,7 +360,7 @@ What is built so far:
   cases from it, then make the TS match).
 - **Legacy photo `overlays` become text layers on read** (`design_schema.overlays_to_layers`, called by
   `normalize_story` and `with_designs`), so stored overlays keep rendering and are never written again.
-- **Fonts are an allowlist of 95 Google faces** (`services/magazine/fonts.py`, mirrored by the client's
+- **Fonts are an allowlist of 102 Google faces** (`services/magazine/fonts.py`, mirrored by the client's
   generated `design/fonts.ts`), each with the weights and italics it ships. A page's font link asks only
   for what its designs and text blocks use (`story_fonts` → `fonts_links`: one `<link>` per face, always
   with regular 400; issue pages too). "heading"/"body" are the magazine's own pair (`var(--mz-h)`/`--mz-b`).
@@ -729,6 +729,21 @@ normalized paragraphs itself; a thread with no valid composition prints its word
   i.e. a visible photo shares its link, no credit is printed and the Text view and the story's cover skip it; dropped
   without a `link`). **The server never composes**: wrap, keep and runt
   are the Studio's composer only; the server checks the shapes. The Text view marks a drop cap (`dropcap`).
+- **Gummfit cuts** (`studio/cuts.py`, client `studio/fonts/cuts.ts`, held equal by `test_cappe_studio_fonts_catalog.py`):
+  Studio-only families built from open-licensed variable fonts fixed at a display optical size (Bodoni Moda Display
+  opsz 96, Fraunces Display 144, Playfair Poster 1200) or a width (condensed/expanded Noto Serif Display, Anybody,
+  Archivo, League Gothic, Bricolage Grotesque, Playfair). The build instances the source at the cut's `axes`, renames
+  it inside the file (`font_build.rename`: family/style/full/PostScript names; copyright and licence records kept, SIL
+  OFL 1.1) and writes it to the manifest under the cut's name. They aren't in `magazine/fonts.FONTS`: the classic
+  editor loads type from Google Fonts by name, which doesn't serve them. A page naming a cut whose faces aren't built is
+  set in its `stand_in` (its source, or `fallback` when the catalog lacks the source: Playfair → Playfair Display).
+  **The catalog build defaults every other axis**, which is why the existing Bodoni Moda and Fraunces are their *text*
+  cuts (opsz 11 and 9): add a cut rather than change that, or every existing face's bytes change.
+  `build_magazine_fonts.py --families "A,B" --manifest` adds or rebuilds just those in the manifest (`merge`); the
+  build is deterministic (rebuilt twice to the same bytes, 2026-10-24). **Ops:** after the backend ships, run
+  `build_magazine_fonts.py --out DIR --upload --dry-run`, then for real, per environment: it builds and uploads the
+  205 faces the manifest gained (12.8 MB) and skips what storage has. Italiana and Six Caps (already in the catalog)
+  declare Reserved Font Names, which a modified (subset) copy may not use; that is unresolved.
 - **Your own fonts** (`studio/custom_fonts.py`, `studio/font_build.py`, `routes/studio_fonts.py`, `cappefont01`): any plan
   with `magazine` uploads TTF/OTF/WOFF/WOFF2 (≤10 MB, licence attestation required, 30/h, 60 visible per site). An
   upload is never stored as it came: fontTools parses it, a variable font is fixed at its default, CFF/CFF2 outlines

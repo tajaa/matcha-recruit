@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
 import FontField from '../../../magazine/workspace/FontField'
+import { CUTS } from '../../fonts/cuts'
 import { ColorField, NumberField, Row, Section, Select } from '../../../magazine/workspace/controls'
 import { allIds, charOf, newId } from '../../model/doc'
 import { captureParent, detachParent, importIdentity, linkRole, removeStyle, removeSwatch, starterIdentity, IDENTITY_LIMITS } from '../../model/identity'
@@ -198,7 +199,7 @@ export function IdentityPanel() {
 function StyleFields({ value, identity, onChange }: { value: CharAttrs; identity: MagazineIdentity; onChange: (value: CharAttrs) => void }) {
   const full = charOf(value)
   return <div className="space-y-3">
-    <FontField value={full.font} roles={false}
+    <FontField value={full.font} roles={false} cuts={CUTS}
         onChange={(font) => onChange({ ...value, font })} />
     <Row>
       <NumberField label="Style size" value={full.size} min={1} max={1296} step={0.5}
