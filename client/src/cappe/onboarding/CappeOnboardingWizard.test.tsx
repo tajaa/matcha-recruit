@@ -41,7 +41,9 @@ function renderWizard() {
   )
 }
 
-async function toCategoryStep(mode: 'One location' | 'Multiple locations', name: string) {
+type Mode = 'Online only' | 'One location' | 'Multiple locations'
+
+async function toCategoryStep(mode: Mode, name: string) {
   fireEvent.click(screen.getByRole('button', { name: new RegExp(mode) }))
   fireEvent.click(screen.getByRole('button', { name: /Continue/ }))
   fireEvent.change(screen.getByLabelText('Business name'), { target: { value: name } })
@@ -49,7 +51,7 @@ async function toCategoryStep(mode: 'One location' | 'Multiple locations', name:
   await screen.findByRole('heading', { name: 'What kind of business is it?' })
 }
 
-async function toStartStep(mode: 'One location' | 'Multiple locations', name: string, category: string | null = 'Food & Drink') {
+async function toStartStep(mode: Mode, name: string, category: string | null = 'Food & Drink') {
   await toCategoryStep(mode, name)
   if (category) {
     fireEvent.click(await screen.findByRole('button', { name: category }))
@@ -116,6 +118,23 @@ describe('CappeOnboardingWizard', () => {
     })
     // The site takes the owner's timezone instead of staying on UTC.
     expect(api.put).toHaveBeenCalledWith('/sites/site-1', { timezone: TZ })
+  })
+
+  it('sets up an online-only store as one site, with no branch to name', async () => {
+    renderWizard()
+    expect(screen.getByText('Where do customers find you?')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Online only/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Continue/ }))
+    expect(screen.queryByText('Your first branch')).not.toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Business name'), { target: { value: 'Tide Goods' } })
+    fireEvent.click(screen.getByRole('button', { name: /Continue/ }))
+    await screen.findByRole('heading', { name: 'What kind of business is it?' })
+    fireEvent.click(screen.getByRole('button', { name: 'Skip for now' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Start with a blank site' }))
+
+    await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/cappe/sites/site-1'))
+    expect(api.post).toHaveBeenCalledTimes(1)
+    expect(api.post).toHaveBeenCalledWith('/sites', { name: 'Tide Goods', source_type: 'blank', is_multi_location: false })
   })
 
   it('still finishes when the timezone cannot be saved', async () => {

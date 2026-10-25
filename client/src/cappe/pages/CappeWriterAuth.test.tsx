@@ -19,6 +19,7 @@ function at(path: string, element: React.ReactNode) {
       <Routes>
         <Route path="/cappe/magazines/signup" element={element} />
         <Route path="/cappe/magazines/login" element={element} />
+        <Route path="/cappe/signup" element={element} />
         <Route path="/cappe/writer" element={<p>writer home</p>} />
         <Route path="/cappe/billing" element={<p>billing</p>} />
       </Routes>
@@ -55,6 +56,32 @@ describe('writer sign-up', () => {
     const body = JSON.parse(fetchMock.mock.calls[0][1].body as string)
     expect(body.account_type).toBe('writer')
     expect(body.intended_plan).toBeUndefined()
+  })
+})
+
+describe('writer picked on the general sign-up page', () => {
+  it('offers a writer account and sends it to the magazine, not the billing page', async () => {
+    const fetchMock = respond(200, {
+      verification_required: false, email: 'ana@example.com', access_token: 'a', refresh_token: 'r',
+      account: { account_type: 'writer' }, intended_plan: null,
+    })
+    at('/cappe/signup?plan=pro', <CappeSignup />)
+    expect(screen.getByText(/You picked the/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /A writer/ }))
+    // A writer picks the Writer plan when the magazine goes live, not here.
+    expect(screen.queryByText(/You picked the/)).not.toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'ana@example.com' } })
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'harbour-123' } })
+    fireEvent.click(screen.getByRole('button', { name: /Create account/ }))
+    expect(await screen.findByText('writer home')).toBeInTheDocument()
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string)
+    expect(body.account_type).toBe('writer')
+    expect(body.intended_plan).toBeUndefined()
+  })
+
+  it('starts on writer when the link says so', () => {
+    at('/cappe/signup?type=writer', <CappeSignup />)
+    expect(screen.getByRole('button', { name: /A writer/ })).toHaveAttribute('aria-pressed', 'true')
   })
 })
 

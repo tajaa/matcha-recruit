@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Loader2, MapPin, MapPinned, ArrowRight, ArrowLeft } from 'lucide-react'
+import { Loader2, Globe, MapPin, MapPinned, ArrowRight, ArrowLeft } from 'lucide-react'
 import { cappeApi, fetchCappeTemplateCategories } from '../api'
 import TemplateGallery from '../components/TemplateGallery'
 import { useCappeMe } from '../hooks/useCappeMe'
@@ -11,14 +11,16 @@ import type { CappeSite, CappeLocation, CappeTemplateSummary } from '../types'
 
 // Post-signup business-setup wizard. account_type is already chosen at signup;
 // this asks the questions that shape the rest of the product — single vs
-// multi-location, the name, what kind of business it is — then how to start:
+// multi-location (or online only), the name, what kind of business it is — then how to start:
 // blank or from a template. The category is asked ONCE here and used twice:
 // it sorts the template shelf and seeds the Discover listing, so nobody is
 // asked again on the directory card. The template choice has to live here: the
 // Free plan includes one site, so a wizard that only made blank sites spent it
 // before the gallery was reachable. Mounted at /cappe/onboarding inside
 // CappeLayout; CappeSites redirects here on first run (zero sites).
-type Mode = 'single' | 'multi'
+// 'online' is a single site with no storefront: same site as 'single', and
+// it doesn't ask for a branch or send the owner to Locations.
+type Mode = 'online' | 'single' | 'multi'
 type Step = 1 | 2 | 3 | 4
 type Category = { slug: string; label: string }
 
@@ -122,10 +124,16 @@ export default function CappeOnboardingWizard() {
 
   const MODES: { value: Mode; icon: typeof MapPin; title: string; blurb: string }[] = [
     {
+      value: 'online',
+      icon: Globe,
+      title: 'Online only',
+      blurb: 'No storefront. You sell and ship online, or work remotely.',
+    },
+    {
       value: 'single',
       icon: MapPin,
       title: 'One location',
-      blurb: 'A single shop, studio or office. One set of hours, one map.',
+      blurb: 'A single shop, studio or office customers visit. One set of hours, one map.',
     },
     {
       value: 'multi',
@@ -166,7 +174,7 @@ export default function CappeOnboardingWizard() {
           {step === 1 ? (
             <>
               <label className="mb-3 block text-sm font-medium text-zinc-300">
-                Do you have one location, or more than one?
+                Where do customers find you?
               </label>
               <div className="grid gap-2">
                 {MODES.map(({ value, icon: Icon, title, blurb }) => {
