@@ -7,6 +7,8 @@ import re
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
+from .sites import CappeSite
+
 MastheadStyle = Literal["classic", "literary", "modern", "elegant", "display"]
 
 
@@ -262,6 +264,24 @@ class CappeMagazineSiteCreate(BaseModel):
     accent: Optional[str] = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
 
 
+class CappeMagazineStart(CappeMagazineSiteCreate):
+    """Create the magazine and its first private Studio draft together."""
+    request_id: UUID
+    doc: dict[str, Any]
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def clean_name(cls, value):
+        if isinstance(value, str):
+            value = value.strip()
+        return value
+
+
+class CappeMagazineStartResult(BaseModel):
+    site: CappeSite
+    post_id: UUID
+
+
 class CappeFollowRequest(BaseModel):
     """A reader following a magazine by email (double opt-in)."""
     email: EmailStr
@@ -428,6 +448,8 @@ __all__ = [
     "HANDLE_PATTERN",
     "CappeHandleCheck",
     "CappeMagazineSiteCreate",
+    "CappeMagazineStart",
+    "CappeMagazineStartResult",
     "CappeFollowRequest",
     "CappeIssueCreate",
     "CappeIssue",

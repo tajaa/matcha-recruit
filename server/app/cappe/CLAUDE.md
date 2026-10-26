@@ -463,6 +463,13 @@ What is built so far:
   `can_sell=false`, one site, `magazine`. Its Stripe Price needs `server/scripts/seed_cappe_plans.py`
   after the migration; until then a writer checkout is 503. `GET /public/pricing?for=writer` is the
   magazines landing page's lineup.
+- **Writer quick start** (`POST /magazine/quick-start`) creates the same magazine site, draft About
+  page and first `format='pages'` Studio draft in one transaction, under the account row lock and site
+  limit. `collection_doc` bounds and normalizes the submitted design and removes site photo/font
+  references, paywalls and cached composition. No plan purchase or publication happens here. The site
+  UUID is `uuid5(account.id, "writer-start:<request_id>")`; its draft UUID is `uuid5(site.id, "first-draft")`.
+  A replay looks up that account's site and draft before enforcing the creation limit and never
+  overwrites edits. A deleted first draft returns 409 rather than recreating it. No migration is needed.
 - **A magazine site publishes with a published story on a plan with `magazine`**
   (`readiness._magazine_readiness`; the publish route answers a missing plan with 402
   `plan_required` naming the Writer plan first). It is never sent for business-listing inference.

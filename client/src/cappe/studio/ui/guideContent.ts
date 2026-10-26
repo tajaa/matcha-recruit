@@ -30,6 +30,7 @@ export const GUIDE: GuideSection[] = [
       + 'pictures in picture frames, and you place each one exactly where you want it. Readers see your pages just as '
       + 'you laid them out, scaled to their screen.',
     points: [
+      'Starting a writer account? Name your magazine and choose an editorial design during setup. Your first ten-page draft opens here, with your name on the cover and empty picture frames. Browse the pages, replace the sample words and add your own photos. Nothing is public until you publish; choose a magazine plan when you are ready.',
       'Everything you change saves by itself a moment later, and ⌘Z undoes it.',
       'Use the contents on the left to jump to any part of the Studio. You can open this guide again from Help → How the Studio works, or the ? at the top right.',
     ],

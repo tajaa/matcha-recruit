@@ -1,6 +1,8 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import manifest from '../../../../../server/app/cappe/services/magazine/studio/fonts_manifest.json'
+import type { FaceBook } from '../../studio/fonts/faces'
 import MagazineOnboarding from '../onboarding/MagazineOnboarding'
 import { handleFrom } from './handles'
 import Emails from '../emails/Emails'
@@ -11,7 +13,21 @@ import type { CappeAccount, CappeIssue, CappePost } from '../../types'
 
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), patch: vi.fn(), delete: vi.fn() }))
 const pricing = vi.hoisted(() => vi.fn())
-vi.mock('../../api', () => ({ cappeApi: api, fetchCappePricing: pricing, clearCappeTokens: vi.fn() }))
+const designs = vi.hoisted(() => ({ load: vi.fn(), ensure: vi.fn() }))
+vi.mock('../../api', () => ({ cappeApi: api, cappeApiBase: '/api/cappe', fetchCappePricing: pricing, clearCappeTokens: vi.fn() }))
+vi.mock('../../studio/fonts/faces', async (original) => ({ ...await original<object>(), loadManifest: designs.load }))
+vi.mock('../../studio/compose/shaper', async (original) => ({ ...await original<object>(), loadHarfBuzz: async () => ({}) }))
+vi.mock('../../studio/fonts/loader', () => ({
+  browserWidth: vi.fn(),
+  FontLoader: class {
+    readonly book: FaceBook
+    constructor(book: FaceBook) { this.book = book }
+    ensureDoc = designs.ensure
+    measure = { width: (c: { size: number }, t: string) => t.length * c.size / 2,
+      metrics: (c: { size: number }) => ({ asc: c.size * 0.8, desc: c.size * 0.2, cap: c.size * 0.7 }) }
+  },
+}))
+beforeEach(() => { vi.clearAllMocks(); designs.load.mockResolvedValue(manifest); designs.ensure.mockResolvedValue(undefined) })
 
 const OPTIONS = {
   topics: [{ key: 'travel', label: 'Travel' }, { key: 'food', label: 'Food & drink' }, { key: 'art', label: 'Art' },
@@ -32,6 +48,7 @@ function mount(path: string, element: React.ReactElement, pattern: string) {
       <Routes>
         <Route path={pattern} element={element} />
         <Route path="/cappe/sites/:siteId/stories" element={<p>the stories</p>} />
+        <Route path="/cappe/studio/:siteId/story/:postId" element={<p>the first Studio draft</p>} />
         <Route path="/cappe/writer/new" element={<p>name your magazine</p>} />
       </Routes>
     </MemoryRouter>,
@@ -49,20 +66,28 @@ describe('handles', () => {
 describe('MagazineOnboarding', () => {
   it('names the magazine, checks the address and creates it', async () => {
     answer({ '/magazine/options': OPTIONS, '/magazine/handle-available': { handle: 'the-harbour-review', available: true, reason: null } })
-    api.post.mockResolvedValue({ id: 's-9' })
+    api.post.mockResolvedValue({ site: { id: 's-9' }, post_id: 'p-9' })
     mount('/cappe/writer/new', <MagazineOnboarding />, '/cappe/writer/new')
     fireEvent.change(await screen.findByPlaceholderText('The Harbour Review'), { target: { value: 'The Harbour Review' } })
     expect(screen.getByDisplayValue('the-harbour-review')).toBeInTheDocument()
     expect(await screen.findByText(/the-harbour-review\.gummfit\.com is yours to take/, {}, { timeout: 2000 })).toBeInTheDocument()
+    fireEvent.click(screen.getByText(/Optional details/))
     for (const t of ['Travel', 'Food & drink', 'Art', 'Music']) fireEvent.click(screen.getByRole('button', { name: t }))
     expect(screen.getByRole('button', { name: 'Music' })).toHaveAttribute('aria-pressed', 'false') // three at most
     fireEvent.click(screen.getByRole('button', { name: /Archivo Black/ }))
-    fireEvent.click(screen.getByRole('button', { name: /Create my magazine/ }))
-    expect(await screen.findByText('the stories')).toBeInTheDocument()
-    expect(api.post).toHaveBeenCalledWith('/magazine/sites', {
+    fireEvent.click(screen.getByRole('button', { name: 'Choose Maison' }))
+    fireEvent.click(screen.getByRole('button', { name: /Open my first draft/ }))
+    expect(await screen.findByText('the first Studio draft')).toBeInTheDocument()
+    expect(api.post).toHaveBeenCalledWith('/magazine/quick-start', expect.objectContaining({
       name: 'The Harbour Review', handle: 'the-harbour-review', tagline: null, topics: ['travel', 'food', 'art'],
-      masthead_style: 'modern',
-    })
+      masthead_style: 'modern', request_id: expect.any(String),
+    }))
+    const doc = api.post.mock.calls[0][1].doc
+    expect(doc.pages).toHaveLength(10)
+    expect(JSON.stringify(doc)).toContain('The Harbour Review')
+    expect(JSON.stringify(doc)).toContain('Playfair Poster')
+    expect(doc.items.filter((i: { kind: string }) => i.kind === 'image').every((i: { asset_id: string | null }) => !i.asset_id)).toBe(true)
+    expect(JSON.stringify(doc)).not.toContain('starter-media')
   })
 
   it('says why an address can’t be had and won’t create it', async () => {
@@ -71,7 +96,41 @@ describe('MagazineOnboarding', () => {
     fireEvent.change(await screen.findByPlaceholderText('The Harbour Review'), { target: { value: 'Harbour' } })
     fireEvent.change(screen.getByDisplayValue('harbour'), { target: { value: 'WWW' } })
     expect(await screen.findByText('That address is reserved. Pick another.', {}, { timeout: 2000 })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Create my magazine/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /Open my first draft/ })).toBeDisabled()
+  })
+
+  it('keeps the chosen design and request id after a failed response, and prevents double submits', async () => {
+    answer({ '/magazine/options': OPTIONS, '/magazine/handle-available': { handle: 'harbour', available: true } })
+    let reject!: (reason: Error) => void
+    api.post.mockImplementationOnce(() => new Promise((_, no) => { reject = no }))
+      .mockResolvedValue({ site: { id: 's-9' }, post_id: 'p-9' })
+    mount('/cappe/writer/new', <MagazineOnboarding />, '/cappe/writer/new')
+    fireEvent.change(await screen.findByPlaceholderText('The Harbour Review'), { target: { value: 'Harbour' } })
+    fireEvent.click(await screen.findByRole('button', { name: 'Choose Off Register' }))
+    fireEvent.click(screen.getByRole('button', { name: /Next design page/ }))
+    expect(screen.getByText('2 / 10 · Contents')).toBeInTheDocument()
+    fireEvent.submit(screen.getByRole('form', { name: 'Your magazine' }))
+    fireEvent.submit(screen.getByRole('form', { name: 'Your magazine' }))
+    expect(api.post).toHaveBeenCalledTimes(1)
+    await act(async () => reject(new Error('Connection lost. Try again.')))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Connection lost')
+    expect(screen.getByRole('button', { name: 'Choose Off Register' })).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(screen.getByRole('button', { name: /Open my first draft/ }))
+    expect(await screen.findByText('the first Studio draft')).toBeInTheDocument()
+    expect(api.post.mock.calls[1][1]).toEqual(api.post.mock.calls[0][1])
+  })
+
+  it('can reload failed design fonts without losing the magazine name', async () => {
+    answer({ '/magazine/options': OPTIONS, '/magazine/handle-available': { handle: 'harbour', available: true } })
+    designs.ensure.mockRejectedValueOnce(new Error('Font connection interrupted'))
+    mount('/cappe/writer/new', <MagazineOnboarding />, '/cappe/writer/new')
+    fireEvent.change(await screen.findByPlaceholderText('The Harbour Review'), { target: { value: 'Harbour' } })
+    expect(await screen.findByRole('alert')).toHaveTextContent('Font connection interrupted')
+    expect(screen.getByRole('button', { name: /Open my first draft/ })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Reload designs' }))
+    expect(await screen.findByRole('button', { name: 'Choose Quiet Form' })).toBeInTheDocument()
+    expect(screen.getByDisplayValue('Harbour')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('button', { name: /Open my first draft/ })).toBeEnabled())
   })
 })
 
