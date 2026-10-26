@@ -1,5 +1,6 @@
 import { Navigate, useLocation } from 'react-router-dom'
 import { useMe } from '../../hooks/useMe'
+import { authLoginPath } from '../../api/authPaths'
 
 interface Props {
   /** Roles allowed to render the subtree. Anything else is bounced. */
@@ -30,7 +31,7 @@ export default function RequireRole({ roles, children }: Props) {
   // signed-in admin over a transient blip — see isNoSession in hooks/useMe.
   if (authFailed) {
     const next = encodeURIComponent(location.pathname + location.search)
-    return <Navigate to={`/login?next=${next}`} replace />
+    return <Navigate to={`${authLoginPath(location.pathname)}?next=${next}`} replace />
   }
 
   // Still fail closed when we simply don't know who this is: render nothing

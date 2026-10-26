@@ -1,6 +1,7 @@
 import { afterEach, describe, it, expect, vi } from 'vitest'
 import { clearAuthTokens, setAuthTokens } from './authStorage'
-import { API_BASE, ApiError, logoutSession, planRequiredMessage, _shouldReportStatus } from './client'
+import { API_BASE, ApiError, api, logoutSession, planRequiredMessage, _shouldReportStatus } from './client'
+import { authLoginPath } from './authPaths'
 
 function tokenWithExpiry(exp: number): string {
   return `header.${btoa(JSON.stringify({ exp }))}.signature`
@@ -43,6 +44,36 @@ describe('_shouldReportStatus', () => {
 })
 
 describe('logoutSession', () => {
+  it('returns Gummfit staff to their login when refresh is rejected after a 401', async () => {
+    const location = { pathname: '/gummfit/admin/models', search: '', hash: '', href: '' }
+    vi.stubGlobal('location', location)
+    setAuthTokens(tokenWithExpiry(Date.now() / 1000 - 60), 'refresh-token')
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 401 })))
+
+    await expect(api.get('/auth/me')).rejects.toThrow('Session expired')
+    await vi.waitFor(() => expect(location.href).toBe('/gummfit/admin/login?next=%2Fgummfit%2Fadmin%2Fmodels'))
+  })
+
+  it('does not redirect repeatedly from the Gummfit staff login itself', async () => {
+    const location = { pathname: '/gummfit/admin/login', search: '', hash: '', href: '' }
+    vi.stubGlobal('location', location)
+    await logoutSession()
+    expect(location.href).toBe('')
+  })
+
+  it('returns Gummfit staff to their login with their destination after revoking the session', async () => {
+    const location = { pathname: '/gummfit/admin', search: '?view=bank', hash: '', href: '' }
+    vi.stubGlobal('location', location)
+    setAuthTokens(tokenWithExpiry(Date.now() / 1000 + 60), '')
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(logoutSession()).resolves.toBe(true)
+
+    expect(location.href).toBe('/gummfit/admin/login?next=%2Fgummfit%2Fadmin%3Fview%3Dbank')
+    expect(fetchMock).toHaveBeenCalledWith(`${API_BASE}/auth/logout`, expect.objectContaining({ method: 'POST' }))
+  })
+
   it('does not send an expired access token to logout after refresh is rejected', async () => {
     setAuthTokens(tokenWithExpiry(Date.now() / 1000 - 60), 'refresh-token')
     window.history.replaceState({}, '', '/login')
@@ -53,6 +84,12 @@ describe('logoutSession', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(fetchMock.mock.calls[0]?.[0]).toBe(`${API_BASE}/auth/refresh`)
+  })
+})
+
+describe('authLoginPath', () => {
+  it.each(['/admin', '/app/settings', '/gummfit/creators', '/gummfit/administrator'])('preserves the Matcha login for %s', (path) => {
+    expect(authLoginPath(path)).toBe('/login')
   })
 })
 

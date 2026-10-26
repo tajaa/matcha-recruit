@@ -1,5 +1,6 @@
 import { resetAuthCaches } from './authReset'
 import { clearAuthTokens, getAccessToken, getRefreshToken, setAuthTokens } from './authStorage'
+import { authLoginPath } from './authPaths'
 import { noteRequestId, reportApiError } from './errorReporter'
 
 export const API_BASE = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '')
@@ -78,8 +79,10 @@ async function _clearLocalSession(broadcast = true) {
     }
     // Guard against a redirect loop: a failed refresh fired from the login page
     // itself would otherwise reassign location to /login repeatedly.
-    if (window.location.pathname !== '/login') {
-      window.location.href = '/login'
+    const loginPath = authLoginPath(window.location.pathname)
+    if (window.location.pathname !== loginPath) {
+      const next = encodeURIComponent(window.location.pathname + window.location.search + window.location.hash)
+      window.location.href = loginPath === '/login' ? loginPath : `${loginPath}?next=${next}`
     }
   } finally {
     // The login page is an SPA route, so the module can survive a subsequent

@@ -7,6 +7,7 @@ import SchedulingHomeRedirect from "./pages/landing/scheduling/SchedulingHomeRed
 
 // Lazy area modules — each /<area>/* prefix is its own chunk, loaded on entry.
 const AdminRoutes = lazy(() => import("./routes/AdminRoutes"));
+const GummfitAdminRoutes = lazy(() => import("./routes/GummfitAdminRoutes"));
 import RequireScOnboardingComplete from "./components/auth/RequireScOnboardingComplete";
 
 const AppRoutes = lazy(() => import("./routes/AppRoutes"));
@@ -281,6 +282,7 @@ export default function App() {
         <Route path="/cappe/*" element={<CappeRoutes />} />
         {/* Gummfit's public creator funnel has its own human-readable URL
             space, while sharing the Cappe implementation and auth stack. */}
+        <Route path="/gummfit/admin/*" element={<GummfitAdminRoutes />} />
         <Route path="/gummfit/*" element={<CappeRoutes />} />
         {/* Dedicated Cappe domain: bare apex serves the Cappe tree at root.
             /cappe/* links inside the pages still resolve via the mount above,

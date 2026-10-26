@@ -124,6 +124,15 @@ client/src/
 
 ### Admin pages
 
+Gummfit staff also have a dedicated console at `/gummfit/admin` (including on
+gummfit.com), composed in `routes/GummfitAdminRoutes.tsx` with
+`layouts/GummfitAdminLayout.tsx`. It reuses the Cappe admin tools and shared
+Matcha staff auth/API stack; customer Cappe tokens never grant admin access.
+`/gummfit/admin/login` is the staff sign-in, and session expiry/sign-out return
+there. The AI models page shows only Gummfit's registry rows while preserving
+the complete versioned model map on save. Existing `/admin/cappe` and
+`/admin/cappe-creators` tools remain available.
+
 `routes/AdminRoutes.tsx` mounts `layouts/AdminLayout.tsx` inside the authenticated
 app shell. The admin design uses one centered `max-w-6xl` canvas,
 small section headings, neutral glass surfaces, compact controls, and normal
