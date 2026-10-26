@@ -169,6 +169,7 @@ export const GUIDE: GuideSection[] = [
       'Select words and use the Character panel: the font (102 families, each with its weights and italics, 11 Gummfit cuts, or one of your own), size, leading, tracking, kerning, colour and underline.',
       'The Paragraph panel sets a paragraph’s alignment (left, centre, right or justified), indents, and space before and after.',
       'Paragraph styles (Body text, Headline, Heading, Subheading, Pull quote, Caption) also say what each paragraph is in the Text view readers get on phones.',
+      'Write article bodies directly in the editor. Body text does not accept pasted or dropped text, on the page or in the Story Editor. Headlines, headings, pull quotes and captions still accept paste. Typing, spelling corrections and undo work as usual.',
       'Select a text frame (not its words) to set its columns, gutter, inset and vertical alignment in the Object panel.',
       'The Story Editor (⌘Y) shows a frame’s text as plain lines, handy for long passages and checking spelling.',
     ],

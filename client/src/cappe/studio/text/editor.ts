@@ -11,6 +11,7 @@ import { baseKeymap } from '@tiptap/pm/commands'
 import { keymap } from '@tiptap/pm/keymap'
 import { EditorState, TextSelection, type Command, type Transaction } from '@tiptap/pm/state'
 import { EditorView } from '@tiptap/pm/view'
+import { BODY_WRITING_NOTICE, bodyWritingProps } from '../../magazine/writing'
 import { paraText } from '../model/doc'
 import { LIMITS, clamp } from '../model/limits'
 import { resolveChar } from '../model/identity'
@@ -66,6 +67,7 @@ export class TextEditor {
     const sel = TextSelection.create(doc, posOf(doc, at[0], at[1]), posOf(doc, head[0], head[1]))
     if (!this.view) {
       this.view = new EditorView(this.host, {
+        ...bodyWritingProps((p) => (paraAttrsOf(p).role ?? 'p') === 'p', () => this.store.set({ notice: BODY_WRITING_NOTICE })),
         state: state.apply(state.tr.setSelection(sel)),
         dispatchTransaction: (tr) => this.dispatch(tr),
         transformCopied: (slice, view) => portableSlice(slice, this.store.get().doc.identity, paraAttrsOf(view.state.selection.$from.parent)),

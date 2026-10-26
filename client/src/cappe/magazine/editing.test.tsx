@@ -191,21 +191,6 @@ describe('StoryEditor — editing', () => {
     expect(block).toMatchObject({ md: 'First words. More.', rt: para('First words. More.') })
   })
 
-  it('leaves ⌘Z to Assist’s own fields', async () => {
-    mountEditor()
-    const say = await onPage()
-    typeHeadline(say, 'Dawn')
-    fireEvent.click(screen.getByRole('button', { name: /Assist/ }))
-    fireEvent.click(screen.getByRole('tab', { name: 'Draft' }))
-    const notes = screen.getByLabelText('Your notes')
-    const ev = createEvent.keyDown(notes, { key: 'z', metaKey: true })
-    fireEvent(notes, ev)
-    expect(ev.defaultPrevented).toBe(false)  // the browser undoes the notes
-    expect(headline()).toHaveTextContent('Dawn')  // the story is untouched
-    fireEvent.keyDown(document.body, { key: 'z', metaKey: true })
-    expect(headline()).toHaveTextContent('The harbour at dawn')
-  })
-
   it('saves with ⌘S only when there is something to save', async () => {
     api.put.mockResolvedValue(post({ title: 'Dawn' }))
     mountEditor()

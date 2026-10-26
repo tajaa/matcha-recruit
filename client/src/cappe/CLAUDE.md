@@ -27,8 +27,8 @@ Website-builder frontend for the consumer brand **Gummfit**, host-routed on gumm
   multi-select import, "stock a topic", and polling of the server's imports. Archive thumbnails are
   signed paths under the Cappe API (`cappeApiBase` + `thumb`), never the archive's own URLs.
   `library/IllustrateForm.tsx` draws a labeled AI illustration (a refusal for a real person shows as
-  a refusal, `code === 'real_person'`). `editor/AssistPanel.tsx` is the editor's Assist (draft,
-  headlines, captions, tighten, archive searches): it sends the editor's unsaved story, shows each
+  a refusal, `code === 'real_person'`). `editor/AssistPanel.tsx` is the editor's Assist (headlines,
+  captions, archive searches; article bodies are written directly): it sends the editor's unsaved story, shows each
   proposal, and changes nothing until the writer applies it.
   Writers (`account_type='writer'`): `writers/WritersLanding.tsx` at `/cappe/magazines/start`,
   `CappeSignup writerOnly` / `CappeLogin writerOnly` at `/cappe/magazines/signup|login`,
@@ -108,6 +108,9 @@ Website-builder frontend for the consumer brand **Gummfit**, host-routed on gumm
   changes (the issue's and its stories') survive both. `EditFrame` drops a render that was loading when
   words were typed (it predates them) and numbers renders with a counter that never repeats. Field lengths are cut by whole characters
   (`fields.clip`), never half an emoji.
+  Article bodies reject pasted and dropped text through `magazine/writing.ts`; the frame applies it to
+  rich body fields, and Studio applies it to paragraphs with the Body text role (including the default).
+  Headlines, captions and other text roles keep paste. This is an editor rule, not authorship verification.
 - `studio/` — **Gummfit Studio** (2026-10-22), the design application for stories made of pages, full
   screen at `/cappe/studio/:siteId/story/:postId` (outside `CappeLayout`; the classic `StoryEditor` hands a
   paged story to it). Server spec: `server/app/cappe/CLAUDE.md` §Gummfit Studio. Its core is plain

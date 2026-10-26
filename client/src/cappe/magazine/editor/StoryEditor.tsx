@@ -11,7 +11,7 @@ import AssistPanel from './AssistPanel'
 import StorySettings from './StorySettings'
 import { confirmLeave } from '../../utils/unsavedGuard'
 import { useUnsavedGuard } from '../../pages/site/PageEditor/useUnsavedGuard'
-import { duplicateBlock, moveBlock, newBlock, withCaption, withText } from './blocks'
+import { duplicateBlock, moveBlock, newBlock, withCaption } from './blocks'
 import { useHistory } from './history'
 import BookFrame from '../reader/BookFrame'
 import BlockPanel, { PanelHead } from '../canvas/BlockPanel'
@@ -448,6 +448,7 @@ export default function StoryEditor() {
             Click anything on the pages to change it. Type straight into the headline and the text. Click a picture to lay words, shapes
             and pictures on it, then drag them, resize them from a corner and turn them from the knob. Add things from the left.
           </p>
+          <p className="text-xs leading-relaxed text-zinc-500">Article bodies are written directly here. Pasting and dropping text into them are disabled.</p>
           <StorySettings fields={fields} options={options} isStory={isStory} paidOn={paidOn} siteId={siteId!} narrow
             onField={setField} onLayout={startFromLayout} />
           <button type="button" onClick={remove} className={`inline-flex items-center gap-2 text-sm ${ui.danger}`}><Trash2 className="h-4 w-4" /> Delete story</button>
@@ -523,11 +524,6 @@ export default function StoryEditor() {
             onHeadline={(h) => setDoc((d) => (d ? { ...d, fields: { ...d.fields, title: h.title, excerpt: h.dek || d.fields.excerpt, kicker: h.kicker || d.fields.kicker } } : d), { step: true })}
             onCaption={(id, caption) => setBlocks((bs) => withCaption(bs, id, caption), true)}
             onAlt={(a) => setAssets((m) => new Map(m).set(a.id, a))}
-            onTighten={(i, md, rt) => setBlocks((bs) => withText(bs, i, md, rt), true)}
-            onDraft={(dr) => setDoc((d) => (d ? {
-              fields: { ...d.fields, title: dr.title || d.fields.title, excerpt: dr.excerpt || d.fields.excerpt, kicker: dr.kicker || d.fields.kicker },
-              blocks: dr.content.blocks,
-            } : d), { step: true })}
             onFind={setFinding} />
         </div>
       )}
