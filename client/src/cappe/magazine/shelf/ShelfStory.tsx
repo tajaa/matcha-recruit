@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, Loader2 } from 'lucide-react'
 import { cappeApi } from '../../api'
+import { useCappeMe } from '../../hooks/useCappeMe'
 import type { CappeReaderStory } from '../../types'
-import BookFrame from '../reader/BookFrame'
+import ReaderModal from '../reader/ReaderModal'
 import { readerMagazinePath, readerStoryPath } from './readerPaths'
 
 const STORY = /^\/stories\/([^/?#]+)\/?$/
@@ -18,19 +19,21 @@ const HOME = (path: string) => path === '/' || path === '/magazine'
  *  here, the magazine's own pages on its site in a new tab, and the paywall
  *  gets a button that opens the magazine's page here, where they subscribe. */
 export default function ShelfStory() {
+  const { account } = useCappeMe()
   const { slug = '', story = '' } = useParams<{ slug: string; story: string }>()
   const navigate = useNavigate()
   const asText = useSearchParams()[0].get('view') === 'text'
-  const key = `${slug}|${story}|${asText}`
+  const key = `${account?.id}|${slug}|${story}|${asText}`
   const [result, setResult] = useState<{ key: string; data?: CappeReaderStory; error?: string } | null>(null)
 
   useEffect(() => {
+    if (!account) return
     let live = true
     cappeApi.get<CappeReaderStory>(`/reader/magazines/${encodeURIComponent(slug)}/stories/${encodeURIComponent(story)}${asText ? '?view=text' : ''}`)
       .then((d) => { if (live) setResult({ key, data: d }) })
       .catch((e) => { if (live) setResult({ key, error: e instanceof Error ? e.message : 'Could not open this story' }) })
     return () => { live = false }
-  }, [slug, story, key, asText])
+  }, [slug, story, key, asText, account])
 
   const current = result?.key === key ? result : null
   const data = current?.data ?? null
@@ -76,9 +79,11 @@ export default function ShelfStory() {
       </div>
       {error && <p role="alert" className="p-6 text-sm text-red-400">{error}</p>}
       {!data && !error && <div className="flex justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-zinc-500" /></div>}
-      {data && (
-        <BookFrame html={data.html} title={data.title || 'Story'} prepare={prepare} onLink={follow} openExternal keys
-          className="flex-1" style={{ minHeight: '80vh' }} />
+      {data && account && (
+        <ReaderModal key={key} accountId={account.id} html={data.html} title={data.title || 'Story'} prepare={prepare} onLink={follow}
+          endpoint={`/reader/magazines/${encodeURIComponent(slug)}/stories/${encodeURIComponent(story)}/annotations`}
+          canAnnotate={data.has_access} asText={asText} onClose={() => navigate(readerMagazinePath(slug))}
+          onTextView={() => navigate(`${readerStoryPath(slug, story)}${asText ? '' : '?view=text'}`)} />
       )}
     </div>
   )

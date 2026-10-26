@@ -4,6 +4,7 @@ import { Loader2 } from 'lucide-react'
 import { cappeApi, clearCappeTokens, getCappeToken } from '../../api'
 import { invalidateCappeMeCache, useCappeMe } from '../../hooks/useCappeMe'
 import { readerPaths } from './readerPaths'
+import { discardCommentDrafts, hasCommentDrafts } from '../reader/commentDraft'
 
 /** The reader's dashboard shell: a slim bar over the page, no site-building
  *  sidebar. Without a session it sends the reader to sign in and back. */
@@ -20,6 +21,8 @@ export default function ReaderLayout() {
   }, [loading, account, navigate, here])
 
   async function signOut() {
+    if (account && hasCommentDrafts(account.id) && !window.confirm('Discard your unsaved comments and sign out?')) return
+    if (account) discardCommentDrafts(account.id)
     await cappeApi.post('/auth/logout').catch(() => {})
     clearCappeTokens()
     invalidateCappeMeCache()
