@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
+import { useEffect } from 'react'
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import Shelf from './Shelf'
 import Feed from './Feed'
@@ -9,6 +10,7 @@ import ReaderLayout from './ReaderLayout'
 import CappeLayout from '../../layout/CappeLayout'
 import { magazineSlugFrom, readerMagazinePath, readerNext, readerStoryPath } from './readerPaths'
 import { LINK_PREFIX } from '../reader/book'
+import { discardCommentDrafts, hasCommentDrafts } from '../reader/commentDraft'
 import type { CappeFollowedMagazine, CappeReaderMagazine, CappeReaderStoryCard, CappeShelfMagazine } from '../../types'
 
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() }))
@@ -81,7 +83,10 @@ beforeEach(() => {
   me.account = { id: 'a-1', email: 'rae@example.com', account_type: 'reader' }
   me.loading = false
 })
-afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
+afterEach(() => {
+  discardCommentDrafts('a-1'); discardCommentDrafts('a-2')
+  vi.useRealTimers(); vi.unstubAllGlobals()
+})
 
 describe('reader paths', () => {
   it('reads a magazine from its handle, address or a link', () => {
@@ -117,6 +122,48 @@ describe('the shell', () => {
   it('keeps a reader out of the site builder', () => {
     mount('/cappe/sites', '/cappe/sites', <CappeLayout />)
     expect(screen.getByText('at /cappe/reader')).toBeInTheDocument()
+  })
+
+  it('protects retained comments after Back and asks before discarding them on sign-out', async () => {
+    api.get.mockImplementation((path: string) => Promise.resolve(path.endsWith('/annotations')
+      ? { annotations: [] } : { html: '<p>page</p>', paid: false, has_access: true, title: 'Low tide' }))
+    api.post.mockResolvedValue({})
+    let back!: () => void
+    function History() {
+      const navigate = useNavigate()
+      useEffect(() => { back = () => navigate(-1) }, [navigate])
+      return null
+    }
+    render(<MemoryRouter initialEntries={['/cappe/reader', '/cappe/reader/m/salt/low-tide']} initialIndex={1}>
+      <History /><Routes>
+        <Route path="/cappe/reader" element={<ReaderLayout />}>
+          <Route index element={<p>Magazine stories</p>} />
+          <Route path="m/:slug/:story" element={<ShelfStory />} />
+        </Route>
+        <Route path="/cappe/reader/login" element={<Where />} />
+      </Routes>
+    </MemoryRouter>)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Comment' })).toBeEnabled())
+    fireEvent.click(screen.getByRole('button', { name: 'Comment' }))
+    fireEvent.change(screen.getByLabelText('Comment on page 1'), { target: { value: 'Keep after leaving the reader' } })
+    await act(async () => { back() })
+    expect(screen.getByText('Magazine stories')).toBeInTheDocument()
+    const showUnload = () => {
+      const event = new Event('beforeunload', { cancelable: true })
+      window.dispatchEvent(event)
+      return event.defaultPrevented
+    }
+    expect(showUnload()).toBe(true)
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }))
+    expect(api.post).not.toHaveBeenCalled()
+    expect(hasCommentDrafts('a-1')).toBe(true)
+    confirm.mockReturnValue(true)
+    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }))
+    expect(await screen.findByText('at /cappe/reader/login')).toBeInTheDocument()
+    expect(api.post).toHaveBeenCalledWith('/auth/logout')
+    expect(hasCommentDrafts('a-1')).toBe(false)
+    expect(showUnload()).toBe(false)
   })
 })
 
@@ -297,6 +344,22 @@ describe('one magazine', () => {
 })
 
 describe('reading a story', () => {
+  it('hides the previous account’s story while loading the next identity', async () => {
+    let finish!: (story: { html: string; paid: boolean; has_access: boolean; title: string }) => void
+    api.get.mockResolvedValueOnce({ html: '<p>first</p>', paid: true, has_access: false, title: 'First account story' })
+      .mockImplementation(() => new Promise((resolve) => { finish = resolve }))
+    const tree = () => <MemoryRouter initialEntries={['/cappe/reader/m/salt/low-tide']}><Routes>
+      <Route path="/cappe/reader/m/:slug/:story" element={<ShelfStory />} />
+    </Routes></MemoryRouter>
+    const shown = render(tree())
+    expect(await screen.findByTitle('First account story')).toBeInTheDocument()
+    me.account = { ...me.account, id: 'a-2' }
+    shown.rerender(tree())
+    expect(screen.queryByTitle('First account story')).not.toBeInTheDocument()
+    await act(async () => { finish({ html: '<p>second</p>', paid: true, has_access: false, title: 'Second account story' }) })
+    expect(await screen.findByTitle('Second account story')).toBeInTheDocument()
+  })
+
   it('shows the magazine’s page and points its links where they go', async () => {
     api.get.mockResolvedValue({ html: '<p>page</p>', paid: true, has_access: false, title: 'Low tide' })
     mount('/cappe/reader/m/salt/low-tide', '/cappe/reader/m/:slug/:story', <ShelfStory />)

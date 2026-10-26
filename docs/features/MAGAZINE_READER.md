@@ -14,9 +14,15 @@ own marks, since their text order can differ. If a writer changes a passage, its
 the notebook; ambiguous matches do not highlight a different passage. Page-only notes refer to the
 page at the time of writing; classic flowing pages can paginate differently after resizing.
 
-A failed save keeps the selection/comment and reuses its request ID when retried. A failed deletion
-keeps the note. Leaving with an unsaved comment asks before discarding it. An unavailable notes API
-leaves the pages readable and offers Retry loading in the notebook.
+A failed save keeps the selection/comment and reuses its request ID when retried. Saving a highlight
+or underline keeps a comment in progress, and a completed comment save keeps words typed after it
+started. A failed deletion keeps the note. Close and view changes ask before discarding an unsaved
+comment; refresh and tab close use the browser's unsaved-work warning. Browser Back/Forward keeps the
+draft and retry ID for reopening the same story in the current page session. Draft recovery is scoped
+to the account, story and view, stays in memory, and is cleared by saving that unchanged draft, Cancel,
+or confirmed discard. Retained drafts still warn on refresh/tab close after leaving the story; sign-out
+asks before discarding them. An unavailable notes API leaves the pages readable and offers Retry loading in
+the notebook. Quotes with conflicting saved context stay unresolved even if their words occur once.
 
 The existing magazine entitlement applies. Paid stories require a live subscription or comp to read
 or write annotations. This feature does not change checkout, add a single-issue purchase product,

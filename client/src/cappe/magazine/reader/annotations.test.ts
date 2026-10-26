@@ -29,6 +29,12 @@ describe('quote anchors', () => {
     expect(locateQuote('coast and coast', q('coast', 1))).toBeNull()
     expect(locateQuote('gone', q('coast'))).toBeNull()
   })
+  it('rejects a sole match when saved context conflicts, including at the old offset', () => {
+    expect(locateQuote('North coast near docks.', q('coast', 0, 'South ', ' beside cliffs.'))).toBeNull()
+    expect(locateQuote('North coast near docks.', q('coast', 6, 'South ', ' beside cliffs.'))).toBeNull()
+    expect(locateQuote('new coast after', q('coast', 0))).toBe(4)
+    expect(locateQuote('a coast a coast', q('coast', 99, 'a '))).toBeNull()
+  })
 })
 describe('painting', () => {
   it('paints overlapping marks without changing text or formatting, and removes them', () => {
@@ -47,6 +53,17 @@ describe('painting', () => {
     expect(paintAnnotations(document, [note(q('deleted'))])).toEqual(new Set())
     paintAnnotations(document, [note(q('Hello'), 'comment')])
     expect(document.querySelector('[data-reader-note]')!.getAttribute('style')).toContain('background')
+  })
+  it('keeps a deleted passage unresolved when another copy of its words remains', () => {
+    document.body.innerHTML = '<article class="mz-story"><p>North coast near docks.</p><p>South coast beside cliffs.</p></article>'
+    const text = document.querySelectorAll('p')[1].firstChild!
+    const range = document.createRange(); range.setStart(text, 6); range.setEnd(text, 11)
+    document.getSelection()!.removeAllRanges(); document.getSelection()!.addRange(range)
+    const quote = selectedQuote(document)!
+    expect(quote.prefix).toContain('South ')
+    document.querySelectorAll('p')[1].remove()
+    expect(paintAnnotations(document, [note(quote, 'comment')])).toEqual(new Set())
+    expect(document.querySelector('[data-reader-note]')).toBeNull()
   })
   it('paints disjoint portions of one node exactly', () => {
     document.querySelector('article')!.textContent = '0123456789'

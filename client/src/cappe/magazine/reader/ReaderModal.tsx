@@ -3,6 +3,7 @@ import { Highlighter, Loader2, MessageSquare, StickyNote, Trash2, Underline, X }
 import { cappeApi } from '../../api'
 import BookFrame from './BookFrame'
 import { jumpToAnnotation, pageAt, paintAnnotations, selectedQuote, selectionPageAt } from './annotations'
+import { useCommentDraft } from './commentDraft'
 import type { ReaderAnnotation, ReaderAnnotationBody, ReaderQuote } from './annotationTypes'
 
 const BUTTON = 'inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-lg px-3 text-sm text-zinc-200 hover:bg-zinc-800 disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-lime-300'
@@ -10,13 +11,20 @@ const TOOL = 'inline-flex min-h-11 shrink-0 flex-col items-center justify-center
 const MAX_COMMENT = 4000
 
 type Props = {
-  html: string; title: string; endpoint: string; canAnnotate: boolean; asText: boolean
+  accountId: string; html: string; title: string; endpoint: string; canAnnotate: boolean; asText: boolean
   prepare: (doc: Document) => void; onLink: (path: string) => void; onClose: () => void; onTextView: () => void
 }
 
 /** Native dialog supplies focus trapping, inert background and focus return.
  * Full viewport on phones; inset reading room with a notebook on desktop. */
 export default function ReaderModal(props: Props) {
+  const view = props.asText ? 'text' : 'pages'
+  const [draft, comment] = useCommentDraft(props.accountId, props.endpoint, view)
+  const mounted = useRef(false)
+  useEffect(() => {
+    mounted.current = true
+    return () => { mounted.current = false }
+  }, [])
   const dialog = useRef<HTMLDialogElement>(null)
   const [doc, setDoc] = useState<Document | null>(null)
   const [notes, setNotes] = useState<ReaderAnnotation[]>([])
@@ -24,25 +32,21 @@ export default function ReaderModal(props: Props) {
   const [loadVersion, setLoadVersion] = useState(0)
   const [loadError, setLoadError] = useState('')
   const [error, setError] = useState('')
-  const [notice, setNotice] = useState('')
+  const [notice, setNotice] = useState(draft ? 'Your unsaved comment is still here.' : '')
   const [busy, setBusy] = useState(false)
-  const [notebook, setNotebook] = useState(false)
+  const [notebook, setNotebook] = useState(!!draft)
   const [selection, setSelection] = useState<ReaderQuote | null>(null)
   const [page, setPage] = useState(1)
   const [selectedPage, setSelectedPage] = useState(1)
-  const [draft, setDraft] = useState<{ quote: ReaderQuote | null; page: number; text: string } | null>(null)
   const [found, setFound] = useState<Set<string>>(new Set())
-  const pending = useRef<{ json: string; id: string } | null>(null)
   const writing = useRef(false)
   const latest = useRef(props)
   useEffect(() => { latest.current = props })
-  const draftRef = useRef(draft)
-  useEffect(() => { draftRef.current = draft })
-  const view = props.asText ? 'text' : 'pages'
   const currentNotes = notes.filter((n) => n.view === view)
 
   const leave = (action: () => void) => {
-    if (draftRef.current?.text.trim() && !window.confirm('Discard your unsaved comment?')) return
+    if (comment.get()?.text.trim() && !window.confirm('Discard your unsaved comment?')) return
+    comment.discard()
     action()
   }
   const close = () => leave(() => latest.current.onClose())
@@ -91,13 +95,16 @@ export default function ReaderModal(props: Props) {
   async function save(body: ReaderAnnotationBody) {
     if (writing.current) return
     writing.current = true; setBusy(true); setError('')
-    const json = JSON.stringify(body)
-    if (pending.current?.json !== json) pending.current = { json, id: crypto.randomUUID() }
+    const request = comment.request(body)
+    const submitted = body.kind === 'comment' ? draft : null
     try {
-      const saved = await cappeApi.put<ReaderAnnotation>(`${props.endpoint}/${pending.current.id}`, body)
+      const saved = await cappeApi.put<ReaderAnnotation>(`${props.endpoint}/${request.id}`, body)
+      // A remounted reader may have loaded before this write landed. Leave
+      // its recovered draft and UUID intact so it can confirm the same write.
+      if (!mounted.current) return
       setNotes((all) => [...all.filter((n) => n.id !== saved.id), saved])
-      pending.current = null
-      setDraft(null); setSelection(null); doc?.getSelection()?.removeAllRanges()
+      comment.complete(request, submitted)
+      setSelection(null); doc?.getSelection()?.removeAllRanges()
       setNotice(body.kind === 'comment' ? 'Comment saved.' : body.kind === 'highlight' ? 'Highlight saved.' : 'Underline saved.')
     } catch (e) {
       setError(`${e instanceof Error ? e.message : 'Could not confirm the save'}. Your selection and comment are kept; try again.`)
@@ -134,7 +141,7 @@ export default function ReaderModal(props: Props) {
           <button type="button" className={TOOL} disabled={!ready || !selection} onPointerDown={(e) => e.preventDefault()} onClick={() => mark('highlight')}><Highlighter className="h-4 w-4 text-yellow-300" />Highlight</button>
           <button type="button" className={TOOL} disabled={!ready || !selection} onPointerDown={(e) => e.preventDefault()} onClick={() => mark('underline')}><Underline className="h-4 w-4" />Underline</button>
           <button type="button" className={TOOL} disabled={!ready} onPointerDown={(e) => e.preventDefault()}
-            onClick={() => { setDraft((d) => d ?? { quote: selection, page: selection ? selectedPage : page, text: '' }); setNotebook(true) }}><MessageSquare className="h-4 w-4" />Comment</button>
+            onClick={() => { if (!draft) comment.set({ quote: selection, page: selection ? selectedPage : page, text: '' }); setNotebook(true) }}><MessageSquare className="h-4 w-4" />Comment</button>
           <button type="button" className={`${TOOL} sm:ml-auto`} aria-pressed={notebook} onClick={() => setNotebook((v) => !v)}><StickyNote className="h-4 w-4" />Notes ({currentNotes.length})</button>
         </div>
         <div className="flex min-h-0 flex-1">
@@ -155,14 +162,14 @@ export default function ReaderModal(props: Props) {
               {!props.canAnnotate && <p className="text-sm text-zinc-400">Subscribe to add highlights and private comments to this story.</p>}
               {props.canAnnotate && !loaded && !loadError && <p role="status" className="text-sm text-zinc-400">Loading your notes…</p>}
               {loadError && <div role="alert" className="text-sm text-red-300">{loadError}<button type="button" className={BUTTON} onClick={() => setLoadVersion((v) => v + 1)}>Retry loading</button></div>}
-              {draft && <form className="mb-5" onSubmit={(e) => { e.preventDefault(); if (draft.text.trim()) void save({ kind: 'comment', view, ...draft }) }}>
+              {draft && <form className="mb-5" onSubmit={(e) => { e.preventDefault(); if (ready && draft.text.trim() && Array.from(draft.text).length <= MAX_COMMENT) void save({ kind: 'comment', view, ...draft }) }}>
                 <label htmlFor="reader-comment" className="text-xs text-zinc-400">{draft.quote ? 'Comment on selected words' : `Comment on page ${draft.page}`}</label>
                 {draft.quote && <blockquote className="my-2 line-clamp-4 border-l-2 border-yellow-300/50 pl-3 font-serif text-sm text-zinc-300">{draft.quote.exact}</blockquote>}
-                <textarea id="reader-comment" autoFocus value={draft.text} onChange={(e) => setDraft({ ...draft, text: e.target.value })} rows={4}
+                <textarea id="reader-comment" autoFocus value={draft.text} onChange={(e) => comment.set({ ...draft, text: e.target.value })} rows={4}
                   className="mt-2 w-full rounded-lg border border-zinc-700 bg-zinc-900 p-3 text-sm focus:border-lime-300 focus:outline-none" placeholder="What would you like to remember?" />
                 <p className="text-right text-xs text-zinc-500">{Array.from(draft.text).length}/{MAX_COMMENT}</p>
-                <div className="mt-2 flex gap-2"><button type="submit" disabled={busy || !draft.text.trim() || Array.from(draft.text).length > MAX_COMMENT} className={`${BUTTON} bg-zinc-800`}>{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}Save comment</button>
-                  <button type="button" className={BUTTON} disabled={busy} onClick={() => setDraft(null)}>Cancel</button></div>
+                <div className="mt-2 flex gap-2"><button type="submit" disabled={!ready || !draft.text.trim() || Array.from(draft.text).length > MAX_COMMENT} className={`${BUTTON} bg-zinc-800`}>{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}Save comment</button>
+                  <button type="button" className={BUTTON} disabled={busy} onClick={comment.cancel}>Cancel</button></div>
               </form>}
               {loaded && !currentNotes.length && <p className="py-6 text-sm leading-relaxed text-zinc-500">Select words on a page, then choose Highlight, Underline or Comment. You can also comment on the page without selecting words.</p>}
               <ul className="space-y-4">{currentNotes.map((n) => <li key={n.id} className="border-b border-zinc-800 pb-4">

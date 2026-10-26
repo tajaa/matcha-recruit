@@ -61,7 +61,12 @@ Website-builder frontend for the consumer brand **Gummfit**, host-routed on gumm
   polls selection from the script-less frame (no listeners in it), and paints plain-text quote anchors with
   context. Ambiguous/deleted quotes stay in the notebook without marking other words. Pages/Text view have
   separate anchors; the notebook says they are private. Writes reuse a UUID after an uncertain save, retain
-  the draft on failure, and delete only after the server confirms. The reader does NOT enable BookFrame's
+  the draft on failure, and delete only after the server confirms. `reader/commentDraft.ts` keeps
+  account/story/view-scoped comment drafts and retry UUIDs in memory across history navigation;
+  refresh/tab close warn while any retained draft is dirty, including outside the reader, and sign-out
+  asks before discarding the account's drafts. Completed saves clear only the unchanged comment
+  they submitted; marks and newer typing keep the draft. Conflicting quote context stays unresolved.
+  The reader does NOT enable BookFrame's
   `keys` option: its recurring iframe blur would interrupt native touch-selection handles. The regular page
   arrows and swipe still work. The server's page stays in `reader/BookFrame.tsx`, with `allow-popups` for web
   links; its paywall gets a link to the magazine's page here, and its other pages open on the site).

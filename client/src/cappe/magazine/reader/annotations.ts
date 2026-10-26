@@ -24,14 +24,13 @@ export function locateQuote(text: string, q: ReaderQuote): number | null {
   const context = (at: number) => (!q.prefix || text.slice(Math.max(0, at - q.prefix.length), at) === q.prefix)
     && (!q.suffix || text.slice(at + q.exact.length, at + q.exact.length + q.suffix.length) === q.suffix)
   if (text.slice(q.start, q.start + q.exact.length) === q.exact && context(q.start)) return q.start
-  let at = text.indexOf(q.exact), unique: number | null = null, contextual: number | null = null
-  let count = 0, contextCount = 0
+  let at = text.indexOf(q.exact), contextual: number | null = null
+  let contextCount = 0
   while (at >= 0) {
-    count++; unique = at
     if (context(at)) { contextCount++; contextual = at }
     at = text.indexOf(q.exact, at + 1)
   }
-  return contextCount === 1 ? contextual : count === 1 ? unique : null
+  return contextCount === 1 ? contextual : null
 }
 
 export function selectedQuote(doc: Document): ReaderQuote | null {
