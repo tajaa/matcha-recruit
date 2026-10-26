@@ -10,11 +10,12 @@ import WritersLanding from './WritersLanding'
 import WriterHome from './WriterHome'
 import CappeSidebar from '../../components/CappeSidebar'
 import type { CappeAccount, CappeIssue, CappePost } from '../../types'
+import { CappeApiError } from '../../api'
 
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), patch: vi.fn(), delete: vi.fn() }))
 const pricing = vi.hoisted(() => vi.fn())
 const designs = vi.hoisted(() => ({ load: vi.fn(), ensure: vi.fn() }))
-vi.mock('../../api', () => ({ cappeApi: api, cappeApiBase: '/api/cappe', fetchCappePricing: pricing, clearCappeTokens: vi.fn() }))
+vi.mock('../../api', async (original) => ({ ...await original<object>(), cappeApi: api, cappeApiBase: '/api/cappe', fetchCappePricing: pricing, clearCappeTokens: vi.fn() }))
 vi.mock('../../studio/fonts/faces', async (original) => ({ ...await original<object>(), loadManifest: designs.load }))
 vi.mock('../../studio/compose/shaper', async (original) => ({ ...await original<object>(), loadHarfBuzz: async () => ({}) }))
 vi.mock('../../studio/fonts/loader', () => ({
@@ -115,9 +116,75 @@ describe('MagazineOnboarding', () => {
     await act(async () => reject(new Error('Connection lost. Try again.')))
     expect(await screen.findByRole('alert')).toHaveTextContent('Connection lost')
     expect(screen.getByRole('button', { name: 'Choose Off Register' })).toHaveAttribute('aria-pressed', 'true')
-    fireEvent.click(screen.getByRole('button', { name: /Open my first draft/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Retry opening my draft/ }))
     expect(await screen.findByText('the first Studio draft')).toBeInTheDocument()
     expect(api.post.mock.calls[1][1]).toEqual(api.post.mock.calls[0][1])
+  })
+
+  it.each(['network', 'server'])('replays an unchanged pending request after a %s failure and a late taken-handle result', async (failure) => {
+    let committed = false
+    api.get.mockImplementation((path: string) => Promise.resolve(path === '/magazine/options' ? OPTIONS : {
+      handle: 'harbour', available: !committed, reason: committed ? 'That address is taken. Pick another.' : null,
+    }))
+    api.post.mockImplementationOnce(async () => {
+      committed = true
+      throw failure === 'network' ? new Error('Response lost') : new CappeApiError('Response lost', undefined, 500)
+    }).mockResolvedValue({ site: { id: 's-9' }, post_id: 'p-9' })
+    mount('/cappe/writer/new', <MagazineOnboarding />, '/cappe/writer/new')
+    await screen.findByRole('button', { name: 'Choose Quiet Form' })
+    fireEvent.change(screen.getByPlaceholderText('The Harbour Review'), { target: { value: 'Harbour' } })
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Open my first draft' })).toBeEnabled())
+    fireEvent.click(screen.getByRole('button', { name: 'Open my first draft' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Response lost')
+    await screen.findByText('That address is taken. Pick another.', {}, { timeout: 2000 })
+    expect(screen.getByDisplayValue('Harbour')).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Choose Maison' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Retry opening my draft' })).toBeEnabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Retry opening my draft' }))
+    expect(await screen.findByText('the first Studio draft')).toBeInTheDocument()
+    expect(api.post.mock.calls[1][1]).toEqual(api.post.mock.calls[0][1])
+  })
+
+  it.each([403, 409, 422, 429])('allows correcting setup after a definite HTTP %s rejection', async (status) => {
+    answer({ '/magazine/options': OPTIONS, '/magazine/handle-available': { handle: 'harbour', available: true } })
+    api.post.mockRejectedValueOnce(new CappeApiError('Correct your setup', undefined, status))
+      .mockResolvedValue({ site: { id: 's-9' }, post_id: 'p-9' })
+    mount('/cappe/writer/new', <MagazineOnboarding />, '/cappe/writer/new')
+    fireEvent.change(await screen.findByPlaceholderText('The Harbour Review'), { target: { value: 'Harbour' } })
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Open my first draft' })).toBeEnabled())
+    fireEvent.click(screen.getByRole('button', { name: 'Open my first draft' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Correct your setup')
+    expect(screen.getByDisplayValue('Harbour')).toBeEnabled()
+    fireEvent.change(screen.getByDisplayValue('Harbour'), { target: { value: 'Harbour Two' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Choose Maison' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open my first draft' }))
+    expect(await screen.findByText('the first Studio draft')).toBeInTheDocument()
+    expect(api.post.mock.calls[1][1].name).toBe('Harbour Two')
+    expect(api.post.mock.calls[1][1].handle).toBe('harbour-two')
+  })
+
+  it.each([403, 409, 422, 429])('keeps recovery available after a lost response followed by HTTP %s', async (status) => {
+    let committed = false
+    api.get.mockImplementation((path: string) => Promise.resolve(path === '/magazine/options' ? OPTIONS : {
+      handle: 'harbour', available: !committed, reason: committed ? 'That address is taken. Pick another.' : null,
+    }))
+    api.post.mockImplementationOnce(async () => { committed = true; throw new Error('Response lost') })
+      .mockRejectedValueOnce(new CappeApiError('Retry interrupted', undefined, status))
+      .mockResolvedValue({ site: { id: 's-9' }, post_id: 'p-9' })
+    mount('/cappe/writer/new', <MagazineOnboarding />, '/cappe/writer/new')
+    fireEvent.change(await screen.findByPlaceholderText('The Harbour Review'), { target: { value: 'Harbour' } })
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Open my first draft' })).toBeEnabled())
+    fireEvent.click(screen.getByRole('button', { name: 'Open my first draft' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Response lost')
+    await screen.findByText('That address is taken. Pick another.', {}, { timeout: 2000 })
+    fireEvent.click(screen.getByRole('button', { name: 'Retry opening my draft' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Retry interrupted')
+    expect(screen.getByDisplayValue('Harbour')).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Retry opening my draft' })).toBeEnabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Retry opening my draft' }))
+    expect(await screen.findByText('the first Studio draft')).toBeInTheDocument()
+    expect(api.post.mock.calls[1][1]).toEqual(api.post.mock.calls[0][1])
+    expect(api.post.mock.calls[2][1]).toEqual(api.post.mock.calls[0][1])
   })
 
   it('can reload failed design fonts without losing the magazine name', async () => {

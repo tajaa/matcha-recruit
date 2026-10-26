@@ -466,7 +466,10 @@ What is built so far:
 - **Writer quick start** (`POST /magazine/quick-start`) creates the same magazine site, draft About
   page and first `format='pages'` Studio draft in one transaction, under the account row lock and site
   limit. `collection_doc` bounds and normalizes the submitted design and removes site photo/font
-  references, paywalls and cached composition. No plan purchase or publication happens here. The site
+  references and paywalls. Quick start opts into `keep_composition=True`: the document schema validates
+  its composed lines before storage, so first publication (including outside Studio) renders the chosen
+  geometry even without a document edit. Saved library collections still discard composition by default.
+  No plan purchase or publication happens here. The site
   UUID is `uuid5(account.id, "writer-start:<request_id>")`; its draft UUID is `uuid5(site.id, "first-draft")`.
   A replay looks up that account's site and draft before enforcing the creation limit and never
   overwrites edits. A deleted first draft returns 409 rather than recreating it. No migration is needed.

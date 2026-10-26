@@ -11,7 +11,8 @@ from fastapi import HTTPException
 
 from app.cappe.models.magazine import CappeMagazineStart
 from app.cappe.routes import magazine
-from app.cappe.services.magazine.studio.schema import starter_doc
+from app.cappe.services.magazine.studio.render import page_items_html
+from app.cappe.services.magazine.studio.schema import normalize_doc, starter_doc
 from tests._helpers.routes import route_client
 from tests.cappe.test_cappe_magazine_writers import BODY, BUSINESS, WRITER, _site_row
 
@@ -131,6 +132,26 @@ def test_creates_private_site_and_editable_draft_without_photos_or_a_plan(setup)
     assert saved["doc"]["items"][-1]["caption"] == ""
     assert "cutout" not in saved["doc"]["items"][-1]
     assert saved["doc"]["paywall_page"] is None
+
+
+def test_stored_first_draft_already_renders_the_designed_lines_without_a_studio_save(setup):
+    doc = starter_doc()
+    doc["threads"][0]["paras"] = [{"runs": [{"t": "Hello 🌊"}]}]
+    # UTF-16 offsets, with the last word on the linked second-page frame.
+    doc["threads"][0]["comp"] = {"lines": [[0, 0, 0, 5, 54, 80, 120, 0], [1, 0, 6, 8, 54, 80, 100, 0]]}
+    expected = normalize_doc(doc)
+    with client() as api:
+        result = api.post("/magazine/quick-start", json=payload(doc=doc))
+    assert result.status_code == 201, result.text
+    saved = json.loads(setup.post[3])["doc"]
+    assert saved["threads"][0]["comp"] == expected["threads"][0]["comp"]
+    for page in range(2):
+        html = page_items_html(saved, page, {})
+        assert html == page_items_html(expected, page, {})
+        assert 'class="lyt-l' in html and 'class="lyt-flow"' not in html
+    # First publication only changes post status: the stored content already
+    # has the same geometry that setup and the Studio preview displayed.
+    assert setup.events.count("post") == 1 and setup.events[-1] == "commit"
 
 
 def test_lost_response_replay_does_not_hit_site_limit_or_overwrite_edits(setup):

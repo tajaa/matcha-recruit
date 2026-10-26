@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ArrowRight, Check, Loader2, LockKeyhole, X } from 'lucide-react'
-import { cappeApi } from '../../api'
+import { CappeApiError, cappeApi } from '../../api'
 import { ui } from '../../components/ui'
 import { CAPPE_HOST } from '../../host'
 import type { CappeHandleCheck, CappeMagazineOptions, CappeMagazineStartResult, MastheadStyle } from '../../types'
@@ -10,6 +10,10 @@ import { handleFrom } from '../writers/handles'
 import MagazineDesigns from './MagazineDesigns'
 
 const MAX_TOPICS = 3
+type StartRequest = {
+  name: string; handle: string; tagline: string | null; topics: string[]; masthead_style: MastheadStyle
+  request_id: string; doc: Doc
+}
 
 /** Name, art direction, then a private ten-page draft in Studio. */
 export default function MagazineOnboarding() {
@@ -26,6 +30,7 @@ export default function MagazineOnboarding() {
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState('quiet-form')
   const [doc, setDoc] = useState<Doc | null>(null)
+  const [pending, setPending] = useState<StartRequest | null>(null)
   const requestId = useRef(crypto.randomUUID())
   const submitting = useRef(false)
 
@@ -53,17 +58,24 @@ export default function MagazineOnboarding() {
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
-    if (submitting.current || !doc) return
+    if (submitting.current) return
+    let body = pending
+    if (!body) {
+      if (!doc || !name.trim() || address.length < 3 || (current !== null && !current.available)) return
+      body = { name: name.trim(), handle: address, tagline: tagline.trim() || null, topics, masthead_style: masthead,
+        request_id: requestId.current, doc }
+    }
     submitting.current = true
+    setPending(body)
     setBusy(true)
     setError(null)
     try {
-      const result = await cappeApi.post<CappeMagazineStartResult>('/magazine/quick-start', {
-        name: name.trim(), handle: address, tagline: tagline.trim() || null, topics, masthead_style: masthead,
-        request_id: requestId.current, doc,
-      })
+      const result = await cappeApi.post<CappeMagazineStartResult>('/magazine/quick-start', body)
       navigate(`/cappe/studio/${result.site.id}/story/${result.post_id}`, { replace: true })
     } catch (err) {
+      // An initial client rejection did not create a draft. After an uncertain
+      // outcome, even a later rejection cannot rule out that earlier commit.
+      if (!pending && err instanceof CappeApiError && err.status && err.status >= 400 && err.status < 500) setPending(null)
       setError(err instanceof Error ? err.message : 'Your magazine could not be created')
     } finally {
       setBusy(false)
@@ -79,7 +91,7 @@ export default function MagazineOnboarding() {
       <h1 className="text-3xl font-medium tracking-tight text-zinc-50 sm:text-4xl">Your magazine starts here.</h1>
       <p className={`${ui.subtitle} mb-8 mt-3 max-w-xl leading-relaxed`}>Give it a name. Find its look. Open a complete draft and make it yours.</p>
       <form onSubmit={submit} className="space-y-8" aria-label="Your magazine">
-        <fieldset disabled={busy} className="space-y-8">
+        <fieldset disabled={busy || !!pending} className="space-y-8">
           <section className={`${ui.card} space-y-5 p-5 sm:p-6`} aria-label="Magazine details">
             <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">01 / Your publication</p>
             <label className="block">
@@ -132,14 +144,15 @@ export default function MagazineOnboarding() {
               </fieldset>
             </details>
           </section>
-          <MagazineDesigns name={name} selected={selected} onSelect={setSelected} onReady={setDoc} disabled={busy} />
+          <MagazineDesigns name={name} selected={selected} onSelect={setSelected} onReady={setDoc} disabled={busy || !!pending} />
         </fieldset>
         {error && <p role="alert" className="text-sm text-red-400">{error}</p>}
+        {pending && !busy && <p className="text-sm text-zinc-400">Your setup details are kept while we confirm the result. Retry opening your draft.</p>}
         <div className="flex flex-col gap-4 border-t border-zinc-800 pt-6 sm:flex-row sm:items-center sm:justify-between">
           <p className="flex items-start gap-2 text-xs leading-relaxed text-zinc-400"><LockKeyhole className="mt-0.5 h-4 w-4 shrink-0" /><span>Private until you publish.<br />No plan purchase needed to start.</span></p>
           <button type="submit" className={ui.btnPrimary}
-            disabled={busy || !doc || !name.trim() || address.length < 3 || (current !== null && !current.available)}>
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />} {busy ? 'Creating your draft…' : 'Open my first draft'}
+            disabled={busy || (!pending && (!doc || !name.trim() || address.length < 3 || (current !== null && !current.available)))}>
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />} {busy ? 'Creating your draft…' : pending ? 'Retry opening my draft' : 'Open my first draft'}
           </button>
         </div>
       </form>

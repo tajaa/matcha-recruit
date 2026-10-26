@@ -16,7 +16,11 @@ MAX_COLLECTION_PAGES = 32
 MAX_COLLECTION_BYTES = 1_000_000
 
 
-def collection_doc(raw: dict[str, Any], bank: Optional[Mapping[str, dict]] = None) -> dict:
+def collection_doc(raw: dict[str, Any], bank: Optional[Mapping[str, dict]] = None,
+                   *, keep_composition: bool = False) -> dict:
+    """Portable designs normally recompose when placed. A newly created story
+    keeps its schema-validated composition so every publication path sees the
+    same lines as setup, even before its first Studio edit or save."""
     if len(json.dumps(raw, ensure_ascii=True, separators=(",", ":"))) > MAX_COLLECTION_BYTES:
         raise DocError("A collection is too big to save. Use fewer pages or less text.")
     if isinstance(raw.get("pages"), list) and len(raw["pages"]) > MAX_COLLECTION_PAGES:
@@ -31,7 +35,7 @@ def collection_doc(raw: dict[str, Any], bank: Optional[Mapping[str, dict]] = Non
             if isinstance(i, dict) and i.get("kind") == "image" else i
             for i in raw["items"]
         ]
-    if isinstance(raw.get("threads"), list):
+    if isinstance(raw.get("threads"), list) and not keep_composition:
         portable["threads"] = [{k: v for k, v in t.items() if k != "comp"} if isinstance(t, dict) else t
                                for t in raw["threads"]]
     try:
@@ -46,7 +50,9 @@ def collection_doc(raw: dict[str, Any], bank: Optional[Mapping[str, dict]] = Non
         doc = normalize_doc({
             **{k: v for k, v in doc.items() if k != "identity"},
             "pages": [{"id": p["id"]} for p in doc["pages"]],
-            "threads": [{"id": t["id"], "frames": t["frames"], "paras": t["paras"]} for t in resolved_threads(doc)],
+            "threads": [{"id": t["id"], "frames": t["frames"], "paras": t["paras"],
+                         **({"comp": t["comp"]} if keep_composition and "comp" in t else {})}
+                        for t in resolved_threads(doc)],
             "items": [{k: v for k, v in resolve_item(i, identity).items() if k not in ("fill_swatch", "stroke_swatch")}
                       for i in doc["items"]],
         }, bank)

@@ -279,8 +279,9 @@ async def quick_start_magazine(body: CappeMagazineStart, account: CappeAccount =
     handle, topics = _magazine_setup(body, account)
     try:
         # The portable schema bounds the document and clears photo references,
-        # paid pages, site fonts and cached composition. Preview samples never persist.
-        doc = collection_doc(body.doc)
+        # paid pages and site fonts. This is already a composed story, so keep
+        # validated lines for first publication, including outside Studio.
+        doc = collection_doc(body.doc, keep_composition=True)
     except DocError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     site_id = uuid5(account.id, f"writer-start:{body.request_id}")
