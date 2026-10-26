@@ -6,7 +6,8 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
 
 os.environ.setdefault("LIVE_API", "test-key")
 os.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost/test")
@@ -145,6 +146,30 @@ def _body(**over):
             "product": {"name": "Moon mug", "price_cents": 2400, "inventory": 12}}
     data.update(over)
     return CappeQuickStoreCreate(**data)
+
+
+@pytest.mark.parametrize("name", ["", " ", "   ", "\t\r\n", "\u00a0", "\u2003\u3000", " \u00a0\t\u3000 ", None, 123, "界" * 256])
+def test_invalid_first_product_names_return_422_before_opening_a_connection(setup, monkeypatch, name):
+    def no_connection():
+        raise AssertionError("An invalid product name must be rejected before opening a connection")
+
+    monkeypatch.setattr(sites, "get_connection", no_connection)
+    app = FastAPI()
+    app.include_router(sites.router, prefix="/api/cappe")
+    app.dependency_overrides[sites.require_cappe_account] = lambda: setup.account
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.post("/api/cappe/sites/quick-store", json={
+            "name": "Sample store", "product": {"name": name, "price_cents": 100},
+        })
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["loc"] == ["body", "product", "name"]
+    assert setup.conn.events == [] and setup.made == []
+
+
+@pytest.mark.parametrize("name", [" Moon mug ", "\u00a0Crème 🍵\u3000", " e\u0301 ", " x ", " " + "界" * 255 + " "])
+def test_first_product_names_are_trimmed_without_changing_the_words(name):
+    body = _body(product={"name": name, "price_cents": 100})
+    assert body.product.name == name.strip()
 
 
 def test_home_page_is_the_name_the_line_and_the_shop():

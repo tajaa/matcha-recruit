@@ -337,6 +337,12 @@ class CappeQuickStoreProduct(BaseModel):
     # None = no count kept (made to order, or plenty); a number tracks stock.
     inventory: Optional[int] = Field(default=None, ge=0, le=1_000_000)
 
+    @field_validator("name", mode="before")
+    @classmethod
+    def trim_name(cls, value: Any) -> Any:
+        # Apply the length bounds to the name that will actually be stored.
+        return value.strip() if isinstance(value, str) else value
+
 
 class CappeQuickStoreCreate(BaseModel):
     """`POST /sites/quick-store`: an online store with its first product."""
