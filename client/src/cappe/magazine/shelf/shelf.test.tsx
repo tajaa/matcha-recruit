@@ -326,18 +326,18 @@ describe('reading a story', () => {
   })
 
   it('opens the next story here', async () => {
-    api.get.mockResolvedValue({ html: '<p>page</p>', paid: false, has_access: true, title: 'Low tide' })
+    api.get.mockImplementation((path: string) => Promise.resolve(path.endsWith('/annotations') ? { annotations: [] } : { html: '<p>page</p>', paid: false, has_access: true, title: 'Low tide' }))
     mount('/cappe/reader/m/salt/low-tide', '/cappe/reader/m/:slug/:story', <ShelfStory />)
     const frame = await screen.findByTitle('Low tide') as HTMLIFrameElement
     frame.contentDocument!.body.innerHTML = '<a href="/stories/high-tide">Next</a>'
     fireEvent.load(frame)
     followed.value = '/stories/high-tide'
     fireEvent.load(frame)
-    await waitFor(() => expect(api.get).toHaveBeenLastCalledWith('/reader/magazines/salt/stories/high-tide'))
+    await waitFor(() => expect(api.get.mock.calls.filter(([path]) => !String(path).endsWith('/annotations')).at(-1)?.[0]).toBe('/reader/magazines/salt/stories/high-tide'))
   })
 
   it('opens a Studio story’s Text view here, and its pages again', async () => {
-    api.get.mockResolvedValue({ html: '<p>page</p>', paid: false, has_access: true, title: 'Low tide' })
+    api.get.mockImplementation((path: string) => Promise.resolve(path.endsWith('/annotations') ? { annotations: [] } : { html: '<p>page</p>', paid: false, has_access: true, title: 'Low tide' }))
     mount('/cappe/reader/m/salt/low-tide', '/cappe/reader/m/:slug/:story', <ShelfStory />)
     const frame = await screen.findByTitle('Low tide') as HTMLIFrameElement
     frame.contentDocument!.body.innerHTML = '<a href="/stories/low-tide/text">Text view</a>'
@@ -345,13 +345,13 @@ describe('reading a story', () => {
     expect(frame.contentDocument!.querySelector('a')!.getAttribute('href')).toBe(`${LINK_PREFIX}%2Fstories%2Flow-tide%2Ftext`)
     followed.value = '/stories/low-tide/text'
     fireEvent.load(frame)
-    await waitFor(() => expect(api.get).toHaveBeenLastCalledWith('/reader/magazines/salt/stories/low-tide?view=text'))
+    await waitFor(() => expect(api.get.mock.calls.filter(([path]) => !String(path).endsWith('/annotations')).at(-1)?.[0]).toBe('/reader/magazines/salt/stories/low-tide?view=text'))
     const text = await screen.findByTitle('Low tide') as HTMLIFrameElement
     text.contentDocument!.body.innerHTML = '<a href="/stories/low-tide">See it as designed</a>'
     fireEvent.load(text)
     followed.value = '/stories/low-tide'
     fireEvent.load(text)
-    await waitFor(() => expect(api.get).toHaveBeenLastCalledWith('/reader/magazines/salt/stories/low-tide'))
+    await waitFor(() => expect(api.get.mock.calls.filter(([path]) => !String(path).endsWith('/annotations')).at(-1)?.[0]).toBe('/reader/magazines/salt/stories/low-tide'))
   })
 
   it('says when it can’t', async () => {

@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, Loader2 } from 'lucide-react'
 import { cappeApi } from '../../api'
 import type { CappeReaderStory } from '../../types'
-import BookFrame from '../reader/BookFrame'
+import ReaderModal from '../reader/ReaderModal'
 import { readerMagazinePath, readerStoryPath } from './readerPaths'
 
 const STORY = /^\/stories\/([^/?#]+)\/?$/
@@ -77,8 +77,10 @@ export default function ShelfStory() {
       {error && <p role="alert" className="p-6 text-sm text-red-400">{error}</p>}
       {!data && !error && <div className="flex justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-zinc-500" /></div>}
       {data && (
-        <BookFrame html={data.html} title={data.title || 'Story'} prepare={prepare} onLink={follow} openExternal keys
-          className="flex-1" style={{ minHeight: '80vh' }} />
+        <ReaderModal key={key} html={data.html} title={data.title || 'Story'} prepare={prepare} onLink={follow}
+          endpoint={`/reader/magazines/${encodeURIComponent(slug)}/stories/${encodeURIComponent(story)}/annotations`}
+          canAnnotate={data.has_access} asText={asText} onClose={() => navigate(readerMagazinePath(slug))}
+          onTextView={() => navigate(`${readerStoryPath(slug, story)}${asText ? '' : '?view=text'}`)} />
       )}
     </div>
   )

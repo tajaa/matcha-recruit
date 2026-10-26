@@ -55,7 +55,15 @@ Website-builder frontend for the consumer brand **Gummfit**, host-routed on gumm
   `/cappe/reader/signup|login` (a `next` inside `/cappe/reader` is honoured, `shelf/readerPaths.ts`),
   `shelf/ReaderLayout.tsx` (bar + sign-in gate), `Shelf.tsx` (`/cappe/reader`: every magazine held, open one
   by its address), `ShelfMagazine.tsx` (`/cappe/reader/m/:slug`: subscribe, cancel/keep, stories) and
-  `ShelfStory.tsx` (`…/:story`: the server's page in `reader/BookFrame.tsx`, with `allow-popups` for web
+  `ShelfStory.tsx` opens `reader/ReaderModal.tsx` at `…/:story`: a native dialog (full viewport on a phone,
+  inset on desktop), with a private notebook beside the pages or in place of them on a phone. Select words
+  to highlight, underline or comment; Comment without a selection adds a page note. `reader/annotations.ts`
+  polls selection from the script-less frame (no listeners in it), and paints plain-text quote anchors with
+  context. Ambiguous/deleted quotes stay in the notebook without marking other words. Pages/Text view have
+  separate anchors; the notebook says they are private. Writes reuse a UUID after an uncertain save, retain
+  the draft on failure, and delete only after the server confirms. The reader does NOT enable BookFrame's
+  `keys` option: its recurring iframe blur would interrupt native touch-selection handles. The regular page
+  arrows and swipe still work. The server's page stays in `reader/BookFrame.tsx`, with `allow-popups` for web
   links; its paywall gets a link to the magazine's page here, and its other pages open on the site).
   `stories/Stories.tsx` (the wall of covers at `sites/:siteId/stories`; `/blog` redirects here),
   `editor/StoryEditor.tsx` + `editor/BlockEditor.tsx` (blocks, a library picker, a live preview

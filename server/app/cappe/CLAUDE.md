@@ -520,6 +520,18 @@ What is built so far:
   paywall marker prints nothing), cut at the paywall otherwise; `no-store, private`. The shelf keeps a
   magazine that is down so its reader can still cancel; resume needs one still taking subscribers. The
   paywall on the magazine's own page links to the dashboard (`pages.reader_path`, `data-mz-alt`).
+- **Private reader annotations** (`cappereader01`, `routes/reader_annotations.py`,
+  `services/magazine/annotations.py`, `models/reader.py`): GET/PUT/DELETE under
+  `/reader/magazines/{slug}/stories/{story}/annotations`. The confirmed account and live magazine/story
+  are resolved on EVERY request; paid stories require the same subscription/comp access as reading.
+  No writer/public endpoint exposes these notes. Storage keys are `(account_id, post_id, id)`; both FKs
+  cascade, the post index serves cascades, and responses are `no-store, private`. Quotes carry UTF-16
+  offsets plus plain text/context, a view and page; page comments may have no quote. Max 250/story,
+  checked under the account row lock in the insert transaction. PUT is immutable/idempotent by client UUID,
+  including retries at the cap; there is no external call after mutation. Quote/comment limits and whole
+  Unicode validation precede JSONB storage (64 KB DB ceiling). Apply the additive migration BEFORE backend
+  deployment; old versions ignore the new table. Downgrade refuses while notes exist. Never apply it as
+  part of a PR task. See `docs/features/MAGAZINE_READER.md` for use and validation.
 - **Readers follow magazines from their account** (`cappemag08`: `cappe_magazine_follows`, PK
   account+site, both cascade; `services/magazine/follows.py`, routes in `routes/reader.py`). A follow is
   a one-tap Follow on the reader dashboard and sends NO email: email followers stay `cappe_subscribers`
