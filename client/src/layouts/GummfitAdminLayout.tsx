@@ -37,7 +37,7 @@ export default function GummfitAdminLayout() {
           <Link to={GUMMFIT_ADMIN_PATH} className="text-lg tracking-tight text-zinc-100">Gummfit <span className="text-sm text-zinc-500">Admin</span></Link>
           <div className="flex flex-wrap items-center gap-4 text-xs text-zinc-400">
             <span>{me?.user.email}</span>
-            <Link to="/" className="hover:text-zinc-100">View Gummfit</Link>
+            <Link to="/cappe" className="hover:text-zinc-100">View Gummfit</Link>
             <AdminButton variant="ghost" size="sm" disabled={loggingOut} onClick={signOut}>{loggingOut ? 'Signing out…' : 'Sign out'}</AdminButton>
           </div>
         </div>

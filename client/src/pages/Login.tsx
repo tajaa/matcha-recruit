@@ -4,7 +4,7 @@ import { api, API_BASE } from '../api/client'
 import { setAuthTokens } from '../api/authStorage'
 import { safeSameOriginPath } from '../utils/urlSecurity'
 import { invalidateMeCache } from '../hooks/useMe'
-import { GUMMFIT_ADMIN_PATH, GUMMFIT_ADMIN_LOGIN, isGummfitAdminPath } from '../api/authPaths'
+import { GUMMFIT_ADMIN_PATH, isGummfitAdminLoginPath, isGummfitAdminPath } from '../api/authPaths'
 
 // framer-motion rides in with the modal; keep it out of the entry chunk until
 // someone asks for a consultation.
@@ -87,7 +87,7 @@ export default function Login({ surface }: { surface?: 'gummfit-admin' }) {
       // path (single leading slash, not `//host` or a scheme).
       const safeNext = safeSameOriginPath(nextParam)
       const nextPath = safeNext?.split(/[?#]/)[0]
-      const adminNext = nextPath && isGummfitAdminPath(nextPath) && nextPath !== GUMMFIT_ADMIN_LOGIN ? safeNext : null
+      const adminNext = nextPath && isGummfitAdminPath(nextPath) && !isGummfitAdminLoginPath(nextPath) ? safeNext : null
       navigate(gummfitAdmin ? adminNext || GUMMFIT_ADMIN_PATH : safeNext || roleRoutes[res.user.role] || '/app')
     } catch {
       setError('Invalid email or password')

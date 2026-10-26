@@ -6,6 +6,13 @@ import { clearAuthTokens, getAccessToken } from '../api/authStorage'
 import { api } from '../api/client'
 import GummfitAdminRoutes from './GummfitAdminRoutes'
 import Login from '../pages/Login'
+import App from '../App'
+
+const host = vi.hoisted(() => ({ cappe: false }))
+vi.mock('../cappe/host', async (original) => ({ ...await original<object>(), get isCappeHost() { return host.cappe } }))
+vi.mock('../cappe/routes', () => ({ default: () => <p>Public Gummfit landing</p> }))
+vi.mock('../pages/landing/scheduling', () => ({ default: () => <p>Matcha scheduling landing</p> }))
+vi.mock('../components/shared/RouteTracker', () => ({ default: () => null }))
 
 const auth = vi.hoisted(() => ({ role: 'admin' as string | null, loading: false, authFailed: false }))
 vi.mock('../hooks/useMe', () => ({
@@ -51,6 +58,7 @@ function show(path = '/gummfit/admin') {
 }
 
 beforeEach(() => {
+  host.cappe = false
   auth.role = 'admin'
   auth.loading = false
   auth.authFailed = false
@@ -141,6 +149,10 @@ describe('Gummfit staff console', () => {
     ['/admin/settings', '/gummfit/admin'],
     ['https://example.com', '/gummfit/admin'],
     ['/gummfit/admin/login', '/gummfit/admin'],
+    ['/gummfit/admin/login/', '/gummfit/admin'],
+    ['/GUMMFIT/ADMIN/LOGIN///?next=/admin', '/gummfit/admin'],
+    ['/gummfit/%61dmin/%6cogin/', '/gummfit/admin'],
+    ['/gummfit/%61dmin?view=bank', '/gummfit/%61dmin?view=bank'],
   ])('signs staff in and validates the return path %s', async (next, destination) => {
     vi.mocked(api.post).mockResolvedValue({ access_token: 'staff-access', refresh_token: 'staff-refresh', user: { role: 'admin' } })
     show(`/gummfit/admin/login${next ? `?next=${encodeURIComponent(next)}` : ''}`)
@@ -176,5 +188,22 @@ describe('Gummfit staff console', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
     expect(await screen.findByText('Matcha app')).toBeInTheDocument()
     expect(getAccessToken()).toBe('client-access')
+  })
+
+  it.each([false, true])('opens Gummfit from View Gummfit on the Cappe host=%s', async (cappe) => {
+    host.cappe = cappe
+    render(<ToastProvider><MemoryRouter initialEntries={['/gummfit/admin']}><App /></MemoryRouter></ToastProvider>)
+    fireEvent.click(await screen.findByRole('link', { name: 'View Gummfit' }))
+    expect(await screen.findByText('Public Gummfit landing')).toBeInTheDocument()
+    expect(screen.queryByText('Matcha scheduling landing')).not.toBeInTheDocument()
+  })
+
+  it.each(['/GUMMFIT/ADMIN/models', '/gummfit/%61dmin?view=bank', '/%67ummfit/admin/'])('uses staff sign-in for accepted Gummfit URL %s', async (path) => {
+    host.cappe = true
+    auth.role = null
+    auth.authFailed = true
+    render(<ToastProvider><MemoryRouter initialEntries={[path]}><App /></MemoryRouter></ToastProvider>)
+    expect(await screen.findByRole('heading', { name: 'Admin sign in.' })).toBeInTheDocument()
+    expect(screen.queryByText('Public Gummfit landing')).not.toBeInTheDocument()
   })
 })

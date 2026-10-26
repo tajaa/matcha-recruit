@@ -54,11 +54,18 @@ describe('logoutSession', () => {
     await vi.waitFor(() => expect(location.href).toBe('/gummfit/admin/login?next=%2Fgummfit%2Fadmin%2Fmodels'))
   })
 
-  it('does not redirect repeatedly from the Gummfit staff login itself', async () => {
-    const location = { pathname: '/gummfit/admin/login', search: '', hash: '', href: '' }
+  it.each(['/gummfit/admin/login', '/gummfit/admin/login/', '/GUMMFIT/ADMIN/LOGIN', '/gummfit/%61dmin/%6cogin/'])('does not redirect repeatedly from staff login %s', async (pathname) => {
+    const location = { pathname, search: '', hash: '', href: '' }
     vi.stubGlobal('location', location)
     await logoutSession()
     expect(location.href).toBe('')
+  })
+
+  it('keeps expiry at an encoded staff destination in the staff realm', async () => {
+    const location = { pathname: '/gummfit/%61dmin/models', search: '?tab=default', hash: '', href: '' }
+    vi.stubGlobal('location', location)
+    await logoutSession()
+    expect(location.href).toBe('/gummfit/admin/login?next=%2Fgummfit%2F%2561dmin%2Fmodels%3Ftab%3Ddefault')
   })
 
   it('returns Gummfit staff to their login with their destination after revoking the session', async () => {
