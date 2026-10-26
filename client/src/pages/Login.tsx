@@ -4,6 +4,7 @@ import { api, API_BASE } from '../api/client'
 import { setAuthTokens } from '../api/authStorage'
 import { safeSameOriginPath } from '../utils/urlSecurity'
 import { invalidateMeCache } from '../hooks/useMe'
+import { GUMMFIT_ADMIN_PATH, isGummfitAdminLoginPath, isGummfitAdminPath } from '../api/authPaths'
 
 // framer-motion rides in with the modal; keep it out of the entry chunk until
 // someone asks for a consultation.
@@ -56,7 +57,8 @@ function LoginInput({ label, id, ...props }: React.ComponentProps<'input'> & { l
   )
 }
 
-export default function Login() {
+export default function Login({ surface }: { surface?: 'gummfit-admin' }) {
+  const gummfitAdmin = surface === 'gummfit-admin'
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -75,12 +77,18 @@ export default function Login() {
     setLoading(true)
     try {
       const res = await api.post<LoginResponse>('/auth/login', { email, password })
+      if (gummfitAdmin && res.user.role !== 'admin') {
+        setError('Administrator access is required. Use your Matcha staff account.')
+        return
+      }
       setAuthTokens(res.access_token, res.refresh_token)
       invalidateMeCache()
       // Open-redirect guard: only honor `next` if it's a same-origin relative
       // path (single leading slash, not `//host` or a scheme).
       const safeNext = safeSameOriginPath(nextParam)
-      navigate(safeNext || roleRoutes[res.user.role] || '/app')
+      const nextPath = safeNext?.split(/[?#]/)[0]
+      const adminNext = nextPath && isGummfitAdminPath(nextPath) && !isGummfitAdminLoginPath(nextPath) ? safeNext : null
+      navigate(gummfitAdmin ? adminNext || GUMMFIT_ADMIN_PATH : safeNext || roleRoutes[res.user.role] || '/app')
     } catch {
       setError('Invalid email or password')
     } finally {
@@ -117,7 +125,7 @@ export default function Login() {
             className="text-4xl tracking-tight"
             style={{ fontFamily: DISPLAY, fontWeight: 500, color: INK }}
           >
-            Matcha
+            {gummfitAdmin ? 'Gummfit' : 'Matcha'}
           </span>
         </Link>
 
@@ -141,10 +149,12 @@ export default function Login() {
                 lineHeight: 1.1,
               }}
             >
-              {ssoMode ? 'Sign in with SSO' : 'Sign in.'}
+              {gummfitAdmin ? 'Admin sign in.' : ssoMode ? 'Sign in with SSO' : 'Sign in.'}
             </h1>
             <p className="mt-2 text-sm" style={{ color: MUTED }}>
-              {ssoMode
+              {gummfitAdmin
+                ? 'Use your Matcha staff account to manage Gummfit.'
+                : ssoMode
                 ? 'Enter your work email to continue via your identity provider.'
                 : 'Welcome back. Access your consulting workspace.'}
             </p>
@@ -209,16 +219,16 @@ export default function Login() {
                 {loading ? 'Signing in…' : 'Sign in'}
               </button>
               <div className="flex items-center justify-between text-sm">
-                <button
+                {!gummfitAdmin && <button
                   type="button"
                   onClick={() => { setSsoMode(true); setError('') }}
                   className="transition-opacity hover:opacity-60"
                   style={{ color: MUTED }}
                 >
                   Sign in with SSO
-                </button>
+                </button>}
                 <Link
-                  to="/reset-password"
+                  to={gummfitAdmin ? 'https://hey-matcha.com/reset-password' : '/reset-password'}
                   className="transition-opacity hover:opacity-60"
                   style={{ color: MUTED }}
                 >
@@ -230,7 +240,7 @@ export default function Login() {
         </div>
 
         {/* Contact sales */}
-        <p className="mt-8 text-center text-sm" style={{ color: MUTED }}>
+        {!gummfitAdmin && <p className="mt-8 text-center text-sm" style={{ color: MUTED }}>
           Don&apos;t have an account?{' '}
           <button
             type="button"
@@ -240,7 +250,7 @@ export default function Login() {
           >
             Book a consultation
           </button>
-        </p>
+        </p>}
       </div>
 
       {contactMounted && (

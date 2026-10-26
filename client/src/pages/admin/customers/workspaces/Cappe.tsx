@@ -3,7 +3,7 @@ import { AdminStat as Stat, AdminButton as Button, AdminInput as Input, AdminSel
 import { AdminTabs as PillTabs, AdminTab, AdminTabBar } from '../../../../components/admin/AdminTabs'
 import { AdminPageHeader } from '../../../../components/admin/AdminPageHeader'
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import { ChevronDown, ChevronRight, ExternalLink } from 'lucide-react'
 import { api } from '../../../../api/client'
 import { cappeSiteHost } from '../../../../cappe/host'
@@ -12,6 +12,7 @@ import CappeCreators from './CappeCreators'
 import CappeSignupGrants from './CappeSignupGrants'
 import CappeStudioBank from './CappeStudioBank'
 import type { CappePlanOption } from '../../../../types/cappeAdmin'
+import { GUMMFIT_ADMIN_PATH, isGummfitAdminPath } from '../../../../api/authPaths'
 
 type CappeSite = {
   id: string
@@ -201,6 +202,7 @@ function accountMatches(account: CappeAccount, search: string) {
 
 export default function Cappe() {
   const { toast } = useToast()
+  const { pathname } = useLocation()
   const [params, setParams] = useSearchParams()
   const requestedView = params.get('view')
   const view: View = requestedView === 'brands' || requestedView === 'creators' || requestedView === 'grants' || requestedView === 'bank' ? requestedView : 'websites'
@@ -299,7 +301,8 @@ export default function Cappe() {
 
   return (
     <div>
-      <AdminPageHeader title="Gummfit" description="Manage websites, brand accounts, creators, marketplace reviews, and collaborations." />
+      <AdminPageHeader title="Gummfit" description="Manage websites, brand accounts, creators, marketplace reviews, and collaborations."
+        actions={!isGummfitAdminPath(pathname) && <Link to={GUMMFIT_ADMIN_PATH} className="inline-flex items-center gap-1.5 text-xs text-zinc-400 hover:text-zinc-100">Open Gummfit admin <ExternalLink size={13} /></Link>} />
 
       <div className="mt-6">
         <PillTabs
