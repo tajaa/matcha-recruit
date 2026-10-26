@@ -1005,10 +1005,13 @@ and Publish 503 with a setup message; the composer and queue still work.
   by the allowlisted `theme_config.template` marker. It applies on free and paid plans, private
   previews and the live store; the shared public store widget still owns product links and checkout.
   Theme colours and fonts remain editable. Other templates do not load these styles.
-- Sample photography is bundled as three optimised WebP files in `site_templates/assets/` (prompts
+- Sample photography is bundled as optimised WebP files in `site_templates/assets/` (prompts
   and provenance in its README). The versioned, allowlisted `/templates/starter-media/{key}` route
   serves them without DB or external-storage access. Only `quick_store.sample_products()` references
-  them; no example name, price or picture is saved into the site or rendered publicly.
+  store merchandise; no example name, price or picture is saved into the site or rendered publicly.
+  `services/template_media.py` owns the shared allowlist. Writers' Studio uses the editorial images
+  only in its built-in collection and single-page preview projection, never in inserted documents or
+  saved collections. Neither surface needs a database row or storage upload for these images.
 
 ## Site templates (`services/site_templates/`)
 

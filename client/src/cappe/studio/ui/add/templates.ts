@@ -51,7 +51,7 @@ export const TEMPLATES: Template[] = [
       { kind: 'image', x: 0, y: 0, w: W, h: H, fill: '#8d8478', name: 'Cover picture' },
       { kind: 'rect', x: 0, y: 0, w: W, h: 230, fill: '#000000', opacity: 25, name: 'Top shade' },
       { kind: 'text', x: 30, y: 34, w: W - 60, h: 104, name: 'Masthead',
-        parts: [p('THE QUARTERLY', { font: 'Bodoni Moda', wt: 900, size: 58, track: -10, color: PAPER }, { align: 'c', lead: 62 })] },
+        parts: [p('THE QUARTERLY', { font: 'Bodoni Moda Display', wt: 600, size: 58, track: -10, color: PAPER }, { align: 'c', lead: 62 })] },
       { kind: 'text', x: 30, y: 144, w: W - 60, h: 16, name: 'Issue line',
         parts: [kicker('ISSUE 01  ·  AUTUMN  ·  YOUR TOWN', PAPER, 'c')] },
       { kind: 'text', x: 40, y: 430, w: 230, h: 170, name: 'Cover lines', parts: [
@@ -75,7 +75,7 @@ export const TEMPLATES: Template[] = [
       { kind: 'rect', x: 0, y: 0, w: W, h: 196, fill: TEAL, name: 'Band' },
       { kind: 'text', x: M, y: 40, w: W - 2 * M, h: 14, name: 'Issue line', parts: [kicker('NO. 04  ·  THE MAKERS ISSUE', '#cfe1dc', 'c')] },
       { kind: 'text', x: M, y: 58, w: W - 2 * M, h: 118, name: 'Masthead',
-        parts: [p('Field Notes', { font: 'DM Serif Display', size: 80, color: CREAM }, { align: 'c', lead: 84 })] },
+        parts: [p('Field Notes', { font: 'Fraunces Display', size: 72, color: CREAM }, { align: 'c', lead: 80 })] },
       { kind: 'image', x: M, y: 226, w: W - 2 * M, h: 410, fill: FRAME, name: 'Cover picture' },
       { kind: 'text', x: M, y: 656, w: W - 2 * M, h: 100, name: 'Headline', parts: [
         p('Making Things by Hand', { font: 'Libre Caslon Display', size: 38, color: TEAL }, { role: 'h1', align: 'c', lead: 42 }),
@@ -121,7 +121,7 @@ export const TEMPLATES: Template[] = [
       { kind: 'text', x: M, y: M, w: W - 2 * M, h: 340, thread: 'body', cols: 3, gutter: 14, name: 'Story', parts: [...BODY, ...BODY].map(body) },
       { kind: 'graphic', x: 246, y: 414, w: 120, h: 12, src: GRAPHICS.ornament, color: RUST, fit: 'stretch', name: 'Ornament' },
       { kind: 'text', x: 84, y: 438, w: 444, h: 110, name: 'Pull quote',
-        parts: [p('“You learn to read the sea the way you read a face you love.”', { font: 'Playfair Display', it: true, size: 26 }, { role: 'quote', align: 'c', lead: 32 })] },
+        parts: [p('“You learn to read the sea the way you read a face you love.”', { font: 'Playfair Condensed Poster', it: true, size: 26 }, { role: 'quote', align: 'c', lead: 32 })] },
       { kind: 'text', x: M, y: 572, w: W - 2 * M, h: H - 572 - M, thread: 'body', cols: 3, gutter: 14, name: 'Story, continued' },
     ],
   },

@@ -32,7 +32,7 @@ from ..services.site_templates.imagery import (
     placeholder_svg,
 )
 from ..services.site_templates.preview import render_template_preview
-from ..services.quick_store import SAMPLE_ASSETS
+from ..services.template_media import SAMPLE_ASSETS
 from .render import tenant_security_headers
 
 router = APIRouter()

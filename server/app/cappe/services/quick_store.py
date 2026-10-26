@@ -1,13 +1,11 @@
 """Draft online stores: choose a look now, review the details before launch."""
-from pathlib import Path
 from typing import Any
 
 from .site_templates import clone_structure, get_template
+from .template_media import SAMPLE_ASSETS as SAMPLE_ASSETS
 
 DIRECTORY_CATEGORY = "retail"
 DEFAULT_TEMPLATE = "online-studio"
-SAMPLE_ASSETS = {f"{name}-v1.webp": Path(__file__).parent / "site_templates" / "assets" / f"{name}-v1.webp"
-                 for name in ("vessel", "tote", "lamp")}
 
 
 def is_store_template(slug: Any) -> bool:

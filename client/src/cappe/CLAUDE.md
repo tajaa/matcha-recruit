@@ -158,6 +158,10 @@ Website-builder frontend for the consumer brand **Gummfit**, host-routed on gumm
   `collectionLibrary.ts` holds pending library writes and feedback per Studio store across panel remounts,
   invalidates stale reads, and reuses a save request UUID for an unchanged retry. `collectionPreview.ts`
   shares one composition across a collection's thumbnails; failed preparation can be retried.
+  Built-in collections and single-page templates use `ui/add/samplePreview.ts` only at the render
+  boundary: transient sample asset IDs and bundled same-origin photography illustrate the designs.
+  Source documents, placement, saved collections and the library never receive those sample images.
+  Saved/unknown collections get no sample projection. The guide and template panel disclose this.
   **Editorial type** (feature 4): the Character panel's Kerning (⌥←/⌥→ at the caret, `ops.kernAt`; with letters
   selected, tracking; letters typed after a kerned one don't take its kerning, `unkern`). **No browser kerns across a
   change of letter-spacing** (Chrome does across same-font spans otherwise; the composer never does across runs), so a

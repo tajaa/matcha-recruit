@@ -6,6 +6,7 @@ import { useCtx } from '../context'
 import { applyTemplate, blankPage, previewDoc, templateFaces } from './applyTemplate'
 import { TEMPLATES, type Template } from './templates'
 import CollectionsTab from './CollectionsTab'
+import { pageSample, samplePreview } from './samplePreview'
 
 const THUMB = 124
 
@@ -16,8 +17,8 @@ function Thumb({ t }: { t: Template }) {
   const paper = useStudio(c.store, (s) => s.doc.paper)
   const bleed = useStudio(c.store, (s) => s.doc.bleed)
   const html = useMemo(() => {
-    const d = previewDoc(t, { ...c.store.get().doc, size, paper, bleed })
-    return pageItemsHtml(d, 0, { assets: {}, faces: c.fonts.book.face, used: new Map(), threads: frameThreads(d) })
+    const preview = samplePreview(previewDoc(t, { ...c.store.get().doc, size, paper, bleed }), pageSample(t.id))
+    return pageItemsHtml(preview.doc, 0, { assets: preview.assets, faces: c.fonts.book.face, used: new Map(), threads: frameThreads(preview.doc) })
   }, [t, size, paper, bleed, c])
   const box = useRef<HTMLDivElement>(null)
   useLayoutEffect(() => { if (box.current) setHtml(box.current, html) }, [html])
@@ -67,7 +68,7 @@ function SinglePages() {
     <div className="space-y-4">
       <p className="text-[11px] leading-snug text-zinc-500">
         {blank ? `Click one to lay out page ${page + 1}.` : `Click one to add it as a new page after page ${page + 1}.`}
-        {' '}Then fill its frames from Photos or Yours, and type over its words.
+        {' '}Sample photos are preview only. Fill its frames from Photos or Yours, and type over its words.
       </p>
       {groups.map((g) => (
         <section key={g}>

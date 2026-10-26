@@ -12,12 +12,13 @@ import { blankPage } from './applyTemplate'
 import { COLLECTIONS } from './collections'
 import { collectionPreview } from './collectionPreview'
 import { collectionLibrary, useCollectionLibrary } from './collectionLibrary'
+import { samplePreview } from './samplePreview'
 
 const button = 'rounded-md border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-200 hover:border-zinc-500 hover:bg-zinc-800 disabled:opacity-50'
 const problem = (err: unknown) => err instanceof Error && err.message ? err.message : 'The collection couldn’t be opened. Try again.'
 
 /** A real Studio page, rendered at thumbnail size with its own typography. */
-export function CollectionPreview({ doc, page = 0, width = 112 }: { doc: Doc; page?: number; width?: number }) {
+export function CollectionPreview({ doc, page = 0, width = 112, sample }: { doc: Doc; page?: number; width?: number; sample?: string }) {
   const c = useCtx()
   const [prepared, setPrepared] = useState<{ source: Doc; doc: Doc } | null>(null)
   useEffect(() => {
@@ -28,9 +29,12 @@ export function CollectionPreview({ doc, page = 0, width = 112 }: { doc: Doc; pa
     return () => { alive = false }
   }, [doc, c])
   const shown = prepared?.source === doc ? prepared.doc : doc
-  const html = useMemo(() => pageItemsHtml(shown, page, {
-    assets: {}, faces: c.fonts.book.face, used: new Map(), threads: frameThreads(shown),
-  }), [shown, page, c.fonts.book])
+  const html = useMemo(() => {
+    const preview = samplePreview(shown, sample)
+    return pageItemsHtml(preview.doc, page, {
+      assets: preview.assets, faces: c.fonts.book.face, used: new Map(), threads: frameThreads(preview.doc),
+    })
+  }, [shown, page, c.fonts.book, sample])
   const box = useRef<HTMLDivElement>(null)
   useLayoutEffect(() => { if (box.current) setHtml(box.current, html) }, [html])
   return <div ref={box} aria-hidden className="relative shrink-0 overflow-hidden shadow-md" style={{
@@ -97,6 +101,7 @@ export default function CollectionsTab() {
         <h3 className="text-lg font-medium text-zinc-100">{opened.name}</h3>
         <p className="mt-1 text-xs leading-relaxed text-zinc-400">{opened.description}</p>
         {opened.fonts && <p className="mt-2 text-[10px] leading-relaxed text-zinc-500">{opened.fonts}</p>}
+        {!opened.saved && <p className="mt-2 text-[10px] leading-relaxed text-zinc-500">Sample photography shows the art direction. Your pages start with empty photo frames.</p>}
       </div>
       <div className="space-y-2 rounded-md border border-zinc-700 bg-zinc-950/50 p-3">
         <p className="text-[11px] leading-relaxed text-zinc-400">{empty ? 'Start this blank story with the complete collection.' : 'Add the complete collection after the spread in view. A blank page is added when needed to keep its facing spreads together.'} Your page size is used. Everything stays editable.</p>
@@ -107,7 +112,7 @@ export default function CollectionsTab() {
       </div>
       <div className="grid grid-cols-2 justify-items-center gap-x-2 gap-y-4" aria-label="Pages in this collection">
         {opened.doc.pages.map((p, k) => <div key={p.id} className="space-y-1.5">
-          <CollectionPreview doc={opened.doc} page={k} />
+          <CollectionPreview doc={opened.doc} page={k} sample={opened.saved ? undefined : opened.id} />
           <p className="max-w-28 text-[10px] text-zinc-500">{String(k + 1).padStart(2, '0')} · {opened.pages?.[k] ?? 'Your design'}</p>
         </div>)}
       </div>
@@ -116,13 +121,13 @@ export default function CollectionsTab() {
     </> : <>
       <div>
         <h3 className="text-sm font-medium text-zinc-100">Designed as a whole</h3>
-        <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">Covers, contents, opening spreads, photo essays, interviews and credits. One considered design from first page to last.</p>
+        <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">Covers, contents, opening spreads, photo essays, interviews and credits. Sample photos show the design; add your own after choosing.</p>
       </div>
       <div className="grid grid-cols-2 gap-3">
         {COLLECTIONS.map((collection) => <button key={collection.id} type="button" disabled={pending}
           onClick={() => { setOpened(collection); setMessage(null); setError(null); library.feedback() }} aria-label={`Explore ${collection.name}`}
           className="flex flex-col items-center gap-2 rounded-md border border-zinc-800 p-1.5 text-left hover:border-zinc-500 disabled:opacity-50">
-          <CollectionPreview doc={collection.doc} />
+          <CollectionPreview doc={collection.doc} sample={collection.id} />
           <span className="w-full text-xs text-zinc-200">{collection.name}</span>
           <span className="w-full text-[10px] leading-snug text-zinc-500">{collection.direction}<span className="mt-1 block">{collection.doc.pages.length} editable pages</span></span>
         </button>)}
