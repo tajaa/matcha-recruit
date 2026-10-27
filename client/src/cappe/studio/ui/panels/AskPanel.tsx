@@ -110,12 +110,16 @@ export function AskPanel() {
   const conv = conversation(c.store)
   const { turns, busy, focus, draft } = useConversation(c.store)
   const [text, setText] = useState('')
-  // Words "Ask about this" started the question with: put in the box once.
-  const [seenDraft, setSeenDraft] = useState(0)
-  if (draft && draft.n !== seenDraft) {
-    setSeenDraft(draft.n)
+  // Words "Ask about this" started the question with: put in the box once,
+  // and taken, so closing and opening the panel doesn't put it back.
+  const [seenDraft, setSeenDraft] = useState<typeof draft>(null)
+  if (draft && draft !== seenDraft) {
+    setSeenDraft(draft)
     setText(draft.text)
   }
+  useEffect(() => {
+    if (draft) conv.taken()
+  }, [draft, conv])
   const [over, setOver] = useState(false)
   const [picture, setPicture] = useState<Picture | null>(null)
   const [pictureError, setPictureError] = useState<string | null>(null)

@@ -176,6 +176,26 @@ describe('lining things up', () => {
     expect(canSpace(locked, ['a', 'b', 'c'])).toBe(false)
   })
 
+  it('spaces their middles when a wide one is over the others, so none leaves the room', () => {
+    // 380 of boxes in 300 of room: even gaps would be negative.
+    const d = doc({ items: [r('a', 0, 0, 300, 10), r('b', 50, 0, 30, 10), r('c', 100, 0, 50, 10)] })
+    const out = spaceItems(d, ['a', 'b', 'c'], 'across')
+    // Middles 65 (b), 125 (c), 150 (a): spaced to 65, 107.5, 150.
+    expect([at(out, 'b').x, at(out, 'c').x, at(out, 'a').x]).toEqual([50, 82.5, 0])
+    for (const id of ['a', 'b', 'c']) {
+      const i = at(out, id)
+      expect(i.x).toBeGreaterThanOrEqual(0)
+      expect(i.x + i.w).toBeLessThanOrEqual(300)
+    }
+  })
+
+  it('keeps the room from the first start to the furthest end, whichever starts last', () => {
+    // c starts last but b ends furthest (at 500): 420 of boxes, two gaps of 40.
+    const d = doc({ items: [r('a', 0, 0, 10, 10), r('b', 100, 0, 400, 10), r('c', 150, 0, 10, 10)] })
+    const out = spaceItems(d, ['a', 'b', 'c'], 'across')
+    expect([at(out, 'a').x, at(out, 'b').x, at(out, 'c').x]).toEqual([0, 50, 490])
+  })
+
   it('rehomes only what has crossed onto another page', () => {
     const d = doc({ items: [r('a', 100, 100, 50, 50, { page: 'p2' }), r('b', 700, 100, 50, 50, { page: 'p2' })] })
     const out = rehome(d, layout(d), ['a', 'b', 'gone'])

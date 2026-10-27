@@ -308,7 +308,8 @@ export function usePointer(scroller: RefObject<HTMLDivElement | null>, board: Re
   function down(e: React.PointerEvent): void {
     const s = store.get()
     if (e.button === 1 || space.current || s.tool === 'hand') { e.preventDefault(); pan(e); return }
-    if (e.button !== 0) return
+    // A Mac's Ctrl-click is a right-click: the menu (`context`) answers it.
+    if (e.button !== 0 || macRightClick(e)) return
     const p = toPt(e)
     const target = e.target as HTMLElement
     const lay = layRef.current
@@ -394,6 +395,11 @@ export function usePointer(scroller: RefObject<HTMLDivElement | null>, board: Re
 
   return { down, double, context, zoomAt }
 }
+
+/** A Ctrl-click on a Mac: the browser sends it as a left button down, then
+ *  opens the menu for it. */
+export const macRightClick = (e: { ctrlKey: boolean }) =>
+  e.ctrlKey && typeof navigator !== 'undefined' && /Mac|iP(hone|ad|od)/.test(navigator.platform)
 
 /** A frame or shape made by a click: a standard size there; a text frame the
  *  width of the column clicked and down to the bottom margin. */

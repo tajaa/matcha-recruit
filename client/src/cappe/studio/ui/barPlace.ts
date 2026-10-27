@@ -10,12 +10,15 @@ type Box = { left: number; top: number; right: number; bottom: number }
 
 /** Where the bar goes, in window coordinates: centred over the selection,
  *  above it (clear of `above`), else below it, else at the top of the view;
- *  never past the view's sides. `board` is the board's top-left on screen,
- *  `sel` the selection in pasteboard points. */
+ *  never past the view's sides. Null when the selection is scrolled out of
+ *  the view. `board` is the board's top-left on screen, `sel` the selection
+ *  in pasteboard points. */
 export function barPlace(view: Box, board: { left: number; top: number }, sel: Rect, zoom: number,
-  bar: { w: number; h: number }, above = 0): { left: number; top: number } {
+  bar: { w: number; h: number }, above = 0): { left: number; top: number } | null {
   const top = board.top + sel.y * zoom, bottom = board.top + (sel.y + sel.h) * zoom
-  const mid = board.left + (sel.x + sel.w / 2) * zoom
+  const l = board.left + sel.x * zoom, r = board.left + (sel.x + sel.w) * zoom
+  if (bottom < view.top || top > view.bottom || r < view.left || l > view.right) return null
+  const mid = (l + r) / 2
   const left = Math.max(view.left + EDGE, Math.min(view.right - bar.w - EDGE, mid - bar.w / 2))
   const fits = (y: number) => y >= view.top + EDGE && y + bar.h <= view.bottom - EDGE
   const over = top - GAP - above - bar.h, under = bottom + GAP

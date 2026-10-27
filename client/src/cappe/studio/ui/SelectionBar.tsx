@@ -13,7 +13,7 @@ import {
   Sparkles, Square, Trash2, Underline,
 } from 'lucide-react'
 import FontField from '../../magazine/workspace/FontField'
-import { ColorPicker, IconBtn, NumberField, Seg, Slider } from '../../magazine/workspace/controls'
+import { ColorPanel, IconBtn, NumberField, Seg, Slider } from '../../magazine/workspace/controls'
 import { usePopover } from '../../magazine/workspace/popover'
 import { swatchCss } from '../../magazine/workspace/color'
 import { bounds, type Layout } from '../canvas/geometry'
@@ -40,7 +40,9 @@ export default function SelectionBar({ lay, scroller, board }: {
   const place = useRef<() => void>(() => {})
   const shown = barShown(s)
 
-  // Placed before it is painted, after every change, and on a scroll or a resize.
+  // Placed before it is painted when the selection, its place or the zoom
+  // changes (not on each word typed), on a scroll, and when its size does.
+  const editing = !!s.editing
   useLayoutEffect(() => {
     place.current = () => {
       const el = bar.current, sc = scroller.current, bd = board.current, host = bar.current?.parentElement
@@ -53,11 +55,14 @@ export default function SelectionBar({ lay, scroller, board }: {
       const one = chosen.length === 1 && !chosen[0].locked && !st.editing
       const b = bd.getBoundingClientRect(), h = host.getBoundingClientRect()
       const at = barPlace(sc.getBoundingClientRect(), b, sel, st.view.zoom, { w: el.offsetWidth, h: el.offsetHeight }, one ? ROTATE_ROOM : 0)
+      // Scrolled out of sight: no bar for what can't be seen.
+      el.style.visibility = at ? '' : 'hidden'
+      if (!at) return
       el.style.left = `${at.left - h.left}px`
       el.style.top = `${at.top - h.top}px`
     }
     place.current()
-  })
+  }, [c.store, lay, scroller, board, shown, s.selection, s.doc.items, s.doc.pages, s.view.zoom, editing])
   useEffect(() => {
     if (!shown) return
     const run = () => place.current()
@@ -70,11 +75,13 @@ export default function SelectionBar({ lay, scroller, board }: {
   }, [shown, scroller])
 
   if (!shown) return null
-  const items = s.doc.items.filter((i) => s.selection.includes(i.id)).map((i) => resolveItem(i, s.doc.identity))
+  const all = s.doc.items.filter((i) => s.selection.includes(i.id)).map((i) => resolveItem(i, s.doc.identity))
+  // What the bar changes: a locked thing stays as it is, as it does for a move.
+  const items = all.filter((i) => !i.locked)
   const kinds = new Set(items.map((i) => i.kind))
   const only = kinds.size === 1 ? items[0].kind : null
   const parts: ReactNode[] = []
-  if (items.every((i) => i.locked)) parts.push(<Locked key="locked" />)
+  if (!items.length) parts.push(<Locked key="locked" />)
   else {
     if (s.editing || only === 'text') parts.push(<TextPart key="text" s={s} />)
     if (!s.editing) {
@@ -83,7 +90,7 @@ export default function SelectionBar({ lay, scroller, board }: {
       if (only === 'line') parts.push(<LinePart key="line" items={items} units={s.doc.units} />)
       const inked = items.filter((i): i is GraphicItem => i.kind === 'graphic' && i.color !== null)
       if (only === 'graphic' && inked.length) parts.push(<GraphicPart key="graphic" inked={inked} />)
-      parts.push(<Common key="common" items={items} s={s} />)
+      parts.push(<Common key="common" items={items} chosen={all.length} s={s} />)
     }
   }
   return (
@@ -248,8 +255,10 @@ const ALIGNS: { id: string; label: string; icon: ReactNode }[] = [
   { id: 'align-bottom', label: 'Bottom', icon: <AlignEndHorizontal className="h-4 w-4" /> },
 ]
 
-/** Everything selected: line it up, see through it, lock, duplicate, delete, more. */
-function Common({ items, s }: { items: Item[]; s: State }) {
+/** Everything selected: line it up, see through it, lock, duplicate, delete,
+ *  more. `items`: the unlocked ones; `chosen`: how many are selected (locked
+ *  ones count when lining up). */
+function Common({ items, chosen, s }: { items: Item[]; chosen: number; s: State }) {
   const c = useCtx()
   const { store } = c
   const ids = items.map((i) => i.id)
@@ -257,7 +266,7 @@ function Common({ items, s }: { items: Item[]; s: State }) {
   return (
     <span className="flex items-center gap-0.5">
       <Pop label="Position" icon={<AlignStartVertical className="h-4 w-4" />} w={250} h={spaced ? 150 : 110}>
-        <p className="text-[11px] text-zinc-400">{items.length === 1 ? 'Line it up with the page' : 'Line them up with each other'}</p>
+        <p className="text-[11px] text-zinc-400">{chosen === 1 ? 'Line it up with the page' : 'Line them up with each other'}</p>
         <div className="grid grid-cols-3 gap-1">
           {ALIGNS.map((a) => (
             <button key={a.id} type="button" onClick={() => command(a.id).run(c)} aria-label={command(a.id).label} title={command(a.id).label}
@@ -373,18 +382,7 @@ function Swatch({ label, value, onChange, none, letter }: {
             style={{ background: value ? css : 'linear-gradient(135deg, transparent 45%, #f87171 45% 55%, transparent 55%)' }} />
         )}
       </button>
-      {at && (
-        <div ref={panel} role="dialog" aria-label={label} style={at}
-          className="fixed z-50 w-[248px] rounded-lg border border-zinc-700 bg-zinc-900 p-2.5 shadow-2xl">
-          {none !== undefined && (
-            <button type="button" aria-pressed={!value} onClick={() => onChange('')}
-              className={`mb-2 w-full rounded-md border px-2 py-1 text-left text-[11px] ${value ? 'border-zinc-800 text-zinc-300 hover:border-zinc-600' : 'border-emerald-500 text-emerald-300'}`}>
-              {none}
-            </button>
-          )}
-          <ColorPicker value={value || '#1a1a1a'} onChange={onChange} accent="#10b981" />
-        </div>
-      )}
+      {at && <ColorPanel panel={panel} at={at} label={label} value={value} onChange={onChange} auto={none} />}
     </>
   )
 }

@@ -18,27 +18,34 @@ export default function ContextMenu() {
   const root = useRef<HTMLDivElement>(null)
   const close = () => c.store.set({ menu: null })
 
+  // Closed by a click elsewhere, leaving the window, a resize, and the page
+  // moving under it (a scroll, or the wheel or a pinch zooming).
   useEffect(() => {
     if (!at) return
-    const away = (e: PointerEvent) => { if (!root.current?.contains(e.target as Node)) c.store.set({ menu: null }) }
     const gone = () => c.store.set({ menu: null })
-    window.addEventListener('pointerdown', away, true)
-    window.addEventListener('blur', gone)
-    window.addEventListener('resize', gone)
-    return () => { window.removeEventListener('pointerdown', away, true); window.removeEventListener('blur', gone); window.removeEventListener('resize', gone) }
+    const away = (e: Event) => { if (!root.current?.contains(e.target as Node)) gone() }
+    const events: [string, EventListener, boolean][] = [
+      ['pointerdown', away, true], ['wheel', away, true], ['scroll', away, true], ['blur', gone, false], ['resize', gone, false],
+    ]
+    for (const [name, fn, capture] of events) window.addEventListener(name, fn, capture)
+    return () => { for (const [name, fn, capture] of events) window.removeEventListener(name, fn, capture) }
   }, [at, c.store])
 
   if (!at) return null
   return (
-    <div ref={root} onContextMenu={(e) => e.preventDefault()}>
+    // A press on the menu's gaps or a dimmed row leaves the keyboard on the
+    // row it was on, so the arrows and Esc keep working.
+    <div ref={root} onContextMenu={(e) => e.preventDefault()} onMouseDown={(e) => e.preventDefault()}>
       <Menu rows={menuRows(state)} state={state} x={at.x} y={at.y} focus onClose={close}
         run={(cmd) => { close(); cmd.run(c) }} />
     </div>
   )
 }
 
-function Menu({ rows, state, x, y, focus, onClose, onBack, run }: {
+function Menu({ rows, state, x, y, back, focus, onClose, onBack, run }: {
   rows: Row[]; state: State; x: number; y: number
+  /** A side menu: the left edge of the menu it came out of (flipped, it ends there). */
+  back?: number
   /** Take the keyboard when it opens (the menu, and a side menu opened by key). */
   focus: boolean
   onClose: () => void
@@ -48,24 +55,25 @@ function Menu({ rows, state, x, y, focus, onClose, onBack, run }: {
 }) {
   const el = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState({ left: x, top: y })
-  // The side menu out, and where (measured from its row when it opened).
-  const [open, setOpen] = useState<{ index: number; byKey: boolean; x: number; y: number } | null>(null)
+  // The side menu out, and where (measured from its row when it opened:
+  // `x` its right edge, `back` its left, where a flipped side menu ends).
+  const [open, setOpen] = useState<{ index: number; byKey: boolean; x: number; y: number; back: number } | null>(null)
   const openAt = (index: number, byKey: boolean, row: HTMLElement) => {
     const r = row.getBoundingClientRect()
-    setOpen({ index, byKey, x: r.right - 2, y: r.top - 5 })
+    setOpen({ index, byKey, x: r.right - 2, y: r.top - 5, back: r.left + 2 })
   }
-  const side = !!onBack
 
-  // Kept inside the window: flipped to the left or up when it would run off.
+  // Kept inside the window: flipped to the left or up when it would run off
+  // (a side menu to the left of the menu it came out of, whatever its width).
   useLayoutEffect(() => {
     const m = el.current
     if (!m) return
     const w = m.offsetWidth, h = m.offsetHeight
-    const left = x + w > window.innerWidth - 4 ? Math.max(4, side ? x - w * 2 : x - w) : x
+    const left = x + w > window.innerWidth - 4 ? Math.max(4, (back ?? x) - w) : x
     const top = y + h > window.innerHeight - 4 ? Math.max(4, window.innerHeight - h - 4) : y
     setPos({ left, top })
     if (focus) m.querySelector<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')?.focus()
-  }, [x, y, focus, side])
+  }, [x, y, back, focus])
 
   const buttons = () => [...(el.current?.querySelectorAll<HTMLButtonElement>(':scope > [role="menuitem"]:not(:disabled)') ?? [])]
   const keys = (e: ReactKeyboardEvent) => {
@@ -121,7 +129,7 @@ function Menu({ rows, state, x, y, focus, onClose, onBack, run }: {
 function SideMenu({ index, label, rows, state, at, onOpen, onShut, onClose, run }: {
   index: number; label: string; rows: Row[]; state: State
   /** Out, at this point (`byKey`: opened by a key, so it takes the keyboard). */
-  at: { x: number; y: number; byKey: boolean } | null
+  at: { x: number; y: number; back: number; byKey: boolean } | null
   onOpen: (byKey: boolean, row: HTMLElement) => void; onShut: () => void; onClose: () => void; run: (cmd: Command) => void
 }) {
   const btn = useRef<HTMLButtonElement>(null)
@@ -134,7 +142,7 @@ function SideMenu({ index, label, rows, state, at, onOpen, onShut, onClose, run 
         <span>{label}</span><ChevronRight className="h-3.5 w-3.5 text-zinc-500" />
       </button>
       {at && (
-        <Menu rows={rows} state={state} x={at.x} y={at.y} focus={at.byKey} onClose={onClose}
+        <Menu rows={rows} state={state} x={at.x} y={at.y} back={at.back} focus={at.byKey} onClose={onClose}
           onBack={() => { onShut(); btn.current?.focus() }} run={run} />
       )}
     </>

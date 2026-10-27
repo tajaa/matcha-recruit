@@ -77,6 +77,7 @@ export async function preparePicture(file: Blob): Promise<Picture> {
 export class Conversation {
   private state: AskState = { turns: [], busy: false, focus: 0, draft: null }
   private listeners = new Set<() => void>()
+  private drafts = 0 // `draft.n`: still counting after a draft is taken
   private next = 1
 
   get = (): AskState => this.state
@@ -102,7 +103,7 @@ export class Conversation {
 
   /** Start a question with these words, for the person to finish (and give a picture to). */
   prompt(text: string): void {
-    this.set({ draft: { text, n: (this.state.draft?.n ?? 0) + 1 }, focus: this.state.focus + 1 })
+    this.set({ draft: { text, n: ++this.drafts }, focus: this.state.focus + 1 })
   }
 
   /** The draft went into the question box. */

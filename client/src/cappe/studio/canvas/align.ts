@@ -74,26 +74,34 @@ export function alignItems(doc: Doc, ids: readonly string[], how: Align): Doc {
 /** Whether `spaceItems` can space these out: three or more that can move. */
 export const canSpace = (doc: Doc, ids: readonly string[]) => movable(doc, ids).length >= 3
 
-/** Even gaps between three or more items, across or down: the first and the
- *  last stay where they are, the rest move between them. */
+/** Even gaps between three or more items, across or down, within the room
+ *  from the first one's start to the furthest end, which stays as it is:
+ *  the rest move between its ends. When they don't fit in
+ *  that room side by side (a wide one over the others), their middles are
+ *  spaced evenly instead, as Illustrator does, so nothing leaves the room. */
 export function spaceItems(doc: Doc, ids: readonly string[], how: Spread): Doc {
   if (!canSpace(doc, ids)) return doc
   const lay = layout(doc)
   const origin = originOf(doc, lay)
   const across = how === 'across'
-  const boxes = movable(doc, ids).map((i) => ({ id: i.id, b: bounds([i], origin)! }))
-    .sort((a, b) => (across ? a.b.x - b.b.x : a.b.y - b.b.y))
   const start = (r: Rect) => (across ? r.x : r.y)
   const size = (r: Rect) => (across ? r.w : r.h)
-  const first = boxes[0].b, last = boxes[boxes.length - 1].b
-  const span = start(last) + size(last) - start(first)
-  const gap = (span - boxes.reduce((n, x) => n + size(x.b), 0)) / (boxes.length - 1)
+  const boxes = movable(doc, ids).map((i) => ({ id: i.id, b: bounds([i], origin)! }))
+  const from = Math.min(...boxes.map((x) => start(x.b))), to = Math.max(...boxes.map((x) => start(x.b) + size(x.b)))
+  const gap = (to - from - boxes.reduce((n, x) => n + size(x.b), 0)) / (boxes.length - 1)
   const moves = new Map<string, Pt>()
-  let at = start(first)
-  for (const { id, b } of boxes) {
-    const d = at - start(b)
-    moves.set(id, across ? { x: d, y: 0 } : { x: 0, y: d })
-    at += size(b) + gap
+  const move = (id: string, d: number) => moves.set(id, across ? { x: d, y: 0 } : { x: 0, y: d })
+  if (gap >= 0) {
+    let at = from
+    for (const { id, b } of boxes.sort((a, z) => start(a.b) - start(z.b))) {
+      move(id, at - start(b))
+      at += size(b) + gap
+    }
+  } else {
+    const mid = (r: Rect) => start(r) + size(r) / 2
+    boxes.sort((a, z) => mid(a.b) - mid(z.b))
+    const lo = mid(boxes[0].b), step = (mid(boxes[boxes.length - 1].b) - lo) / (boxes.length - 1)
+    boxes.forEach(({ id, b }, k) => move(id, lo + k * step - mid(b)))
   }
   return shift(doc, lay, moves)
 }

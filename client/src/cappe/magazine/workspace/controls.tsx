@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from 'react'
+import { useRef, useState, type ReactNode, type RefObject } from 'react'
 import { ChevronDown, Pipette, Plus, Trash2 } from 'lucide-react'
 import type { Paint, PaintKind, Stop } from '../design/types'
 import { alphaOf, hexToHsva, hsvaToHex, readColour, swatchCss, withAlpha, type Hsva } from './color'
@@ -236,18 +236,27 @@ export function ColorField({ label, value, onChange, accent = '#10b981', auto }:
           style={{ background: `linear-gradient(${css},${css}),repeating-conic-gradient(#71717a 0 25%,#d4d4d8 0 50%) 0 0/6px 6px` }} />
         <span className={`truncate text-[11px] text-zinc-300 ${value ? 'font-mono' : ''}`}>{value === 'accent' ? 'Accent' : value || auto}</span>
       </button>
-      {at && (
-        <div ref={panel} className="fixed z-50 w-[248px] rounded-lg border border-zinc-700 bg-zinc-900 p-2.5 shadow-2xl" style={at} role="dialog" aria-label={label}>
-          {auto !== undefined && (
-            <button type="button" aria-pressed={!value} onClick={() => onChange('')}
-              className={`mb-2 w-full rounded-md border px-2 py-1 text-left text-[11px] ${value ? 'border-zinc-800 text-zinc-300 hover:border-zinc-600' : 'border-emerald-500 text-emerald-300'}`}>
-              {auto}
-            </button>
-          )}
-          <ColorPicker value={value || '#1a1a1a'} onChange={onChange} accent={accent} />
-        </div>
-      )}
+      {at && <ColorPanel panel={panel} at={at} label={label} value={value} onChange={onChange} accent={accent} auto={auto} />}
     </>
+  )
+}
+
+/** The panel a colour opens (`usePopover`'s `panel` and `at`): `auto`, what
+ *  '' means, offered first; then the picker. Also the Studio bar's swatches. */
+export function ColorPanel({ panel, at, label, value, onChange, accent = '#10b981', auto }: {
+  panel: RefObject<HTMLDivElement | null>; at: { left: number; top: number }
+  label: string; value: string; onChange: (c: string) => void; accent?: string; auto?: string
+}) {
+  return (
+    <div ref={panel} className="fixed z-50 w-[248px] rounded-lg border border-zinc-700 bg-zinc-900 p-2.5 shadow-2xl" style={at} role="dialog" aria-label={label}>
+      {auto !== undefined && (
+        <button type="button" aria-pressed={!value} onClick={() => onChange('')}
+          className={`mb-2 w-full rounded-md border px-2 py-1 text-left text-[11px] ${value ? 'border-zinc-800 text-zinc-300 hover:border-zinc-600' : 'border-emerald-500 text-emerald-300'}`}>
+          {auto}
+        </button>
+      )}
+      <ColorPicker value={value || '#1a1a1a'} onChange={onChange} accent={accent} />
+    </div>
   )
 }
 

@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { createRef } from 'react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { macRightClick } from '../canvas/usePointer'
 import type { Measure } from '../compose/compose'
 import { layout } from '../canvas/geometry'
 import { newItem } from '../model/doc'
@@ -39,6 +40,12 @@ function studio(d: Doc, over: Partial<State> = {}) {
   return { store, ctx, editor }
 }
 
+// jsdom lays nothing out: every box is a 1000 × 800 view at the window's corner.
+const VIEW = { left: 0, top: 0, right: 1000, bottom: 800, width: 1000, height: 800, x: 0, y: 0 }
+beforeEach(() => {
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ ...VIEW, toJSON: () => VIEW } as DOMRect)
+})
+
 function bar(d: Doc, over: Partial<State> = {}) {
   const made = studio(d, over)
   const scroller = createRef<HTMLDivElement>(), board = createRef<HTMLDivElement>()
@@ -51,7 +58,7 @@ function bar(d: Doc, over: Partial<State> = {}) {
       <ContextMenu />
     </StudioContext.Provider>,
   )
-  return made
+  return { ...made, scroller }
 }
 
 const item = (store: Store, id: string) => store.get().doc.items.find((i) => i.id === id)!
@@ -69,15 +76,21 @@ describe('where the bar goes', () => {
   })
 
   it('goes below when there is no room above, and to the top of the view when neither fits', () => {
-    expect(barPlace(view, { left: 0, top: 0 }, { x: 100, y: 20, w: 100, h: 100 }, 1, size).top).toBe(130)
-    expect(barPlace(view, { left: 0, top: 0 }, { x: 100, y: 20, w: 100, h: 780 }, 1, size).top).toBe(8)
-    // Scrolled out of sight below: pinned at the top too.
-    expect(barPlace(view, { left: 0, top: 0 }, { x: 100, y: 2000, w: 100, h: 100 }, 1, size).top).toBe(8)
+    expect(barPlace(view, { left: 0, top: 0 }, { x: 100, y: 20, w: 100, h: 100 }, 1, size)?.top).toBe(130)
+    expect(barPlace(view, { left: 0, top: 0 }, { x: 100, y: 20, w: 100, h: 780 }, 1, size)?.top).toBe(8)
+  })
+
+  it('has no place when the selection is scrolled out of the view, any side', () => {
+    for (const sel of [{ x: 100, y: 2000 }, { x: 100, y: -300 }, { x: 1200, y: 100 }, { x: -300, y: 100 }]) {
+      expect(barPlace(view, { left: 0, top: 0 }, { ...sel, w: 100, h: 100 }, 1, size)).toBeNull()
+    }
+    // A sliver still in view keeps it.
+    expect(barPlace(view, { left: 0, top: 0 }, { x: 100, y: 750, w: 100, h: 100 }, 1, size)).not.toBeNull()
   })
 
   it('never runs past the sides of the view, and scales with the zoom', () => {
-    expect(barPlace(view, { left: 0, top: 0 }, { x: 0, y: 400, w: 20, h: 20 }, 1, size).left).toBe(8)
-    expect(barPlace(view, { left: 0, top: 0 }, { x: 990, y: 400, w: 20, h: 20 }, 1, size).left).toBe(1000 - 300 - 8)
+    expect(barPlace(view, { left: 0, top: 0 }, { x: 0, y: 400, w: 20, h: 20 }, 1, size)?.left).toBe(8)
+    expect(barPlace(view, { left: 0, top: 0 }, { x: 990, y: 400, w: 20, h: 20 }, 1, size)?.left).toBe(1000 - 300 - 8)
     expect(barPlace(view, { left: 0, top: 0 }, { x: 200, y: 200, w: 100, h: 100 }, 2, size)).toEqual({ left: 500 - 150, top: 400 - 10 - 36 })
   })
 
@@ -225,6 +238,35 @@ describe('the bar over the selection', () => {
     expect(screen.queryByRole('toolbar', { name: 'Selection' })).toBeNull()
   })
 
+  it('leaves a locked thing as it is when it is selected with others', () => {
+    const { store } = bar(doc({ items: [rect('r1', 50, { fill: '#ff0000' } as Partial<Item>), rect('r2', 300, { locked: true, fill: '#00ff00' } as Partial<Item>)] }),
+      { selection: ['r1', 'r2'] })
+    fireEvent.click(screen.getByRole('button', { name: 'Fill: #ff0000' }))
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Fill' })).getByRole('button', { name: 'No fill' }))
+    expect(item(store, 'r1')).toMatchObject({ fill: null })
+    expect(item(store, 'r2')).toMatchObject({ fill: '#00ff00' })
+    fireEvent.click(screen.getByRole('button', { name: 'Transparency' }))
+    fireEvent.change(within(screen.getByRole('dialog', { name: 'Transparency' })).getByRole('slider', { name: 'Opacity' }), { target: { value: '40' } })
+    expect([item(store, 'r1').opacity, item(store, 'r2').opacity]).toEqual([40, 100])
+    // Lining up still counts the locked one.
+    fireEvent.click(screen.getByRole('button', { name: 'Position' }))
+    expect(screen.getByRole('dialog', { name: 'Position' })).toHaveTextContent('Line them up with each other')
+  })
+
+  it('hides while the selection is scrolled out of sight', () => {
+    const { scroller } = bar(doc({ items: [rect('r1', 50)] }), { selection: ['r1'] })
+    const toolbar = screen.getByRole('toolbar', { name: 'Selection' })
+    expect(toolbar.style.visibility).toBe('')
+    // The view now starts far below the page.
+    const below = { ...VIEW, top: 5000, bottom: 5800 }
+    vi.mocked(HTMLElement.prototype.getBoundingClientRect).mockImplementation(function (this: HTMLElement) {
+      const r = this === scroller.current ? below : VIEW
+      return { ...r, toJSON: () => r } as DOMRect
+    })
+    fireEvent.scroll(scroller.current!)
+    expect(toolbar.style.visibility).toBe('hidden')
+  })
+
   it('shows only the words’ controls while they are typed in', () => {
     bar(doc(words()), { selection: ['t1'], editing: { thread: 's1', anchor: [0, 0], head: [0, 5] } })
     expect(screen.getByRole('button', { name: 'Bold (⌘B)' })).toBeInTheDocument()
@@ -297,6 +339,38 @@ describe('the right-click menu', () => {
     render(<StudioContext.Provider value={ctx}><ContextMenu /></StudioContext.Provider>)
     fireEvent.pointerDown(document.body)
     expect(store.get().menu).toBeNull()
+  })
+
+  it('closes when the page moves under it: a scroll, or the wheel or a pinch', () => {
+    const { store, ctx } = studio(doc(), { menu: { x: 10, y: 10 } })
+    render(<StudioContext.Provider value={ctx}><ContextMenu /></StudioContext.Provider>)
+    // The wheel over the menu itself leaves it open.
+    fireEvent.wheel(screen.getByRole('menu', { name: 'Actions' }))
+    expect(store.get().menu).not.toBeNull()
+    fireEvent.wheel(document.body, { ctrlKey: true })
+    expect(store.get().menu).toBeNull()
+    act(() => store.set({ menu: { x: 10, y: 10 } }))
+    fireEvent.scroll(document.body)
+    expect(store.get().menu).toBeNull()
+  })
+
+  it('keeps the keyboard on its row when its gaps are pressed', () => {
+    const { ctx } = studio(doc({ items: [rect('r1', 50)] }), { selection: ['r1'], menu: { x: 10, y: 10 } })
+    render(<StudioContext.Provider value={ctx}><ContextMenu /></StudioContext.Provider>)
+    const menu = screen.getByRole('menu', { name: 'Actions' })
+    const separator = within(menu).getAllByRole('separator')[0]
+    // A press whose default is stopped doesn't take the focus away.
+    expect(fireEvent.mouseDown(separator)).toBe(false)
+    expect(fireEvent.mouseDown(within(menu).getByRole('menuitem', { name: /Paste/ }))).toBe(false)
+  })
+
+  it('takes a Mac’s Ctrl-click as a right-click, and only on a Mac', () => {
+    const platform = vi.spyOn(navigator, 'platform', 'get')
+    platform.mockReturnValue('MacIntel')
+    expect(macRightClick({ ctrlKey: true })).toBe(true)
+    expect(macRightClick({ ctrlKey: false })).toBe(false)
+    platform.mockReturnValue('Win32')
+    expect(macRightClick({ ctrlKey: true })).toBe(false)
   })
 })
 

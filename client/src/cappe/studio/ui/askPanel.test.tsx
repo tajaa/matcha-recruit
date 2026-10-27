@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { CappeApiError } from '../../api'
 import type { Measure } from '../compose/compose'
@@ -263,7 +263,15 @@ describe('matching a look from a picture', () => {
     expect(store.get().selection).toEqual([id])
     expect(box()).toHaveValue('How can I make this look like the picture I’ve attached?')
     expect(commandsPayload(store.get()).some((c) => c.id === 'ask-about')).toBe(false)
-    expect(conversation(store).get().draft).not.toBeNull()
+    // Taken once: the panel reopened doesn't put it back over what was done since.
+    expect(conversation(store).get().draft).toBeNull()
+    fireEvent.change(box(), { target: { value: '' } })
+    cleanup()
+    render(<StudioContext.Provider value={ctx}><AskPanel /></StudioContext.Provider>)
+    expect(box()).toHaveValue('')
+    // Asked again, the words come again.
+    act(() => command('ask-about').run(ctx))
+    expect(box()).toHaveValue('How can I make this look like the picture I’ve attached?')
   })
 })
 

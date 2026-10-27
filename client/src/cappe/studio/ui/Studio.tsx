@@ -141,8 +141,12 @@ function useKeys(c: StudioCtx, paused: RefObject<boolean>) {
       if (paused.current) return
       const t = e.target as HTMLElement | null
       const s = c.store.get()
-      // The right-click menu keeps its own keys.
-      if (s.menu) return
+      // The right-click menu keeps its own keys; Esc still closes it when the
+      // keyboard has left it.
+      if (s.menu) {
+        if (e.key === 'Escape') { e.preventDefault(); c.store.set({ menu: null }) }
+        return
+      }
       const typing = !!s.editing && !!t && c.editor.view?.dom.contains(t)
       const field = !!t && !typing && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))
       const cmd = commandForKey(e)
