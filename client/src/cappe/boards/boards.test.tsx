@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CappeAsset } from '../types'
 import type { Board, Pin } from './api'
 import { angleTo, cascade, COMPACT_AT, fitView, raise, resized, toBoard, zoomAt } from './board'
-import { asUrl, fromText, fromTransfer, pinnable, tooBig, typingIn } from './paste'
+import { asUrl, clip, fromText, fromTransfer, pinnable, tooBig, typingIn } from './paste'
 import { MAX_FILE_BYTES, NOTE_MAX, SIZE_MAX, SIZE_MIN } from './limits'
 
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), patch: vi.fn(), delete: vi.fn(), upload: vi.fn() }))
@@ -108,6 +108,16 @@ describe('pasting and dropping', () => {
     expect((fromText('x'.repeat(NOTE_MAX + 50)) as { text: string }).text).toHaveLength(NOTE_MAX)
     expect(fromText('   ')).toBeNull()
     expect(asUrl('see example.com')).toBeNull()
+  })
+
+  it('cuts long words between whole characters, never through an emoji', () => {
+    const long = 'a'.repeat(NOTE_MAX - 1) + '🌊🌊'
+    const note = fromText(long) as { text: string }
+    expect(Array.from(note.text)).toHaveLength(NOTE_MAX)
+    expect(note.text.endsWith('🌊')).toBe(true)
+    expect(/[\uD800-\uDBFF]$/.test(note.text)).toBe(false)
+    expect(clip('🌊🌊🌊', 2)).toBe('🌊🌊')
+    expect(clip('short', 40)).toBe('short')
   })
 
   it('takes files first: a copied screenshot also carries its name as words', () => {

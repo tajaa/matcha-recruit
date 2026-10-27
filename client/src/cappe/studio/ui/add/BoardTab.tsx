@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ExternalLink, FileText, Globe, Loader2, Lock } from 'lucide-react'
-import { boardsApi, fileUrl, type Board, type BoardDetail, type Pin } from '../../../boards/api'
+import { boardsApi, errorText, fileUrl, type Board, type BoardDetail, type Pin } from '../../../boards/api'
 import { NOTE_BG } from '../../../boards/look'
 import ToLibraryForm from '../../../boards/ToLibraryForm'
 import { cappePath } from '../../../host'
@@ -20,9 +20,6 @@ function remember(siteId: string, boardId: string) {
   try { localStorage.setItem(chosenKey(siteId), boardId) } catch { /* private window: forget it */ }
 }
 
-function message(e: unknown, fallback: string) {
-  return e instanceof Error && e.message ? e.message : fallback
-}
 
 /** The site's mood boards beside the pages, to design from. A library
  *  picture on a board goes onto the page like any of Yours (click, or drag
@@ -44,7 +41,7 @@ export default function BoardTab() {
       setBoards(list)
       const keep = remembered(c.siteId)
       setBoardId(list.find((b) => b.id === keep)?.id ?? list[0]?.id ?? '')
-    }, (e) => { if (alive) setError(message(e, 'Your mood boards didn’t load.')) })
+    }, (e) => { if (alive) setError(errorText(e, 'Your mood boards didn’t load.')) })
     return () => { alive = false }
   }, [c.siteId])
 
@@ -52,7 +49,7 @@ export default function BoardTab() {
     if (!boardId) return
     let alive = true
     boardsApi.get(c.siteId, boardId).then((d) => { if (alive) { setDetail(d); setError(null) } },
-      (e) => { if (alive) setError(message(e, 'That board didn’t load.')) })
+      (e) => { if (alive) setError(errorText(e, 'That board didn’t load.')) })
     return () => { alive = false }
   }, [c.siteId, boardId])
 

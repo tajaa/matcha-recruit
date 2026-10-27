@@ -5,9 +5,13 @@ not found. Adding a pin takes the site's advisory lock between the counts and
 the insert, so two uploads at once can't both fit under a board's pin limit or
 the site's storage limit.
 
+Deleting a board or a site takes the same lock before it reads which files to
+remove, so a pin can't be added between that read and the cascade (its files
+would never be removed). A pin added after the board is gone is `BoardGone`.
+
 A pin is answered without its storage paths: its pictures and file are signed
-links (`files.image_link` / `files.document_link`), and a library picture's are
-its public CDN sizes.
+links naming the pin (`files.link`, looked up again by `file_for`), and a
+library picture's are its public CDN sizes.
 """
 from __future__ import annotations
 
@@ -25,6 +29,10 @@ class BoardLimit(Exception):
 
 class SiteFull(Exception):
     """The site's pinned files would pass `MAX_SITE_BYTES`."""
+
+
+class BoardGone(Exception):
+    """The board was deleted before the pin could be added."""
 
 
 BOARD_COLUMNS = "b.id, b.title, b.created_at, b.updated_at"
@@ -65,13 +73,26 @@ def pin_out(r) -> dict[str, Any]:
         out.update(src=_sized(variants, d.get("asset_url")), full=d.get("asset_url"), alt=d.get("asset_alt"),
                    width=d.get("asset_width"), height=d.get("asset_height"))
         return out
-    out["src"] = files.image_link(d.get("thumb_path"), "image/webp")
-    if d["kind"] == "image":
-        out["full"] = files.image_link(d.get("file_path"), d.get("mime") or "image/jpeg")
-    elif d["kind"] == "file":
-        out["file_url"] = files.document_link(d.get("file_path"), d.get("mime") or "application/octet-stream",
-                                              d.get("filename") or "file")
+    if d.get("thumb_path"):
+        out["src"] = files.link(d["id"], "thumb")
+    if d.get("file_path"):
+        out["full" if d["kind"] == "image" else "file_url"] = files.link(d["id"], "full" if d["kind"] == "image" else "doc")
     return out
+
+
+async def file_for(conn, pin_id: UUID, part: str) -> Optional[tuple[str, str, str]]:
+    """(private path, type, name) of a pin's file for a signed link, or None
+    when the pin or that file is gone (deleted, or moved to the library)."""
+    row = await conn.fetchrow(
+        "SELECT kind, file_path, thumb_path, mime, filename FROM cappe_board_pins WHERE id = $1", pin_id,
+    )
+    if row is None:
+        return None
+    if part == "thumb" and row["thumb_path"]:
+        return row["thumb_path"], "image/webp", "thumb.webp"
+    if row["file_path"] and part == ("full" if row["kind"] == "image" else "doc"):
+        return row["file_path"], row["mime"] or "application/octet-stream", row["filename"] or "file"
+    return None
 
 
 async def _lock(conn, site_id: UUID) -> None:
@@ -143,6 +164,7 @@ async def delete_board(conn, site_id: UUID, board_id: UUID) -> Optional[list[str
     """Delete a board and its pins. Returns the files to remove once the
     delete has committed, or None when there was no such board."""
     async with conn.transaction():
+        await _lock(conn, site_id)
         held = await conn.fetch(
             "SELECT file_path, thumb_path FROM cappe_board_pins WHERE board_id = $1 AND site_id = $2",
             board_id, site_id,
@@ -155,7 +177,10 @@ async def delete_board(conn, site_id: UUID, board_id: UUID) -> Optional[list[str
 
 
 async def site_files(conn, site_id: UUID) -> list[str]:
-    """Every file a site's pins keep — removed after the site is deleted."""
+    """Every file a site's pins keep — removed after the site is deleted. Call
+    it inside the delete's transaction: it takes the site's lock, so no pin is
+    added between this read and the cascade."""
+    await _lock(conn, site_id)
     rows = await conn.fetch(
         "SELECT file_path, thumb_path FROM cappe_board_pins "
         "WHERE site_id = $1 AND (file_path IS NOT NULL OR thumb_path IS NOT NULL)",
@@ -206,7 +231,7 @@ async def check_room(conn, site_id: UUID, board_id: UUID, new_bytes: int) -> Non
 
 
 async def insert_pin(conn, site_id: UUID, board_id: UUID, fields: dict[str, Any]) -> dict[str, Any]:
-    """Add a pin on top of the board. Raises `BoardLimit` or `SiteFull`."""
+    """Add a pin on top of the board. Raises `BoardGone`, `BoardLimit` or `SiteFull`."""
     values = {k: fields.get(k) for k in INSERT_FIELDS}
     values["size_bytes"] = values["size_bytes"] or 0
     values["rotation"] = values["rotation"] or 0
@@ -214,6 +239,8 @@ async def insert_pin(conn, site_id: UUID, board_id: UUID, fields: dict[str, Any]
     params = ", ".join(f"${i + 3}" for i in range(len(INSERT_FIELDS)))
     async with conn.transaction():
         await _lock(conn, site_id)
+        if not await conn.fetchval("SELECT 1 FROM cappe_boards WHERE id = $1 AND site_id = $2", board_id, site_id):
+            raise BoardGone("Board not found")
         await check_room(conn, site_id, board_id, values["size_bytes"])
         pin_id = await conn.fetchval(
             f"""INSERT INTO cappe_board_pins (board_id, site_id, z, {cols})

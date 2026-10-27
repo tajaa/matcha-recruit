@@ -71,6 +71,11 @@ export interface ToLibrary {
   credit_line?: string
 }
 
+/** What went wrong, in the server's words when it sent any. */
+export function errorText(e: unknown, fallback: string): string {
+  return e instanceof Error && e.message ? e.message : fallback
+}
+
 /** A signed board link (a path under the API) or a CDN address, ready for `src`/`href`. */
 export function fileUrl(link: string | null): string | null {
   if (!link) return null

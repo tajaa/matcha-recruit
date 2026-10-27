@@ -11,40 +11,24 @@ image is fetched through the SSRF-guarded fetcher, re-encoded as a small WebP
 """
 from __future__ import annotations
 
-import base64
-import hashlib
-import hmac
 import io
-import json
 import time
 from typing import Optional
 
 from PIL import Image
 
-from .....config import get_settings
+from ... import signed_links
 
 TTL_SECONDS = 6 * 3600
 THUMB_SIDE = 480
 MAX_SOURCE_BYTES = 4 * 1024 * 1024
 PATH = "/public/stock-thumbs/"
-
-
-def _key() -> bytes:
-    return hashlib.sha256(b"cappe-stock-thumb:" + get_settings().jwt_secret_key.encode()).digest()
-
-
-def _b64(data: bytes) -> str:
-    return base64.urlsafe_b64encode(data).decode().rstrip("=")
-
-
-def _unb64(text: str) -> bytes:
-    return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
+PURPOSE = b"cappe-stock-thumb"
+_b64 = signed_links.b64  # tests forge payloads with it
 
 
 def sign(url: str, *, now: Optional[float] = None) -> str:
-    payload = _b64(json.dumps({"u": url, "e": int((now or time.time()) + TTL_SECONDS)}, separators=(",", ":")).encode())
-    mac = _b64(hmac.new(_key(), payload.encode(), hashlib.sha256).digest()[:18])
-    return f"{payload}.{mac}"
+    return signed_links.sign(PURPOSE, {"u": url, "e": int((now or time.time()) + TTL_SECONDS)})
 
 
 def thumb_path(url: str) -> str:
@@ -53,19 +37,10 @@ def thumb_path(url: str) -> str:
 
 def verify(token: str, *, now: Optional[float] = None) -> Optional[str]:
     """The thumbnail URL a token stands for, or None (forged, mangled, expired)."""
-    payload, _, mac = token.partition(".")
-    if not payload or not mac or len(token) > 2048:
+    claim = signed_links.verify(PURPOSE, token, now=now)
+    if claim is None or not isinstance(claim.get("u"), str):
         return None
-    expected = _b64(hmac.new(_key(), payload.encode(), hashlib.sha256).digest()[:18])
-    if not hmac.compare_digest(mac, expected):
-        return None
-    try:
-        data = json.loads(_unb64(payload))
-    except ValueError:
-        return None
-    if not isinstance(data, dict) or not isinstance(data.get("u"), str) or int(data.get("e", 0)) < (now or time.time()):
-        return None
-    return data["u"] if data["u"].startswith("https://") else None
+    return claim["u"] if claim["u"].startswith("https://") else None
 
 
 def to_webp(data: bytes) -> bytes:

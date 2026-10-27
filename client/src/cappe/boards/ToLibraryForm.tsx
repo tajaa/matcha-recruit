@@ -1,11 +1,8 @@
 import { useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import type { CappeAsset } from '../types'
-import { boardsApi, type Pin } from './api'
+import { boardsApi, errorText, type Pin } from './api'
 
-function message(e: unknown, fallback: string) {
-  return e instanceof Error && e.message ? e.message : fallback
-}
 
 /** Make a pinned picture a library picture, so a story can use it. Asks what
  *  the library upload asks; a pinned picture is reference until then.
@@ -31,7 +28,7 @@ export default function ToLibraryForm({ siteId, pin, onDone, onCancel, dark = fa
         { rights_attested: true, ai_made: aiMade, alt: alt.trim() || undefined })
       onDone(res.pin, res.asset)
     } catch (e) {
-      setError(message(e, 'That picture couldn’t be added.'))
+      setError(errorText(e, 'That picture couldn’t be added.'))
       setBusy(false)
     }
   }

@@ -7,37 +7,40 @@ picture to the library ("I may use this").
 
 The dashboard's CSP loads images only from our origin and CloudFront, and an
 `<img>` can't carry the bearer token, so a pin's picture is
-`/public/board-files/<token>` under the Cappe API. The token is the private
-path, how to answer and an expiry, signed with the app's secret (as
-`magazine/sources/thumbs.py` signs archive thumbnails), so the route serves
-only what a board answer of ours handed out. Pictures are streamed from our
-origin; a document redirects to a short presigned S3 link carrying its own
-name, so its bytes never pass through us or open on our origin.
+`/public/board-files/<token>` under the Cappe API. The token names only the
+pin and which of its files (thumbnail, full picture, document) with an
+expiry, signed with the app's secret (`services/signed_links.py`, as archive
+thumbnails are): a token's payload is readable, so it never carries a storage
+path; the route looks the file up by pin. A deleted pin's links die with it.
+Pictures are streamed from our origin; a document redirects to a short
+presigned S3 link carrying its own name, so its bytes never pass through us or
+open on our origin.
 
 Expiries are rounded to a window (`_expiry`), so the same picture keeps the
 same link for hours and the browser's cache works across board loads.
+
+A PDF's first page is drawn on a small pool of its own with a time limit
+(`first_page`), so a hostile PDF can hold at most those threads, never the
+shared pool every request's other work runs on.
 """
 from __future__ import annotations
 
 import asyncio
-import base64
-import hashlib
-import hmac
 import io
-import json
 import logging
 import os
 import time
 import unicodedata
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Iterable, Optional
 from urllib.parse import quote
+from uuid import UUID
 
 from PIL import Image
 
-from ....config import get_settings
 from ....core.services.storage import get_storage
-from .. import media, upload_guard
+from .. import media, signed_links, upload_guard
 from .limits import FILENAME_MAX
 
 logger = logging.getLogger(__name__)
@@ -47,6 +50,10 @@ PATH = "/public/board-files/"
 TTL_SECONDS = 6 * 3600
 THUMB_SIDE = 800
 PDF_THUMB_ZOOM = 1.5
+PDF_SECONDS = 10.0
+PURPOSE = b"cappe-board-file"
+PARTS = ("thumb", "full", "doc")
+_PDF_POOL = ThreadPoolExecutor(max_workers=2, thread_name_prefix="cappe-board-pdf")
 
 IMAGE_TYPES = set(upload_guard.ALLOWED_IMAGE)
 PDF = "application/pdf"
@@ -124,61 +131,28 @@ def disposition(filename: str, mime: str) -> str:
 
 # ── signed links ────────────────────────────────────────────────────────────
 
-def _key() -> bytes:
-    return hashlib.sha256(b"cappe-board-file:" + get_settings().jwt_secret_key.encode()).digest()
-
-
-def _b64(data: bytes) -> str:
-    return base64.urlsafe_b64encode(data).decode().rstrip("=")
-
-
-def _unb64(text: str) -> bytes:
-    return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
-
-
 def _expiry(now: float) -> int:
     """Between one and two windows from now, the same for everyone within a
     window: the same file gets the same link, so the browser caches it."""
     return int((now // TTL_SECONDS + 2) * TTL_SECONDS)
 
 
-def sign(path: str, *, mode: str, mime: str, name: Optional[str] = None, now: Optional[float] = None) -> str:
-    claim = {"p": path, "m": mode, "t": mime, "e": _expiry(time.time() if now is None else now)}
-    if name:
-        claim["n"] = name
-    payload = _b64(json.dumps(claim, separators=(",", ":")).encode())
-    mac = _b64(hmac.new(_key(), payload.encode(), hashlib.sha256).digest()[:18])
-    return f"{payload}.{mac}"
+def link(pin_id: UUID | str, part: str, *, now: Optional[float] = None) -> str:
+    """The signed link to one of a pin's files: `thumb`, `full` or `doc`."""
+    claim = {"i": str(pin_id), "f": part, "e": _expiry(time.time() if now is None else now)}
+    return PATH + signed_links.sign(PURPOSE, claim)
 
 
-def image_link(path: Optional[str], mime: str) -> Optional[str]:
-    return PATH + sign(path, mode="image", mime=mime) if path else None
-
-
-def document_link(path: Optional[str], mime: str, name: str) -> Optional[str]:
-    return PATH + sign(path, mode="doc", mime=mime, name=name) if path else None
-
-
-def verify(token: str, *, now: Optional[float] = None) -> Optional[dict]:
-    """What a token stands for (`p` path, `m` mode, `t` type, `n` name), or
-    None when it is forged, mangled or expired."""
-    payload, _, mac = token.partition(".")
-    if not payload or not mac or len(token) > 4096:
-        return None
-    expected = _b64(hmac.new(_key(), payload.encode(), hashlib.sha256).digest()[:18])
-    if not hmac.compare_digest(mac, expected):
+def verify(token: str, *, now: Optional[float] = None) -> Optional[tuple[UUID, str]]:
+    """The (pin id, part) a token stands for, or None when it is forged,
+    mangled or expired."""
+    claim = signed_links.verify(PURPOSE, token, now=now)
+    if claim is None or claim.get("f") not in PARTS or not isinstance(claim.get("i"), str):
         return None
     try:
-        claim = json.loads(_unb64(payload))
-    except (ValueError, UnicodeDecodeError):
+        return UUID(claim["i"]), claim["f"]
+    except ValueError:
         return None
-    if not isinstance(claim, dict) or not isinstance(claim.get("p"), str) or claim.get("m") not in ("image", "doc"):
-        return None
-    if not isinstance(claim.get("e"), int) or claim["e"] < (time.time() if now is None else now):
-        return None
-    if not claim["p"].startswith("s3://") or not isinstance(claim.get("t"), str):
-        return None
-    return claim
 
 
 # ── pictures ────────────────────────────────────────────────────────────────
@@ -224,6 +198,17 @@ def pdf_thumbnail(data: bytes) -> Optional[bytes]:
         return None
 
 
+async def first_page(data: bytes) -> Optional[bytes]:
+    """`pdf_thumbnail` on the PDF pool, or None past `PDF_SECONDS`. The thread
+    may run on after a timeout; it holds one of the pool's two, nothing else."""
+    try:
+        return await asyncio.wait_for(asyncio.get_running_loop().run_in_executor(_PDF_POOL, pdf_thumbnail, data),
+                                      PDF_SECONDS)
+    except TimeoutError:
+        logger.warning("board pdf thumbnail took over %ss; pinned without one", PDF_SECONDS)
+        return None
+
+
 # ── storing ─────────────────────────────────────────────────────────────────
 
 async def _put(data: bytes, filename: str, mime: str) -> str:
@@ -252,7 +237,7 @@ async def store_document(data: bytes, mime: str, filename: Optional[str]) -> Sto
     """Keep a document as it came, with its first page drawn when it is a PDF.
     Raises `StorageUnavailable`."""
     name = clean_filename(filename)
-    thumb = await asyncio.to_thread(pdf_thumbnail, data) if mime == PDF else None
+    thumb = await first_page(data) if mime == PDF else None
     if thumb:
         file_path, thumb_path = await asyncio.gather(_put(data, name, mime), _put(thumb, "page1.webp", "image/webp"))
     else:

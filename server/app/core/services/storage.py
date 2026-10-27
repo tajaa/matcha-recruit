@@ -158,6 +158,11 @@ class StorageService:
 
             return f"/uploads/resumes/{unique_id}{ext}"
 
+    def _get_object_bytes(self, bucket: str, key: str) -> bytes:
+        """One S3 object's bytes. Blocking: callers run it in a thread, so a
+        large read never stalls the event loop for every other request."""
+        return self.s3_client.get_object(Bucket=bucket, Key=key)["Body"].read()
+
     async def download_file(self, path: str) -> bytes:
         """Download a file from storage.
 
@@ -175,8 +180,7 @@ class StorageService:
             if not self.s3_client or not self.bucket:
                 raise RuntimeError("S3 not configured but CloudFront path provided")
             try:
-                response = self.s3_client.get_object(Bucket=self.bucket, Key=key)
-                return response["Body"].read()
+                return await asyncio.to_thread(self._get_object_bytes, self.bucket, key)
             except ClientError as e:
                 raise RuntimeError(f"Failed to download from S3: {e}")
 
@@ -201,8 +205,7 @@ class StorageService:
             key = parts[1] if len(parts) > 1 else ""
 
             try:
-                response = self.s3_client.get_object(Bucket=bucket, Key=key)
-                return response["Body"].read()
+                return await asyncio.to_thread(self._get_object_bytes, bucket, key)
             except ClientError as e:
                 raise RuntimeError(f"Failed to download from S3: {e}")
 
@@ -313,7 +316,7 @@ class StorageService:
                 return False
             key = path[len(f"https://{self.cloudfront_domain}/") :]
             try:
-                self.s3_client.delete_object(Bucket=self.bucket, Key=key)
+                await asyncio.to_thread(self.s3_client.delete_object, Bucket=self.bucket, Key=key)
                 return True
             except ClientError:
                 return False
@@ -327,7 +330,7 @@ class StorageService:
             key = parts[1] if len(parts) > 1 else ""
 
             try:
-                self.s3_client.delete_object(Bucket=bucket, Key=key)
+                await asyncio.to_thread(self.s3_client.delete_object, Bucket=bucket, Key=key)
                 return True
             except ClientError:
                 return False
@@ -415,7 +418,7 @@ class StorageService:
         key = parts[1] if len(parts) > 1 else ""
 
         try:
-            self.s3_client.delete_object(Bucket=bucket, Key=key)
+            await asyncio.to_thread(self.s3_client.delete_object, Bucket=bucket, Key=key)
             return True
         except ClientError:
             return False

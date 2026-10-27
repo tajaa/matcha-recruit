@@ -19,6 +19,14 @@ const DOCUMENT = new Set([
 const EXTENSIONS = /\.(jpe?g|png|gif|webp|pdf|docx?|xlsx?|txt|md|csv)$/i
 const URLISH = /^(https?:\/\/\S+|www\.\S+\.\S+|[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}\/\S*)$/i
 
+/** The first `max` characters, cut between whole characters (as the server
+ *  and Postgres count them), never through an emoji's surrogate pair: the
+ *  server refuses half a character. */
+export function clip(text: string, max: number): string {
+  const chars = Array.from(text)
+  return chars.length <= max ? text : chars.slice(0, max).join('')
+}
+
 /** Whether the server will take this file (it checks the bytes again). */
 export function pinnable(file: File): boolean {
   return IMAGE.test(file.type) || DOCUMENT.has(file.type) || EXTENSIONS.test(file.name)
@@ -40,7 +48,7 @@ export function fromText(text: string): Pasted | null {
   if (!t) return null
   const url = asUrl(t)
   if (url) return { kind: 'link', url }
-  return { kind: 'note', text: t.slice(0, NOTE_MAX) }
+  return { kind: 'note', text: clip(t, NOTE_MAX) }
 }
 
 interface Transfer {

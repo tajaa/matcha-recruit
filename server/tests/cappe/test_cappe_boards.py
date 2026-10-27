@@ -19,6 +19,7 @@ What each block pins:
 Run from server/:  ./venv/bin/python -m pytest tests/cappe/test_cappe_boards.py -q
 """
 import io
+import json
 import os
 import re
 from datetime import datetime, timezone
@@ -41,7 +42,7 @@ load_settings()
 from app.cappe.models import boards as models  # noqa: E402
 from app.cappe.routes import boards as routes  # noqa: E402
 from app.cappe.routes.public import board_files as public_files  # noqa: E402
-from app.cappe.services import media  # noqa: E402
+from app.cappe.services import media, signed_links  # noqa: E402
 from app.cappe.services.boards import files, limits, links, store  # noqa: E402
 from tests._helpers.routes import QueryConn, route_client  # noqa: E402
 
@@ -219,33 +220,36 @@ def test_the_client_mirrors_every_bound():
 
 # ── signed links ────────────────────────────────────────────────────────────
 
-def test_a_signed_link_verifies_and_keeps_its_claim():
-    token = files.sign("s3://private-bucket/cappe/boards/1-a.webp", mode="image", mime="image/webp", now=1000.0)
-    claim = files.verify(token, now=1000.0)
-    assert claim["p"] == "s3://private-bucket/cappe/boards/1-a.webp" and claim["m"] == "image"
+def test_a_signed_link_names_the_pin_and_part_only():
+    token = files.link(PIN_ID, "thumb", now=1000.0)[len(files.PATH):]
+    assert files.verify(token, now=1000.0) == (PIN_ID, "thumb")
+    readable = json.loads(signed_links.unb64(token.split(".")[0]))
+    assert set(readable) == {"i", "f", "e"} and "s3" not in token and "bucket" not in json.dumps(readable)
 
 
 def test_a_forged_mangled_or_expired_link_is_refused():
-    token = files.sign("s3://private-bucket/cappe/boards/1-a.webp", mode="image", mime="image/webp", now=1000.0)
+    token = files.link(PIN_ID, "thumb", now=1000.0)[len(files.PATH):]
     payload, mac = token.split(".")
-    other = files.sign("s3://private-bucket/cappe/boards/2-b.webp", mode="image", mime="image/webp", now=1000.0)
+    other = files.link(uuid4(), "thumb", now=1000.0)[len(files.PATH):]
     assert files.verify(f"{other.split('.')[0]}.{mac}", now=1000.0) is None
     assert files.verify(payload, now=1000.0) is None
     assert files.verify(token, now=1000.0 + 3 * files.TTL_SECONDS) is None
+    forged = signed_links.sign(files.PURPOSE, {"i": str(PIN_ID), "f": "secrets", "e": 9_999_999_999})
+    assert files.verify(forged) is None
+
+
+def test_a_link_minted_for_archive_thumbnails_is_no_good_here():
+    from app.cappe.services.magazine.sources import thumbs
+
+    assert files.verify(thumbs.sign("https://api.openverse.org/t/")) is None
+    assert thumbs.verify(files.link(PIN_ID, "thumb")[len(files.PATH):]) is None
 
 
 def test_the_same_file_keeps_the_same_link_within_a_window():
     """So the browser's cache works across board loads."""
     start = 10 * files.TTL_SECONDS
-    a = files.sign("s3://b/k", mode="image", mime="image/webp", now=start + 5)
-    b = files.sign("s3://b/k", mode="image", mime="image/webp", now=start + files.TTL_SECONDS - 5)
-    assert a == b
-    assert files.verify(a, now=start + files.TTL_SECONDS - 5) is not None
-
-
-def test_only_private_paths_are_ever_signed_for():
-    token = files.sign("https://elsewhere.example.test/x.png", mode="image", mime="image/png")
-    assert files.verify(token) is None
+    assert files.link(PIN_ID, "full", now=start + 5) == files.link(PIN_ID, "full", now=start + files.TTL_SECONDS - 5)
+    assert files.verify(files.link(PIN_ID, "full", now=start + 5)[len(files.PATH):], now=start + files.TTL_SECONDS - 5)
 
 
 # ── files ───────────────────────────────────────────────────────────────────
@@ -397,9 +401,11 @@ def test_a_link_that_cant_be_fetched_is_a_card_named_by_its_host(monkeypatch):
 def test_a_private_pin_is_answered_with_signed_links_only():
     out = store.pin_out(_pin_row(kind="image", file_path="s3://private-bucket/cappe/boards/0-a.jpg",
                                  thumb_path="s3://private-bucket/cappe/boards/1-thumb.webp", mime="image/jpeg"))
-    assert out["src"].startswith(files.PATH) and out["full"].startswith(files.PATH)
+    assert files.verify(out["src"][len(files.PATH):]) == (PIN_ID, "thumb")
+    assert files.verify(out["full"][len(files.PATH):]) == (PIN_ID, "full")
     assert "file_path" not in out and "thumb_path" not in out and not out["in_library"]
-    assert "s3://" not in str(models.PinOut(**out).model_dump(mode="json"))
+    answered = json.dumps(models.PinOut(**out).model_dump(mode="json"))
+    assert "private-bucket" not in answered and "s3://" not in answered
 
 
 def test_a_library_pin_shows_the_librarys_sizes():
@@ -411,11 +417,27 @@ def test_a_library_pin_shows_the_librarys_sizes():
     assert out["in_library"] and (out["width"], out["height"], out["alt"]) == (2000, 1000, "Dunes")
 
 
-def test_a_document_pin_links_to_its_file_under_its_name():
+def test_a_document_pin_links_to_its_file():
     out = store.pin_out(_pin_row(kind="file", file_path="s3://private-bucket/cappe/boards/0-brief.pdf",
                                  filename="brief.pdf", mime=files.PDF))
-    claim = files.verify(out["file_url"][len(files.PATH):])
-    assert claim["m"] == "doc" and claim["n"] == "brief.pdf"
+    assert files.verify(out["file_url"][len(files.PATH):]) == (PIN_ID, "doc") and out["src"] is None
+
+
+@pytest.mark.parametrize("row,part,expected", [
+    ({"kind": "image", "file_path": "s3://b/a.jpg", "thumb_path": "s3://b/t.webp", "mime": "image/jpeg"}, "thumb",
+     ("s3://b/t.webp", "image/webp", "thumb.webp")),
+    ({"kind": "image", "file_path": "s3://b/a.jpg", "thumb_path": "s3://b/t.webp", "mime": "image/jpeg"}, "full",
+     ("s3://b/a.jpg", "image/jpeg", "a.jpg")),
+    ({"kind": "image", "file_path": "s3://b/a.jpg", "thumb_path": None, "mime": "image/jpeg"}, "doc", None),
+    ({"kind": "file", "file_path": "s3://b/x.pdf", "thumb_path": None, "mime": files.PDF}, "doc",
+     ("s3://b/x.pdf", files.PDF, "a.jpg")),
+    ({"kind": "image", "file_path": None, "thumb_path": None, "mime": None}, "full", None),  # now in the library
+])
+def test_a_link_finds_only_the_file_it_names(row, part, expected):
+    import asyncio
+
+    conn = Conn(fetchrow={"FROM cappe_board_pins WHERE id": {**row, "filename": "a.jpg"}})
+    assert asyncio.run(store.file_for(conn, PIN_ID, part)) == expected
 
 
 # ── store: scoping and limits ───────────────────────────────────────────────
@@ -424,7 +446,8 @@ def test_adding_a_pin_locks_the_site_and_checks_room_first():
     import asyncio
 
     conn = Conn(
-        fetchval={"COUNT(*) FROM cappe_board_pins": 3, "SUM(size_bytes)": 10, "INSERT INTO cappe_board_pins": PIN_ID},
+        fetchval={"COUNT(*) FROM cappe_board_pins": 3, "SUM(size_bytes)": 10, "INSERT INTO cappe_board_pins": PIN_ID,
+                  "FROM cappe_boards WHERE id": 1},
         fetchrow={"FROM cappe_board_pins p LEFT JOIN cappe_assets": _pin_row()},
     )
     asyncio.run(store.insert_pin(conn, SITE_ID, BOARD_ID, {"kind": "note", "x": 0, "y": 0, "w": 220, "h": 180,
@@ -435,6 +458,32 @@ def test_adding_a_pin_locks_the_site_and_checks_room_first():
     assert lock < insert
     assert conn.args_for("pg_advisory_xact_lock") == (f"cappe_boards:{SITE_ID}",)
     assert "site_id = $2" not in order[insert] and conn.args_for("INSERT INTO cappe_board_pins")[:2] == (BOARD_ID, SITE_ID)
+
+
+def test_a_pin_for_a_board_deleted_meanwhile_is_refused_under_the_lock():
+    import asyncio
+
+    conn = Conn(fetchval={"FROM cappe_boards WHERE id": None})
+    with pytest.raises(store.BoardGone):
+        asyncio.run(store.insert_pin(conn, SITE_ID, BOARD_ID, {"kind": "note", "x": 0, "y": 0, "w": 220, "h": 180,
+                                                               "note": "x"}))
+    order = [sql for _, sql, _ in conn.calls]
+    assert "pg_advisory_xact_lock" in order[0] and not any("INSERT" in sql for sql in order)
+
+
+@pytest.mark.parametrize("call", ["board", "site"])
+def test_deleting_takes_the_lock_before_reading_its_files(call):
+    """Else a pin added between the read and the cascade loses its files without them being removed."""
+    import asyncio
+
+    conn = Conn(fetch={"FROM cappe_board_pins": []}, fetchval={"DELETE FROM cappe_boards": BOARD_ID})
+    if call == "board":
+        asyncio.run(store.delete_board(conn, SITE_ID, BOARD_ID))
+    else:
+        asyncio.run(store.site_files(conn, SITE_ID))
+    order = [sql for _, sql, _ in conn.calls]
+    assert "pg_advisory_xact_lock" in order[0] and conn.args_for("pg_advisory_xact_lock") == (f"cappe_boards:{SITE_ID}",)
+    assert "FROM cappe_board_pins" in order[1]
 
 
 def test_a_full_board_or_site_is_refused():
@@ -726,35 +775,45 @@ def test_a_library_pin_cant_be_added_again(monkeypatch, storage):
 
 # ── the signed-file route ───────────────────────────────────────────────────
 
-def _public_client():
+def _public_client(monkeypatch, row):
+    monkeypatch.setattr(public_files, "get_connection", lambda *a, **k: Conn(fetchrow={"FROM cappe_board_pins": row}))
     return route_client(public_files.router)
 
 
-def test_a_picture_streams_from_our_origin(storage):
+def test_a_picture_streams_from_our_origin(monkeypatch, storage):
     storage.files["s3://private-bucket/t.webp"] = (b"RIFF....WEBP", "image/webp")
-    link = files.image_link("s3://private-bucket/t.webp", "image/webp")
-    with _public_client() as client:
-        res = client.get(link)
+    row = {"kind": "image", "file_path": "s3://private-bucket/a.jpg", "thumb_path": "s3://private-bucket/t.webp",
+           "mime": "image/jpeg", "filename": "a.jpg"}
+    with _public_client(monkeypatch, row) as client:
+        res = client.get(files.link(PIN_ID, "thumb"))
     assert res.status_code == 200 and res.content == b"RIFF....WEBP"
     assert res.headers["content-type"] == "image/webp" and res.headers["x-content-type-options"] == "nosniff"
     assert res.headers["content-security-policy"] == "default-src 'none'"
 
 
-def test_a_document_redirects_to_s3_under_its_name(storage):
+def test_a_document_redirects_to_s3_under_its_name(monkeypatch, storage):
     storage.files["s3://private-bucket/brief.pdf"] = (b"%PDF-1.4", files.PDF)
-    link = files.document_link("s3://private-bucket/brief.pdf", files.PDF, "Spring brief.pdf")
-    with _public_client() as client:
-        res = client.get(link, follow_redirects=False)
+    row = {"kind": "file", "file_path": "s3://private-bucket/brief.pdf", "thumb_path": None, "mime": files.PDF,
+           "filename": "Spring brief.pdf"}
+    with _public_client(monkeypatch, row) as client:
+        res = client.get(files.link(PIN_ID, "doc"), follow_redirects=False)
     assert res.status_code == 302 and res.headers["location"].startswith("https://private-bucket.s3.example.test/")
     assert storage.presigned[0][1].startswith('inline; filename="Spring brief.pdf"')
 
 
-def test_a_bad_link_or_a_gone_file_is_not_found(storage):
-    with _public_client() as client:
+def test_a_bad_link_a_deleted_pin_or_a_gone_file_is_not_found(monkeypatch, storage):
+    image = {"kind": "image", "file_path": "s3://private-bucket/gone.jpg", "thumb_path": None, "mime": "image/jpeg",
+             "filename": "gone.jpg"}
+    with _public_client(monkeypatch, image) as client:
         assert client.get(files.PATH + "nope.nope").status_code == 404
-        assert client.get(files.image_link("s3://private-bucket/gone.webp", "image/webp")).status_code == 404
-        text = files.PATH + files.sign("s3://private-bucket/a.html", mode="image", mime="text/html")
-        assert client.get(text).status_code == 404
+        assert client.get(files.link(PIN_ID, "full")).status_code == 404  # its file isn't in storage
+        assert client.get(files.link(PIN_ID, "thumb")).status_code == 404  # it has none
+    with _public_client(monkeypatch, None) as client:
+        assert client.get(files.link(PIN_ID, "full")).status_code == 404  # the pin was deleted
+    html = {**image, "file_path": "s3://private-bucket/a.html", "mime": "text/html"}
+    storage.files["s3://private-bucket/a.html"] = (b"<script>", "text/html")
+    with _public_client(monkeypatch, html) as client:
+        assert client.get(files.link(PIN_ID, "full")).status_code == 404
 
 
 # ── the migration ───────────────────────────────────────────────────────────
@@ -791,3 +850,166 @@ def test_deleting_a_site_removes_its_board_files_after(monkeypatch):
     assert pins < next(i for i, sql in enumerate(order) if "DELETE FROM cappe_sites" in sql)
     assert tasks == [(files.remove, (["s3://private-bucket/a.jpg", "s3://private-bucket/t.webp",
                                       "s3://private-bucket/b.pdf"],))]
+
+
+# ── review fixes (PR #910) ──────────────────────────────────────────────────
+
+def test_storage_reads_and_deletes_s3_off_the_event_loop():
+    """A big photo read from S3 must not stall every other request on the worker."""
+    import asyncio
+    import threading
+
+    from app.core.services.storage import StorageService
+
+    loop_thread = []
+
+    class S3:
+        def __init__(self):
+            self.threads = []
+
+        def get_object(self, Bucket, Key):
+            self.threads.append(threading.get_ident())
+            return {"Body": io.BytesIO(b"bytes")}
+
+        def delete_object(self, Bucket, Key):
+            self.threads.append(threading.get_ident())
+
+    service = object.__new__(StorageService)
+    service.s3_client, service.bucket, service.cloudfront_domain = S3(), "pub", "cdn.example.test"
+
+    async def run():
+        loop_thread.append(threading.get_ident())
+        got = await service.download_file("s3://private-bucket/a.jpg")
+        await service.delete_private_file("s3://private-bucket/a.jpg")
+        await service.delete_file("https://cdn.example.test/cappe/library/a.jpg")
+        await service.delete_file("s3://pub/b.jpg")
+        return got
+
+    assert asyncio.run(run()) == b"bytes"
+    assert len(service.s3_client.threads) == 4 and loop_thread[0] not in service.s3_client.threads
+
+
+def test_a_link_to_a_full_size_photo_is_fetched_whole(monkeypatch):
+    import asyncio
+
+    big = _photo((2400, 1600))
+    calls = []
+
+    async def fetch(url, *, max_bytes, **kw):
+        calls.append(max_bytes)
+        truncated = len(big) > max_bytes
+        return _fetched(big[:max_bytes], "image/jpeg", truncated=truncated, url=url)
+
+    monkeypatch.setattr(links, "MAX_PAGE_BYTES", 1024)  # any photo is bigger than a page
+    monkeypatch.setattr(links, "fetch_public", fetch)
+    preview = asyncio.run(links.fetch_preview("https://a.example.test/photo.jpg"))
+    assert preview.direct and preview.image_bytes == big
+    assert calls == [1024, links.MAX_DIRECT_BYTES]
+
+
+def test_a_photo_too_big_even_to_pin_is_a_plain_card(monkeypatch):
+    import asyncio
+
+    async def fetch(url, *, max_bytes, **kw):
+        return _fetched(b"x" * 10, "image/jpeg", truncated=True, url=url)
+
+    monkeypatch.setattr(links, "fetch_public", fetch)
+    preview = asyncio.run(links.fetch_preview("https://a.example.test/huge.jpg"))
+    assert not preview.direct and preview.image_bytes is None and preview.title == "a.example.test"
+
+
+def test_an_address_is_measured_as_it_is_stored():
+    near = "example.com/" + "a" * (limits.URL_MAX - len("example.com/") - 3)
+    assert len(near) < limits.URL_MAX and len("https://" + near) > limits.URL_MAX
+    with pytest.raises(links.BadLink):
+        links.normalize_url(near)
+    fits = "example.com/" + "a" * (limits.URL_MAX - len("https://example.com/"))
+    assert len(links.normalize_url(fits)) == limits.URL_MAX
+
+
+def _library_ready(monkeypatch, storage):
+    path = "s3://private-bucket/cappe/boards/0-a.jpg"
+    storage.files[path] = (_photo(), "image/jpeg")
+    FakeStore(monkeypatch, row=_pin_row(kind="image", file_path=path, thumb_path=None, mime="image/jpeg",
+                                        filename="a.jpg"))
+    storage.public_deleted = []
+
+    async def delete_file(path):
+        storage.public_deleted.append(path)
+        return True
+
+    storage.delete_file = delete_file
+    return path
+
+
+def test_a_failed_library_write_takes_down_the_public_copy(monkeypatch, storage):
+    path = _library_ready(monkeypatch, storage)
+
+    async def insert_upload(conn, **kw):
+        return {"id": ASSET_ID}
+
+    async def changed(*a, **k):
+        return None  # the pin changed meanwhile (a second click got there first)
+
+    monkeypatch.setattr(routes.cappe_assets, "insert_upload", insert_upload)
+    monkeypatch.setattr(store, "attach_asset", changed)
+    with _client(monkeypatch, _site_conn()) as client:
+        res = client.post(f"/sites/{SITE_ID}/boards/{BOARD_ID}/pins/{PIN_ID}/library", json={"rights_attested": True})
+    assert res.status_code == 409
+    assert storage.public and sorted(storage.public_deleted) == sorted(storage.public)
+    assert path in storage.files  # the private copy stays: the pin still shows it
+
+
+def test_a_library_copy_that_cant_be_stored_is_a_503(monkeypatch, storage):
+    _library_ready(monkeypatch, storage)
+
+    async def refused(*a, **k):
+        raise RuntimeError("Failed to upload to S3: NoSuchBucket")
+
+    monkeypatch.setattr(media, "store_processed", refused)
+    with _client(monkeypatch, _site_conn()) as client:
+        res = client.post(f"/sites/{SITE_ID}/boards/{BOARD_ID}/pins/{PIN_ID}/library", json={"rights_attested": True})
+    assert res.status_code == 503
+
+
+def test_a_pin_on_a_board_deleted_meanwhile_is_404_and_its_files_go(monkeypatch, storage):
+    FakeStore(monkeypatch)
+
+    async def gone(*a, **k):
+        raise store.BoardGone("Board not found")
+
+    monkeypatch.setattr(store, "insert_pin", gone)
+    with _client(monkeypatch, _site_conn()) as client:
+        res = client.post(f"/sites/{SITE_ID}/boards/{BOARD_ID}/pins/upload", data={"x": "0", "y": "0"},
+                          files={"file": ("a.jpg", _photo(), "image/jpeg")})
+    assert res.status_code == 404 and not storage.files and len(storage.deleted) == 2
+
+
+def test_a_pdf_that_takes_too_long_pins_without_a_page(monkeypatch):
+    import asyncio
+    import time as clock
+
+    monkeypatch.setattr(files, "PDF_SECONDS", 0.05)
+    monkeypatch.setattr(files, "pdf_thumbnail", lambda data: clock.sleep(0.3) or b"late")
+    assert asyncio.run(files.first_page(b"%PDF-1.4")) is None
+
+
+@pytest.mark.parametrize("width,height,expected,kept", [
+    (1200, 800, (280.0, 186.7), True),
+    (100, 20000, (limits.SIZE_MIN, limits.SIZE_MAX), False),  # 1:200 is past what the bounds allow
+    (400, 8000, (200.0, limits.SIZE_MAX), True),              # tall: capped by height, shape kept
+    (8000, 200, (960.0, limits.SIZE_MIN), True),              # wide: lifted to the minimum height, shape kept
+    (20000, 100, (limits.SIZE_MAX, limits.SIZE_MIN), False),  # 200:1 is past what the bounds allow
+])
+def test_a_new_picture_pin_keeps_its_shape(width, height, expected, kept):
+    w, h = routes._size("image", width=width, height=height)
+    assert (w, h) == expected
+    if kept:
+        assert abs(w / h - width / height) / (width / height) < 0.01
+
+
+def test_a_picture_given_one_side_takes_the_other_from_its_shape():
+    body = SimpleNamespace(x=0, y=0, w=600.0, h=None, rotation=0)
+    assert routes._placed(body, "image", width=1200, height=800) == {"x": 0, "y": 0, "w": 600.0, "h": 400.0, "rotation": 0}
+    body = SimpleNamespace(x=0, y=0, w=None, h=100.0, rotation=0)
+    assert routes._placed(body, "image", width=1200, height=800)["w"] == 150.0

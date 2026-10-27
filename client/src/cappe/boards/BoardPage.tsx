@@ -5,20 +5,17 @@ import {
 } from 'lucide-react'
 import LibraryPanel from '../magazine/library/LibraryPanel'
 import type { CappeAsset } from '../types'
-import { boardsApi, fileUrl, type Board, type Pin } from './api'
+import { boardsApi, errorText, fileUrl, type Board, type Pin } from './api'
 import BoardCanvas, { type Pending } from './BoardCanvas'
 import { cascade, fitView, layoutOf, raise, toBoard, zoomAt, type Point, type View } from './board'
 import { MAX_FILE_BYTES, NOTE_COLORS, TITLE_MAX, type NoteColor } from './limits'
-import { fromTransfer, pinnable, tooBig, typingIn, type Pasted } from './paste'
+import { clip, fromTransfer, pinnable, tooBig, typingIn, type Pasted } from './paste'
 import { NOTE_BG } from './look'
 import ToLibraryForm from './ToLibraryForm'
 
 const DRAFT = 'draft-note'
 const SAVE_AFTER_MS = 500
 
-function message(e: unknown, fallback: string) {
-  return e instanceof Error && e.message ? e.message : fallback
-}
 
 function draftNote(boardId: string, at: Point, z: number): Pin {
   const now = new Date().toISOString()
@@ -72,7 +69,7 @@ export default function BoardPage() {
         fit.current.pins = res.pins
         fitOnce()
       })
-      .catch((e) => { if (alive) setLoadError(message(e, 'This board didn’t load.')) })
+      .catch((e) => { if (alive) setLoadError(errorText(e, 'This board didn’t load.')) })
     return () => { alive = false }
   }, [siteId, boardId, fitOnce])
 
@@ -90,7 +87,7 @@ export default function BoardPage() {
     const items = pinsRef.current.filter((p) => ids.has(p.id) && p.id !== DRAFT).map(layoutOf)
     if (!items.length) return
     boardsApi.layout(siteId, boardId, items)
-      .catch((e) => setNotice(message(e, 'Where things are wasn’t saved. Move it again to retry.')))
+      .catch((e) => setNotice(errorText(e, 'Where things are wasn’t saved. Move it again to retry.')))
   }, [siteId, boardId])
 
   useEffect(() => () => flush(), [flush])
@@ -137,7 +134,7 @@ export default function BoardPage() {
     try {
       landed(await work())
     } catch (e) {
-      setNotice(message(e, `“${label}” couldn’t be pinned.`))
+      setNotice(errorText(e, `“${label}” couldn’t be pinned.`))
     } finally {
       setPending((list) => list.filter((p) => p.key !== key))
     }
@@ -162,7 +159,7 @@ export default function BoardPage() {
 
   const addNoteText = (text: string, at: Point) => {
     if (!siteId || !boardId) return
-    void withPending(text.slice(0, 40), at, () => boardsApi.addNote(siteId, boardId, at, text))
+    void withPending(clip(text, 40), at, () => boardsApi.addNote(siteId, boardId, at, text))
   }
 
   const add = (what: Pasted, at: Point) => {
@@ -188,18 +185,18 @@ export default function BoardPage() {
       setPins((list) => list.filter((p) => p.id !== DRAFT))
       setSelected(null)
       const at = { x: pin.x, y: pin.y }
-      if (words) void withPending(words.slice(0, 40), at, () => boardsApi.addNote(siteId, boardId, at, words, pin.color ?? 'yellow'))
+      if (words) void withPending(clip(words, 40), at, () => boardsApi.addNote(siteId, boardId, at, words, pin.color ?? 'yellow'))
       return
     }
     if (!words || words === pin.note) return
     patchLocal(id, { note: words })
-    boardsApi.update(siteId, boardId, id, { note: words }).catch((e) => setNotice(message(e, 'The note wasn’t saved.')))
+    boardsApi.update(siteId, boardId, id, { note: words }).catch((e) => setNotice(errorText(e, 'The note wasn’t saved.')))
   }
 
   const recolour = (pin: Pin, color: NoteColor) => {
     if (!siteId || !boardId || pin.id === DRAFT) return patchLocal(pin.id, { color })
     patchLocal(pin.id, { color })
-    boardsApi.update(siteId, boardId, pin.id, { color }).catch((e) => setNotice(message(e, 'The colour wasn’t saved.')))
+    boardsApi.update(siteId, boardId, pin.id, { color }).catch((e) => setNotice(errorText(e, 'The colour wasn’t saved.')))
   }
 
   const remove = (pin: Pin) => {
@@ -210,7 +207,7 @@ export default function BoardPage() {
     if (pin.id === DRAFT) return
     setBoard((b) => (b ? { ...b, pin_count: Math.max(0, b.pin_count - 1) } : b))
     boardsApi.removePin(siteId, boardId, pin.id).catch((e) => {
-      setNotice(message(e, 'That wasn’t removed.'))
+      setNotice(errorText(e, 'That wasn’t removed.'))
       setPins((list) => [...list, pin])
     })
   }
@@ -270,7 +267,7 @@ export default function BoardPage() {
     const t = title.trim()
     if (!board || !t || t === board.title) return
     setBoard({ ...board, title: t })
-    boardsApi.rename(siteId, boardId, t).catch((e) => setNotice(message(e, 'The name wasn’t saved.')))
+    boardsApi.rename(siteId, boardId, t).catch((e) => setNotice(errorText(e, 'The name wasn’t saved.')))
   }
 
   const zoomBy = (factor: number) => setView((v) => zoomAt(v, factor, size.w / 2, size.h / 2))

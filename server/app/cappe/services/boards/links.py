@@ -26,12 +26,15 @@ from urllib.parse import urljoin, urlsplit
 from ....core.services.safe_fetch import fetch_public
 from .. import media
 from . import files
-from .limits import LINK_DESCRIPTION_MAX, LINK_TITLE_MAX, SITE_NAME_MAX, URL_MAX
+from .limits import LINK_DESCRIPTION_MAX, LINK_TITLE_MAX, MAX_FILE_BYTES, SITE_NAME_MAX, URL_MAX
 
 logger = logging.getLogger(__name__)
 
 MAX_PAGE_BYTES = 768 * 1024
+# A page's preview picture is only a thumbnail; a link straight to a photo is
+# the photo, as big as an upload may be.
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
+MAX_DIRECT_BYTES = MAX_FILE_BYTES
 PAGE_ACCEPT = "text/html,application/xhtml+xml;q=0.9,image/*;q=0.8,*/*;q=0.5"
 IMAGE_ACCEPT = "image/webp,image/*,*/*;q=0.8"
 TIMEOUT = 12.0
@@ -56,10 +59,12 @@ class LinkPreview:
 def normalize_url(raw: str) -> str:
     """An http(s) address from what was pasted ("example.com/a" is https)."""
     text = (raw or "").strip()
-    if not text or len(text) > URL_MAX or any(c.isspace() for c in text):
+    if not text or any(c.isspace() for c in text):
         raise BadLink("Paste a web address, like https://example.com.")
     if "://" not in text:
         text = "https://" + text
+    if len(text) > URL_MAX:  # counted as stored, scheme included
+        raise BadLink("That address is too long to pin.")
     parts = urlsplit(text)
     if parts.scheme.lower() not in ("http", "https") or not parts.hostname or "." not in parts.hostname:
         raise BadLink("Paste a web address, like https://example.com.")
@@ -146,9 +151,9 @@ def _decode(body: bytes) -> str:
     return body.decode("utf-8", errors="replace")
 
 
-async def _picture(url: str) -> tuple[Optional[bytes], Optional[str]]:
+async def _picture(url: str, max_bytes: int = MAX_IMAGE_BYTES) -> tuple[Optional[bytes], Optional[str]]:
     try:
-        got = await fetch_public(url, max_bytes=MAX_IMAGE_BYTES, accept=IMAGE_ACCEPT, total_timeout=TIMEOUT)
+        got = await fetch_public(url, max_bytes=max_bytes, accept=IMAGE_ACCEPT, total_timeout=TIMEOUT)
     except Exception as exc:  # noqa: BLE001 — unsafe host, network error, timeout
         logger.info("board link picture %s: %s", host_of(url), exc)
         return None, None
@@ -168,10 +173,12 @@ async def fetch_preview(url: str) -> LinkPreview:
     if page.status >= 400:
         return plain
     if page.content_type in files.IMAGE_TYPES:
-        if page.truncated:
-            return plain
-        return LinkPreview(url=url, title=host_of(url), image_bytes=page.body, image_mime=page.content_type,
-                           direct=True)
+        body, mime = page.body, page.content_type
+        if page.truncated:  # a photo is bigger than a page: fetch it again, whole
+            body, mime = await _picture(url, MAX_DIRECT_BYTES)
+            if body is None or mime not in files.IMAGE_TYPES:
+                return plain
+        return LinkPreview(url=url, title=host_of(url), image_bytes=body, image_mime=mime, direct=True)
     if "html" not in page.content_type:
         return plain
     head = parse_head(_decode(page.body), page.final_url or url)

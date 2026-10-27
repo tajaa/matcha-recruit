@@ -68,12 +68,23 @@ def _clamp(value: float) -> float:
     return max(SIZE_MIN, min(SIZE_MAX, value))
 
 
+def _fit(ratio: float, w: float) -> tuple[float, float]:
+    """A box `w` wide in the shape `ratio` (width / height), moved inside the
+    size bounds without changing its shape. Only a picture longer than
+    SIZE_MAX:SIZE_MIN can't keep it."""
+    h = w / ratio
+    if h > SIZE_MAX:
+        h, w = SIZE_MAX, SIZE_MAX * ratio
+    if h < SIZE_MIN:
+        h, w = SIZE_MIN, SIZE_MIN * ratio
+    return round(_clamp(w), 1), round(_clamp(h), 1)
+
+
 def _size(kind: str, *, width: Optional[int] = None, height: Optional[int] = None,
           has_picture: bool = False) -> tuple[float, float]:
     """A new pin's size when the board didn't say: pictures keep their shape."""
     if kind == "image" and width and height:
-        w = 280.0
-        return w, _clamp(round(w * height / width, 1))
+        return _fit(width / height, 280.0)
     if kind == "note":
         return 220.0, 180.0
     if kind == "link":
@@ -84,8 +95,18 @@ def _size(kind: str, *, width: Optional[int] = None, height: Optional[int] = Non
 
 
 def _placed(body, kind: str, **shape) -> dict:
+    """Where a new pin goes. A picture given only one side gets the other
+    from its own shape."""
     w, h = _size(kind, **shape)
-    return {"x": body.x, "y": body.y, "w": body.w or w, "h": body.h or h, "rotation": body.rotation}
+    width, height = shape.get("width"), shape.get("height")
+    if body.w and body.h:
+        w, h = body.w, body.h
+    elif kind == "image" and width and height and (body.w or body.h):
+        ratio = width / height
+        w, h = _fit(ratio, body.w or body.h * ratio)
+    else:
+        w, h = body.w or w, body.h or h
+    return {"x": body.x, "y": body.y, "w": w, "h": h, "rotation": body.rotation}
 
 
 def _limit_error(exc: Exception) -> HTTPException:
@@ -105,15 +126,27 @@ async def _insert(site_id: UUID, board_id: UUID, fields: dict, *, cleanup: list[
     """Insert a pin; on any refusal, remove the files stored for it."""
     try:
         async with get_connection() as conn:
-            if await store.get_board(conn, site_id, board_id) is None:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Board not found")
             return await store.insert_pin(conn, site_id, board_id, fields)
+    except store.BoardGone as exc:  # deleted while the file was being stored
+        await files.remove(cleanup)
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Board not found") from exc
     except (store.BoardLimit, store.SiteFull) as exc:
         await files.remove(cleanup)
         raise _limit_error(exc) from exc
     except Exception:
         await files.remove(cleanup)
         raise
+
+
+async def _remove_public(stored: media.StoredImage) -> None:
+    """Best-effort delete of a stored library picture and all its sizes."""
+    urls = [stored.url, *(v["url"] for v in stored.variants.get("webp", [])),
+            *([stored.variants["share"]["url"]] if stored.variants.get("share") else [])]
+    storage = get_storage()
+    results = await asyncio.gather(*(storage.delete_file(u) for u in urls), return_exceptions=True)
+    for url, result in zip(urls, results):
+        if isinstance(result, Exception) or result is False:
+            logger.warning("orphan library copy not deleted: %s (%s)", url, result)
 
 
 # ── boards ──────────────────────────────────────────────────────────────────
@@ -370,18 +403,27 @@ async def pin_to_library(site_id: UUID, board_id: UUID, pin_id: UUID, body: PinT
         image = await asyncio.to_thread(media.process_image, data, row["mime"] or "image/jpeg", derivatives=True)
     except media.ImageRejected as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
-    stored = await media.store_processed(image, prefix="cappe/library", filename=row["filename"])
-    async with get_connection() as conn:
-        async with conn.transaction():
-            asset = await cappe_assets.insert_upload(
-                conn, account_id=account.id, site_id=site["id"], url=stored.url, width=stored.width,
-                height=stored.height, size_bytes=stored.bytes, mime=stored.mime, variants=stored.variants,
-                alt=_text(body.alt), caption=None, credit_line=_text(body.credit_line), ai_made=body.ai_made,
-            )
-            pin = await store.attach_asset(conn, site_id, board_id, pin_id, asset["id"], row["file_path"])
-            if pin is None:
-                raise HTTPException(status_code=status.HTTP_409_CONFLICT,
-                                    detail="That pin changed meanwhile. Open the board again and retry.")
+    try:
+        stored = await media.store_processed(image, prefix="cappe/library", filename=row["filename"])
+    except RuntimeError as exc:  # S3 refused or isn't set up
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=NO_STORAGE) from exc
+    try:
+        async with get_connection() as conn:
+            async with conn.transaction():
+                asset = await cappe_assets.insert_upload(
+                    conn, account_id=account.id, site_id=site["id"], url=stored.url, width=stored.width,
+                    height=stored.height, size_bytes=stored.bytes, mime=stored.mime, variants=stored.variants,
+                    alt=_text(body.alt), caption=None, credit_line=_text(body.credit_line), ai_made=body.ai_made,
+                )
+                pin = await store.attach_asset(conn, site_id, board_id, pin_id, asset["id"], row["file_path"])
+                if pin is None:
+                    raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                                        detail="That pin changed meanwhile. Open the board again and retry.")
+    except Exception:
+        # Nothing records the public copy just made (the insert rolled back):
+        # take it down rather than leave a reachable orphan on the CDN.
+        await _remove_public(stored)
+        raise
     background.add_task(files.remove, [row["file_path"], row["thumb_path"]])
     return JSONResponse({"pin": PinOut(**pin).model_dump(mode="json"),
                          "asset": CappeAsset(**asset).model_dump(mode="json")}, headers=_PRIVATE)

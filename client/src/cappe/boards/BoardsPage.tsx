@@ -3,12 +3,9 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { LayoutDashboard, Loader2, Plus, Trash2 } from 'lucide-react'
 import SurfaceShell from '../components/SurfaceShell'
 import { ui } from '../components/ui'
-import { boardsApi, fileUrl, type Board } from './api'
+import { boardsApi, errorText, fileUrl, type Board } from './api'
 import { MAX_BOARDS_PER_SITE, TITLE_MAX } from './limits'
 
-function message(e: unknown, fallback: string) {
-  return e instanceof Error && e.message ? e.message : fallback
-}
 
 /** `sites/:siteId/boards` — the site's mood boards, last changed first. */
 export default function BoardsPage() {
@@ -24,7 +21,7 @@ export default function BoardsPage() {
     let alive = true
     boardsApi.list(siteId)
       .then((list) => { if (alive) setBoards(list) })
-      .catch((e) => { if (alive) setError(message(e, 'Your mood boards didn’t load.')) })
+      .catch((e) => { if (alive) setError(errorText(e, 'Your mood boards didn’t load.')) })
     return () => { alive = false }
   }, [siteId])
 
@@ -39,7 +36,7 @@ export default function BoardsPage() {
       const board = await boardsApi.create(siteId, name)
       navigate(`/cappe/sites/${siteId}/boards/${board.id}`)
     } catch (e) {
-      setError(message(e, 'That board wasn’t made.'))
+      setError(errorText(e, 'That board wasn’t made.'))
       setBusy(false)
     }
   }
@@ -50,7 +47,7 @@ export default function BoardsPage() {
       await boardsApi.remove(siteId, board.id)
       setBoards((list) => (list ?? []).filter((b) => b.id !== board.id))
     } catch (e) {
-      setError(message(e, 'That board wasn’t deleted.'))
+      setError(errorText(e, 'That board wasn’t deleted.'))
     }
   }
 
