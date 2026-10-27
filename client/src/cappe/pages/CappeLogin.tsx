@@ -9,6 +9,7 @@ import { readerNext, readerPaths } from '../magazine/shelf/readerPaths'
 import { postAuthHome } from '../utils/postAuthHome'
 import ResendVerification from '../components/ResendVerification'
 import type { CappeTokenResponse } from '../types'
+import { cappeAuthPaths } from '../host'
 
 export default function CappeLogin({ creatorOnly = false, brandOnly = false, writerOnly = false, readerOnly = false }: {
   creatorOnly?: boolean; brandOnly?: boolean; writerOnly?: boolean; readerOnly?: boolean
@@ -96,7 +97,7 @@ export default function CappeLogin({ creatorOnly = false, brandOnly = false, wri
               className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
             />
             <p className="mt-1.5 text-right text-xs">
-              <Link to="/cappe/forgot-password" className="font-medium text-lime-400 hover:text-lime-300">
+              <Link to={cappeAuthPaths.forgotPassword} className="font-medium text-lime-400 hover:text-lime-300">
                 Forgot password?
               </Link>
             </p>
@@ -117,7 +118,7 @@ export default function CappeLogin({ creatorOnly = false, brandOnly = false, wri
 
         <p className="mt-4 text-center text-sm text-zinc-500">
           {creatorOnly ? 'New to Gummfit Creators?' : brandOnly ? 'New to Gummfit for Brands?' : writerOnly ? 'New to Gummfit Magazines?' : readerOnly ? 'No reader account yet?' : 'New to Gummfit?'}{' '}
-          <Link to={creatorOnly ? creatorPaths.signup : brandOnly ? creatorPaths.brandSignup : writerOnly ? writerPaths.signup : readerOnly ? (next ? `${readerPaths.signup}?next=${encodeURIComponent(next)}` : readerPaths.signup) : '/cappe/website-setup'} className="font-medium text-lime-400 hover:text-lime-300">
+          <Link to={creatorOnly ? creatorPaths.signup : brandOnly ? creatorPaths.brandSignup : writerOnly ? writerPaths.signup : readerOnly ? (next ? `${readerPaths.signup}?next=${encodeURIComponent(next)}` : readerPaths.signup) : cappeAuthPaths.signup} className="font-medium text-lime-400 hover:text-lime-300">
             {creatorOnly ? 'Create your creator profile' : brandOnly ? 'Create a brand profile' : writerOnly ? 'Start your magazine' : readerOnly ? 'Create one' : 'Create an account'}
           </Link>
         </p>

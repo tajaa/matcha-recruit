@@ -4,6 +4,7 @@ import { CheckCircle2, Loader2, XCircle } from 'lucide-react'
 import { CappeApiError, cappePublicPost, clearCappeTokens } from '../api'
 import { invalidateCappeMeCache } from '../hooks/useCappeMe'
 import { ui } from '../components/ui'
+import { cappeAuthPaths } from '../host'
 
 const SHELL = 'flex min-h-screen items-center justify-center bg-zinc-950 bg-[radial-gradient(60rem_40rem_at_50%_-10%,rgba(198,241,107,0.08),transparent)] px-4'
 const PRIMARY = 'inline-block rounded-lg bg-lime-400 px-4 py-2 text-sm font-semibold text-zinc-950 hover:bg-lime-300'
@@ -58,7 +59,7 @@ export default function CappeResetPassword() {
           <p className="mt-2 text-sm leading-relaxed text-zinc-400">
             You've been signed out everywhere. Sign in with your new password.
           </p>
-          <Link to="/cappe/login" className={`mt-6 ${PRIMARY}`}>Sign in</Link>
+          <Link to={cappeAuthPaths.login} className={`mt-6 ${PRIMARY}`}>Sign in</Link>
         </div>
       </div>
     )
@@ -71,7 +72,7 @@ export default function CappeResetPassword() {
           <XCircle className="mx-auto h-10 w-10 text-amber-400" />
           <h1 className="mt-4 text-2xl font-semibold tracking-tight text-zinc-50">This link won't work</h1>
           <p className="mt-2 text-sm leading-relaxed text-zinc-400">{deadMessage}</p>
-          <Link to="/cappe/forgot-password" className={`mt-6 ${PRIMARY}`}>Get a new link</Link>
+          <Link to={cappeAuthPaths.forgotPassword} className={`mt-6 ${PRIMARY}`}>Get a new link</Link>
         </div>
       </div>
     )

@@ -6,6 +6,7 @@ import { getCappeToken } from '../api'
 import CappeSidebar from '../components/CappeSidebar'
 import { creatorPaths } from '../creators/creatorPaths'
 import { readerPaths } from '../magazine/shelf/readerPaths'
+import { cappeAuthPaths } from '../host'
 
 // Authenticated Cappe shell. Independent of TenantSidebar — Cappe is its own
 // product. Redirects to /cappe/login when there is no live Cappe session.
@@ -15,7 +16,7 @@ export default function CappeLayout() {
   const location = useLocation()
   const isCreatorDashboard = location.pathname.includes('/creators/dashboard') || location.pathname.includes('/creator')
   const isBrandCreatorDashboard = location.pathname.includes('/creators/brands/dashboard')
-  const loginPath = isBrandCreatorDashboard ? creatorPaths.brandLogin : isCreatorDashboard ? creatorPaths.login : '/cappe/login'
+  const loginPath = isBrandCreatorDashboard ? creatorPaths.brandLogin : isCreatorDashboard ? creatorPaths.login : cappeAuthPaths.login
 
   // Phone-width navigation drawer. Stored as the path it was opened on, so
   // following any link closes it without an effect having to reset state.

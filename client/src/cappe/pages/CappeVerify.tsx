@@ -7,6 +7,7 @@ import ResendVerification from '../components/ResendVerification'
 import { billingStartPath } from './CappeBilling/paths'
 import type { CappeVerifyResponse } from '../types'
 import { postAuthHome } from '../utils/postAuthHome'
+import { cappeAuthPaths } from '../host'
 
 // Landing for the emailed confirmation link (/cappe/verify?token=…). Exchanges
 // the token for a session and drops the user straight into their dashboard.
@@ -81,7 +82,7 @@ export default function CappeVerify() {
             <div className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900 p-4">
               <ResendVerification label="Send a new link" />
             </div>
-            <Link to="/cappe/login" className="mt-6 inline-block text-sm font-medium text-lime-400 hover:text-lime-300">
+            <Link to={cappeAuthPaths.login} className="mt-6 inline-block text-sm font-medium text-lime-400 hover:text-lime-300">
               Back to sign in
             </Link>
           </>
@@ -94,7 +95,7 @@ export default function CappeVerify() {
               {message} If you already confirmed your email, just sign in.
             </p>
             <Link
-              to="/cappe/login"
+              to={cappeAuthPaths.login}
               className="mt-6 inline-block rounded-lg bg-lime-400 px-4 py-2 text-sm font-semibold text-zinc-950 hover:bg-lime-300"
             >
               Go to sign in

@@ -10,6 +10,7 @@ import { postAuthHome } from '../utils/postAuthHome'
 import ResendVerification from '../components/ResendVerification'
 import { billingStartPath } from './CappeBilling/paths'
 import type { CappeAccountType, CappeSignupGrantInfo, CappeSignupResponse } from '../types'
+import { cappeAuthPaths } from '../host'
 
 const ACCOUNT_TYPES: {
   value: CappeAccountType
@@ -170,7 +171,7 @@ export default function CappeSignup({ creatorOnly = false, brandOnly = false, wr
               Wrong address? Go back and fix it
             </button>
           </div>
-          <Link to={creatorOnly ? creatorPaths.login : brandOnly ? creatorPaths.brandLogin : writer ? writerPaths.login : readerOnly ? readerPaths.login : '/cappe/login'} className="mt-6 inline-block text-sm font-medium text-lime-400 hover:text-lime-300">
+          <Link to={creatorOnly ? creatorPaths.login : brandOnly ? creatorPaths.brandLogin : writer ? writerPaths.login : readerOnly ? readerPaths.login : cappeAuthPaths.login} className="mt-6 inline-block text-sm font-medium text-lime-400 hover:text-lime-300">
             Back to sign in
           </Link>
         </div>
@@ -298,7 +299,7 @@ export default function CappeSignup({ creatorOnly = false, brandOnly = false, wr
 
         <p className="mt-4 text-center text-sm text-zinc-500">
           Already have an account?{' '}
-          <Link to={creatorOnly ? creatorPaths.login : brandOnly ? creatorPaths.brandLogin : readerOnly ? signInPath : '/cappe/login'} className="font-medium text-emerald-400 hover:text-emerald-300">
+          <Link to={creatorOnly ? creatorPaths.login : brandOnly ? creatorPaths.brandLogin : readerOnly ? signInPath : cappeAuthPaths.login} className="font-medium text-emerald-400 hover:text-emerald-300">
             Sign in
           </Link>
         </p>

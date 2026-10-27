@@ -10,6 +10,7 @@ import Hero from './landing/Hero'
 import Pricing from './landing/Pricing'
 import StackComparison from './landing/StackComparison'
 import { EYEBROW, LIME_BUTTON, SIGNUP_PATH, WRAP, usePublicPricing, useReveal } from './landing/shared'
+import { cappePath } from '../host'
 
 // Every module named here ships in-house — see routes.tsx. That list IS the pitch.
 const IN_HOUSE = ['Websites', 'Online stores', 'Bookings', 'Newsletters', 'Domains & email']
@@ -43,17 +44,17 @@ function Header() {
   return (
     <header className={`sticky top-0 z-30 border-b transition-colors ${solid ? 'border-white/10 bg-[#141c14]/95 backdrop-blur-xl' : 'border-transparent'}`}>
       <div className={`flex items-center justify-between py-4 ${WRAP}`}>
-        <Link to="/gummfit" className="flex items-center gap-2.5" aria-label="Gummfit home">
+        <Link to={cappePath('/gummfit')} className="flex items-center gap-2.5" aria-label="Gummfit home">
           <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[#d4ff72] text-sm font-black tracking-tighter text-[#182115] shadow-[0_0_25px_rgba(212,255,114,0.25)]">G</span>
           <span className="text-lg font-semibold tracking-[-0.04em]">Gummfit</span>
         </Link>
         <nav className="hidden items-center gap-6 text-sm md:flex" aria-label="Main">
           {NAV.map((item) => <a key={item.href} href={item.href} className="font-medium text-[#c5c8bc] transition hover:text-white">{item.label}</a>)}
-          <Link to="/gummfit/discover" className="font-medium text-[#c5c8bc] transition hover:text-white">Discover</Link>
-          <Link to="/gummfit/creators" className="font-medium text-[#c5c8bc] transition hover:text-white">Creators</Link>
+          <Link to={cappePath('/gummfit/discover')} className="font-medium text-[#c5c8bc] transition hover:text-white">Discover</Link>
+          <Link to={cappePath('/gummfit/creators')} className="font-medium text-[#c5c8bc] transition hover:text-white">Creators</Link>
         </nav>
         <div className="flex items-center gap-3 text-sm">
-          <Link to="/gummfit/login" className="hidden font-medium text-[#deded4] transition hover:text-white sm:block">Sign in</Link>
+          <Link to={cappePath('/gummfit/login')} className="hidden font-medium text-[#deded4] transition hover:text-white sm:block">Sign in</Link>
           <Link to={SIGNUP_PATH} className="rounded-full bg-[#d4ff72] px-4 py-2 font-semibold text-[#182115] transition hover:-translate-y-0.5 hover:bg-[#e2ff9a] sm:px-5">Get started</Link>
           <button
             type="button"
@@ -69,9 +70,9 @@ function Header() {
       {open && (
         <nav className={`flex flex-col gap-1 pb-5 text-base md:hidden ${WRAP}`} aria-label="Mobile">
           {NAV.map((item) => <a key={item.href} href={item.href} onClick={() => setOpen(false)} className={MOBILE_LINK}>{item.label}</a>)}
-          <Link to="/gummfit/discover" className={MOBILE_LINK}>Discover</Link>
-          <Link to="/gummfit/creators" className={MOBILE_LINK}>Creators</Link>
-          <Link to="/gummfit/login" className={MOBILE_LINK}>Sign in</Link>
+          <Link to={cappePath('/gummfit/discover')} className={MOBILE_LINK}>Discover</Link>
+          <Link to={cappePath('/gummfit/creators')} className={MOBILE_LINK}>Creators</Link>
+          <Link to={cappePath('/gummfit/login')} className={MOBILE_LINK}>Sign in</Link>
         </nav>
       )}
     </header>
@@ -128,7 +129,7 @@ function DiscoverStrip() {
   return (
     <section className="border-y border-white/10 bg-[#1a201a] py-20 sm:py-24">
       <div className={WRAP}>
-        <div className="flex flex-wrap items-end justify-between gap-5"><div><p className={`${EYEBROW} text-[#d4ff72]`}>Built with Gummfit</p><h2 className="mt-3 text-3xl font-semibold tracking-[-0.05em] text-[#f5f3eb] sm:text-4xl">Small businesses, open for business.</h2></div><Link to="/gummfit/discover" className="inline-flex items-center gap-1.5 text-sm font-semibold text-[#deded4] hover:text-[#d4ff72]">Discover more <ArrowRight className="h-4 w-4" /></Link></div>
+        <div className="flex flex-wrap items-end justify-between gap-5"><div><p className={`${EYEBROW} text-[#d4ff72]`}>Built with Gummfit</p><h2 className="mt-3 text-3xl font-semibold tracking-[-0.05em] text-[#f5f3eb] sm:text-4xl">Small businesses, open for business.</h2></div><Link to={cappePath('/gummfit/discover')} className="inline-flex items-center gap-1.5 text-sm font-semibold text-[#deded4] hover:text-[#d4ff72]">Discover more <ArrowRight className="h-4 w-4" /></Link></div>
         <div className="mt-10 grid gap-5 md:grid-cols-3">{entries.map((entry) => <DirectoryCard key={entry.slug} entry={entry} />)}</div>
       </div>
     </section>
@@ -166,9 +167,9 @@ export default function CappeLanding() {
           <span>© {new Date().getFullYear()} Gummfit</span>
           <div className="flex flex-wrap gap-5">
             <a href="#pricing" className="hover:text-white">Pricing</a>
-            <Link to="/gummfit/discover" className="hover:text-white">Discover</Link>
-            <Link to="/gummfit/creators" className="hover:text-white">Gummfit Creators</Link>
-            <Link to="/gummfit/login" className="hover:text-white">Sign in</Link>
+            <Link to={cappePath('/gummfit/discover')} className="hover:text-white">Discover</Link>
+            <Link to={cappePath('/gummfit/creators')} className="hover:text-white">Gummfit Creators</Link>
+            <Link to={cappePath('/gummfit/login')} className="hover:text-white">Sign in</Link>
             <span className="uppercase tracking-[0.16em]">A Matcha product</span>
           </div>
         </div>

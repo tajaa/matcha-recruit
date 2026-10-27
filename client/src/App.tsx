@@ -130,6 +130,7 @@ const NotFound = lazy(() => import("./pages/shared/NotFound"));
 // On the dedicated Cappe domain the Cappe route tree also mounts at "/" so
 // the bare apex shows the Gummfit landing instead of the Matcha landing.
 import { isCappeHost } from "./cappe/host";
+import GummfitPrefixRedirect from "./cappe/hostRedirect";
 
 // The landing opens on a dark hero; a white spinner page before it reads as a flash.
 const LANDING_PATHS = ["/", "/incidents"];
@@ -283,7 +284,9 @@ export default function App() {
         {/* Gummfit's public creator funnel has its own human-readable URL
             space, while sharing the Cappe implementation and auth stack. */}
         <Route path="/gummfit/admin/*" element={<GummfitAdminRoutes />} />
-        <Route path="/gummfit/*" element={<CappeRoutes />} />
+        {/* On gummfit.com the tree lives at "/", so an old /gummfit/... link
+            redirects to its root URL (gummfit.com/login, not /gummfit/login). */}
+        <Route path="/gummfit/*" element={isCappeHost ? <GummfitPrefixRedirect /> : <CappeRoutes />} />
         {/* Dedicated Cappe domain: bare apex serves the Cappe tree at root.
             /cappe/* links inside the pages still resolve via the mount above,
             so both URL spaces work on this host. */}

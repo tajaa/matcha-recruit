@@ -1,11 +1,11 @@
-import { CAPPE_HOST } from '../../host'
+import { CAPPE_HOST, cappePath } from '../../host'
 
 /** Gummfit reader accounts: people who subscribe to magazines and sell
  *  nothing. Their dashboard lists every magazine they hold
  *  (server/app/cappe/routes/reader.py). */
 export const readerPaths = {
-  signup: '/cappe/reader/signup',
-  login: '/cappe/reader/login',
+  signup: cappePath('/cappe/reader/signup'),
+  login: cappePath('/cappe/reader/login'),
   home: '/cappe/reader',
   feed: '/cappe/reader/feed',
 } as const
