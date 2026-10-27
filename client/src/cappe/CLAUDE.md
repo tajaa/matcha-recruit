@@ -205,6 +205,19 @@ Placement rules and boundary rules between the three client apps live in `client
 
 ## Quick-start storefronts
 
+Writer setup at `/cappe/writer/new` uses `magazine/onboarding/MagazineDesigns.tsx`: the four
+Studio collections, real font loading/composition and the shared `PagePreview` renderer. Writers
+name the magazine, browse all ten pages and open a private Studio draft directly. `starter.ts`
+fits their name into the cover without changing the source collection. Photos remain a transient
+preview projection; the submitted document has empty frames. Tagline, topics and website masthead
+are optional. `/magazine/quick-start` creates the site and draft together; one request UUID survives
+retries in the mounted form, and a submission guard prevents duplicate clicks. An uncertain network/5xx
+result freezes that request's details and offers Retry opening my draft, independently of a late taken
+handle check. An initial definite 4xx rejection restores editing; later retry errors preserve the pending
+request because they cannot rule out an earlier commit. The server retains schema-validated composition
+in the first draft, so publishing without a Studio edit keeps the designed geometry. Saved library
+collections still recompose when placed. Publishing keeps the existing plan/readiness gates.
+
 `CappeOnboardingWizard` offers online-only sellers three product-first designs (the registry's
 `online-store` tag). A first product is optional; store and product remain drafts. `StoreReady` uses
 an owner-only, sandboxed rendered preview, including draft products or clearly labelled examples.

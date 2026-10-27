@@ -43,6 +43,28 @@ def test_portable_layout_retains_words_guides_and_geometry_without_photo_or_acce
     assert doc["items"][-1]["asset_id"] and doc["paywall_page"] == 2  # no mutation
 
 
+@pytest.mark.parametrize("identity", [False, True])
+def test_initial_story_can_keep_validated_composition_without_changing_saved_collections(identity):
+    doc = starter_doc()
+    doc["threads"][0]["paras"] = [{"runs": [{"t": "Hello 🌊"}]}]
+    doc["threads"][0]["comp"] = {"lines": [[0, 0, 0, 8, 54, 80, 120, 0]], "untrusted_extra": "discard"}
+    if identity:
+        doc["identity"] = {"v": 1, "name": "Harbour"}
+    copied = C.collection_doc(doc)
+    initial = C.collection_doc(doc, keep_composition=True)
+    assert "comp" not in copied["threads"][0]
+    assert initial["threads"][0]["comp"] == {"lines": [[0, 0, 0, 8, 54, 80, 120, 0]]}
+    assert "identity" not in initial
+    assert doc["threads"][0]["comp"]["untrusted_extra"] == "discard"
+
+
+def test_initial_composition_still_goes_through_the_document_validator():
+    doc = starter_doc()
+    doc["threads"][0]["paras"] = [{"runs": [{"t": "Hello 🌊"}]}]
+    doc["threads"][0]["comp"] = {"lines": [[0, 0, 0, 99, 54, 80, 120, 0]]}
+    assert "comp" not in C.collection_doc(doc, keep_composition=True)["threads"][0]
+
+
 @pytest.mark.parametrize("pages", [1, C.MAX_COLLECTION_PAGES])
 def test_page_boundaries(pages):
     doc = starter_doc()

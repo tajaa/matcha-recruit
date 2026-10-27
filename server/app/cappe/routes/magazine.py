@@ -19,7 +19,7 @@ month they paid for. A new price is for new subscribers; readers keep theirs.
 import json
 from datetime import datetime, timezone
 from typing import Any, Optional
-from uuid import UUID
+from uuid import UUID, uuid4, uuid5
 
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -34,6 +34,8 @@ from ..models.cappe import (
     CappeHandleCheck,
     CappeMagazine,
     CappeMagazineSiteCreate,
+    CappeMagazineStart,
+    CappeMagazineStartResult,
     CappeMagazineUpdate,
     CappeSite,
 )
@@ -43,7 +45,9 @@ from ..services.magazine import writers
 from ..services.magazine.billing import fee_bps
 from ..services.magazine.follows import follower_count
 from ..services.magazine.magazines import MASTHEADS, get_magazine, preview_blocks, save_magazine
-from ..services.magazine.stories import POST_COLS, post_row
+from ..services.magazine.stories import POST_COLS, post_row, reading_stats, story_text
+from ..services.magazine.studio.collections import collection_doc
+from ..services.magazine.studio.schema import DocError
 from ..services.magazine.topics import TOPICS, normalize_topic
 from ._shared import get_owned_site, site_row_to_dict
 from .render import _front_html, _nav, _site_dict, invalidate_render_cache, tenant_security_headers
@@ -215,11 +219,7 @@ async def handle_available(handle: str = Query(..., max_length=60),
     return {"handle": wanted, "available": problem is None, "reason": problem}
 
 
-@router.post("/magazine/sites", response_model=CappeSite, status_code=status.HTTP_201_CREATED)
-async def create_magazine_site(body: CappeMagazineSiteCreate, account: CappeAccount = Depends(require_cappe_account)):
-    """A writer's magazine: a site at `<handle>.gummfit.com` whose front page
-    is the magazine, with a draft About page. Business accounts turn on a
-    magazine from their own site instead."""
+def _magazine_setup(body: CappeMagazineSiteCreate, account: CappeAccount):
     if account.account_type != "writer":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
                             detail="Magazine sites are for writer accounts. Turn on a magazine from your site.")
@@ -230,8 +230,34 @@ async def create_magazine_site(body: CappeMagazineSiteCreate, account: CappeAcco
     topics = [normalize_topic(t) for t in body.topics]
     if any(t is None for t in topics):
         raise HTTPException(status_code=422, detail="Pick the magazine's topics from the list.")
+    return handle, list(dict.fromkeys(topics))
+
+
+async def _insert_magazine(conn, body: CappeMagazineSiteCreate, account: CappeAccount, handle, topics, site_id):
     heading, text = MASTHEADS[body.masthead_style]
     name = body.name.strip()
+    row = await conn.fetchrow(
+        f"""INSERT INTO cappe_sites (account_id, name, slug, subdomain, source_type, theme_config, id)
+            VALUES ($1, $2, $3, $3, 'magazine', $4::jsonb, $5)
+            RETURNING {_SITE_COLS}""",
+        account.id, name, handle, json.dumps({"fonts": {"heading": heading, "body": text}}), site_id,
+    )
+    await save_magazine(conn, row["id"], {
+        "enabled": True, "name": name, "tagline": (body.tagline or "").strip() or None,
+        "masthead_style": body.masthead_style, "accent": body.accent,
+        "topics": topics, "front_at_root": True,
+    }, default_name=name)
+    await conn.execute(
+        """INSERT INTO cappe_pages (site_id, title, slug, content, sort_order, status)
+           VALUES ($1, 'About', 'about', '{}', 1, 'draft')""", row["id"],
+    )
+    return row
+
+
+@router.post("/magazine/sites", response_model=CappeSite, status_code=status.HTTP_201_CREATED)
+async def create_magazine_site(body: CappeMagazineSiteCreate, account: CappeAccount = Depends(require_cappe_account)):
+    """A writer's magazine at exactly their handle, with a draft About page."""
+    handle, topics = _magazine_setup(body, account)
     async with get_connection() as conn:
         try:
             async with conn.transaction():
@@ -239,22 +265,55 @@ async def create_magazine_site(body: CappeMagazineSiteCreate, account: CappeAcco
                 await _enforce_site_limit(conn, account)
                 if await writers.handle_taken(conn, handle):
                     raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=writers.TAKEN)
-                row = await conn.fetchrow(
-                    f"""INSERT INTO cappe_sites (account_id, name, slug, subdomain, source_type, theme_config)
-                        VALUES ($1, $2, $3, $3, 'magazine', $4::jsonb)
-                        RETURNING {_SITE_COLS}""",
-                    account.id, name, handle, json.dumps({"fonts": {"heading": heading, "body": text}}),
-                )
-                await save_magazine(conn, row["id"], {
-                    "enabled": True, "name": name, "tagline": (body.tagline or "").strip() or None,
-                    "masthead_style": body.masthead_style, "accent": body.accent,
-                    "topics": list(dict.fromkeys(topics)), "front_at_root": True,
-                }, default_name=name)
-                await conn.execute(
-                    """INSERT INTO cappe_pages (site_id, title, slug, content, sort_order, status)
-                       VALUES ($1, 'About', 'about', '{}', 1, 'draft')""",
-                    row["id"],
-                )
+                row = await _insert_magazine(conn, body, account, handle, topics, uuid4())
         except asyncpg.UniqueViolationError as exc:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=writers.TAKEN) from exc
     return site_row_to_dict(row, page_count=1)
+
+
+@router.post("/magazine/quick-start", response_model=CappeMagazineStartResult, status_code=201)
+async def quick_start_magazine(body: CappeMagazineStart, account: CappeAccount = Depends(require_cappe_account)):
+    """One transaction, no publication or plan purchase. Identifiers are derived
+    from the account and request, so a lost response can be retried without a
+    new table or consuming a second site slot. A replay never overwrites edits."""
+    handle, topics = _magazine_setup(body, account)
+    try:
+        # The portable schema bounds the document and clears photo references,
+        # paid pages and site fonts. This is already a composed story, so keep
+        # validated lines for first publication, including outside Studio.
+        doc = collection_doc(body.doc, keep_composition=True)
+    except DocError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    site_id = uuid5(account.id, f"writer-start:{body.request_id}")
+    post_id = uuid5(site_id, "first-draft")
+    content = {"doc": doc}
+    text = story_text(content)
+    words, minutes = reading_stats(text)
+    async with get_connection() as conn:
+        try:
+            async with conn.transaction():
+                await _lock_account_for_site_creation(conn, account.id)
+                row = await conn.fetchrow(
+                    f"SELECT {_SITE_COLS} FROM cappe_sites WHERE id = $1 AND account_id = $2",
+                    site_id, account.id,
+                )
+                if row is not None:
+                    saved_post = await conn.fetchval(
+                        "SELECT id FROM cappe_posts WHERE id = $1 AND site_id = $2", post_id, site_id,
+                    )
+                    if saved_post is None:
+                        raise HTTPException(status_code=409, detail="Your magazine already exists. Open it from Stories.")
+                else:
+                    await _enforce_site_limit(conn, account)
+                    if await writers.handle_taken(conn, handle):
+                        raise HTTPException(status_code=409, detail=writers.TAKEN)
+                    row = await _insert_magazine(conn, body, account, handle, topics, site_id)
+                    await conn.execute(
+                        """INSERT INTO cappe_posts
+                           (id, site_id, title, slug, status, format, content, body, word_count, reading_minutes, access)
+                           VALUES ($1, $2, $3, 'first-edition', 'draft', 'pages', $4::jsonb, $5, $6, $7, 'free')""",
+                        post_id, site_id, f"{body.name} — First edition", json.dumps(content), text, words, minutes,
+                    )
+        except asyncpg.UniqueViolationError as exc:
+            raise HTTPException(status_code=409, detail=writers.TAKEN) from exc
+    return {"site": site_row_to_dict(row, page_count=1), "post_id": post_id}

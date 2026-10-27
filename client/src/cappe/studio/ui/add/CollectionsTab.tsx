@@ -1,10 +1,8 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ArrowLeft, BookOpen, Loader2, Plus, Save, Trash2 } from 'lucide-react'
 import { collectionsApi } from '../../collectionsApi'
 import { COLLECTION_LIMITS } from '../../model/collections'
 import type { Doc } from '../../model/types'
-import { frameThreads, pageItemsHtml } from '../../render/layoutRender'
-import { setHtml } from '../../render/sink'
 import { useStudio } from '../../store/store'
 import { useCtx } from '../context'
 import { applyCollection } from './applyCollection'
@@ -12,7 +10,7 @@ import { blankPage } from './applyTemplate'
 import { COLLECTIONS } from './collections'
 import { collectionPreview } from './collectionPreview'
 import { collectionLibrary, useCollectionLibrary } from './collectionLibrary'
-import { samplePreview } from './samplePreview'
+import { PagePreview } from './PagePreview'
 
 const button = 'rounded-md border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-200 hover:border-zinc-500 hover:bg-zinc-800 disabled:opacity-50'
 const problem = (err: unknown) => err instanceof Error && err.message ? err.message : 'The collection couldn’t be opened. Try again.'
@@ -29,17 +27,7 @@ export function CollectionPreview({ doc, page = 0, width = 112, sample }: { doc:
     return () => { alive = false }
   }, [doc, c])
   const shown = prepared?.source === doc ? prepared.doc : doc
-  const html = useMemo(() => {
-    const preview = samplePreview(shown, sample)
-    return pageItemsHtml(preview.doc, page, {
-      assets: preview.assets, faces: c.fonts.book.face, used: new Map(), threads: frameThreads(preview.doc),
-    })
-  }, [shown, page, c.fonts.book, sample])
-  const box = useRef<HTMLDivElement>(null)
-  useLayoutEffect(() => { if (box.current) setHtml(box.current, html) }, [html])
-  return <div ref={box} aria-hidden className="relative shrink-0 overflow-hidden shadow-md" style={{
-    width, height: width * doc.size.h / doc.size.w, background: doc.paper, ['--u' as string]: `${width / doc.size.w}px`,
-  }} />
+  return <PagePreview doc={shown} faces={c.fonts.book} page={page} width={width} sample={sample} />
 }
 
 type Opened = { id: string; name: string; description: string; fonts?: string; pages?: string[]; doc: Doc; saved?: boolean }
