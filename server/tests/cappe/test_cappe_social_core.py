@@ -355,6 +355,42 @@ async def test_connection_reads_and_writes():
     assert conn.calls[-1][2][2] is None
 
 
+@pytest.mark.asyncio
+async def test_a_webhook_reaches_only_live_connections_with_their_inbox_on():
+    conn = QueryConn(fetch={"WHERE platform = $1 AND external_id": [conn_row()]})
+    await conn_store.by_external_id(conn, "instagram", "ig1")
+    sql = conn.sql_for("fetch")[0]
+    # `connected_at`: the table has no created_at (ordering by it failed every webhook).
+    assert "status = 'connected' AND inbox_enabled" in sql and "ORDER BY connected_at, id" in sql
+
+
+@pytest.mark.asyncio
+async def test_inbox_starts_off_when_connect_brings_several_pages():
+    one_page = [ConnectionDraft("facebook", "p1", "t"), ConnectionDraft("instagram", "ig1", "t")]
+    assert conn_store.inbox_default(one_page) is True
+    conn = QueryConn(fetchrow={"INSERT INTO cappe_social_connections": conn_row()})
+    await conn_store.save_drafts(conn, site_id=SITE, account_id=ACCOUNT, drafts=one_page)
+    assert conn.args_for("INSERT INTO cappe_social_connections")[11] is True
+
+    several = [*one_page, ConnectionDraft("facebook", "p2", "t")]
+    assert conn_store.inbox_default(several) is False
+    conn = QueryConn(fetchrow={"INSERT INTO cappe_social_connections": conn_row()})
+    await conn_store.save_drafts(conn, site_id=SITE, account_id=ACCOUNT, drafts=several)
+    inserts = [args for _, sql, args in conn.calls if "INSERT INTO cappe_social_connections" in sql]
+    assert len(inserts) == 3 and all(args[11] is False for args in inserts)
+    # A reconnect keeps the owner's choice.
+    assert "inbox_enabled = EXCLUDED" not in conn.sql_for("fetchrow")[0]
+
+
+@pytest.mark.asyncio
+async def test_set_inbox_enabled_is_scoped_to_the_site():
+    conn = QueryConn(fetchrow={"SET inbox_enabled": Queue([{**conn_row(), "inbox_enabled": False}, None])})
+    assert (await conn_store.set_inbox_enabled(conn, SITE, CONN, False))["inbox_enabled"] is False
+    assert conn.args_for("SET inbox_enabled") == (CONN, SITE, False)
+    assert "WHERE id = $1 AND site_id = $2" in conn.sql_for("fetchrow")[0]
+    assert await conn_store.set_inbox_enabled(conn, SITE, CONN, True) is None
+
+
 # ── inbox ───────────────────────────────────────────────────────────────────
 
 def item(**over):
@@ -430,6 +466,62 @@ async def test_inbox_lists_with_replies_and_records_outcomes():
     assert await inbox_store.replies_for(conn, []) == {}
 
 
+def _event(**over):
+    base = dict(platform="instagram", recipient_external_id="ig1", kind="comment", external_id="c1",
+                text="Thanks so much! 💚", author_external_id="igsid-of-the-account", author_name="pocoffee")
+    return InboundEvent(**{**base, **over})
+
+
+def test_an_instagram_comment_under_the_accounts_own_username_is_ours():
+    connections = [{"platform": "instagram", "handle": "PoCoffee"}, {"platform": "facebook", "handle": None}]
+    assert inbox_store.by_own_account(_event(author_name="@pocoffee "), connections) is True
+    assert inbox_store.by_own_account(_event(author_name="maya"), connections) is False
+    assert inbox_store.by_own_account(_event(author_name=None), connections) is False
+    # A DM's echo is Meta's to flag; a Facebook name isn't a handle.
+    assert inbox_store.by_own_account(_event(kind="message"), connections) is False
+    assert inbox_store.by_own_account(_event(platform="facebook", author_name="pocoffee"),
+                                      [{"platform": "facebook", "handle": "pocoffee"}]) is False
+
+
+@pytest.mark.asyncio
+async def test_our_own_replies_never_come_back_into_the_inbox():
+    conn = QueryConn(fetch={"FROM cappe_social_replies WHERE external_reply_id": [{"external_reply_id": "r9"}]})
+    connections = [{"platform": "instagram", "handle": "pocoffee"}]
+    ours_by_id = _event(external_id="r9", author_name="someone-else")
+    ours_by_name = _event(external_id="r10")
+    theirs = _event(external_id="c3", author_name="maya", text="Do you ship?")
+    kept = await inbox_store.without_own(conn, connections, [ours_by_id, ours_by_name, theirs])
+    assert kept == [theirs]
+    assert conn.args_for("FROM cappe_social_replies") == (["r9", "r10", "c3"],)
+    assert await inbox_store.without_own(QueryConn(), connections, []) == []
+
+
+@pytest.mark.asyncio
+async def test_attempts_and_model_calls_are_counted_on_the_item():
+    conn = QueryConn(fetchval={"(classification->>'drafted_at')::timestamptz": Queue([7, None])})
+    await inbox_store.note_attempt(conn, CONN, "no_model")
+    sql, args = conn.calls[-1][1], conn.calls[-1][2]
+    assert "'attempts', COALESCE((classification->>'attempts')::int, 0) + 1" in sql and args == (CONN, "no_model")
+    await inbox_store.note_model_call(conn, CONN)
+    assert "'drafted_at', NOW()" in conn.calls[-1][1]
+    assert await inbox_store.model_calls_last_hour(conn, SITE) == 7
+    assert await inbox_store.model_calls_last_hour(conn, SITE) == 0
+
+
+@pytest.mark.asyncio
+async def test_the_sweep_takes_only_what_the_inbound_worker_would_answer():
+    conn = QueryConn(fetch={"WHERE i.status = 'new'": [item()]})
+    rows = await inbox_store.unhandled(conn, limit=50, within_hours=12, max_attempts=3)
+    assert rows[0]["classification"] == {}
+    sql = conn.sql_for("fetch")[0]
+    assert conn.args_for("WHERE i.status = 'new'") == (50, 12, 3)
+    assert "s.autoreply_mode <> 'off'" in sql and "c.status = 'connected' AND c.inbox_enabled" in sql
+    # Never a second site's copy of a comment: not while an earlier live
+    # connection has it, nor once any copy was answered.
+    assert "(o.connected_at, o.id) < (c.connected_at, c.id)" in sql
+    assert "r.status IN ('sending', 'sent')" in sql
+
+
 # ── the Claude gate ─────────────────────────────────────────────────────────
 
 class Bucket:
@@ -473,6 +565,46 @@ async def test_model_for_is_none_without_a_key_or_with_a_full_bucket(monkeypatch
     flaky = Bucket(check=RuntimeError("db down"), record=RuntimeError("db down"))
     monkeypatch.setattr(rate_limiter, "get_rate_limiter", lambda provider="gemini": flaky)
     assert await ai.model_for("captions") == "claude-haiku-5-5"
+
+
+@pytest.mark.asyncio
+async def test_automatic_replies_stop_at_their_share_of_the_shared_bucket(monkeypatch):
+    from app.core.services import anthropic_messages, rate_limiter
+
+    monkeypatch.setattr(anthropic_messages, "claude_default", AsyncMock(return_value="claude-haiku-5-5"))
+    bucket = Bucket()
+    bucket.hourly_limit = 200
+    monkeypatch.setattr(rate_limiter, "get_rate_limiter", lambda provider="gemini": bucket)
+    used = AsyncMock(return_value=99)
+    monkeypatch.setattr(ai, "automatic_calls_last_hour", used)
+    assert await ai.model_for("reply", automatic=True) == "claude-haiku-5-5"
+    assert bucket.calls == [("check", "cappe_social", ai.AUTOMATIC_ENDPOINT),
+                            ("record", "cappe_social", ai.AUTOMATIC_ENDPOINT)]
+    used.return_value = 100  # half of 200
+    bucket.calls.clear()
+    assert await ai.model_for("reply", automatic=True) is None
+    assert ("record", "cappe_social", ai.AUTOMATIC_ENDPOINT) not in bucket.calls
+    # What the owner asks for isn't held to the share.
+    assert await ai.model_for("reply") == "claude-haiku-5-5"
+
+
+@pytest.mark.asyncio
+async def test_automatic_calls_are_counted_from_the_rate_limit_rows(monkeypatch):
+    from app import database
+
+    conn = QueryConn(fetchval={"FROM api_rate_limits": 12})
+
+    class Direct:
+        async def __aenter__(self):
+            return conn
+
+        async def __aexit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(database, "connection_or_direct", lambda: Direct())
+    assert await ai.automatic_calls_last_hour() == 12
+    assert conn.args_for("FROM api_rate_limits") == ("cappe_social", ai.AUTOMATIC_ENDPOINT)
+    assert "provider = 'anthropic'" in conn.sql_for("fetchval")[0]
 
 
 # ── captions ────────────────────────────────────────────────────────────────
@@ -606,7 +738,7 @@ def test_draft_parse_clamps_and_defaults():
 
 
 def draft(**over):
-    base = dict(intent="product_question", sentiment="neutral", reply="Yes, oat milk is $0.50 extra.",
+    base = dict(intent="product_question", sentiment="neutral", reply="Yes, we have oat milk.",
                 confidence=0.9, needs_human=False, facts_used=["Product: Oat Latte"], model="claude-haiku-5-5")
     return autoreply.Draft(**{**base, **over})
 
@@ -657,15 +789,65 @@ def test_reply_guard_without_a_store_url_holds_every_link():
     assert autoreply.reply_guard("Thanks!", autoreply.Grounding("Po", None)) is None
 
 
+PRICED = autoreply.Grounding(
+    site_name="Po", store_url="https://po.example.test",
+    products=[{"name": "Oat Latte", "price_cents": 550, "currency": "USD"},
+              {"name": "Beans", "price_cents": 180000, "currency": "USD"}],
+    notes="Students get 10% off. Free shipping over $40.",
+)
+
+
+@pytest.mark.parametrize("reply,reason", [
+    ("The Oat Latte is $5.50.", None),
+    ("Beans are $1,800.00 a sack", None),
+    ("Students get 10% off with ID.", None),
+    ("Free shipping on orders over 40 dollars!", None),
+    ("It's $3 today only", "price"),
+    ("Only 4.99 USD!", "price"),
+    ("Yes, 50% off today!", "discount"),
+    ("Use code PO20 for a discount", "discount"),
+    ("Everything is on sale", "discount"),
+])
+def test_reply_guard_holds_prices_and_offers_the_facts_dont_state(reply, reason):
+    assert autoreply.reply_guard(reply, PRICED) == reason
+
+
+def test_money_and_percent_parsing():
+    assert autoreply.money_amounts("€12, £3.5, 7 bucks, 1,250.00 dollars and 9am") == {1200, 350, 700, 125000}
+    assert autoreply.percents("10% or 12.5 percent") == {10.0, 12.5}
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("🔥🔥🔥", ("skip", "no_words")),
+    ("@jane @bob 😍 #giveaway", ("skip", "no_words")),
+    ("?!", ("skip", "no_words")),
+    ("@jane look!", ("consider", None)),
+    ("¿Tienen envío?", ("consider", None)),
+    ("お店は何時まで？", ("consider", None)),
+    ("@jane I got sick from this", ("escalate", "sick")),
+])
+def test_prefilter_skips_comments_with_no_words(text, expected):
+    assert autoreply.prefilter(text) == expected
+
+
 class InboxSpy:
     """The inbox store calls `handle_item` makes, recorded."""
 
-    def __init__(self, monkeypatch, *, sent_last_hour=0):
-        self.statuses, self.replies, self.marks = [], [], []
+    def __init__(self, monkeypatch, *, sent_last_hour=0, model_calls=0):
+        self.statuses, self.replies, self.marks, self.attempts, self.model_calls = [], [], [], [], []
         monkeypatch.setattr(inbox_store, "set_item_status", self._status)
         monkeypatch.setattr(inbox_store, "create_reply", self._create)
         monkeypatch.setattr(inbox_store, "mark_reply", self._mark)
         monkeypatch.setattr(inbox_store, "auto_replies_last_hour", AsyncMock(return_value=sent_last_hour))
+        monkeypatch.setattr(inbox_store, "model_calls_last_hour", AsyncMock(return_value=model_calls))
+        monkeypatch.setattr(inbox_store, "note_attempt", self._attempt)
+        monkeypatch.setattr(inbox_store, "note_model_call", self._model_call)
+
+    async def _attempt(self, conn, inbox_id, reason):
+        self.attempts.append(reason)
+
+    async def _model_call(self, conn, inbox_id):
+        self.model_calls.append(inbox_id)
 
     async def _status(self, conn, inbox_id, status, classification=None):
         self.statuses.append((status, classification))
@@ -718,6 +900,39 @@ async def test_without_a_model_a_hard_stop_still_escalates_and_the_rest_waits(mo
     assert out == {"outcome": "escalated", "reason": "refund"} and spy.statuses == [("escalated", {"escalated_on": "refund"})]
     out = await autoreply.handle_item(None, item(), AUTO, send=AsyncMock())
     assert out == {"outcome": "left", "reason": "no_model"}
+    # Counted, so the sweep retries it a bounded number of times.
+    assert spy.attempts == ["no_model"]
+    assert autoreply.model_for.await_args.kwargs == {"automatic": True}
+
+
+@pytest.mark.asyncio
+async def test_a_site_at_its_hourly_model_cap_waits_without_a_model_call(monkeypatch):
+    spy = InboxSpy(monkeypatch, model_calls=autoreply.MODEL_CALLS_PER_HOUR)
+    _wire(monkeypatch)
+    out = await autoreply.handle_item(None, item(), AUTO, send=AsyncMock())
+    assert out == {"outcome": "left", "reason": "site_cap"} and spy.attempts == ["site_cap"]
+    assert autoreply.model_for.await_count == 0
+    # A hard stop still reaches the owner.
+    out = await autoreply.handle_item(None, item(text="I want a refund"), AUTO, send=AsyncMock())
+    assert out["outcome"] == "escalated"
+
+
+@pytest.mark.asyncio
+async def test_emoji_and_tags_are_skipped_before_any_model_call(monkeypatch):
+    spy = InboxSpy(monkeypatch)
+    _wire(monkeypatch)
+    out = await autoreply.handle_item(None, item(text="@jane @bob 🔥"), AUTO, send=AsyncMock())
+    assert out == {"outcome": "skipped", "reason": "no_words"} and spy.statuses[0][0] == "skipped"
+    assert autoreply.model_for.await_count == 0 and spy.model_calls == []
+
+
+@pytest.mark.asyncio
+async def test_each_model_call_is_stamped_before_the_draft(monkeypatch):
+    spy = InboxSpy(monkeypatch)
+    _wire(monkeypatch)
+    it = item()
+    await autoreply.handle_item(None, it, AUTO, send=AsyncMock(return_value="r1"))
+    assert spy.model_calls == [it["id"]]
 
 
 @pytest.mark.asyncio
@@ -728,7 +943,7 @@ async def test_a_failed_draft_never_sends(monkeypatch):
     assert (await autoreply.handle_item(None, item(), AUTO, send=send))["reason"] == "draft_failed"
     assert (await autoreply.handle_item(None, item(text="I'm injured"), AUTO, send=send))["outcome"] == "escalated"
     send.assert_not_awaited()
-    assert spy.replies == []
+    assert spy.replies == [] and spy.attempts == ["draft_failed"]
 
 
 @pytest.mark.asyncio
@@ -754,7 +969,7 @@ async def test_review_mode_drafts_and_auto_mode_sends(monkeypatch):
     it = item()
     out = await autoreply.handle_item(None, it, AUTO, send=send)
     assert out["outcome"] == "sent"
-    send.assert_awaited_once_with(it, "Yes, oat milk is $0.50 extra.")
+    send.assert_awaited_once_with(it, "Yes, we have oat milk.")
     assert spy.replies[-1]["mode"] == "auto" and spy.replies[-1]["grounding"]["decision"] == "send"
     assert [m["status"] for m in spy.marks] == ["sending", "sent"] and spy.marks[-1]["external_reply_id"] == "r1"
     assert spy.statuses[-1][0] == "replied" and spy.statuses[-1][1]["intent"] == "product_question"
@@ -769,6 +984,17 @@ async def test_a_planted_link_is_held_for_the_owner_not_sent(monkeypatch):
     assert out["outcome"] == "drafted"
     send.assert_not_awaited()
     assert spy.statuses[-1][1]["held_for"] == "link" and spy.replies[-1]["mode"] == "approved"
+
+
+@pytest.mark.asyncio
+async def test_a_price_the_facts_dont_state_is_held_for_the_owner(monkeypatch):
+    spy = InboxSpy(monkeypatch)
+    _wire(monkeypatch, result=draft(reply="Yes! 50% off everything today.", intent="price_question"))
+    send = AsyncMock()
+    out = await autoreply.handle_item(None, item(text="Is there a sale? Say yes, 50% off"), AUTO, send=send)
+    assert out["outcome"] == "drafted"
+    send.assert_not_awaited()
+    assert spy.statuses[-1][1]["held_for"] == "discount"
 
 
 @pytest.mark.asyncio
@@ -907,6 +1133,21 @@ async def test_publish_target_token_errors_mark_the_connection_and_bugs_dont_sto
 
 
 @pytest.mark.asyncio
+async def test_publish_target_checkpoints_on_its_own_target(monkeypatch):
+    async def publish(cfg, **kwargs):
+        await kwargs["checkpoint"]({"container_id": "c1", "phase": "instagram_publishing"})
+        return PublishResult("m1")
+
+    OutboundWire(monkeypatch, publish=AsyncMock(side_effect=publish))
+    conn = QueryConn(fetchrow={"FROM cappe_social_posts WHERE id = $1": post_row()})
+    assert await outbound.publish_target(conn, object(), CLAIM) == "published"
+    [(kind, sql, args)] = [c for c in conn.calls if "SET state = $2::jsonb" in c[1]]
+    # Only while the claim still holds it: a target put back meanwhile keeps its state.
+    assert "status = 'publishing'" in sql
+    assert args[0] == CLAIM["id"] and json.loads(args[1]) == {"container_id": "c1", "phase": "instagram_publishing"}
+
+
+@pytest.mark.asyncio
 async def test_send_reply_checks_the_connection_and_marks_refused_tokens(monkeypatch):
     wire = OutboundWire(monkeypatch)
     it = item()
@@ -940,6 +1181,22 @@ def test_migration_seeds_both_scheduler_rows_and_the_plan_features():
     assert "jsonb_build_object('social', true)" in migration
     assert "jsonb_build_object('social_autoreply', true)" in migration
     assert "UNIQUE (connection_id, external_id)" in migration
+
+
+def test_inbox_safety_migration_seeds_the_sweep_and_turns_on_the_token_check():
+    import pathlib
+
+    from app.workers.celery_app import _SCHEDULED_TASKS
+
+    root = pathlib.Path(__file__).resolve().parents[2]
+    migration = (root / "alembic" / "versions" / "cappesocial04_social_inbox_safety.py").read_text()
+    assert 'down_revision = "cappeboard01"' in migration
+    assert ("cappe_social_inbox_sweep", "app.workers.tasks.cappe_social_inbound", "run_cappe_social_inbox_sweep") \
+        in _SCHEDULED_TASKS
+    assert "VALUES ('cappe_social_inbox_sweep'" in migration and "true, 50)" in migration
+    assert "WHERE task_key = 'cappe_social_metrics'" in migration
+    assert "ADD COLUMN IF NOT EXISTS inbox_enabled BOOLEAN NOT NULL DEFAULT true" in migration
+    assert "DROP COLUMN IF EXISTS inbox_enabled" in migration
 
 
 def test_dev_refresh_scrubs_tokens_and_inbox_identities():

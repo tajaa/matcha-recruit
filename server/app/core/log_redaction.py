@@ -19,8 +19,11 @@ import re
 # Loggers that print a request's full URL: httpx at INFO, urllib3 at DEBUG.
 LOGGERS = ("httpx", "urllib3.connectionpool")
 
+# `\w*_?token` covers every `…token` parameter: `access_token`, `refresh_token`
+# and Meta's `fb_exchange_token`, which carries a live user token on every
+# Gummfit social Connect.
 _SECRET_PARAM = re.compile(
-    r"(?i)([?&](?:api[_-]?key|key|access_token|refresh_token|token|client_secret|secret|password|"
+    r"(?i)([?&](?:api[_-]?key|key|\w*_?token|client_secret|secret|password|"
     r"sig|signature|x-amz-signature|x-amz-credential|x-amz-security-token)=)[^&\s\"'#]+"
 )
 REDACTED = "***"

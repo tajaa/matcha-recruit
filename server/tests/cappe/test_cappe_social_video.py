@@ -619,7 +619,8 @@ async def test_instagram_reel_starts_then_checks_then_publishes():
         assert first == Pending("instagram_processing", {"container_id": "c1", "checks": 0}, meta.FIRST_CHECK_SECONDS)
         form = graph.form("POST", "ig1/media")
         assert form["media_type"] == "REELS" and form["video_url"] == VERTICAL_URL and form["thumb_offset"] == "3000"
-        assert form["share_to_feed"] == "true" and form["caption"].endswith("https://po.example.test/shop/latte")
+        # No link in an Instagram caption: it isn't clickable there.
+        assert form["share_to_feed"] == "true" and form["caption"] == "New"
         again = await meta.publish(CFG, platform="instagram", external_id="ig1", token="t", caption="New",
                                    media=[VIDEO], state=first.state, client=client)
         assert again.state["checks"] == 1 and again.retry_after_s == meta.CHECK_SECONDS
@@ -721,6 +722,28 @@ async def test_facebook_landscape_video_goes_to_page_videos():
         done = await meta.publish(CFG, platform="facebook", external_id="p1", token="t", caption="Wide",
                                   media=[landscape], state=first.state, client=client)
     assert done.permalink == "https://fb.example.test/v2"
+
+
+@pytest.mark.asyncio
+async def test_facebook_landscape_video_is_checkpointed_and_never_uploaded_twice():
+    landscape = {**VIDEO, "url": LANDSCAPE_URL, "format": "video"}
+    graph = Graph({("POST", "p1/videos"): {"id": "v2"}})
+    saved = []
+
+    async def checkpoint(state):
+        saved.append(state)
+
+    async with graph.client() as client:
+        await meta.publish(CFG, platform="facebook", external_id="p1", token="t", caption="Wide",
+                           media=[landscape], client=client, checkpoint=checkpoint)
+    assert saved[0]["phase"] == "facebook_uploading" and saved[0]["final_write_at"]
+    # The answer never came: the retry finds the video on the Page and checks on it.
+    graph = Graph({("GET", "p1/videos"): {"data": [{"id": "v2", "description": "Wide"}]}})
+    async with graph.client() as client:
+        resumed = await meta.publish(CFG, platform="facebook", external_id="p1", token="t", caption="Wide",
+                                     media=[landscape], state=saved[0], client=client)
+    assert resumed == Pending("facebook_processing", {"video_id": "v2", "checks": 0}, meta.FIRST_CHECK_SECONDS)
+    assert ("POST", "p1/videos") not in graph.paths()
 
 
 @pytest.mark.asyncio

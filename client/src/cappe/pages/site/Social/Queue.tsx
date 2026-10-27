@@ -29,6 +29,10 @@ const STATUS_LABEL: Partial<Record<CappeSocialPostStatus, string>> = { rendering
 const PHASE_LABEL: Record<string, string> = {
   instagram_processing: 'Instagram is processing the video',
   facebook_processing: 'Facebook is processing the video',
+  facebook_uploading: 'Sending the video to Facebook',
+  // A post on its way out, or a retry checking whether it already went out.
+  instagram_publishing: 'Posting to Instagram',
+  facebook_publishing: 'Posting to Facebook',
 }
 // A partial post (one network took it) can re-try the rest; nothing goes out twice.
 const RETRYABLE: CappeSocialPostStatus[] = [...EDITABLE, 'partial']

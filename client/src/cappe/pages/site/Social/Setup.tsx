@@ -49,6 +49,19 @@ export default function Setup({ siteId, configured, connections, settings, onCon
     }
   }
 
+  // Connect brings in every Page the person manages; only the store's own
+  // should be answered as the store.
+  async function setInbox(c: CappeSocialConnection, on: boolean) {
+    setError(null)
+    try {
+      const updated = await cappeApi.patch<CappeSocialConnection>(`/sites/${siteId}/social/connections/${c.id}`,
+        { inbox_enabled: on })
+      onConnections(connections.map((x) => (x.id === c.id ? updated : x)))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Couldn’t change the inbox')
+    }
+  }
+
   async function disconnect(c: CappeSocialConnection) {
     const name = c.handle ? `@${c.handle}` : c.display_name || c.platform
     if (!confirm(`Disconnect ${name}? Posts scheduled for it won’t go out there, and its inbox is cleared.`)) return
@@ -77,6 +90,11 @@ export default function Setup({ siteId, configured, connections, settings, onCon
             </button>
           )}
         </div>
+        {connections.length > 0 && (
+          <p className="mt-2 text-xs text-zinc-500">
+            Turn the inbox on only for your store’s own accounts: their comments and messages are answered as your store.
+          </p>
+        )}
         {!configured && (
           <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/[0.06] px-3 py-2 text-sm text-amber-300">
             Instagram and Facebook aren’t set up on this server yet. You can still write and schedule drafts.
@@ -98,6 +116,12 @@ export default function Setup({ siteId, configured, connections, settings, onCon
                     {c.last_error && c.status !== 'connected' && <span className="text-zinc-500"> · {c.last_error}</span>}
                   </div>
                 </div>
+                <label className="flex shrink-0 items-center gap-1.5 text-xs text-zinc-400"
+                  title="Comments and messages from this account come to your inbox and get AI replies">
+                  <input type="checkbox" checked={c.inbox_enabled} onChange={(e) => setInbox(c, e.target.checked)}
+                    className="accent-lime-400" />
+                  Inbox
+                </label>
                 <button type="button" onClick={() => disconnect(c)} aria-label={`Disconnect ${c.platform}`}
                   className="rounded-lg border border-zinc-700 p-2 text-zinc-500 hover:bg-zinc-800 hover:text-red-400"><Trash2 className="h-4 w-4" /></button>
               </li>

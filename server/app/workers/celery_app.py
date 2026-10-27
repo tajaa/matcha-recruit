@@ -257,6 +257,7 @@ _SCHEDULED_TASKS = [
     ("cappe_social_publisher", "app.workers.tasks.cappe_social_publisher", "run_cappe_social_publisher"),
     ("cappe_social_metrics", "app.workers.tasks.cappe_social_metrics", "run_cappe_social_metrics"),
     ("cappe_social_media_sweep", "app.workers.tasks.cappe_social_media", "run_cappe_social_media_sweep"),
+    ("cappe_social_inbox_sweep", "app.workers.tasks.cappe_social_inbound", "run_cappe_social_inbox_sweep"),
 ]
 
 

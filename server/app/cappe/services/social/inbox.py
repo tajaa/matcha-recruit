@@ -76,6 +76,33 @@ def _row_to_reply(row) -> dict[str, Any]:
     return d
 
 
+def by_own_account(event: InboundEvent, connections: list[dict[str, Any]]) -> bool:
+    """Whether an Instagram comment was written by the account it landed on.
+    Meta's `from.id` on a comment is an Instagram-scoped id, not the account
+    id the webhook's entry carries, so the id check in `parse_webhook` can't
+    see our own reply coming back; the username can."""
+    if event.platform != "instagram" or event.kind != "comment" or not event.author_name:
+        return False
+    name = event.author_name.strip().lstrip("@").lower()
+    return any((c.get("handle") or "").strip().lstrip("@").lower() == name
+               for c in connections if c.get("platform") == "instagram" and c.get("handle"))
+
+
+async def without_own(conn, connections: list[dict[str, Any]], events: list[InboundEvent]) -> list[InboundEvent]:
+    """`events` less what the accounts sent themselves: a reply we posted
+    (its id is a sent reply's `external_reply_id`) or a comment under the
+    account's own username. Without this an automatic reply comes back as a
+    new comment and is answered, again and again up to the hourly cap."""
+    ids = [e.external_id for e in events]
+    sent: set[str] = set()
+    if ids:
+        rows = await conn.fetch(
+            "SELECT external_reply_id FROM cappe_social_replies WHERE external_reply_id = ANY($1::text[])", ids,
+        )
+        sent = {r["external_reply_id"] for r in rows}
+    return [e for e in events if e.external_id not in sent and not by_own_account(e, connections)]
+
+
 async def ingest_events(conn, *, connection: dict[str, Any], events: list[InboundEvent]) -> list[dict[str, Any]]:
     """Store what is new; a re-delivered event is dropped by the unique key.
     Returns the rows that were actually inserted, in item shape."""
@@ -191,6 +218,73 @@ async def set_item_status(conn, inbox_id: UUID, status: str, classification: Opt
     )
 
 
+async def note_attempt(conn, inbox_id: UUID, reason: str) -> None:
+    """The policy couldn't get to this item (no model now, the store's cap,
+    a failed draft): count it, so the sweep tries again a bounded number of
+    times."""
+    await conn.execute(
+        """UPDATE cappe_social_inbox SET
+                  classification = classification || jsonb_build_object(
+                      'attempts', COALESCE((classification->>'attempts')::int, 0) + 1, 'left', $2::text),
+                  updated_at = NOW()
+           WHERE id = $1""",
+        inbox_id, reason,
+    )
+
+
+async def note_model_call(conn, inbox_id: UUID) -> None:
+    """Stamp the item before its draft is asked for; `model_calls_last_hour`
+    counts these, failed calls included."""
+    await conn.execute(
+        """UPDATE cappe_social_inbox SET classification = classification || jsonb_build_object('drafted_at', NOW()),
+                  updated_at = NOW()
+           WHERE id = $1""",
+        inbox_id,
+    )
+
+
+async def model_calls_last_hour(conn, site_id: UUID) -> int:
+    """How many comments and DMs this site's policy asked the model about in
+    the last hour (`note_model_call`)."""
+    return int(await conn.fetchval(
+        """SELECT count(*) FROM cappe_social_inbox
+           WHERE site_id = $1 AND updated_at > NOW() - INTERVAL '1 hour'
+             AND (classification->>'drafted_at')::timestamptz > NOW() - INTERVAL '1 hour'""",
+        site_id,
+    ) or 0)
+
+
+async def unhandled(conn, *, limit: int, within_hours: int, max_attempts: int) -> list[dict[str, Any]]:
+    """Comments and DMs still `new` that a sweep should run the policy on:
+    recent (a DM can only be answered within Meta's 24-hour window), tried
+    fewer than `max_attempts` times, on a site whose mode isn't off, from a
+    live connection with its inbox on — and only the copy the inbound worker
+    would answer: the first-connected live connection for that account, with
+    no copy of the same comment already answered on another site."""
+    rows = await conn.fetch(
+        f"""SELECT {ITEM_COLUMNS} FROM cappe_social_inbox i
+            JOIN cappe_social_connections c ON c.id = i.connection_id
+            JOIN cappe_social_settings s ON s.site_id = i.site_id
+            WHERE i.status = 'new'
+              AND i.received_at > NOW() - make_interval(hours => $2)
+              AND COALESCE((i.classification->>'attempts')::int, 0) < $3
+              AND s.autoreply_mode <> 'off'
+              AND c.status = 'connected' AND c.inbox_enabled
+              AND NOT EXISTS (
+                  SELECT 1 FROM cappe_social_connections o
+                  WHERE o.platform = c.platform AND o.external_id = c.external_id
+                    AND o.status = 'connected' AND o.inbox_enabled
+                    AND (o.connected_at, o.id) < (c.connected_at, c.id))
+              AND NOT EXISTS (
+                  SELECT 1 FROM cappe_social_inbox j JOIN cappe_social_replies r ON r.inbox_id = j.id
+                  WHERE j.external_id = i.external_id AND j.id <> i.id AND r.status IN ('sending', 'sent'))
+            ORDER BY i.received_at
+            LIMIT $1""",
+        limit, within_hours, max_attempts,
+    )
+    return [_row_to_item(r) for r in rows]
+
+
 async def auto_replies_last_hour(conn, site_id: UUID) -> int:
     return int(await conn.fetchval(
         "SELECT count(*) FROM cappe_social_replies WHERE site_id = $1 AND mode = 'auto' "
@@ -210,7 +304,8 @@ async def counts(conn, site_id: UUID) -> dict[str, int]:
 
 
 __all__ = [
-    "SETTINGS_DEFAULTS", "SETTINGS_COLUMNS", "get_settings", "upsert_settings", "ingest_events", "list_inbox",
-    "get_item", "replies_for", "create_reply", "get_reply", "claim_draft", "mark_reply", "set_item_status",
+    "SETTINGS_DEFAULTS", "SETTINGS_COLUMNS", "get_settings", "upsert_settings", "by_own_account", "without_own",
+    "ingest_events", "list_inbox", "get_item", "replies_for", "create_reply", "get_reply", "claim_draft",
+    "mark_reply", "set_item_status", "note_attempt", "note_model_call", "model_calls_last_hour", "unhandled",
     "auto_replies_last_hour", "counts",
 ]

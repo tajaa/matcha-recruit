@@ -2,10 +2,13 @@
 
 The order matters and is fixed:
 
-  1. `prefilter` — deterministic, before any model call. Empty text is
-     skipped; a word from the built-in hard-stop list (refunds, disputes,
-     injuries, legal threats) or the owner's own list escalates: the owner
-     sees it, the model may draft, nothing is ever sent by itself.
+  1. `prefilter` — deterministic, before any model call. Empty text, and
+     text with no words (emoji, @tags, #hashtags: a giveaway's hundreds of
+     "@friend 🔥"), is skipped; a word from the built-in hard-stop list
+     (refunds, disputes, injuries, legal threats) or the owner's own list
+     escalates: the owner sees it, the model may draft, nothing is ever sent
+     by itself. A site asks the model about at most `MODEL_CALLS_PER_HOUR`
+     items an hour; what waits is retried by the hourly inbox sweep.
   2. `draft_reply` — one Claude call, grounded ONLY on the store's catalog,
      its contact details and the owner's notes. It classifies the intent and
      writes a reply; when the answer isn't in the facts it must say so and
@@ -56,6 +59,14 @@ AUTO_INTENTS = frozenset({
 })
 AUTO_CONFIDENCE = 0.75
 MAX_PRODUCTS = 40
+# Model calls one site's inbound comments and DMs may make in an hour,
+# whatever the owner's send cap: past it items wait for the sweep.
+MODEL_CALLS_PER_HOUR = 60
+# Times the policy may be put off (no model, the cap, a failed draft) before
+# an item is left for the owner alone.
+MAX_ATTEMPTS = 3
+# Offers an automatic reply may make only when the owner's facts make them.
+OFFER_WORDS = ("discount*", "coupon*", "promo*", "voucher*", "on sale", "free shipping", "bogo", "price match*")
 
 _SYSTEM = (
     "You answer comments and messages on a small business's own social accounts, as the business. "
@@ -71,6 +82,14 @@ _SYSTEM = (
 _URL_RE = re.compile(r"(?:https?://|www\.)\S+", re.I)
 _EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
 _PHONE_RE = re.compile(r"\+?\d[\d\s().-]{7,}\d")
+_TAG_RE = re.compile(r"[@#][\w.]+")
+# "$12", "€12.50", "12.50 USD", "12 dollars" — a money amount, either way round.
+_MONEY_RE = re.compile(
+    r"[$€£¥]\s?(\d[\d,]*(?:\.\d{1,2})?)"
+    r"|(\d[\d,]*(?:\.\d{1,2})?)\s?(?:usd|eur|gbp|cad|aud|dollars?|euros?|pounds?|bucks)\b",
+    re.I,
+)
+_PERCENT_RE = re.compile(r"(\d+(?:\.\d+)?)\s?(?:%|percent\b)", re.I)
 
 
 @dataclass
@@ -129,13 +148,21 @@ def _word_match(text: str, words: tuple[str, ...] | list[str]) -> Optional[str]:
     return None
 
 
+def has_words(text: str) -> bool:
+    """Whether there's anything to answer once @tags and #hashtags are gone:
+    a letter or a digit, in any script. Emoji and punctuation aren't."""
+    return any(ch.isalnum() for ch in _TAG_RE.sub(" ", text or ""))
+
+
 def prefilter(text: str, *, escalate_words: Optional[list[str]] = None) -> tuple[str, Optional[str]]:
-    """('skip', 'empty') | ('escalate', <word>) | ('consider', None)."""
+    """('skip', 'empty' | 'no_words') | ('escalate', <word>) | ('consider', None)."""
     if not (text or "").strip():
         return "skip", "empty"
     hit = _word_match(text, HARD_STOP_WORDS) or _word_match(text, list(escalate_words or []))
     if hit:
         return "escalate", hit
+    if not has_words(text):
+        return "skip", "no_words"
     return "consider", None
 
 
@@ -216,11 +243,45 @@ def _digits(text: str) -> str:
     return "".join(ch for ch in text if ch.isdigit())
 
 
+def _cents(number: str) -> Optional[int]:
+    try:
+        return round(float(number.replace(",", "")) * 100)
+    except ValueError:
+        return None
+
+
+def money_amounts(text: str) -> set[int]:
+    """Every money amount in `text`, in cents (the currency isn't compared:
+    a store has one)."""
+    return {c for m in _MONEY_RE.finditer(text or "") for c in [_cents(m.group(1) or m.group(2))] if c is not None}
+
+
+def percents(text: str) -> set[float]:
+    return {float(m.group(1)) for m in _PERCENT_RE.finditer(text or "")}
+
+
+def _offer_problem(reply: str, grounding: Grounding) -> Optional[str]:
+    """A price, percentage or offer the facts don't state."""
+    facts = "\n".join(grounding.facts())
+    known = money_amounts(facts) | {int(p["price_cents"]) for p in grounding.products
+                                    if isinstance(p.get("price_cents"), int)}
+    if money_amounts(reply) - known:
+        return "price"
+    if percents(reply) - percents(facts):
+        return "discount"
+    for word in OFFER_WORDS:
+        if _word_match(reply, (word,)) and not _word_match(facts, (word,)):
+            return "discount"
+    return None
+
+
 def reply_guard(reply: str, grounding: Grounding) -> Optional[str]:
     """Why a drafted reply must not go out by itself, or None. Deterministic,
     after the model: whatever a commenter talked it into, an automatic reply
     never carries a link off the store's own site, contact details that
-    aren't the store's, or a hard-stop subject (a promised refund)."""
+    aren't the store's, a price, percentage or offer the store's facts don't
+    state ("yes, 50% off today!"), or a hard-stop subject (a promised
+    refund)."""
     origin = (grounding.store_url or "").rstrip("/").lower()
     for url in _URL_RE.findall(reply):
         u = url.lower().rstrip(".,;:!?)")
@@ -232,6 +293,9 @@ def reply_guard(reply: str, grounding: Grounding) -> Optional[str]:
     known_phone = _digits(grounding.contact.get("phone") or "")
     if any(_digits(p) != known_phone for p in _PHONE_RE.findall(reply)):
         return "phone"
+    offer = _offer_problem(reply, grounding)
+    if offer:
+        return offer
     if _word_match(reply, HARD_STOP_WORDS):
         return "hard_stop"
     return None
@@ -278,16 +342,21 @@ async def handle_item(conn, item: dict[str, Any], settings: dict[str, Any], *, s
         await inbox_store.set_item_status(conn, item["id"], "skipped", {"reason": hit})
         return {"outcome": "skipped", "reason": hit}
 
-    model = await model_for("reply")
+    capped = await inbox_store.model_calls_last_hour(conn, item["site_id"]) >= MODEL_CALLS_PER_HOUR
+    model = None if capped else await model_for("reply", automatic=True)
     if not model:
-        # No model, or not now. The item stays new; a sweep or the owner's
-        # own "Draft a reply" picks it up later.
+        # No model, not now, or this site's hour is used up. The item stays
+        # new; the inbox sweep or the owner's own "Draft a reply" picks it
+        # up later.
         if pre == "escalate":
             await inbox_store.set_item_status(conn, item["id"], "escalated", {"escalated_on": hit})
             return {"outcome": "escalated", "reason": hit}
-        return {"outcome": "left", "reason": "no_model"}
+        reason = "site_cap" if capped else "no_model"
+        await inbox_store.note_attempt(conn, item["id"], reason)
+        return {"outcome": "left", "reason": reason}
 
     grounding = await load_grounding(conn, item["site_id"])
+    await inbox_store.note_model_call(conn, item["id"])
     try:
         draft = await draft_reply(item, grounding, settings, model=model)
     except (RuntimeError, ValueError) as exc:
@@ -295,6 +364,7 @@ async def handle_item(conn, item: dict[str, Any], settings: dict[str, Any], *, s
         if pre == "escalate":
             await inbox_store.set_item_status(conn, item["id"], "escalated", {"escalated_on": hit})
             return {"outcome": "escalated", "reason": hit}
+        await inbox_store.note_attempt(conn, item["id"], "draft_failed")
         return {"outcome": "left", "reason": "draft_failed"}
 
     classification = {
@@ -340,7 +410,7 @@ async def handle_item(conn, item: dict[str, Any], settings: dict[str, Any], *, s
 
 
 __all__ = [
-    "HARD_STOP_WORDS", "INTENTS", "AUTO_INTENTS", "AUTO_CONFIDENCE", "Grounding", "Draft",
-    "prefilter", "load_grounding", "build_prompt", "parse_draft", "draft_reply", "reply_guard", "decide",
-    "handle_item",
+    "HARD_STOP_WORDS", "INTENTS", "AUTO_INTENTS", "AUTO_CONFIDENCE", "MODEL_CALLS_PER_HOUR", "MAX_ATTEMPTS",
+    "OFFER_WORDS", "Grounding", "Draft", "has_words", "prefilter", "load_grounding", "build_prompt", "parse_draft",
+    "draft_reply", "money_amounts", "percents", "reply_guard", "decide", "handle_item",
 ]

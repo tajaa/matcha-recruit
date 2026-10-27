@@ -13,6 +13,12 @@ import Setup from './Setup'
 
 type Tab = 'create' | 'queue' | 'exports' | 'inbox' | 'setup'
 
+const NOTICE_TONE = {
+  ok: 'border-emerald-500/30 bg-emerald-500/[0.06] text-emerald-300',
+  warn: 'border-amber-500/30 bg-amber-500/[0.06] text-amber-300',
+  err: 'border-red-500/30 bg-red-500/[0.06] text-red-300',
+}
+
 // Social growth: drop photos or videos → say what to post (the chat writes
 // each network's copy) or fill in the form → schedule to the connected
 // Instagram / Facebook accounts; the inbox answers comments and DMs. Videos
@@ -23,11 +29,16 @@ type Tab = 'create' | 'queue' | 'exports' | 'inbox' | 'setup'
 export default function Social() {
   const { siteId = '' } = useParams<{ siteId: string }>()
   const [params, setParams] = useSearchParams()
-  const [notice, setNotice] = useState<{ tone: 'ok' | 'err'; text: string } | null>(() => {
+  const [notice, setNotice] = useState<{ tone: 'ok' | 'warn' | 'err'; text: string } | null>(() => {
     const connected = params.get('connected')
     const failed = params.get('social_error')
+    // Permissions not granted, or Pages whose inbox starts off.
+    const warning = params.get('social_warning')
     if (failed) return { tone: 'err', text: `Couldn’t connect: ${failed}` }
-    if (connected) return { tone: 'ok', text: `Connected ${connected.split(',').join(' and ')}.` }
+    if (connected) {
+      const text = `Connected ${connected.split(',').join(' and ')}.`
+      return warning ? { tone: 'warn', text: `${text} ${warning}` } : { tone: 'ok', text }
+    }
     return null
   })
   const [tab, setTab] = useState<Tab | null>(() => (params.get('connected') || params.get('social_error') ? 'setup' : null))
@@ -83,8 +94,7 @@ export default function Social() {
   return (
     <SurfaceShell title="Social" subtitle="Post to Instagram and Facebook, schedule ahead, get videos ready for TikTok and YouTube, and answer comments and messages.">
       {notice && (
-        <div role="status" className={`mb-4 flex items-start justify-between gap-3 rounded-xl border px-4 py-3 text-sm ${notice.tone === 'ok'
-          ? 'border-emerald-500/30 bg-emerald-500/[0.06] text-emerald-300' : 'border-red-500/30 bg-red-500/[0.06] text-red-300'}`}>
+        <div role="status" className={`mb-4 flex items-start justify-between gap-3 rounded-xl border px-4 py-3 text-sm ${NOTICE_TONE[notice.tone]}`}>
           {notice.text}
           <button type="button" onClick={() => setNotice(null)} className="text-xs opacity-70 hover:opacity-100">Dismiss</button>
         </div>

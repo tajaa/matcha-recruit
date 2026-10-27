@@ -25,6 +25,12 @@ Video takes Meta minutes to process, so a video publish is resumable: the
 first call starts it and returns `Pending` with the container/video id, and
 each later call (the publisher's next sweep, `state` passed back) checks on
 it once — no call here waits.
+
+A photo publish is resumable the same way, because the call that makes a post
+live can't be repeated blind: Meta sometimes answers it with a timeout or an
+"unknown error" after the post went out. So the handle is saved (`checkpoint`)
+before that call, and a retry first asks whether it already went out — an
+Instagram container's `status_code`, or the Page's recent posts for Facebook.
 """
 from __future__ import annotations
 
@@ -33,7 +39,7 @@ import hmac
 import json
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from typing import Any, Awaitable, Callable, Optional
 from urllib.parse import urlencode
 
 import httpx
@@ -56,7 +62,9 @@ IG_MAX_CHECKS = 10
 FB_MAX_CHECKS = 30
 
 # The permissions one Connect asks for. Publishing + engagement on Pages, and
-# the Instagram trio (read, publish, comments/messages).
+# the Instagram set (read, publish, comments/messages, post insights). With a
+# Facebook Login for Business configuration (`login_config_id`) the dialog
+# asks for the configuration's permissions instead, so it must list these.
 SCOPES = (
     "pages_show_list",
     "pages_read_engagement",
@@ -68,14 +76,29 @@ SCOPES = (
     "instagram_content_publish",
     "instagram_manage_comments",
     "instagram_manage_messages",
+    "instagram_manage_insights",
     "business_management",
 )
+
+# What each network can't post or answer without. A person can untick any of
+# these in the dialog; Connect then says which are missing.
+REQUIRED_SCOPES = {
+    "facebook": ("pages_manage_posts", "pages_manage_engagement", "pages_messaging"),
+    "instagram": ("instagram_content_publish", "instagram_manage_comments", "instagram_manage_messages"),
+}
 
 # Meta error codes worth another try later: unknown/transient, rate limits.
 # 9007: the media container isn't ready to publish yet — a later try
 # recreates it.
 _RETRYABLE_CODES = frozenset({1, 2, 4, 17, 32, 341, 368, 613, 9007})
 _TIMEOUT = httpx.Timeout(20.0, connect=10.0)
+# A Facebook post found among the Page's recent ones counts as ours when its
+# text matches and it was made at most this long before the checkpoint.
+_FB_MATCH_SLACK = timedelta(minutes=5)
+MAYBE_POSTED = ("Facebook may already have this post. Check the Page before you retry, "
+                "or it may post twice.")
+
+Checkpoint = Callable[[dict[str, Any]], Awaitable[None]]
 
 
 class MetaConfig:
@@ -83,11 +106,13 @@ class MetaConfig:
     and every entry point treats None as "not configured" rather than failing
     deep inside a request."""
 
-    def __init__(self, *, app_id: str, app_secret: str, verify_token: Optional[str], version: str = "v21.0"):
+    def __init__(self, *, app_id: str, app_secret: str, verify_token: Optional[str], version: str = "v21.0",
+                 login_config_id: Optional[str] = None):
         self.app_id = app_id
         self.app_secret = app_secret
         self.verify_token = verify_token
         self.version = version
+        self.login_config_id = login_config_id
 
     @classmethod
     def from_settings(cls) -> Optional["MetaConfig"]:
@@ -100,6 +125,7 @@ class MetaConfig:
         return cls(
             app_id=s.cappe_meta_app_id, app_secret=s.cappe_meta_app_secret,
             verify_token=s.cappe_meta_verify_token, version=s.cappe_meta_graph_version or "v21.0",
+            login_config_id=getattr(s, "cappe_meta_login_config_id", None) or None,
         )
 
     def graph(self, path: str) -> str:
@@ -159,14 +185,34 @@ async def call(
 # ── OAuth ───────────────────────────────────────────────────────────────────
 
 def authorize_url(cfg: MetaConfig, *, redirect_uri: str, state: str) -> str:
-    query = urlencode({
-        "client_id": cfg.app_id,
-        "redirect_uri": redirect_uri,
-        "state": state,
-        "scope": ",".join(SCOPES),
-        "response_type": "code",
-    })
-    return f"{LOGIN_HOST}/{cfg.version}/dialog/oauth?{query}"
+    """The login dialog. A Business-type app's Facebook Login for Business
+    takes a configuration id in place of a scope list (Meta: scope "should
+    not be used" with it); without one, the classic scope list."""
+    params = {"client_id": cfg.app_id, "redirect_uri": redirect_uri, "state": state, "response_type": "code"}
+    if cfg.login_config_id:
+        params["config_id"] = cfg.login_config_id
+    else:
+        params["scope"] = ",".join(SCOPES)
+    return f"{LOGIN_HOST}/{cfg.version}/dialog/oauth?{urlencode(params)}"
+
+
+async def granted_scopes(cfg: MetaConfig, user_token: str, *, client=None) -> tuple[str, ...]:
+    """The permissions the person actually granted (they can untick any).
+    When Meta won't say, the ones asked for — the first publish or reply
+    that needs a missing one reports it then."""
+    try:
+        out = await call(cfg, "GET", "me/permissions", token=user_token, client=client)
+    except ProviderError as exc:
+        logger.warning("meta: could not read granted permissions: %s", exc)
+        return SCOPES
+    granted = sorted({str(p.get("permission")) for p in out.get("data") or []
+                      if isinstance(p, dict) and p.get("status") == "granted" and p.get("permission")})
+    return tuple(granted)
+
+
+def missing_scopes(draft: ConnectionDraft) -> list[str]:
+    """What this account can't post or answer without, of what was granted."""
+    return [s for s in REQUIRED_SCOPES.get(draft.platform, ()) if s not in draft.scopes]
 
 
 async def exchange_code(
@@ -193,6 +239,7 @@ async def exchange_code(
         datetime.now(timezone.utc) + timedelta(seconds=int(expires_in))
         if isinstance(expires_in, (int, float)) and expires_in > 0 else None
     )
+    scopes = await granted_scopes(cfg, long_token, client=client)
     pages = await call(cfg, "GET", "me/accounts", token=long_token, params={
         "fields": "id,name,access_token,picture{url},"
                   "instagram_business_account{id,username,profile_picture_url,followers_count}",
@@ -208,7 +255,7 @@ async def exchange_code(
         drafts.append(ConnectionDraft(
             platform="facebook", external_id=page_id, access_token=page_token,
             handle=None, display_name=page.get("name"), avatar_url=picture,
-            token_expires_at=expires_at, scopes=SCOPES,
+            token_expires_at=expires_at, scopes=scopes,
         ))
         ig = page.get("instagram_business_account")
         if isinstance(ig, dict) and ig.get("id"):
@@ -216,7 +263,7 @@ async def exchange_code(
             drafts.append(ConnectionDraft(
                 platform="instagram", external_id=str(ig["id"]), access_token=page_token,
                 handle=ig.get("username"), display_name=ig.get("username"),
-                avatar_url=ig.get("profile_picture_url"), token_expires_at=expires_at, scopes=SCOPES,
+                avatar_url=ig.get("profile_picture_url"), token_expires_at=expires_at, scopes=scopes,
                 followers_count=int(followers) if isinstance(followers, int) else None,
             ))
     return drafts
@@ -244,12 +291,40 @@ def _with_link(caption: str, link_url: Optional[str]) -> str:
     return text
 
 
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+async def _save(checkpoint: Optional[Checkpoint], state: dict[str, Any]) -> None:
+    """Record where a publish got to, before a call that can't be repeated."""
+    if checkpoint is not None:
+        await checkpoint(state)
+
+
 async def _ig_permalink(cfg, media_id: str, token: str, client) -> Optional[str]:
     try:
         out = await call(cfg, "GET", media_id, token=token, params={"fields": "permalink"}, client=client)
     except ProviderError:
         return None
     return out.get("permalink")
+
+
+async def _ig_published(cfg, ig_id: str, token: str, container_id: str, caption: str, client) -> PublishResult:
+    """A container Meta reports PUBLISHED: an earlier call published it and
+    the outcome was never recorded. Its media id is found among the account's
+    latest posts by the caption; failing that the container id stands in —
+    the post is live either way."""
+    want = (caption or "").strip()
+    if want:
+        try:
+            out = await call(cfg, "GET", f"{ig_id}/media", token=token,
+                             params={"fields": "id,caption,permalink", "limit": 10}, client=client)
+        except ProviderError:
+            out = {}
+        for item in out.get("data") or []:
+            if isinstance(item, dict) and item.get("id") and (item.get("caption") or "").strip() == want:
+                return PublishResult(external_post_id=str(item["id"]), permalink=item.get("permalink"))
+    return PublishResult(external_post_id=container_id)
 
 
 async def _publish_ig_reel(cfg, ig_id: str, token: str, caption: str, video: dict, state: dict,
@@ -272,8 +347,7 @@ async def _publish_ig_reel(cfg, ig_id: str, token: str, caption: str, video: dic
         detail = str(out.get("status") or code)[:200]
         raise ProviderError(f"Instagram couldn't process the video ({detail})", retryable=False)
     if code == "PUBLISHED":
-        # An earlier call published it and the outcome was never recorded.
-        return PublishResult(external_post_id=container_id)
+        return await _ig_published(cfg, ig_id, token, str(container_id), caption, client)
     if code != "FINISHED":
         checks = int(state.get("checks") or 0) + 1
         if checks >= IG_MAX_CHECKS:
@@ -287,14 +361,8 @@ async def _publish_ig_reel(cfg, ig_id: str, token: str, caption: str, video: dic
     return PublishResult(external_post_id=media_id, permalink=await _ig_permalink(cfg, media_id, token, client))
 
 
-async def _publish_instagram(cfg, ig_id: str, token: str, caption: str, media: list[dict], state: dict,
-                             client) -> PublishResult | Pending:
-    videos = [m for m in media if m.get("kind") == "video" and m.get("url")]
-    if videos:
-        return await _publish_ig_reel(cfg, ig_id, token, caption, videos[0], state, client)
-    images = [m for m in media if (m.get("kind") or "image") == "image" and m.get("url")]
-    if not images:
-        raise ProviderError("Instagram needs a photo or a video", retryable=False)
+async def _ig_photo_container(cfg, ig_id: str, token: str, caption: str, images: list[dict], client) -> str:
+    """One photo's container, or a carousel's (its children first)."""
     if len(images) == 1:
         container = await call(cfg, "POST", f"{ig_id}/media", token=token,
                                data={"image_url": images[0]["url"], "caption": caption}, client=client)
@@ -303,19 +371,61 @@ async def _publish_instagram(cfg, ig_id: str, token: str, caption: str, media: l
         for item in images[:10]:
             child = await call(cfg, "POST", f"{ig_id}/media", token=token,
                                data={"image_url": item["url"], "is_carousel_item": "true"}, client=client)
-            children.append(str(child.get("id")))
+            child_id = str(child.get("id") or "")
+            if not child_id:
+                raise ProviderError("Instagram returned no media container", retryable=True)
+            children.append(child_id)
         container = await call(cfg, "POST", f"{ig_id}/media", token=token, data={
             "media_type": "CAROUSEL", "children": ",".join(children), "caption": caption,
         }, client=client)
     creation_id = str(container.get("id") or "")
     if not creation_id:
         raise ProviderError("Instagram returned no media container", retryable=True)
+    return creation_id
+
+
+async def _publish_ig_photos(cfg, ig_id: str, token: str, caption: str, images: list[dict], state: dict,
+                             client, checkpoint: Optional[Checkpoint]) -> PublishResult | Pending:
+    """One photo or a carousel. The container is checkpointed before
+    `media_publish`, so a retry after an answer that never came (a timeout,
+    an "unknown error" Meta gives for a post that went live) asks the
+    container whether it went out instead of posting it again."""
+    container_id = state.get("container_id")
+    if container_id:
+        out = await call(cfg, "GET", container_id, token=token, params={"fields": "status_code,status"}, client=client)
+        code = out.get("status_code")
+        if code == "PUBLISHED":
+            return await _ig_published(cfg, ig_id, token, str(container_id), caption, client)
+        if code == "ERROR":
+            detail = str(out.get("status") or code)[:200]
+            raise ProviderError(f"Instagram couldn't use the photo ({detail})", retryable=False)
+        if code == "EXPIRED":
+            container_id = None  # it never went out; make it again
+        elif code == "IN_PROGRESS":
+            checks = int(state.get("checks") or 0) + 1
+            if checks >= IG_MAX_CHECKS:
+                raise ProviderError("Instagram was still preparing the photo after 10 minutes", retryable=False)
+            return Pending("instagram_publishing", {**state, "checks": checks}, CHECK_SECONDS)
+    if not container_id:
+        container_id = await _ig_photo_container(cfg, ig_id, token, caption, images, client)
+        await _save(checkpoint, {"container_id": container_id, "phase": "instagram_publishing"})
     published = await call(cfg, "POST", f"{ig_id}/media_publish", token=token,
-                           data={"creation_id": creation_id}, client=client)
+                           data={"creation_id": container_id}, client=client)
     media_id = str(published.get("id") or "")
     if not media_id:
         raise ProviderError("Instagram returned no media id", retryable=True)
     return PublishResult(external_post_id=media_id, permalink=await _ig_permalink(cfg, media_id, token, client))
+
+
+async def _publish_instagram(cfg, ig_id: str, token: str, caption: str, media: list[dict], state: dict,
+                             client, checkpoint: Optional[Checkpoint] = None) -> PublishResult | Pending:
+    videos = [m for m in media if m.get("kind") == "video" and m.get("url")]
+    if videos:
+        return await _publish_ig_reel(cfg, ig_id, token, caption, videos[0], state, client)
+    images = [m for m in media if (m.get("kind") or "image") == "image" and m.get("url")]
+    if not images:
+        raise ProviderError("Instagram needs a photo or a video", retryable=False)
+    return await _publish_ig_photos(cfg, ig_id, token, caption, images, state, client, checkpoint)
 
 
 async def _fb_permalink(cfg, post_id: str, token: str, client) -> Optional[str]:
@@ -365,6 +475,34 @@ def _fb_video_failure(status: dict) -> Optional[str]:
     return None
 
 
+async def _fb_already_posted(cfg, page_id: str, token: str, text: str, state: dict, client, *,
+                             edge: str = "published_posts", field: str = "message") -> Optional[PublishResult]:
+    """On a retry after a checkpointed write (`final_write_at`): what that
+    write left on the Page — a post (or video) with exactly this text, made
+    since — or None. A write with no text can't be told apart from the
+    Page's other posts, so it fails asking the owner to check."""
+    since = state.get("final_write_at")
+    if not since:
+        return None
+    if not text:
+        raise ProviderError(MAYBE_POSTED, retryable=False)
+    try:
+        out = await call(cfg, "GET", f"{page_id}/{edge}", token=token, params={
+            "fields": f"id,{field},created_time,permalink_url", "limit": 10,
+        }, client=client)
+    except ProviderError as exc:
+        raise ProviderError(f"{MAYBE_POSTED} ({exc})", retryable=exc.retryable, code=exc.code) from exc
+    started = _ts(since)
+    for item in out.get("data") or []:
+        if not isinstance(item, dict) or not item.get("id") or (item.get(field) or "").strip() != text:
+            continue
+        made = _ts(item.get("created_time"))
+        if started and made and made < started - _FB_MATCH_SLACK:
+            continue
+        return PublishResult(external_post_id=str(item["id"]), permalink=_absolute_fb_url(item.get("permalink_url")))
+    return None
+
+
 def _fb_video_done(status: dict) -> bool:
     if status.get("video_status") != "ready":
         return False
@@ -375,12 +513,20 @@ def _fb_video_done(status: dict) -> bool:
 
 
 async def _publish_fb_video(cfg, page_id: str, token: str, caption: str, video: dict, state: dict,
-                            client) -> PublishResult | Pending:
+                            client, checkpoint: Optional[Checkpoint] = None) -> PublishResult | Pending:
     """A Reel (vertical cut) or a Page video (landscape cut). Both are pulled
     by Facebook from our URL; later calls check on processing."""
     video_id = state.get("video_id")
     if not video_id:
         if video.get("format") == "video":
+            # A Page video is live from this one call, so it is checkpointed
+            # and a retry looks for it among the Page's videos first.
+            found = await _fb_already_posted(cfg, page_id, token, caption, state, client,
+                                             edge="videos", field="description")
+            if found:
+                return Pending("facebook_processing", {"video_id": found.external_post_id, "checks": 0},
+                               FIRST_CHECK_SECONDS)
+            await _save(checkpoint, {"final_write_at": _now_iso(), "phase": "facebook_uploading"})
             out = await call(cfg, "POST", f"{page_id}/videos", token=token,
                              data={"file_url": video["url"], "description": caption, "published": "true"}, client=client)
             video_id = str(out.get("id") or "")
@@ -419,27 +565,39 @@ async def _publish_fb_video(cfg, page_id: str, token: str, caption: str, video: 
 
 
 async def _publish_facebook(cfg, page_id: str, token: str, caption: str, media: list[dict],
-                            link_url: Optional[str], state: dict, client) -> PublishResult | Pending:
+                            link_url: Optional[str], state: dict, client,
+                            checkpoint: Optional[Checkpoint] = None) -> PublishResult | Pending:
     videos = [m for m in media if m.get("kind") == "video" and m.get("url")]
     if videos:
-        return await _publish_fb_video(cfg, page_id, token, caption, videos[0], state, client)
+        return await _publish_fb_video(cfg, page_id, token, caption, videos[0], state, client, checkpoint)
     images = [m for m in media if (m.get("kind") or "image") == "image" and m.get("url")]
+    if not images and not caption:
+        raise ProviderError("A Facebook post needs a caption or a photo", retryable=False)
+    # The write that makes the post live happens once: checkpointed first,
+    # and a retry looks for it among the Page's latest posts before writing.
+    found = await _fb_already_posted(cfg, page_id, token, caption, state, client)
+    if found:
+        if found.permalink:
+            return found
+        return PublishResult(external_post_id=found.external_post_id,
+                             permalink=await _fb_permalink(cfg, found.external_post_id, token, client))
+    attached = []
+    if len(images) > 1:
+        # Unpublished uploads first: repeating them posts nothing.
+        for item in images[:10]:
+            photo = await call(cfg, "POST", f"{page_id}/photos", token=token,
+                               data={"url": item["url"], "published": "false"}, client=client)
+            attached.append({"media_fbid": str(photo.get("id"))})
+    await _save(checkpoint, {"final_write_at": _now_iso(), "phase": "facebook_publishing"})
     if len(images) == 1:
         out = await call(cfg, "POST", f"{page_id}/photos", token=token,
                          data={"url": images[0]["url"], "message": caption, "published": "true"}, client=client)
         post_id = str(out.get("post_id") or out.get("id") or "")
     elif images:
-        attached = []
-        for item in images[:10]:
-            photo = await call(cfg, "POST", f"{page_id}/photos", token=token,
-                               data={"url": item["url"], "published": "false"}, client=client)
-            attached.append({"media_fbid": str(photo.get("id"))})
         out = await call(cfg, "POST", f"{page_id}/feed", token=token,
                          data={"message": caption, "attached_media": json.dumps(attached)}, client=client)
         post_id = str(out.get("id") or "")
     else:
-        if not caption:
-            raise ProviderError("A Facebook post needs a caption or a photo", retryable=False)
         data: dict[str, Any] = {"message": caption}
         if link_url:
             data["link"] = link_url
@@ -454,16 +612,23 @@ async def publish(
     cfg: MetaConfig, *, platform: str, external_id: str, token: str,
     caption: str, media: list[dict], link_url: Optional[str] = None,
     state: Optional[dict[str, Any]] = None, client: Optional[httpx.AsyncClient] = None,
+    checkpoint: Optional[Checkpoint] = None,
 ) -> PublishResult | Pending:
     """Publish, or for a video start/continue publishing: `state` is what the
-    previous call's `Pending` carried."""
-    text = _with_link(caption, link_url)
+    previous call's `Pending` (or `checkpoint`) carried. `checkpoint(state)`
+    is called before a write that makes a post live, so the next call can
+    tell whether it already went out.
+
+    The link goes into Facebook's text only: Instagram doesn't make a link in
+    a caption clickable, and it would count against the 2,200 characters."""
     http, own = _client(client)
     try:
         if platform == "instagram":
-            return await _publish_instagram(cfg, external_id, token, text, media, dict(state or {}), http)
+            return await _publish_instagram(cfg, external_id, token, (caption or "").strip(), media,
+                                            dict(state or {}), http, checkpoint)
         if platform == "facebook":
-            return await _publish_facebook(cfg, external_id, token, text, media, link_url, dict(state or {}), http)
+            return await _publish_facebook(cfg, external_id, token, _with_link(caption, link_url), media,
+                                           link_url, dict(state or {}), http, checkpoint)
         raise ProviderError(f"Unknown platform {platform!r}", retryable=False)
     finally:
         if own:
@@ -677,7 +842,8 @@ def parse_webhook(payload: dict[str, Any]) -> list[InboundEvent]:
 
 
 __all__ = [
-    "MetaConfig", "SCOPES", "configured", "call", "authorize_url", "exchange_code", "subscribe_page",
+    "MetaConfig", "SCOPES", "REQUIRED_SCOPES", "MAYBE_POSTED", "configured", "call", "authorize_url",
+    "granted_scopes", "missing_scopes", "exchange_code", "subscribe_page",
     "publish", "reply", "account_metrics", "post_metrics",
     "verify_challenge", "verify_signature", "parse_webhook",
 ]

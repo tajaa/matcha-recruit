@@ -886,7 +886,7 @@ anywhere on a board, beside or on top of each other. Any site has them (business
   (`test_cappe_boards.py` holds them equal). Apply `cappeboard01` before deploying the backend; old versions ignore
   the tables, and its downgrade refuses while any board exists.
 
-## Social growth (2026-10, `services/social/`, migrations `cappesocial01`–`03`)
+## Social growth (2026-10, `services/social/`, migrations `cappesocial01`–`04`)
 
 Owners connect the Instagram business account and Facebook Page they already run, drop photos
 into a composer (one carousel post, or one post per photo spread across days), schedule or post
@@ -913,6 +913,18 @@ now, and answer comments/DMs from an inbox where Claude Haiku 5.5 drafts replies
   dispatches `run_cappe_social_publish_post` for one post. Retryable failures back off
   2/10/30 min, three attempts; the post's status rolls up from its targets
   (`posts.rollup_status`).
+- **The write that makes a post live is never repeated blind** (2026-10-27 audit). Meta answers
+  `media_publish` (and Facebook's `/photos`, `/feed`, `/videos`) with timeouts or "unknown
+  error" for posts that went live, and those are retryable. So `meta.publish` calls
+  `checkpoint(state)` (→ `posts.save_state`, only while the target is still `publishing`)
+  right before that write: Instagram saves the container id, and a retry asks the container's
+  `status_code` (PUBLISHED → found by caption among the account's latest media; EXPIRED → made
+  again; IN_PROGRESS → `Pending`); Facebook saves `final_write_at`, and a retry looks among the
+  Page's `published_posts` (or `videos`) for that exact text made since, failing with
+  `meta.MAYBE_POSTED` when there is no text to match. `record_failure`'s retryable path keeps
+  `state`; `recover_stale_claims` resumes from it.
+- **Instagram captions carry no link** (`meta.publish` appends `link_url` to Facebook text
+  only): Instagram doesn't make caption links clickable and the link counted against 2,200.
 - **Replies: deterministic first, model second, owner's mode last** (`autoreply.py`). The
   hard-stop list (refunds, disputes, legal, injury/allergy) and the owner's escalate words run
   before any model call and can only ever escalate. The draft is grounded ONLY on the store's
@@ -921,9 +933,35 @@ now, and answer comments/DMs from an inbox where Claude Haiku 5.5 drafts replies
   hourly cap; everything else is a draft to approve. Before an automatic send, `reply_guard`
   (deterministic, after the model) holds any reply with a link off the store's own site, contact
   details that aren't the store's, or a hard-stop subject — a commenter can't plant one through
-  the prompt. A partial post's "Post now" re-tries only its unpublished targets. The reply row is
+  the prompt. Since 2026-10-27 it also holds a price, percentage or offer word (discount, coupon,
+  on sale, free shipping…) that the facts (catalog prices + notes) don't state. A partial post's
+  "Post now" re-tries only its unpublished targets. The reply row is
   written before the network call. The inbound worker re-checks the plan (`social_autoreply`) before running the model — a
   downgrade keeps the stored mode, the plan decides.
+- **Our own replies never come back in** (`inbox.without_own`, before ingest): an event whose id
+  is a sent reply's `external_reply_id`, or an Instagram comment under the account's own
+  username. The `from.id == entry.id` check in `parse_webhook` can't catch Instagram's: a
+  comment's `from.id` is an Instagram-scoped id, the entry's the account id. Without this an
+  automatic reply is answered again, up to the hourly cap, every hour.
+- **Inbound is bounded before the model** (strangers drive it — a giveaway is hundreds of
+  "@friend 🔥"): text with no letters or digits once @tags/#hashtags are gone is skipped
+  (`prefilter` → `no_words`); a site asks the model about at most `autoreply.MODEL_CALLS_PER_HOUR`
+  items an hour (`inbox.note_model_call` stamps `classification.drafted_at`); automatic calls
+  (`ai.model_for(..., automatic=True)`, recorded as endpoint `reply_auto`) stop at
+  `ai.AUTOMATIC_SHARE` of the server-wide `anthropic` hourly limit, so one store can't starve
+  Espresso/Huume/Merlin. What waits is counted (`inbox.note_attempt`, ≤ `MAX_ATTEMPTS`) and
+  retried by **`cappe_social_inbox_sweep`** (hourly, seeded ON in `cappesocial04`; items `new`
+  within 12 h; stops at the first "no model"), which takes only the copy the inbound worker would
+  answer (`inbox.unhandled`).
+- **Inbox fan-out** (`connections.by_external_id`): only `status='connected'` rows with
+  `inbox_enabled`, first-connected (`connected_at, id` — the table has no `created_at`; ordering by
+  it failed every webhook before 2026-10-27) answers. A token Meta refuses (often a former Page
+  admin's, on their own account) is marked `expired` by a publish, a reply or the hourly
+  `cappe_social_metrics` check (turned ON in `cappesocial04`) and then gets nobody's DMs.
+  `inbox_enabled` (`PATCH …/social/connections/{id}`, the Accounts tab's Inbox box) starts off for
+  every account a Connect brings in when it returned more than one Page
+  (`connections.inbox_default`), since Connect saves every Page the person manages; a reconnect
+  keeps the owner's choice.
 - **Models.** Admin → Settings → AI models row `gummfit.social`; default Claude Haiku 5.5 with an
   Anthropic key, nothing without one (no Gemini fallback for words sent under the owner's name).
   Every call counts in the `anthropic` bucket via `social/ai.py`; a full bucket means "not now".
@@ -1058,9 +1096,16 @@ Login for Business, Instagram Graph API and Messenger; add the redirect URI
 for `page` (feed, messages) and `instagram` (comments, messages) to
 `https://<CAPPE_BASE_DOMAIN>/api/cappe/public/social/meta/webhook` with the verify token; then
 set `CAPPE_META_APP_ID`, `CAPPE_META_APP_SECRET`, `CAPPE_META_VERIFY_TOKEN` (optional
-`CAPPE_META_GRAPH_VERSION`, default v21.0) in `~/matcha/.env.backend`. Outside development mode
-the permissions in `meta.SCOPES` need Meta App Review and business verification. Unset ⇒ Connect
-and Publish 503 with a setup message; the composer and queue still work.
+`CAPPE_META_GRAPH_VERSION`, default v21.0) in `~/matcha/.env.backend`. **Facebook Login for
+Business takes a configuration, not a scope list** (Meta: scope "should not be used" with it):
+create one listing every permission in `meta.SCOPES` and set `CAPPE_META_LOGIN_CONFIG_ID`;
+unset, the dialog sends the classic `scope=` list. Connect reads what was actually granted
+(`meta.granted_scopes`, `/me/permissions`) and the callback's `social_warning` says what's
+missing (`meta.REQUIRED_SCOPES`) and which Pages' inboxes start off. Outside development mode
+the permissions in `meta.SCOPES` (including `instagram_manage_insights`, which Instagram post
+insights need) require Meta App Review and business verification. Unset ⇒ Connect
+and Publish 503 with a setup message; the composer and queue still work. The token exchange's
+`fb_exchange_token` is redacted from httpx's request log (`core/log_redaction.py`).
 
 ## Quick store (`POST /sites/quick-store`, `services/quick_store.py`)
 

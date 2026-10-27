@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import Optional
 from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Request, status
@@ -29,6 +30,30 @@ router = APIRouter()
 
 MAX_WEBHOOK_BYTES = 256 * 1024
 _NO_STORE = {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}
+# What each permission Connect needs is for, in the owner's words.
+_SCOPE_LABELS = {
+    "pages_manage_posts": "posting to Facebook",
+    "pages_manage_engagement": "replying to Facebook comments",
+    "pages_messaging": "Facebook messages",
+    "instagram_content_publish": "posting to Instagram",
+    "instagram_manage_comments": "Instagram comments",
+    "instagram_manage_messages": "Instagram messages",
+}
+
+
+def connect_warning(drafts, rows: list[dict]) -> Optional[str]:
+    """What the owner should know after a Connect that worked: permissions
+    they didn't grant, and Pages whose inbox starts off."""
+    notes = []
+    missing = sorted({s for d in drafts for s in meta.missing_scopes(d)}, key=list(_SCOPE_LABELS).index)
+    if missing:
+        notes.append("Facebook didn't allow " + ", ".join(_SCOPE_LABELS.get(s, s) for s in missing)
+                     + ". Reconnect and allow it, or that won't work.")
+    off = sum(1 for r in rows if r.get("inbox_enabled") is False)
+    if off:
+        notes.append(f"{off} accounts came in with their comments and messages off, since you manage several "
+                     "Pages. Turn on the store's own under Accounts.")
+    return " ".join(notes) or None
 
 
 def _back(site_id, **params) -> RedirectResponse:
@@ -75,7 +100,9 @@ async def meta_callback(request: Request):
     for draft in drafts:
         if draft.platform == "facebook":
             await meta.subscribe_page(cfg, draft.external_id, draft.access_token)
-    return _back(site_id, connected=",".join(sorted({r["platform"] for r in rows})))
+    warning = connect_warning(drafts, rows)
+    return _back(site_id, connected=",".join(sorted({r["platform"] for r in rows})),
+                 **({"social_warning": warning} if warning else {}))
 
 
 @router.get("/public/social/meta/webhook")

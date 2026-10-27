@@ -45,6 +45,12 @@ class CappeSocialConnection(BaseModel):
     metrics_at: Optional[datetime] = None
     token_expires_at: Optional[datetime] = None
     connected_at: datetime
+    # Whether its comments and DMs reach the inbox (and the AI replies).
+    inbox_enabled: bool = True
+
+
+class CappeSocialConnectionUpdate(BaseModel):
+    inbox_enabled: bool
 
 
 class CappeSocialConnections(BaseModel):
@@ -541,7 +547,7 @@ __all__ = [
     "MAX_YOUTUBE_TITLE", "MAX_YOUTUBE_DESCRIPTION", "MAX_YOUTUBE_TAG_CHARS",
     "CappeSocialTikTokWords", "CappeSocialYouTubeWords", "CappeSocialExportCreate", "CappeSocialExportFile",
     "CappeSocialExportProgress", "CappeSocialExport", "CappeSocialExportDownload", "CappeSocialPlanExportsEdit",
-    "CappeSocialConnection", "CappeSocialConnections", "CappeSocialConnectStart",
+    "CappeSocialConnection", "CappeSocialConnectionUpdate", "CappeSocialConnections", "CappeSocialConnectStart",
     "CappeSocialMediaItem", "CappeSocialUpload", "CappeSocialPostInput", "CappeSocialPostUpdate",
     "CappeSocialAssetPresign", "CappeSocialAssetUpload", "CappeSocialFrame", "CappeSocialRender", "CappeSocialAsset",
     "CappeSocialChatAttachment", "CappeSocialChatTurnInput", "CappeSocialChatMessage", "CappeSocialPlanCard",

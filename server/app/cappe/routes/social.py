@@ -34,6 +34,7 @@ from ..models.cappe import (
     CappeSocialCaptionRequest,
     CappeSocialCaptions,
     CappeSocialConnection,
+    CappeSocialConnectionUpdate,
     CappeSocialConnections,
     CappeSocialConnectStart,
     CappeSocialInboxItem,
@@ -230,6 +231,22 @@ async def start_meta_connect(
     )
     state = oauth.make_state(site_id, account.id, nonce)
     return CappeSocialConnectStart(authorize_url=meta.authorize_url(cfg, redirect_uri=oauth_redirect_uri(), state=state))
+
+
+@router.patch("/connections/{connection_id}", response_model=CappeSocialConnection)
+async def update_connection(
+    site_id: UUID, connection_id: UUID, body: CappeSocialConnectionUpdate,
+    account: CappeAccount = Depends(require_cappe_account),
+):
+    """Turn an account's inbox on or off: off, its comments and DMs aren't
+    stored or answered here. Connect brings in every Page the person
+    manages; only the store's own should be answered as the store."""
+    async with get_connection() as conn:
+        await get_owned_site(conn, site_id, account.id)
+        row = await conn_store.set_inbox_enabled(conn, site_id, connection_id, body.inbox_enabled)
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
+    return CappeSocialConnection(**row)
 
 
 @router.delete("/connections/{connection_id}", status_code=status.HTTP_204_NO_CONTENT)

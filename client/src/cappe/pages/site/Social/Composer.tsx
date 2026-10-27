@@ -385,6 +385,7 @@ export default function Composer({ siteId, connections, settings, metaConfigured
           <label className="block text-sm text-zinc-300">Link (optional)
             <input value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://"
               className="mt-1 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600" />
+            <span className="mt-1 block text-xs text-zinc-500">Added to Facebook posts. Instagram doesn’t make links in captions clickable, so put it in your bio.</span>
           </label>
           {aiReady && (
             <label className="block text-sm text-zinc-300">What should the AI mention? (optional)

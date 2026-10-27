@@ -100,6 +100,49 @@ def test_authorize_url_asks_for_every_scope_with_our_state():
     assert query["redirect_uri"] == "https://app.example.test/cb"
     assert set(query["scope"].split(",")) == set(meta.SCOPES)
     assert "instagram_content_publish" in meta.SCOPES and "pages_messaging" in meta.SCOPES
+    # Post insights (reach, likes) need their own permission under Facebook Login.
+    assert "instagram_manage_insights" in meta.SCOPES
+    assert "config_id" not in query
+
+
+def test_a_login_for_business_configuration_replaces_the_scope_list(monkeypatch):
+    cfg = meta.MetaConfig(app_id="app1", app_secret="shh", verify_token="vt", login_config_id="cfg-42")
+    query = dict(parse_qsl(meta.authorize_url(cfg, redirect_uri="https://app.example.test/cb", state="s").split("?", 1)[1]))
+    assert query["config_id"] == "cfg-42" and "scope" not in query and query["response_type"] == "code"
+    monkeypatch.setattr(meta, "get_settings", lambda: SimpleNamespace(
+        cappe_meta_app_id="a", cappe_meta_app_secret="b", cappe_meta_verify_token="v",
+        cappe_meta_graph_version="v21.0", cappe_meta_login_config_id="cfg-9"))
+    assert meta.MetaConfig.from_settings().login_config_id == "cfg-9"
+
+
+@pytest.mark.asyncio
+async def test_connect_records_the_permissions_actually_granted():
+    graph = Graph({
+        ("GET", "oauth/access_token"): _token,
+        ("GET", "me/permissions"): {"data": [
+            {"permission": "pages_show_list", "status": "granted"},
+            {"permission": "instagram_content_publish", "status": "declined"},
+            {"permission": "pages_manage_posts", "status": "granted"},
+            {"status": "granted"},
+            "junk",
+        ]},
+        ("GET", "me/accounts"): {"data": [{"id": "p1", "name": "Po", "access_token": "pt1",
+                                           "instagram_business_account": {"id": "ig1", "username": "po"}}]},
+    })
+    async with graph.client() as client:
+        drafts = await meta.exchange_code(CFG, "the-code", redirect_uri="https://app.example.test/cb", client=client)
+    assert all(d.scopes == ("pages_manage_posts", "pages_show_list") for d in drafts)
+    assert graph.paths()[2] == ("GET", "me/permissions") and graph.requests[2][2]["access_token"] == "long"
+    fb, ig = drafts
+    assert meta.missing_scopes(fb) == ["pages_manage_engagement", "pages_messaging"]
+    assert meta.missing_scopes(ig) == list(meta.REQUIRED_SCOPES["instagram"])
+
+
+@pytest.mark.asyncio
+async def test_when_meta_wont_say_what_was_granted_the_asked_for_scopes_stand():
+    graph = Graph({("GET", "me/permissions"): (500, {"error": {"message": "down", "code": 2}})})
+    async with graph.client() as client:
+        assert await meta.granted_scopes(CFG, "tok", client=client) == meta.SCOPES
 
 
 # ── call() and error classification ─────────────────────────────────────────
@@ -236,21 +279,225 @@ async def test_subscribe_page_reports_success_and_swallows_failure():
 # ── publishing ──────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_instagram_single_photo_with_the_link_in_the_caption():
+async def test_instagram_single_photo_keeps_the_link_out_of_the_caption():
+    # Instagram doesn't make a caption link clickable, and it would count
+    # against the 2,200 characters: the link goes to Facebook only.
     graph = Graph({
         ("POST", "ig1/media"): {"id": "c1"},
         ("POST", "ig1/media_publish"): {"id": "m1"},
         ("GET", "m1"): {"permalink": "https://instagram.test/p/m1"},
     })
+    saved = []
+
+    async def checkpoint(state):
+        saved.append((state, len(graph.requests)))
+
     async with graph.client() as client:
         result = await meta.publish(CFG, platform="instagram", external_id="ig1", token="t",
-                                    caption="New roast", media=[IMG], link_url="https://shop.example.test/x",
-                                    client=client)
+                                    caption=" New roast ", media=[IMG], link_url="https://shop.example.test/x",
+                                    client=client, checkpoint=checkpoint)
     assert result.external_post_id == "m1" and result.permalink == "https://instagram.test/p/m1"
-    assert graph.form("POST", "ig1/media") == {
-        "image_url": IMG["url"], "caption": "New roast\n\nhttps://shop.example.test/x",
-    }
+    assert graph.form("POST", "ig1/media") == {"image_url": IMG["url"], "caption": "New roast"}
     assert graph.form("POST", "ig1/media_publish") == {"creation_id": "c1"}
+    # The container is saved after it is made and before media_publish.
+    assert saved == [({"container_id": "c1", "phase": "instagram_publishing"}, 1)]
+
+
+@pytest.mark.asyncio
+async def test_facebook_text_still_carries_the_link():
+    graph = Graph({("POST", "p1/photos"): {"post_id": "p1_9"}, ("GET", "p1_9"): {}})
+    async with graph.client() as client:
+        await meta.publish(CFG, platform="facebook", external_id="p1", token="t", caption="New roast",
+                           media=[IMG], link_url="https://shop.example.test/x", client=client)
+    assert graph.form("POST", "p1/photos")["message"] == "New roast\n\nhttps://shop.example.test/x"
+
+
+# ── a write that may have gone out is never made twice ─────────────────────
+
+@pytest.mark.asyncio
+async def test_instagram_photo_timeout_on_publish_is_retryable_with_the_container_saved():
+    def timeout(request, form):
+        raise httpx.ReadTimeout("slow", request=request)
+
+    graph = Graph({("POST", "ig1/media"): {"id": "c1"}, ("POST", "ig1/media_publish"): timeout})
+    saved = []
+
+    async def checkpoint(state):
+        saved.append(state)
+
+    async with graph.client() as client:
+        with pytest.raises(ProviderError) as info:
+            await meta.publish(CFG, platform="instagram", external_id="ig1", token="t", caption="x",
+                               media=[IMG], client=client, checkpoint=checkpoint)
+    assert info.value.retryable is True
+    assert saved == [{"container_id": "c1", "phase": "instagram_publishing"}]
+
+
+@pytest.mark.asyncio
+async def test_instagram_photo_retry_finds_the_post_that_went_out():
+    graph = Graph({
+        ("GET", "c1"): {"status_code": "PUBLISHED"},
+        ("GET", "ig1/media"): {"data": [{"id": "m0", "caption": "older"},
+                                        {"id": "m7", "caption": "Two shots", "permalink": "https://instagram.test/p/m7"}]},
+    })
+    async with graph.client() as client:
+        result = await meta.publish(CFG, platform="instagram", external_id="ig1", token="t", caption="Two shots",
+                                    media=[IMG, IMG2], state={"container_id": "c1"}, client=client)
+    assert result.external_post_id == "m7" and result.permalink == "https://instagram.test/p/m7"
+    assert ("POST", "ig1/media") not in graph.paths() and ("POST", "ig1/media_publish") not in graph.paths()
+
+    # No caption to match, or the lookup fails: the container stands in.
+    graph = Graph({("GET", "c1"): {"status_code": "PUBLISHED"}})
+    async with graph.client() as client:
+        assert await meta.publish(CFG, platform="instagram", external_id="ig1", token="t", caption="Two shots",
+                                  media=[IMG], state={"container_id": "c1"}, client=client) == \
+            meta.PublishResult(external_post_id="c1")
+        assert await meta.publish(CFG, platform="instagram", external_id="ig1", token="t", caption="",
+                                  media=[IMG], state={"container_id": "c1"}, client=client) == \
+            meta.PublishResult(external_post_id="c1")
+    assert ("GET", "ig1/media") in graph.paths()
+
+
+@pytest.mark.asyncio
+async def test_instagram_photo_retry_publishes_a_finished_container_once():
+    graph = Graph({
+        ("GET", "c1"): {"status_code": "FINISHED"},
+        ("POST", "ig1/media_publish"): {"id": "m1"},
+        ("GET", "m1"): {},
+    })
+    async with graph.client() as client:
+        result = await meta.publish(CFG, platform="instagram", external_id="ig1", token="t", caption="x",
+                                    media=[IMG], state={"container_id": "c1"}, client=client)
+    assert result.external_post_id == "m1"
+    assert ("POST", "ig1/media") not in graph.paths()
+    assert graph.form("POST", "ig1/media_publish") == {"creation_id": "c1"}
+
+
+@pytest.mark.asyncio
+async def test_instagram_photo_retry_remakes_an_expired_container_and_waits_on_one_in_progress():
+    graph = Graph({
+        ("GET", "c1"): {"status_code": "EXPIRED"},
+        ("POST", "ig1/media"): {"id": "c2"},
+        ("POST", "ig1/media_publish"): {"id": "m2"},
+        ("GET", "m2"): {},
+    })
+    async with graph.client() as client:
+        result = await meta.publish(CFG, platform="instagram", external_id="ig1", token="t", caption="x",
+                                    media=[IMG], state={"container_id": "c1"}, client=client)
+    assert result.external_post_id == "m2" and graph.form("POST", "ig1/media_publish") == {"creation_id": "c2"}
+
+    graph = Graph({("GET", "c1"): {"status_code": "IN_PROGRESS"}})
+    async with graph.client() as client:
+        waiting = await meta.publish(CFG, platform="instagram", external_id="ig1", token="t", caption="x",
+                                     media=[IMG], state={"container_id": "c1", "checks": 2}, client=client)
+        assert waiting == meta.Pending("instagram_publishing", {"container_id": "c1", "checks": 3}, meta.CHECK_SECONDS)
+        with pytest.raises(ProviderError, match="after 10 minutes") as info:
+            await meta.publish(CFG, platform="instagram", external_id="ig1", token="t", caption="x", media=[IMG],
+                               state={"container_id": "c1", "checks": meta.IG_MAX_CHECKS - 1}, client=client)
+        assert info.value.retryable is False
+    graph = Graph({("GET", "c1"): {"status_code": "ERROR", "status": "Error: bad image"}})
+    async with graph.client() as client:
+        with pytest.raises(ProviderError, match="bad image") as info:
+            await meta.publish(CFG, platform="instagram", external_id="ig1", token="t", caption="x",
+                               media=[IMG], state={"container_id": "c1"}, client=client)
+    assert info.value.retryable is False
+
+
+@pytest.mark.asyncio
+async def test_carousel_child_without_an_id_is_retryable():
+    graph = Graph({("POST", "ig1/media"): {}})
+    async with graph.client() as client:
+        with pytest.raises(ProviderError, match="no media container") as info:
+            await meta.publish(CFG, platform="instagram", external_id="ig1", token="t", caption="x",
+                               media=[IMG, IMG2], client=client)
+    assert info.value.retryable is True
+    assert graph.paths().count(("POST", "ig1/media")) == 1
+
+
+@pytest.mark.asyncio
+async def test_facebook_checkpoints_before_the_write_that_makes_a_post_live():
+    ids = iter(["f1", "f2"])
+    graph = Graph({
+        ("POST", "p1/photos"): lambda r, f: {"id": next(ids)},
+        ("POST", "p1/feed"): {"id": "p1_10"},
+        ("GET", "p1_10"): {},
+    })
+    saved = []
+
+    async def checkpoint(state):
+        saved.append((state, graph.paths()[-1] if graph.requests else None))
+
+    async with graph.client() as client:
+        await meta.publish(CFG, platform="facebook", external_id="p1", token="t", caption="Both",
+                           media=[IMG, IMG2], client=client, checkpoint=checkpoint)
+    state, last = saved[0]
+    # After the unpublished uploads, before the feed post.
+    assert last == ("POST", "p1/photos") and state["phase"] == "facebook_publishing"
+    assert meta._ts(state["final_write_at"]) is not None
+    assert graph.paths()[-2:] == [("POST", "p1/feed"), ("GET", "p1_10")]
+
+
+@pytest.mark.asyncio
+async def test_facebook_retry_finds_the_post_that_went_out():
+    graph = Graph({
+        ("GET", "p1/published_posts"): {"data": [
+            {"id": "p1_1", "message": "Hi", "created_time": "2026-10-27T11:00:00+0000"},   # too old
+            {"id": "p1_2", "message": "Other", "created_time": "2026-10-27T12:00:30+0000"},
+            {"id": "p1_3", "message": "Hi", "created_time": "2026-10-27T12:00:30+0000",
+             "permalink_url": "https://facebook.test/p1_3"},
+        ]},
+    })
+    state = {"final_write_at": "2026-10-27T12:00:00+00:00"}
+    async with graph.client() as client:
+        result = await meta.publish(CFG, platform="facebook", external_id="p1", token="t", caption="Hi",
+                                    media=[IMG], state=state, client=client)
+    assert result == meta.PublishResult(external_post_id="p1_3", permalink="https://facebook.test/p1_3")
+    assert ("POST", "p1/photos") not in graph.paths()
+
+    # Found without a permalink: it is looked up, as a new post's is.
+    graph = Graph({
+        ("GET", "p1/published_posts"): {"data": [{"id": "p1_3", "message": "Hi"}]},
+        ("GET", "p1_3"): {"permalink_url": "https://facebook.test/p1_3"},
+    })
+    async with graph.client() as client:
+        result = await meta.publish(CFG, platform="facebook", external_id="p1", token="t", caption="Hi",
+                                    media=[], state=state, client=client)
+    assert result.permalink == "https://facebook.test/p1_3" and ("POST", "p1/feed") not in graph.paths()
+
+
+@pytest.mark.asyncio
+async def test_facebook_retry_writes_again_only_when_nothing_went_out():
+    graph = Graph({
+        ("GET", "p1/published_posts"): {"data": []},
+        ("POST", "p1/photos"): {"post_id": "p1_9"},
+        ("GET", "p1_9"): {},
+    })
+    async with graph.client() as client:
+        result = await meta.publish(CFG, platform="facebook", external_id="p1", token="t", caption="Hi",
+                                    media=[IMG], state={"final_write_at": "2026-10-27T12:00:00+00:00"},
+                                    client=client)
+    assert result.external_post_id == "p1_9"
+    assert graph.paths()[0] == ("GET", "p1/published_posts")
+
+
+@pytest.mark.asyncio
+async def test_facebook_retry_that_cant_check_asks_the_owner():
+    # Nothing to match a photo with no words by.
+    graph = Graph({})
+    async with graph.client() as client:
+        with pytest.raises(ProviderError) as info:
+            await meta.publish(CFG, platform="facebook", external_id="p1", token="t", caption="",
+                               media=[IMG], state={"final_write_at": "2026-10-27T12:00:00+00:00"}, client=client)
+    assert str(info.value) == meta.MAYBE_POSTED and info.value.retryable is False
+    assert graph.requests == []
+    # The lookup itself fails: said so, retryable as the failure was.
+    graph = Graph({("GET", "p1/published_posts"): (500, {"error": {"message": "down", "code": 2}})})
+    async with graph.client() as client:
+        with pytest.raises(ProviderError) as info:
+            await meta.publish(CFG, platform="facebook", external_id="p1", token="t", caption="Hi",
+                               media=[IMG], state={"final_write_at": "2026-10-27T12:00:00+00:00"}, client=client)
+    assert str(info.value).startswith(meta.MAYBE_POSTED) and info.value.retryable is True
+    assert ("POST", "p1/photos") not in graph.paths()
 
 
 @pytest.mark.asyncio

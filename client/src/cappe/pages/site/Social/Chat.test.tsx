@@ -11,7 +11,7 @@ vi.mock('../../../api', () => ({ cappeApi: api }))
 const IG: CappeSocialConnection = {
   id: 'c-ig', platform: 'instagram', external_id: 'ig1', handle: 'pocoffee', display_name: 'pocoffee', avatar_url: null,
   status: 'connected', last_error: null, followers_count: 10, metrics: {}, metrics_at: null, token_expires_at: null,
-  connected_at: '2026-10-01T00:00:00Z',
+  connected_at: '2026-10-01T00:00:00Z', inbox_enabled: true,
 }
 const FB: CappeSocialConnection = { ...IG, id: 'c-fb', platform: 'facebook', handle: null, display_name: 'Po Coffee' }
 const SETTINGS: CappeSocialSettings = {
