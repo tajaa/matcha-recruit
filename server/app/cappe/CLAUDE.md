@@ -463,6 +463,16 @@ What is built so far:
   `can_sell=false`, one site, `magazine`. Its Stripe Price needs `server/scripts/seed_cappe_plans.py`
   after the migration; until then a writer checkout is 503. `GET /public/pricing?for=writer` is the
   magazines landing page's lineup.
+- **Writer quick start** (`POST /magazine/quick-start`) creates the same magazine site, draft About
+  page and first `format='pages'` Studio draft in one transaction, under the account row lock and site
+  limit. `collection_doc` bounds and normalizes the submitted design and removes site photo/font
+  references and paywalls. Quick start opts into `keep_composition=True`: the document schema validates
+  its composed lines before storage, so first publication (including outside Studio) renders the chosen
+  geometry even without a document edit. Saved library collections still discard composition by default.
+  No plan purchase or publication happens here. The site
+  UUID is `uuid5(account.id, "writer-start:<request_id>")`; its draft UUID is `uuid5(site.id, "first-draft")`.
+  A replay looks up that account's site and draft before enforcing the creation limit and never
+  overwrites edits. A deleted first draft returns 409 rather than recreating it. No migration is needed.
 - **A magazine site publishes with a published story on a plan with `magazine`**
   (`readiness._magazine_readiness`; the publish route answers a missing plan with 402
   `plan_required` naming the Writer plan first). It is never sent for business-listing inference.
@@ -999,6 +1009,31 @@ set `CAPPE_META_APP_ID`, `CAPPE_META_APP_SECRET`, `CAPPE_META_VERIFY_TOKEN` (opt
 `CAPPE_META_GRAPH_VERSION`, default v21.0) in `~/matcha/.env.backend`. Outside development mode
 the permissions in `meta.SCOPES` need Meta App Review and business verification. Unset ⇒ Connect
 and Publish 503 with a setup message; the composer and queue still work.
+
+## Quick store (`POST /sites/quick-store`, `services/quick_store.py`)
+
+- Online sellers choose Studio, Edit or Pop (`site_templates/online.py`), then optionally add a first
+  product. One transaction stores the template/theme, personalised Home page and a **draft** product.
+  No physical location or policy is invented. No migration or seeded catalog rows are needed.
+- The ready page renders the owned Home through `POST /sites/{id}/preview` with
+  `include_draft_products:true`: ownership is checked before reading the site's draft/active products.
+  The renderer draws inert cards, with no buy buttons or checkout. Empty catalogs show clearly labelled
+  example cards only in previews; examples are never inserted or included in a public render.
+- Online starter sites require an active, reviewed product before publishing. Physical drafts also
+  surface the refund/shipping policy requirement; policies must be saved by the owner in Shop. Other
+  sites retain their ordinary brochure/portfolio readiness rules. Existing plan fulfillment gates remain.
+- The first product's optional photo uploads after creation. Products use `routes/shop.insert_product`.
+- Each starter has its own responsive art direction in `render/assets/storefront.css`, enabled only
+  by the allowlisted `theme_config.template` marker. It applies on free and paid plans, private
+  previews and the live store; the shared public store widget still owns product links and checkout.
+  Theme colours and fonts remain editable. Other templates do not load these styles.
+- Sample photography is bundled as optimised WebP files in `site_templates/assets/` (prompts
+  and provenance in its README). The versioned, allowlisted `/templates/starter-media/{key}` route
+  serves them without DB or external-storage access. Only `quick_store.sample_products()` references
+  store merchandise; no example name, price or picture is saved into the site or rendered publicly.
+  `services/template_media.py` owns the shared allowlist. Writers' Studio uses the editorial images
+  only in its built-in collection and single-page preview projection, never in inserted documents or
+  saved collections. Neither surface needs a database row or storage upload for these images.
 
 ## Site templates (`services/site_templates/`)
 

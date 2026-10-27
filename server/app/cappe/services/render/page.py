@@ -10,6 +10,8 @@ from .design import _BASE_CSS, _block_has_motion, _design_gradient, _font_stack,
 from .sanitize import _clampi, _clean_css, _esc, _hexonly, _js_obj, _num, _safe_href, _safe_image
 
 _ASSETS = Path(__file__).parent / "assets"
+_STOREFRONT_CSS = (_ASSETS / "storefront.css").read_text()
+_STOREFRONTS = {"online-studio": "studio", "online-edit": "edit", "online-pop": "pop"}
 
 
 # ── head / footer (business identity + SEO from meta_config) ────────────────
@@ -260,6 +262,8 @@ def render_site_html(site: dict, page: dict, nav_pages: list[dict], preview: boo
     t["meta"] = meta if isinstance(meta, dict) else {}
     t["locations"] = locations
     t["site_name"] = site.get("name") or ""
+    if preview and "preview_products" in site:
+        t["preview_products"] = site["preview_products"]
 
     content = page.get("content") or {}
     blocks = content.get("blocks") if isinstance(content, dict) else None
@@ -303,6 +307,7 @@ def render_site_html(site: dict, page: dict, nav_pages: list[dict], preview: boo
 
     # Designer typography + brand-gradient tokens (all optional; absent = today).
     tc = site.get("theme_config") if isinstance(site.get("theme_config"), dict) else {}
+    storefront = _STOREFRONTS.get(str(tc.get("template") or ""), "")
     typ = tc.get("type") if isinstance(tc.get("type"), dict) else {}
     tc_colors = tc.get("colors") if isinstance(tc.get("colors"), dict) else {}
     _extra = []
@@ -336,6 +341,7 @@ def render_site_html(site: dict, page: dict, nav_pages: list[dict], preview: boo
         "cz-typw" if _hw else "",
         _anim_cls,
         "cz-editable" if editable else "",
+        f"cz-shop cz-shop--{storefront}" if storefront else "",
     ]))
     premium_js = _MOTION_JS if needs_motion else ""
     canvas_js = _CANVAS_JS if editable else ""
@@ -350,7 +356,7 @@ def render_site_html(site: dict, page: dict, nav_pages: list[dict], preview: boo
   {head_seo}
   {extra_head}
   {_gfonts_link(t['heading'], t['body'])}
-  <style>{theme_vars}{extra_vars}{_BASE_CSS}{_CANVAS_CSS}</style>
+  <style>{theme_vars}{extra_vars}{_BASE_CSS}{_CANVAS_CSS}{_STOREFRONT_CSS if storefront else ""}</style>
   <script>window.__CAPPE__={cappe_ctx};</script>
   {_widget_runtime()}
 </head>

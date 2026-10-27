@@ -27,9 +27,9 @@ import re
 from functools import lru_cache
 from typing import Optional
 
-from ..design_gate import gate_content, gate_theme
+from ..design_gate import gate_content
 from ..render import render_site_html
-from . import get_template
+from . import get_template, template_theme
 from ._shared import substitute_tokens
 
 # Plans the gate treats as premium — the preview takes a bool so it never has
@@ -65,9 +65,12 @@ def _render_cached(slug: str, page_slug: str, premium: bool) -> str:
     values = {"business_name": t.sample_name}
     site = {
         "name": t.sample_name,
-        "theme_config": gate_theme(t.theme, plan),
+        "theme_config": template_theme(t, plan=plan),
         "meta_config": {},
     }
+    if "online-store" in t.tags:
+        from ..quick_store import sample_products
+        site["preview_products"] = sample_products()
     content = gate_content(substitute_tokens(page.get("content") or {}, values), plan)
     html = render_site_html(
         site,

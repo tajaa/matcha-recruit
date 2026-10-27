@@ -14,13 +14,13 @@ type Direction = {
 const DIRECTIONS: Direction[] = [
   { id: 'quiet-form', name: 'Quiet Form', direction: 'Restrained fashion editorial',
     description: 'Precise hairlines, generous white space and sculptural serif headlines. A measured rhythm for fashion and culture.',
-    display: 'Bodoni Moda', body: 'Source Serif 4', label: 'Montserrat', weight: 500,
+    display: 'Bodoni Moda Display', body: 'Source Serif 4', label: 'Montserrat', weight: 400,
     paper: '#f7f6f2', ink: '#252522', accent: '#78766e', picture: '#c9c6bf', margin: 54,
     title: 'The quiet\nform', deck: 'Clothes, gestures and the space between.' },
   { id: 'off-register', name: 'Off Register', direction: 'Experimental art zine',
     description: 'Oversized grotesk type, acidic colour and an off-centre grid. Room for fragments, process and unexpected encounters.',
-    display: 'Space Grotesk', body: 'IBM Plex Mono', label: 'IBM Plex Mono', weight: 700,
-    paper: '#eee9df', ink: '#25231f', accent: '#e45232', picture: '#b6bc71', margin: 36,
+    display: 'Anybody Expanded', body: 'IBM Plex Mono', label: 'IBM Plex Mono', weight: 800,
+    paper: '#f1eee4', ink: '#20212b', accent: '#243fc3', picture: '#d9ed44', margin: 36,
     title: 'OFF\nREGISTER', deck: 'Notes on making something out of nothing.' },
   { id: 'still-light', name: 'Still Light', direction: 'Photographic monograph',
     description: 'Gallery-like margins, quiet captions and uninterrupted image sequences. Photographs set the pace.',
@@ -29,7 +29,7 @@ const DIRECTIONS: Direction[] = [
     title: 'Still Light', deck: 'A study of ordinary places, patiently observed.' },
   { id: 'maison', name: 'Maison', direction: 'Luxury lookbook',
     description: 'Warm ivory, deep ink and widely spaced small type. Deliberate proportions for objects, materials and collections.',
-    display: 'Bodoni Moda', body: 'Lora', label: 'Montserrat', weight: 400,
+    display: 'Playfair Poster', body: 'Lora', label: 'Montserrat', weight: 400,
     paper: '#f2eadf', ink: '#332d28', accent: '#8c7153', picture: '#c5b29c', margin: 72,
     title: 'MAISON', deck: 'A collection of considered things.' },
 ]
@@ -41,7 +41,7 @@ function pages(d: Direction): Template[] {
   const text = (name: string, words: string, x: number, y: number, w: number, h: number,
     size = 11, role: ParaAttrs['role'] = 'p', align: ParaAttrs['align'] = 'l', extra: CharAttrs = {}): TItem => ({
     kind: 'text', name, x, y, w, h,
-    parts: [part(words, { font: d.body, size, color: d.ink, ...extra }, { role, lead: size * 1.45, align })],
+    parts: [part(words, { font: d.body, size, color: d.ink, ...extra }, { role, lead: size * (role === 'h1' ? 1.12 : 1.45), align })],
   })
   const heading = (name: string, words: string, x: number, y: number, w: number, h: number, size = 48): TItem =>
     text(name, words, x, y, w, h, size, 'h1', luxury ? 'c' : 'l', { font: d.display, wt: d.weight })
@@ -59,43 +59,49 @@ function pages(d: Direction): Template[] {
   })
   const cover = mono ? [
     label('Edition', 'PHOTOGRAPHS / VOLUME ONE', M, 56, C),
-    image('Cover photograph', M, 150, C, 400),
-    heading('Masthead', d.title, M, 576, C, 110, 48),
+    image('Cover photograph', M, 122, C, 420),
+    heading('Masthead', d.title, M, 576, C, 110, 58),
     text('Cover subtitle', d.deck, M, 690, C, 42, 12),
   ] : zine ? [
-    { kind: 'rect', name: 'Colour field', x: 0, y: 0, w: W, h: H, fill: d.accent } as TItem,
-    heading('Masthead', d.title, M, 40, C, 280, 68),
-    image('Cover artwork', 172, 330, W - 172, 336),
+    { kind: 'rect', name: 'Colour field', x: 0, y: 0, w: W, h: H, fill: '#d9ed44' } as TItem,
+    heading('Masthead', d.title, M, 40, C, 270, 68),
+    { kind: 'rect', name: 'Off-register paper', x: 138, y: 312, w: 438, h: 380, rot: 3, fill: '#ffffff' } as TItem,
+    { ...image('Cover artwork', 152, 326, 424, 350), rot: -2 },
+    heading('Edition number', '01', M, 352, 100, 142, 54),
     label('Issue line', 'INDEPENDENT ART / ISSUE 001', M, 704, C),
   ] : luxury ? [
     label('Edition', 'COLLECTION / VOLUME 01', M, 52, C, 'c'),
-    heading('Masthead', d.title, M, 104, C, 130, 52),
-    image('Cover photograph', 132, 258, 348, 350),
+    heading('Masthead', d.title, M, 104, C, 136, 62),
+    { kind: 'rect', name: 'Gallery hairline', x: 108, y: 262, w: 396, h: 366, fill: null,
+      stroke: { c: d.accent, w: 0.5 } } as TItem,
+    image('Cover photograph', 120, 274, 372, 342),
     text('Cover subtitle', d.deck, M, 662, C, 48, 12, 'p', 'c'),
   ] : [
     label('Edition', 'AN INDEPENDENT FASHION JOURNAL / 01', M, 42, C),
-    heading('Masthead', d.title, M, 94, C, 210, 58),
-    image('Cover photograph', 210, 324, W - 210 - M, 346),
-    text('Cover subtitle', d.deck, M, 690, C, 44, 12),
+    heading('Masthead', d.title, M, 84, C, 170, 60),
+    image('Cover photograph', 0, 270, W, 454),
+    text('Cover subtitle', d.deck, M, 734, C, 20, 8, 'caption', 'l', { font: d.label }),
   ]
   return [
     page('cover', 'Cover', 'Covers', cover, 1),
     page('contents', 'Contents', 'More pages', [
       label('Section', 'IN THIS VOLUME', M, 54, C),
-      heading('Contents title', zine ? 'INDEX /' : 'Contents', M, 112, C, 124, zine ? 54 : 44), rule(250),
+      heading('Contents title', zine ? 'INDEX /' : mono ? 'In this light' : luxury ? 'The collection' : 'Contents', M, 112, C, 124, zine ? 54 : 44), rule(250),
       ...['Opening / A way of seeing', 'Photo essay / In the frame', 'Interview / In conversation', 'Credits / The people behind it'].flatMap((title, k) => [
         label(`Section number ${k}`, ['04—05', '06—07', '08—09', '10'][k], M, 290 + k * 102, 90),
         text(`Contents entry ${k}`, title, M + 100, 286 + k * 102, C - 100, 76, 16, 'h2', 'l', { font: d.display }),
       ]),
     ], 2),
     page('note', 'Editorial note', 'More pages', [
-      image('Contents photograph', M, 66, C, 344),
+      image('Contents photograph', luxury ? M + C * 0.2 : M, 66, luxury ? C * 0.6 : C, 344),
       label('Section', 'A NOTE FROM THE EDITOR', M, 454, C),
-      text('Editorial note', 'Every collection begins with a way of looking. This one is about attention: to a gesture, a surface, a place.\n\nReplace these words with your introduction. Let your images lead, and give the moments between them room to breathe.', M, 504, C, 194, 13),
+      { ...text('Editorial note', 'Every collection begins with a way of looking. This one is about attention: to a gesture, a surface, a place.\n\nReplace these words with your introduction. Let your images lead, and give the moments between them room to breathe.', M, 504, C, 216, 13),
+        ...(zine ? { rot: -2 } : {}) },
     ], 3),
     page('opening-left', 'Opening spread · left', 'Openers', [
       label('Section', '01 / OPENING', M, 58, C),
-      heading('Opening headline', zine ? 'WAYS\nOF SEEING' : 'A way\nof seeing', M, zine ? 156 : 214, C, 280, zine ? 56 : 52),
+      ...(zine ? [{ kind: 'rect', name: 'Opening colour field', x: 0, y: 128, w: W, h: 390, fill: '#d9ed44' } as TItem] : []),
+      heading('Opening headline', zine ? 'WAYS\nOF SEEING' : mono ? 'Looking,\nagain' : 'A way\nof seeing', M, zine ? 156 : 214, C, 280, zine ? 48 : 52),
       rule(564), text('Opening introduction', d.deck + '\n\nAn opening thought, a fresh perspective. Introduce the story in a few considered lines.', M, 592, C, 132, 14),
     ], 4),
     page('opening-right', 'Opening spread · right', 'Openers', [
@@ -105,12 +111,12 @@ function pages(d: Direction): Template[] {
     ], 5),
     page('essay-left', 'Photo essay · left', 'Photo pages', [
       label('Section', '02 / PHOTO ESSAY', M, 54, C),
-      image('Essay photograph 1', M, mono ? 194 : 128, C, mono ? 346 : 490),
+      image('Essay photograph 1', mono ? 0 : M, mono ? 132 : 128, mono ? W : C, mono ? 438 : 490),
       text('Essay caption 1', '01. Describe what we see, and what lies just beyond the frame.', M, 648, C, 60, 9, 'caption', 'l', { font: d.label }),
     ], 6),
     page('essay-right', 'Photo essay · right', 'Photo pages', [
-      image('Essay photograph 2', M, 72, zine ? C * 0.72 : C, 280),
-      image('Essay photograph 3', zine ? M + C * 0.28 : M, 386, zine ? C * 0.72 : C, 280),
+      image('Essay photograph 2', M, 72, zine ? C * 0.72 : luxury ? C * 0.82 : C, 280),
+      image('Essay photograph 3', zine ? M + C * 0.28 : luxury ? M + C * 0.18 : M, 386, zine ? C * 0.72 : luxury ? C * 0.82 : C, 280),
       text('Essay caption 2', '02—03. A sequence, a contrast, a detail worth staying with.', M, 696, C, 40, 8, 'caption', 'l', { font: d.label }),
     ], 7),
     page('interview-left', 'Interview · portrait', 'More pages', [

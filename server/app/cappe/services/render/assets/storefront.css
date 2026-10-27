@@ -1,0 +1,135 @@
+/* Storefront art direction. The allowlisted template marker selects a layout;
+   colours and fonts remain the owner's editable theme tokens. */
+.cz-shop{--shop-space:clamp(1.25rem,4vw,3.5rem)}
+.cz-shop .cz-wrap{max-width:var(--container,84rem);padding-inline:var(--gutter,var(--shop-space))}
+.cz-shop .cz-header{background:var(--bg);backdrop-filter:none}
+.cz-shop .cz-header .cz-bar{padding:1.15rem var(--gutter,var(--shop-space));gap:1rem}
+.cz-shop .cz-brand{font-size:1.15rem;letter-spacing:-.04em;max-width:75%;overflow-wrap:anywhere}
+.cz-shop .cz-nav a{font-size:.75rem;color:var(--ink)}
+.cz-shop .cz-hero{padding:2.75rem 0 2rem;background:none;min-height:0}
+.cz-shop .cz-hero__title{max-width:none;overflow-wrap:anywhere;font-weight:500;line-height:.95;letter-spacing:-.065em}
+.cz-shop .cz-hero__eyebrow{font:500 .65rem/1.4 var(--font-b);letter-spacing:.17em;text-transform:uppercase;margin:0 0 1.2rem;padding:0;border:0;background:none;border-radius:0}
+.cz-shop .cz-hero__lead{max-width:28rem;font-size:1rem;line-height:1.65;margin:1rem 0 0}
+.cz-shop .cz-cta-row{margin-top:1.25rem}
+.cz-shop .cz-btn{font-size:.72rem;padding:.8rem 1.25rem;min-height:44px}
+.cz-shop .cz-store{padding:1rem 0 4rem;scroll-margin-top:5rem}
+.cz-shop .cz-head{max-width:none;display:flex;align-items:center;gap:1.25rem;text-align:left;margin:0 0 1.5rem}
+.cz-shop .cz-head:after{content:"";height:1px;flex:1;background:var(--line)}
+.cz-shop .cz-head h2{font:500 .65rem/1.5 var(--font-b);text-transform:uppercase;letter-spacing:.15em;flex-shrink:0;max-width:80%}
+.cz-shop .cz-head p{font-size:.85rem;margin:0}
+.cz-shop .cz-store-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:1.5rem;align-items:start}
+.cz-shop .cz-product{border:0;border-radius:0;background:transparent;box-shadow:none;overflow:visible;min-width:0}
+.cz-shop .cz-product:hover{border-color:transparent;box-shadow:none}
+.cz-shop article.cz-product{cursor:default}
+.cz-shop .cz-product__img{border-radius:0;aspect-ratio:4/5;object-fit:cover;transition:filter .3s}
+.cz-shop .cz-product__body{padding:.9rem 0;gap:.3rem}
+.cz-shop .cz-product h3{font:500 .85rem/1.45 var(--font-b);letter-spacing:-.02em}
+.cz-shop .cz-price{font:400 .8rem/1.5 var(--font-b);color:var(--muted)}
+.cz-shop .cz-footer{padding:2rem 0;border-top:1px solid var(--line);text-align:left}
+.cz-shop .cz-footer p{font-size:.72rem}
+.cz-shop :focus-visible{outline:2px solid var(--brand);outline-offset:5px}
+/* These product-first layouts reveal immediately, including inside a frame. */
+.cz-shop.cz-js main>section:not(.cz-rv){opacity:1;transform:none}
+.cz-shop.cz-premium::before,.cz-shop.cz-premium::after{display:none}
+
+/* STUDIO — warm paper, expressive serif, staggered photographic rhythm. */
+.cz-shop--studio .cz-header{border-bottom:0}
+.cz-shop--studio .cz-brand{font-family:var(--font-h);font-weight:500;font-size:1.35rem}
+.cz-shop--studio .cz-hero .cz-wrap{display:grid;grid-template-columns:1.45fr 1fr;column-gap:4rem}
+.cz-shop--studio .cz-hero__eyebrow{grid-column:1/-1}
+.cz-shop--studio .cz-hero__title{grid-column:1;grid-row:2/4;font-size:clamp(3.5rem,7.8vw,7rem);max-width:13ch}
+.cz-shop--studio .cz-hero__lead{grid-column:2;grid-row:2;align-self:end;max-width:23rem;margin:0}
+.cz-shop--studio .cz-cta-row{grid-column:2;grid-row:3;align-self:start}
+.cz-shop--studio .cz-btn{border-radius:999px;font-weight:400}
+.cz-shop--studio .cz-store-grid{grid-template-columns:1.2fr 1fr 1fr;gap:clamp(1rem,3vw,2.5rem)}
+.cz-shop--studio .cz-product:nth-child(3n+2){margin-top:3rem}
+.cz-shop--studio .cz-product:nth-child(3n+3){margin-top:6rem}
+.cz-shop--studio .cz-product__img{border-radius:3px}
+.cz-shop--studio .cz-product h3{font-family:var(--font-h);font-size:1.1rem;font-weight:400}
+
+/* EDIT — a typographic masthead and an asymmetric gallery, precise and spare. */
+.cz-shop--edit .cz-header{border-bottom:1px solid var(--ink)}
+.cz-shop--edit .cz-brand{font-weight:700;text-transform:uppercase;font-size:.9rem;letter-spacing:-.05em}
+.cz-shop--edit .cz-nav{font-family:monospace}
+.cz-shop--edit .cz-hero{padding:2rem 0 1.75rem}
+.cz-shop--edit .cz-hero .cz-wrap{display:grid;grid-template-columns:1fr auto;align-items:center;gap:0 2rem}
+.cz-shop--edit .cz-hero__eyebrow{grid-column:1/-1;font-family:monospace;letter-spacing:.05em}
+.cz-shop--edit .cz-hero__title{grid-column:1/-1;font-size:clamp(4rem,12vw,11rem);font-weight:700;text-transform:uppercase;letter-spacing:-.085em;line-height:.9}
+.cz-shop--edit .cz-hero__lead{font-size:.85rem;margin-top:1.5rem;max-width:32rem}
+.cz-shop--edit .cz-cta-row{justify-self:end;margin-top:1.5rem}
+.cz-shop--edit .cz-btn{border-radius:0;background:var(--ink);color:var(--bg);font-family:monospace;letter-spacing:-.02em}
+.cz-shop--edit .cz-head{padding-top:1rem;border-top:1px solid var(--ink);margin-bottom:1rem}
+.cz-shop--edit .cz-head:after{display:none}
+.cz-shop--edit .cz-head h2{font-family:monospace;letter-spacing:.03em}
+.cz-shop--edit .cz-store-grid{grid-template-columns:repeat(4,minmax(0,1fr));gap:1.25rem;counter-reset:objects}
+.cz-shop--edit .cz-product{counter-increment:objects}
+.cz-shop--edit .cz-product:first-child{grid-column:span 2}
+.cz-shop--edit .cz-product:first-child .cz-product__img{aspect-ratio:5/4}
+.cz-shop--edit .cz-product:not(:first-child) .cz-product__img{aspect-ratio:5/8}
+.cz-shop--edit .cz-product__body{border-top:1px solid var(--ink);margin-top:.65rem;padding-top:.65rem;position:relative;padding-right:1.8rem}
+.cz-shop--edit .cz-product__body:after{content:counter(objects,decimal-leading-zero);position:absolute;right:0;top:.7rem;font:400 .6rem/1.4 monospace;color:var(--muted)}
+.cz-shop--edit .cz-product h3{font-size:.8rem;font-weight:600}
+.cz-shop--edit .cz-price{font-family:monospace;font-size:.7rem}
+
+/* POP — electric ink, a punchy banner and tactile, playful product cards. */
+.cz-shop--pop .cz-header{border-bottom:2px solid var(--brand)}
+.cz-shop--pop .cz-brand{font-weight:700;letter-spacing:-.06em}
+.cz-shop--pop .cz-hero{padding:2.25rem 0 2rem;background:var(--brand);color:var(--brand-fg);overflow:hidden}
+.cz-shop--pop .cz-hero .cz-wrap{position:relative;padding-right:clamp(5rem,20vw,19rem)}
+.cz-shop--pop .cz-hero .cz-wrap:after{content:"✳";position:absolute;right:var(--shop-space);top:50%;transform:translateY(-50%) rotate(12deg);font:400 clamp(5rem,17vw,15rem)/1 sans-serif;color:var(--accent);pointer-events:none}
+.cz-shop--pop .cz-hero__eyebrow{display:inline-block;background:var(--accent);color:var(--ink);border-radius:999px;padding:.35rem .7rem;letter-spacing:.04em;font-size:.6rem}
+.cz-shop--pop .cz-hero__title{font-size:clamp(3.25rem,7.5vw,7.5rem);font-weight:700;letter-spacing:-.075em;max-width:13ch}
+.cz-shop--pop .cz-hero__lead{color:var(--brand-fg);opacity:.85;max-width:30rem;font-size:.9rem}
+.cz-shop--pop .cz-btn{background:var(--accent);color:var(--ink);border-radius:999px;border:0;font-weight:700}
+.cz-shop--pop .cz-store{padding-top:2rem;overflow:hidden}
+.cz-shop--pop .cz-head{margin-bottom:2rem}
+.cz-shop--pop .cz-head h2{font-weight:700;letter-spacing:-.035em;text-transform:none;font-size:1.3rem}
+.cz-shop--pop .cz-store-grid{gap:2rem;padding:.4rem .5rem 1rem}
+.cz-shop--pop .cz-product{background:var(--bg);border:2px solid var(--brand);border-radius:1rem;overflow:hidden;box-shadow:5px 6px 0 var(--brand);transform:rotate(-2deg)}
+.cz-shop--pop .cz-product:nth-child(3n+2){transform:rotate(2deg);margin-top:1.2rem}
+.cz-shop--pop .cz-product:nth-child(3n+3){transform:rotate(-1deg)}
+.cz-shop--pop a.cz-product:hover,.cz-shop--pop button.cz-product:hover{transform:rotate(0) translateY(-5px);box-shadow:7px 10px 0 var(--brand)}
+.cz-shop--pop .cz-product__img{aspect-ratio:1;border-bottom:2px solid var(--brand)}
+.cz-shop--pop .cz-product__body{padding:1rem}
+.cz-shop--pop .cz-product h3{font-weight:700}
+.cz-shop--pop .cz-price{color:var(--ink)}
+
+/* Honest with one product, spacious with many, usable on a phone. */
+.cz-shop .cz-store-grid:has(>.cz-product:only-child){grid-template-columns:minmax(0,36rem);justify-content:center}
+.cz-shop .cz-product:only-child{grid-column:auto;margin:0;transform:none}
+.cz-shop .cz-product:only-child .cz-product__img{aspect-ratio:4/3}
+@media(max-width:700px){
+  .cz-shop .cz-header .cz-bar{padding-block:.9rem}
+  .cz-shop .cz-hero{padding:1.75rem 0}
+  .cz-shop .cz-hero__title{font-size:clamp(2.6rem,11vw,4.25rem)}
+  .cz-shop .cz-hero__lead{font-size:.85rem}
+  .cz-shop .cz-head{margin-bottom:1rem;gap:.75rem}
+  .cz-shop .cz-head h2{font-size:.6rem}
+  .cz-shop .cz-store-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem}
+  .cz-shop .cz-product h3{font-size:.8rem}
+  .cz-shop .cz-price{font-size:.75rem}
+  .cz-shop--studio .cz-hero .cz-wrap{display:block}
+  .cz-shop--studio .cz-hero__lead{margin-top:1rem}
+  .cz-shop--studio .cz-product:nth-child(3n+2),.cz-shop--studio .cz-product:nth-child(3n+3){margin:0}
+  .cz-shop--studio .cz-product:first-child{grid-column:1/-1}
+  .cz-shop--studio .cz-product:first-child .cz-product__img{aspect-ratio:4/3}
+  .cz-shop--edit .cz-hero .cz-wrap{display:block}
+  .cz-shop--edit .cz-hero__title{font-size:clamp(3rem,14vw,6rem)}
+  .cz-shop--edit .cz-product:first-child{grid-column:1/-1}
+  .cz-shop--edit .cz-product:not(:first-child) .cz-product__img{aspect-ratio:4/5}
+  .cz-shop--pop .cz-hero .cz-wrap{padding-right:5rem}
+  .cz-shop--pop .cz-hero .cz-wrap:after{right:.5rem;font-size:4.5rem;top:32%}
+  .cz-shop--pop .cz-hero__eyebrow{font-size:.5rem;letter-spacing:0}
+  .cz-shop--pop .cz-hero__title{font-size:clamp(2.75rem,12vw,5rem)}
+  .cz-shop--pop .cz-head h2{font-size:1.05rem}
+  .cz-shop--pop .cz-store-grid{gap:1rem;padding-inline:.35rem}
+  .cz-shop--pop .cz-product{box-shadow:3px 4px 0 var(--brand);border-radius:.7rem}
+  .cz-shop--pop .cz-product__body{padding:.65rem}
+  .cz-shop--pop .cz-product:last-child:nth-child(odd):not(:only-child){grid-column:1/-1}
+  .cz-shop--pop .cz-product:last-child:nth-child(odd):not(:only-child) .cz-product__img{aspect-ratio:4/3}
+  .cz-shop .cz-store-grid:has(>.cz-product:only-child){grid-template-columns:minmax(0,1fr)}
+  .cz-shop .cz-product:only-child{grid-column:1/-1}
+}
+@media(prefers-reduced-motion:reduce){
+  .cz-shop .cz-product,.cz-shop .cz-product__img{transition:none}
+}

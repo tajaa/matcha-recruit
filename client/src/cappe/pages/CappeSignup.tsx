@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { Loader2, Store, User, Sparkles, MailCheck, Gift } from 'lucide-react'
+import { Loader2, Store, User, Sparkles, MailCheck, Gift, Newspaper } from 'lucide-react'
 import { CappeApiError, cappePublicGet, cappePublicPost, setCappeTokens } from '../api'
 import { invalidateCappeMeCache } from '../hooks/useCappeMe'
 import { creatorPaths } from '../creators/creatorPaths'
@@ -21,7 +21,7 @@ const ACCOUNT_TYPES: {
     value: 'business',
     icon: Store,
     title: 'A business',
-    blurb: 'A shop, studio or restaurant — sell products and take orders.',
+    blurb: 'A shop, studio, restaurant or online store — sell products and take orders.',
   },
   {
     value: 'personal',
@@ -34,6 +34,12 @@ const ACCOUNT_TYPES: {
     icon: Sparkles,
     title: 'A creator',
     blurb: 'Influencer or content creator — get discovered, get brand deals, get paid.',
+  },
+  {
+    value: 'writer',
+    icon: Newspaper,
+    title: 'A writer',
+    blurb: 'Publish your own photo magazine — stories, issues and paid readers.',
   },
 ]
 
@@ -48,7 +54,7 @@ export default function CappeSignup({ creatorOnly = false, brandOnly = false, wr
   const navigate = useNavigate()
   const [params] = useSearchParams()
   const [accountType, setAccountType] = useState<CappeAccountType>(
-    readerOnly ? 'reader' : writerOnly ? 'writer' : creatorOnly || params.get('type') === 'creator' ? 'creator' : 'business',
+    readerOnly ? 'reader' : writerOnly || params.get('type') === 'writer' ? 'writer' : creatorOnly || params.get('type') === 'creator' ? 'creator' : 'business',
   )
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
@@ -56,6 +62,8 @@ export default function CappeSignup({ creatorOnly = false, brandOnly = false, wr
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [sentTo, setSentTo] = useState<string | null>(null)
+  // A writer picked on the general page goes where the writer page sends them.
+  const writer = writerOnly || accountType === 'writer'
   // A paid plan picked on the pricing cards. The server keeps it across the
   // email-confirmation hop; creators and brands have their own signup pages.
   // A grant link (/signup?grant=…) gives a paid plan free for a while, so it
@@ -70,7 +78,7 @@ export default function CappeSignup({ creatorOnly = false, brandOnly = false, wr
   const [grantDead, setGrantDead] = useState<string | null>(null)
   // A writer names their magazine first and picks a plan when it goes live;
   // a reader has no plan.
-  const plan = !grantToken && !creatorOnly && !brandOnly && !writerOnly && !readerOnly && /^[a-z0-9_]{1,40}$/.test(params.get('plan') ?? '') ? params.get('plan') : null
+  const plan = !grantToken && !creatorOnly && !brandOnly && !writer && !readerOnly && /^[a-z0-9_]{1,40}$/.test(params.get('plan') ?? '') ? params.get('plan') : null
   const interval = params.get('interval') === 'year' ? 'year' : 'month'
   // A reader sent here from a magazine keeps where they were going.
   const signInPath = params.get('next') ? `${readerPaths.login}?next=${encodeURIComponent(params.get('next') ?? '')}` : readerPaths.login
@@ -113,7 +121,7 @@ export default function CappeSignup({ creatorOnly = false, brandOnly = false, wr
         navigate(
           creatorOnly ? creatorPaths.home
             : brandOnly ? creatorPaths.brandHome
-            : writerOnly ? writerPaths.home
+            : writer ? writerPaths.home
             : readerOnly ? readerNext(params.get('next'))
               : res.intended_plan && res.account?.account_type !== 'creator'
                 ? billingStartPath(res.intended_plan, res.intended_interval)
@@ -162,7 +170,7 @@ export default function CappeSignup({ creatorOnly = false, brandOnly = false, wr
               Wrong address? Go back and fix it
             </button>
           </div>
-          <Link to={creatorOnly ? creatorPaths.login : brandOnly ? creatorPaths.brandLogin : writerOnly ? writerPaths.login : readerOnly ? readerPaths.login : '/cappe/login'} className="mt-6 inline-block text-sm font-medium text-lime-400 hover:text-lime-300">
+          <Link to={creatorOnly ? creatorPaths.login : brandOnly ? creatorPaths.brandLogin : writer ? writerPaths.login : readerOnly ? readerPaths.login : '/cappe/login'} className="mt-6 inline-block text-sm font-medium text-lime-400 hover:text-lime-300">
             Back to sign in
           </Link>
         </div>
@@ -188,7 +196,7 @@ export default function CappeSignup({ creatorOnly = false, brandOnly = false, wr
         <form onSubmit={onSubmit} className="space-y-4 rounded-2xl border border-zinc-800 bg-zinc-900 p-6 shadow-xl shadow-black/40">
           {!creatorOnly && !brandOnly && !writerOnly && !readerOnly && <div>
             <label className="mb-2 block text-sm font-medium text-zinc-300">I'm building a site for…</label>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               {ACCOUNT_TYPES.map(({ value, icon: Icon, title, blurb }) => {
                 const active = accountType === value
                 return (

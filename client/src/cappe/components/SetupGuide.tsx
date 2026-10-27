@@ -4,6 +4,7 @@ import { Check, Copy, Rocket, Loader2, RotateCw, Sparkles, ArrowRight, CircleAle
 import { cappeApi } from '../api'
 import { cappeSiteHost } from '../host'
 import type { CappePage, CappeReadiness, CappeSite } from '../types'
+import { readinessActionPath } from '../utils/readinessAction'
 
 interface SetupGuideProps {
   site: CappeSite
@@ -46,23 +47,7 @@ export default function SetupGuide({ site, pages, publishing, onPublish, refresh
   const url = `https://${host}`
   const homePageId = pages[0]?.id
 
-  // Map a readiness action to a destination in the dashboard.
-  function actionTo(action: string | null): string {
-    switch (action) {
-      case 'shop': return `/cappe/sites/${site.id}/shop`
-      case 'pages': return homePageId ? `/cappe/sites/${site.id}/pages/${homePageId}` : `/cappe/sites/${site.id}`
-      case 'settings': return `/cappe/sites/${site.id}`
-      // The commerce items: the Shop page's settings cards, and Orders for Stripe.
-      case 'policies': case 'shipping': case 'tax': case 'identity':
-        return `/cappe/sites/${site.id}/shop#${action}`
-      case 'payments': return `/cappe/sites/${site.id}/orders`
-      // A magazine site's checklist (services/readiness.py).
-      case 'stories': return `/cappe/sites/${site.id}/stories`
-      case 'magazine': return `/cappe/sites/${site.id}/magazine`
-      case 'billing': return '/cappe/billing'
-      default: return `/cappe/sites/${site.id}`
-    }
-  }
+  const actionTo = (action: string | null) => readinessActionPath(site.id, action, homePageId)
 
   // Page-editing tasks (intro/about, sell-on-page, contact) need a page to open.
   // Blank sites historically shipped with none, so the 'pages' deep link

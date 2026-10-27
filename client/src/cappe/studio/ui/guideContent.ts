@@ -30,6 +30,7 @@ export const GUIDE: GuideSection[] = [
       + 'pictures in picture frames, and you place each one exactly where you want it. Readers see your pages just as '
       + 'you laid them out, scaled to their screen.',
     points: [
+      'Starting a writer account? Name your magazine and choose an editorial design during setup. Your first ten-page draft opens here, with your name on the cover and empty picture frames. Browse the pages, replace the sample words and add your own photos. Nothing is public until you publish; choose a magazine plan when you are ready.',
       'Everything you change saves by itself a moment later, and ⌘Z undoes it.',
       'Use the contents on the left to jump to any part of the Studio. You can open this guide again from Help → How the Studio works, or the ? at the top right.',
     ],
@@ -70,7 +71,7 @@ export const GUIDE: GuideSection[] = [
     id: 'add', group: 'Make', icon: Shapes, title: 'Add things from the side panel',
     body: 'The tabs at the far left hold what you can put on a page. Click a thing to add it to the middle of the page you’re on, or drag it to the spot you want. Click a tab again (or the « at its top) to fold the panel away.',
     points: [
-      'Templates opens on Collections: coordinated designs from cover to credits (see Editorial collections below). Single pages has individual covers, openers, story pages, photo pages, contents, an interview, a list and a back page. On a blank page a single template lays out that page; otherwise it adds a new page after it. Fill its picture frames and type over its words. One undo removes the layout.',
+      'Templates opens on Collections: coordinated designs from cover to credits (see Editorial collections below). Single pages has individual covers, openers, story pages, photo pages, contents, an interview, a list and a back page. On a blank page a single template lays out that page; otherwise it adds a new page after it. Sample photos appear only in previews. Fill its picture frames and type over its words. One undo removes the layout.',
       'Elements: shapes, lines, picture frames and colour blocks, and over 3,500 graphics: icons, stickers, badges, dividers and patterns, with Gummfit’s own picks first (From Gummfit). Search them all at the top; See all opens a whole group. A colour block, a whole-page frame or a pattern goes behind everything, edge to edge.',
       'Select a one-colour graphic (a shape, icon, badge, divider or pattern) and its Look, in the Object panel, changes its colour and whether it keeps its shape, stretches or repeats. Stickers keep their own colours.',
       'Text: a heading, a subheading or body text, the small styles (kicker, pull quote, caption), and font pairings set together in one frame. Double-click it on the page to type your own words.',
@@ -97,7 +98,7 @@ export const GUIDE: GuideSection[] = [
     points: [
       'Quiet Form is restrained fashion editorial; Off Register an experimental art zine; Still Light a photographic monograph; Maison a luxury lookbook. Each has ten editable pages: a cover, contents and editorial note, facing opening and photo-essay spreads, a two-page interview, and credits.',
       'Explore a collection to see every page and its type pairing. Use all pages starts a blank story with the collection, or inserts it after the spread in view. Blank pages are added when needed to keep the cover on the right and preserve your existing facing spreads. Your page size is used. Existing pages and their text stay in the story.',
-      'Fill the picture frames from Photos or Yours, and type over the sample words. The layouts are ordinary frames: move them, change the type, link text, and make the design your own. One ⌘Z undoes adding the whole collection. If the story would exceed its save limits, nothing is added.',
+      'The previews use illustrative sample photography and the Studio’s display and width cuts to show each design’s character. Sample photos are never added to your story or library. Your pages start with empty photo frames: fill them from Photos or Yours, and type over the sample words. The layouts are ordinary frames: move them, change the type, link text, and make the design your own. One ⌘Z undoes adding the whole collection. If the story would exceed its save limits, nothing is added.',
       'Save these pages stores your current pages as a named collection (up to 32 pages and 50 saved collections). It keeps type, spacing, words, shapes and guides. Photos become empty frames, and subscriber access settings stay with the source story. Saved collections are available across your account’s magazines.',
       'Open one of Your collections to preview and reuse it, or remove it from the library. Removing it never removes pages already added to a story.',
       'Saving and removing a collection keep running while you use another panel. Return to Collections to see the result. If a save loses its connection, retrying the same design completes that save without creating another copy.',

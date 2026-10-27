@@ -6,6 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from .shop import CappeProduct
 from ._validators import (
     MAX_SNAPSHOT_BYTES, app_url_scheme, assert_json_size, iana_timezone,
     ship_country as country_code, store_currency,
@@ -294,6 +295,8 @@ class CappePagePreview(_SnapshotSizeLimit):
     meta_config: Optional[dict[str, Any]] = None
     # When true, render with the canvas selection/edit runtime (Business editor).
     editable: bool = False
+    # Owner-only, inert storefront preview. Draft products never reach public APIs.
+    include_draft_products: bool = False
 
 
 class CappePage(BaseModel):
@@ -325,11 +328,48 @@ class CappeTemplateSummary(BaseModel):
     pages: list[dict[str, str]] = Field(default_factory=list)  # [{slug, title}] for the preview tabs
 
 
+class CappeQuickStoreProduct(BaseModel):
+    """The first product of a store made in one step. A physical good: a
+    digital one needs its file, which the Shop page asks for."""
+    name: str = Field(min_length=1, max_length=255)
+    price_cents: int = Field(ge=0, le=100_000_000)
+    description: Optional[str] = Field(default=None, max_length=2000)
+    # None = no count kept (made to order, or plenty); a number tracks stock.
+    inventory: Optional[int] = Field(default=None, ge=0, le=1_000_000)
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def trim_name(cls, value: Any) -> Any:
+        # Apply the length bounds to the name that will actually be stored.
+        return value.strip() if isinstance(value, str) else value
+
+
+class CappeQuickStoreCreate(BaseModel):
+    """`POST /sites/quick-store`: an online store with its first product."""
+    name: str = Field(min_length=1, max_length=255)
+    # One line under the store's name on its home page; none = no line.
+    tagline: Optional[str] = Field(default=None, max_length=200)
+    timezone: Optional[str] = Field(default=None, max_length=64)
+    template_slug: str = Field(default="online-studio", max_length=160, pattern=r"^[a-z0-9-]+$")
+    # None = make the store now and add the product later (a plan that
+    # doesn't sell physical goods yet).
+    product: Optional[CappeQuickStoreProduct] = None
+    _tz = field_validator("timezone")(iana_timezone)
+
+
+class CappeQuickStore(BaseModel):
+    site: CappeSite
+    product: Optional[CappeProduct] = None
+
+
 __all__ = [
     "MAX_SNAPSHOT_BYTES",
     "normalize_custom_domain",
     "CappeSiteCreate",
     "CappeSiteFromTemplate",
+    "CappeQuickStoreProduct",
+    "CappeQuickStoreCreate",
+    "CappeQuickStore",
     "CappeSiteUpdate",
     "CappeReadinessItem",
     "CappeReadiness",

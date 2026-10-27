@@ -1774,6 +1774,8 @@ export type CappeMagazineOptions = {
   mastheads: { key: MastheadStyle; heading: string; body: string }[]
 }
 
+export type CappeMagazineStartResult = { site: CappeSite; post_id: string }
+
 export type CappeHandleCheck = { handle: string; available: boolean; reason: string | null }
 
 /** A story sent to a magazine's followers (cappemag04). */

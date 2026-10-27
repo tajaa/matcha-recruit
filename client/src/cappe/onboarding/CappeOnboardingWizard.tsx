@@ -1,24 +1,27 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { Loader2, MapPin, MapPinned, ArrowRight, ArrowLeft } from 'lucide-react'
+import { Link, useNavigate } from 'react-router-dom'
+import { Loader2, Globe, ImagePlus, MapPin, MapPinned, ArrowRight, ArrowLeft } from 'lucide-react'
 import { cappeApi, fetchCappeTemplateCategories } from '../api'
-import TemplateGallery from '../components/TemplateGallery'
+import TemplateGallery, { TemplatePreview } from '../components/TemplateGallery'
 import { useCappeMe } from '../hooks/useCappeMe'
 import { CAPPE_HOST } from '../host'
 import { creatorPaths } from '../creators/creatorPaths'
 import { subdomainPreview } from '../utils/slug'
-import type { CappeSite, CappeLocation, CappeTemplateSummary } from '../types'
+import { isPremiumPlan } from '../utils/plan'
+import type { CappeEntitlements, CappeLocation, CappeProduct, CappeSite, CappeTemplateSummary } from '../types'
 
 // Post-signup business-setup wizard. account_type is already chosen at signup;
 // this asks the questions that shape the rest of the product — single vs
-// multi-location, the name, what kind of business it is — then how to start:
+// multi-location (or online only), the name, what kind of business it is — then how to start:
 // blank or from a template. The category is asked ONCE here and used twice:
 // it sorts the template shelf and seeds the Discover listing, so nobody is
 // asked again on the directory card. The template choice has to live here: the
 // Free plan includes one site, so a wizard that only made blank sites spent it
 // before the gallery was reachable. Mounted at /cappe/onboarding inside
 // CappeLayout; CappeSites redirects here on first run (zero sites).
-type Mode = 'single' | 'multi'
+// Online sellers get a designed draft storefront immediately; product details
+// can be completed later, before products and the site are published.
+type Mode = 'online' | 'single' | 'multi'
 type Step = 1 | 2 | 3 | 4
 type Category = { slug: string; label: string }
 
@@ -46,6 +49,15 @@ export default function CappeOnboardingWizard() {
   // Which template is being cloned, when the site is not starting blank.
   const [templateSlug, setTemplateSlug] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // The quick store's line and first product.
+  const [tagline, setTagline] = useState('')
+  const [storeTemplate, setStoreTemplate] = useState('online-studio')
+  const [storeTemplates, setStoreTemplates] = useState<CappeTemplateSummary[]>([])
+  const [product, setProduct] = useState({ name: '', price: '', stock: '' })
+  const [photo, setPhoto] = useState<File | null>(null)
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null)
+  // What the plan sells; null until known (the server checks again).
+  const [plan, setPlan] = useState<CappeEntitlements | null>(null)
 
   useEffect(() => {
     let alive = true
@@ -57,6 +69,18 @@ export default function CappeOnboardingWizard() {
     return () => { alive = false }
   }, [])
 
+  useEffect(() => {
+    if (mode !== 'online') return
+    let alive = true
+    cappeApi.get<CappeEntitlements>('/billing/entitlements').then((p) => { if (alive) setPlan(p) }).catch(() => {})
+    cappeApi.get<CappeTemplateSummary[]>('/templates').then((templates) => {
+      if (alive) setStoreTemplates(templates.filter((t) => t.tags.includes('online-store')))
+    }).catch(() => {})
+    return () => { alive = false }
+  }, [mode])
+
+  useEffect(() => () => { if (photoUrl) URL.revokeObjectURL(photoUrl) }, [photoUrl])
+
   if (account?.account_type === 'creator') {
     return (
       <div className="flex min-h-full items-center justify-center bg-zinc-950">
@@ -66,6 +90,50 @@ export default function CappeOnboardingWizard() {
   }
 
   const personal = account?.account_type === 'personal'
+  const online = mode === 'online'
+  // Unknown counts as yes: the server refuses a plan that can't, and says why.
+  const sellsGoods = !plan || plan.allowed_fulfillment.includes('physical')
+  const priceCents = Math.round(Number(product.price) * 100)
+  const productReady = product.name.trim() !== '' && product.price.trim() !== ''
+    && Number.isFinite(priceCents) && priceCents >= 0
+    && (product.stock.trim() === '' || /^\d+$/.test(product.stock.trim()))
+
+  async function finishStore(withProduct: boolean) {
+    if (!name.trim() || submitting) return
+    setSubmitting(true)
+    setError(null)
+    try {
+      const res = await cappeApi.post<{ site: CappeSite; product: CappeProduct | null }>('/sites/quick-store', {
+        name: name.trim(),
+        tagline: tagline.trim() || null,
+        timezone: browserTimezone(),
+        template_slug: storeTemplate,
+        product: withProduct
+          ? {
+              name: product.name.trim(),
+              price_cents: priceCents,
+              inventory: product.stock.trim() === '' ? null : Number(product.stock.trim()),
+            }
+          : null,
+      })
+      // The photo goes up once the store exists (uploads belong to a site).
+      // Best-effort: the store is made, and the ready page offers the photo.
+      if (photo && res.product) {
+        try {
+          const fd = new FormData()
+          fd.append('file', photo)
+          const up = await cappeApi.upload<{ url: string }>(`/sites/${res.site.id}/upload`, fd)
+          await cappeApi.put(`/sites/${res.site.id}/products/${res.product.id}`, { image_url: up.url })
+        } catch {
+          /* the ready page shows the product without its photo */
+        }
+      }
+      navigate(`/cappe/sites/${res.site.id}/ready`, { replace: true })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not create your store. Try again.')
+      setSubmitting(false)
+    }
+  }
   const slugPreview = subdomainPreview(name)
   const categoryChoices = (categories ?? []).filter((c) => !personal || PERSONAL_CATEGORIES.has(c.slug))
 
@@ -122,10 +190,16 @@ export default function CappeOnboardingWizard() {
 
   const MODES: { value: Mode; icon: typeof MapPin; title: string; blurb: string }[] = [
     {
+      value: 'online',
+      icon: Globe,
+      title: 'Online only',
+      blurb: 'No storefront. You sell and ship online, or work remotely.',
+    },
+    {
       value: 'single',
       icon: MapPin,
       title: 'One location',
-      blurb: 'A single shop, studio or office. One set of hours, one map.',
+      blurb: 'A single shop, studio or office customers visit. One set of hours, one map.',
     },
     {
       value: 'multi',
@@ -137,19 +211,22 @@ export default function CappeOnboardingWizard() {
 
   const TITLES: Record<Step, string> = {
     1: `Hi${account?.name ? ` ${account.name.split(' ')[0]}` : ''} — let's set up`,
-    2: 'Name your business',
-    3: personal ? "What's the site for?" : 'What kind of business is it?',
+    2: online ? 'Name your store' : 'Name your business',
+    3: online ? 'Make it your store' : personal ? "What's the site for?" : 'What kind of business is it?',
     4: 'How do you want to start?',
   }
   const BLURBS: Record<Step, string> = {
     1: 'A couple of quick questions so we can shape everything around how you work.',
     2: 'This becomes your web address. You can change it later.',
-    3: personal
+    3: online
+      ? 'Choose a look and optionally add a product. Everything starts as a private draft.'
+      : personal
       ? "We'll put the templates made for it first."
       : "We'll put the templates made for it first, and list you under it in Discover.",
     4: 'Pick a design to start from, or begin with an empty site. Either way, everything is editable.',
   }
-  const width = step === 4 ? 'max-w-4xl' : step === 3 ? 'max-w-xl' : 'max-w-md'
+  const width = step === 4 ? 'max-w-4xl' : step === 3 ? 'max-w-2xl' : 'max-w-md'
+  const steps: Step[] = online ? [1, 2, 3] : [1, 2, 3, 4]
 
   return (
     <div className="flex min-h-full items-center justify-center bg-zinc-950 py-8 bg-[radial-gradient(60rem_40rem_at_50%_-10%,rgba(198,241,107,0.08),transparent)] px-4">
@@ -166,7 +243,7 @@ export default function CappeOnboardingWizard() {
           {step === 1 ? (
             <>
               <label className="mb-3 block text-sm font-medium text-zinc-300">
-                Do you have one location, or more than one?
+                Where do customers find you?
               </label>
               <div className="grid gap-2">
                 {MODES.map(({ value, icon: Icon, title, blurb }) => {
@@ -207,14 +284,14 @@ export default function CappeOnboardingWizard() {
               }}
             >
               <label htmlFor="cappe-onboarding-name" className="mb-1 block text-sm font-medium text-zinc-300">
-                {personal ? 'Your name or business name' : 'Business name'}
+                {online ? 'Store name' : personal ? 'Your name or business name' : 'Business name'}
               </label>
               <input
                 id="cappe-onboarding-name"
                 autoFocus
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. Lumière Skincare Spa"
+                placeholder={online ? 'e.g. Tide & Thread' : 'e.g. Lumière Skincare Spa'}
                 maxLength={255}
                 className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 outline-none focus:border-lime-400 focus:ring-1 focus:ring-lime-400"
               />
@@ -226,6 +303,23 @@ export default function CappeOnboardingWizard() {
                   </>
                 )}
               </p>
+
+              {online && (
+                <div className="mt-4">
+                  <label htmlFor="cappe-onboarding-tagline" className="mb-1 block text-sm font-medium text-zinc-300">
+                    What do you sell? <span className="font-normal text-zinc-500">(optional)</span>
+                  </label>
+                  <input
+                    id="cappe-onboarding-tagline"
+                    value={tagline}
+                    onChange={(e) => setTagline(e.target.value)}
+                    placeholder="e.g. Hand-thrown mugs and bowls, made in Oakland"
+                    maxLength={200}
+                    className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 outline-none focus:border-lime-400 focus:ring-1 focus:ring-lime-400"
+                  />
+                  <p className="mt-1.5 text-xs text-zinc-500">One line under your name on the store's front page.</p>
+                </div>
+              )}
 
               {mode === 'multi' && (
                 <div className="mt-4">
@@ -257,6 +351,137 @@ export default function CappeOnboardingWizard() {
                   Continue <ArrowRight className="h-4 w-4" />
                 </button>
               </div>
+            </form>
+          ) : step === 3 && online ? (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault()
+                if (productReady && sellsGoods) void finishStore(true)
+              }}
+            >
+              <fieldset className="mb-6">
+                <legend className="mb-3 text-sm font-medium text-zinc-200">Start with a store design</legend>
+                <div className="grid grid-cols-3 gap-2 sm:gap-3">
+                  {(storeTemplates.length ? storeTemplates : [{ slug: 'online-studio', name: 'Studio' }]).map((t) => (
+                    <button key={t.slug} type="button" aria-pressed={storeTemplate === t.slug}
+                      aria-label={`Choose ${t.name}`} disabled={submitting} onClick={() => setStoreTemplate(t.slug)}
+                      className={`overflow-hidden rounded-xl border bg-zinc-900 text-left transition-shadow ${storeTemplate === t.slug ? 'border-lime-400 ring-1 ring-lime-400 shadow-lg shadow-lime-400/10' : 'border-zinc-700 hover:border-zinc-500'}`}>
+                      <TemplatePreview slug={t.slug} name={t.name} premium={isPremiumPlan(account?.plan)} />
+                      <span className="flex items-center justify-between gap-1 p-2 text-xs font-medium text-zinc-200 sm:px-3">
+                        {t.name.replace(' — Online shop', '')}
+                        <span aria-hidden="true" className={`h-2 w-2 shrink-0 rounded-full ${storeTemplate === t.slug ? 'bg-lime-400' : 'bg-zinc-600'}`} />
+                      </span>
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-2 text-xs text-zinc-500">No address, opening hours or physical storefront needed. You can change the design later.</p>
+              </fieldset>
+              <h2 className="mb-3 text-sm font-medium text-zinc-200">Your first product <span className="font-normal text-zinc-500">(optional)</span></h2>
+              {!sellsGoods ? (
+                <div className="rounded-xl border border-amber-500/30 bg-amber-500/[0.06] p-4 text-sm leading-relaxed text-zinc-300">
+                  Physical products are sold on the Business plan. Your {plan?.plan_name} plan sells downloads,
+                  services and bookings.{' '}
+                  <Link to="/cappe/billing" className="font-medium text-lime-400 hover:text-lime-300">See plans</Link>
+                </div>
+              ) : (
+                <div className="grid gap-4 sm:grid-cols-[8rem_1fr]">
+                  <label className="flex aspect-square cursor-pointer flex-col items-center justify-center gap-1 overflow-hidden rounded-xl border border-dashed border-zinc-600 bg-zinc-950 text-xs text-zinc-500 hover:border-lime-400">
+                    {photoUrl ? (
+                      <img src={photoUrl} alt="" className="h-full w-full object-cover" />
+                    ) : (
+                      <>
+                        <ImagePlus className="h-5 w-5" />
+                        Add a photo
+                      </>
+                    )}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      aria-label="Product photo"
+                      className="sr-only"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0] ?? null
+                        setPhoto(f)
+                        setPhotoUrl(f ? URL.createObjectURL(f) : null)
+                      }}
+                    />
+                  </label>
+                  <div className="space-y-3">
+                    <div>
+                      <label htmlFor="cappe-product-name" className="mb-1 block text-sm font-medium text-zinc-300">Product name</label>
+                      <input
+                        id="cappe-product-name"
+                        autoFocus
+                        value={product.name}
+                        onChange={(e) => setProduct({ ...product, name: e.target.value })}
+                        placeholder="e.g. Speckled mug"
+                        maxLength={255}
+                        className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 outline-none focus:border-lime-400 focus:ring-1 focus:ring-lime-400"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label htmlFor="cappe-product-price" className="mb-1 block text-sm font-medium text-zinc-300">Price (USD)</label>
+                        <input
+                          id="cappe-product-price"
+                          value={product.price}
+                          onChange={(e) => setProduct({ ...product, price: e.target.value })}
+                          placeholder="24.00"
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 outline-none focus:border-lime-400 focus:ring-1 focus:ring-lime-400"
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="cappe-product-stock" className="mb-1 block text-sm font-medium text-zinc-300">How many in stock</label>
+                        <input
+                          id="cappe-product-stock"
+                          value={product.stock}
+                          onChange={(e) => setProduct({ ...product, stock: e.target.value })}
+                          placeholder="Made to order"
+                          inputMode="numeric"
+                          className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 outline-none focus:border-lime-400 focus:ring-1 focus:ring-lime-400"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+              <p className="mt-4 text-xs text-zinc-500">Your store and product stay drafts. Review the product and your policies before going live.</p>
+              {error && <p role="alert" className="mt-4 text-sm text-red-400">{error}</p>}
+              <div className="mt-5 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setStep(2)}
+                  disabled={submitting}
+                  className="flex items-center gap-1.5 rounded-lg border border-zinc-700 px-3 py-2 text-sm font-medium text-zinc-300 hover:bg-zinc-800 disabled:opacity-60"
+                >
+                  <ArrowLeft className="h-4 w-4" /> Back
+                </button>
+                {sellsGoods ? (
+                  <button
+                    type="submit"
+                    disabled={!productReady || submitting}
+                    className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-lime-400 px-4 py-2 text-sm font-semibold text-zinc-950 transition-colors hover:bg-lime-300 disabled:opacity-50"
+                  >
+                    {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
+                    Create my store <ArrowRight className="h-4 w-4" />
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => void finishStore(false)}
+                    disabled={submitting}
+                    className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-zinc-700 bg-zinc-950 px-4 py-2 text-sm font-medium text-zinc-200 hover:bg-zinc-800 disabled:opacity-60"
+                  >
+                    {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
+                    Create my store, add products later
+                  </button>
+                )}
+              </div>
+              {sellsGoods && <button type="button" disabled={submitting} onClick={() => void finishStore(false)}
+                className="mt-3 w-full py-2 text-sm text-zinc-400 underline hover:text-zinc-200">See my store, add products later</button>}
             </form>
           ) : step === 3 ? (
             <>
@@ -348,7 +573,7 @@ export default function CappeOnboardingWizard() {
         </div>
 
         <div className="mt-4 flex items-center justify-center gap-1.5">
-          {([1, 2, 3, 4] as Step[]).map((n) => (
+          {steps.map((n) => (
             <span key={n} className={`h-1.5 w-1.5 rounded-full ${step === n ? 'bg-lime-400' : 'bg-zinc-700'}`} />
           ))}
         </div>

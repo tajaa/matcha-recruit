@@ -19,6 +19,10 @@ Website-builder frontend for the consumer brand **Gummfit**, host-routed on gumm
   account's previews pass `premium=1` so it sees the polish it will keep.
 - `onboarding/CappeOnboardingWizard.tsx` asks the Discover category ONCE (step 3) — it sorts the
   shelf and seeds `directory_category` on `POST /sites/from-template`.
+  Its **Online only** answer is the quick store instead: store name + one line → starter design
+  and optional first product → `POST /sites/quick-store` → `onboarding/StoreReady.tsx`
+  (`sites/:siteId/ready`): private storefront preview, draft products, and required launch actions.
+  The owner reviews product details and policies before publishing; examples never become real products.
 - `utils/plan.ts` — `isPremiumPlan`, the client mirror of the server's `design_gate.PREMIUM_PLANS`.
 - `magazine/` — photo-journalism magazines (server spec: `server/app/cappe/CLAUDE.md` §Magazines).
   `library/LibraryPanel.tsx` is the picture library with alt text, captions and credits (the
@@ -170,6 +174,10 @@ Website-builder frontend for the consumer brand **Gummfit**, host-routed on gumm
   `collectionLibrary.ts` holds pending library writes and feedback per Studio store across panel remounts,
   invalidates stale reads, and reuses a save request UUID for an unchanged retry. `collectionPreview.ts`
   shares one composition across a collection's thumbnails; failed preparation can be retried.
+  Built-in collections and single-page templates use `ui/add/samplePreview.ts` only at the render
+  boundary: transient sample asset IDs and bundled same-origin photography illustrate the designs.
+  Source documents, placement, saved collections and the library never receive those sample images.
+  Saved/unknown collections get no sample projection. The guide and template panel disclose this.
   **Editorial type** (feature 4): the Character panel's Kerning (⌥←/⌥→ at the caret, `ops.kernAt`; with letters
   selected, tracking; letters typed after a kerned one don't take its kerning, `unkern`). **No browser kerns across a
   change of letter-spacing** (Chrome does across same-font spans otherwise; the composer never does across runs), so a
@@ -210,3 +218,28 @@ Backend package is `server/app/cappe/` (own `CLAUDE.md`, cross-references `DOMAI
 ## Cross-cutting rules
 
 Placement rules and boundary rules between the three client apps live in `client/CLAUDE.md` — read that before adding a file here. DB/deploy/test-data rules are in root `CLAUDE.md`.
+
+## Quick-start storefronts
+
+Writer setup at `/cappe/writer/new` uses `magazine/onboarding/MagazineDesigns.tsx`: the four
+Studio collections, real font loading/composition and the shared `PagePreview` renderer. Writers
+name the magazine, browse all ten pages and open a private Studio draft directly. `starter.ts`
+fits their name into the cover without changing the source collection. Photos remain a transient
+preview projection; the submitted document has empty frames. Tagline, topics and website masthead
+are optional. `/magazine/quick-start` creates the site and draft together; one request UUID survives
+retries in the mounted form, and a submission guard prevents duplicate clicks. An uncertain network/5xx
+result freezes that request's details and offers Retry opening my draft, independently of a late taken
+handle check. An initial definite 4xx rejection restores editing; later retry errors preserve the pending
+request because they cannot rule out an earlier commit. The server retains schema-validated composition
+in the first draft, so publishing without a Studio edit keeps the designed geometry. Saved library
+collections still recompose when placed. Publishing keeps the existing plan/readiness gates.
+
+`CappeOnboardingWizard` offers online-only sellers three product-first designs (the registry's
+`online-store` tag). A first product is optional; store and product remain drafts. `StoreReady` uses
+an owner-only, sandboxed rendered preview, including draft products or clearly labelled examples.
+Required readiness actions stay visible and disable publishing until complete. The general
+`TemplateGallery` prioritises store, portfolio/personal and blog designs for business, personal and
+writer accounts respectively; an explicit category takes precedence and the full shelf stays available.
+The wizard's three design cards share `TemplateGallery`'s `TemplatePreview`: scaled, sandboxed live
+renders of the actual designs, with inert sample photography. They replace approximate colour swatches
+so the chosen layout matches the draft storefront. Preview load failure never blocks store creation.

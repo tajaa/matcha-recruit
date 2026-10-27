@@ -349,6 +349,18 @@ def test_preview_premium_flag_selects_the_layer_and_threads_through_links():
     assert "&premium=1" in paid_html and "&premium=1" not in free_html
 
 
+@pytest.mark.parametrize("premium", [False, True])
+@pytest.mark.parametrize("slug,variant", [("online-studio", "studio"), ("online-edit", "edit"), ("online-pop", "pop")])
+def test_gallery_and_cloned_store_use_the_same_layout(premium, slug, variant):
+    template = get_template(slug)
+    preview = render_template_preview(slug, premium=premium)
+    theme, pages = clone_structure(template, business_name=template.sample_name, plan=PAID if premium else FREE)
+    live = render_site_html({"name": template.sample_name, "theme_config": theme}, pages[0], template.nav)
+    body_class = f'cz-shop cz-shop--{variant}"'
+    assert body_class in preview and body_class in live
+    assert "starter-media" in preview and "starter-media" not in live
+
+
 def test_preview_misses_are_none_and_never_enter_the_cache():
     """A scraper cycling junk slugs/pages must not evict the real pages: only
     validated (template, page) pairs are memoised."""
