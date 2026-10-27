@@ -15,7 +15,10 @@ What the model works from, sent by the Studio with each question:
   * the document and the page in view (`ui/ask/describe.ts`): page size,
     margins, columns, and every frame's place, size, type and colours, in the
     document's units;
-  * at most one reference picture ("make it look like this"), never stored;
+  * at most one reference picture ("make it look like this"), never stored,
+    and with it a picture of the selected part of the page as it looks now
+    (`current`, drawn in the browser by `ui/ask/snapshot.ts`), so the two
+    can be compared;
   * the last few questions and answers, for follow-ups.
 The server adds the faces the Studio can set (`fonts_manifest.json`, each
 family's kind from the magazine font catalog), so a suggested font exists.
@@ -118,6 +121,7 @@ class Question:
     commands: list[dict] = field(default_factory=list)
     page: str = ""
     picture: Optional[dict] = None  # a Messages image block
+    current: Optional[dict] = None  # the selected part of the page, as it looks now
 
 
 def daily_allowance(features: dict[str, Any]) -> int:
@@ -167,6 +171,7 @@ def question(raw: dict) -> Question:
     if len(_guide_text(q.guide)) > MAX_GUIDE_CHARS or len(q.page) > MAX_PAGE_CHARS:
         raise AskInvalid("There's too much to send with this question. Reload the Studio and try again.")
     q.picture = _picture_block(raw.get("picture"))
+    q.current = _picture_block(raw.get("current"))
     return q
 
 
@@ -237,8 +242,16 @@ def _prompt(q: Question) -> str:
     if q.history:
         turns = "\n\n".join(f"Q: {a[:MAX_TURN]}\nA: {b[:MAX_TURN]}" for a, b in q.history)
         parts.append(f"<conversation>\n{turns}\n</conversation>")
-    if q.picture:
+    if q.picture and q.current:
+        parts.append("Two pictures are attached. The first is the reference: the look the person wants. The second is "
+                     "their own design as it looks now (the part the page description marks as selected, else the page "
+                     "in view), drawn by the Studio. Compare them: say concretely what differs (type, scale, weight, "
+                     "spacing, colour, how pictures and white space are used) and how to change theirs to match.")
+    elif q.picture:
         parts.append("The attached picture is the reference: the look the person wants their page to have.")
+    elif q.current:
+        parts.append("The attached picture is the person's own design as it looks now (the part the page description "
+                     "marks as selected, else the page in view), drawn by the Studio.")
     parts.append(f"<question>\n{q.question}\n</question>")
     parts.append(_TASK)
     return "\n\n".join(parts)
@@ -268,8 +281,8 @@ async def answer(q: Question) -> dict:
         raise AskUnavailable()
     try:
         reply = await anthropic_messages.generate_text(
-            _prompt(q), model=model, system=_SYSTEM, attachments=[q.picture] if q.picture else [],
-            json_output=True, effort="medium" if q.picture else "low", max_tokens=4_096,
+            _prompt(q), model=model, system=_SYSTEM, attachments=[p for p in (q.picture, q.current) if p],
+            json_output=True, effort="medium" if q.picture or q.current else "low", max_tokens=4_096,
             timeout_seconds=MODEL_SECONDS, deadline=MODEL_SECONDS,
         )
         data = anthropic_messages.parse_json_object(reply)

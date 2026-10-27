@@ -63,7 +63,7 @@ export const GUIDE: GuideSection[] = [
     points: [
       'Open it with Ask in the top bar, Help → Ask the Studio…, or Window → Ask the Studio. With something selected, the ✦ on the bar over it (or Ask about this… when you right-click it) opens Ask about just that, the question already started.',
       'It knows this guide, every menu command, the fonts you can use and what is on the page in view: each frame’s place, size, type and colours. Select something first to ask about just that.',
-      'To match a look you like: select the part of your page, then give Ask a picture of the look: drag a screenshot onto the panel, paste one (a screenshot taken to the clipboard works), or choose one. Ask “how can I make this look like this?” and the answer compares the two. You can also name a style or a kind of magazine instead.',
+      'To match a look you like: select the part of your page, then give Ask a picture of the look: drag a screenshot onto the panel, paste one (a screenshot taken to the clipboard works), or choose one. Ask “how can I make this look like this?”: the Studio also sends a picture of the part you selected (or the page in view) as it looks now, so the answer compares the two side by side. Both show above the answer. You can also name a style or a kind of magazine instead.',
       'Buttons under an answer open this guide at the right section or start what the answer describes. It never changes your page itself: you make each change, and ⌘Z undoes it.',
       'Answers come from AI and can be wrong. Questions aren’t saved, and closing the Studio clears them.',
     ],

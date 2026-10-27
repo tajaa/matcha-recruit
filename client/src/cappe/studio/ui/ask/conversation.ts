@@ -12,6 +12,7 @@ import { COMMANDS } from '../commands'
 import type { StudioCtx } from '../context'
 import { GUIDE, MORE_KEYS } from '../guideContent'
 import { clip, describeStudio } from './describe'
+import { snapshot } from './snapshot'
 
 export const MAX_QUESTION = 1_000
 const HISTORY = 6
@@ -29,7 +30,8 @@ export const SUGGESTIONS = [
 const UNSENT = new Set(['ask', 'ask-about', 'close'])
 
 export type Picture = { media_type: 'image/jpeg'; data: string; preview: string }
-export type Turn = { id: number; q: string; picture: Picture | null; a: string | null; links: AskLink[]; error: string | null }
+/** `current`: the person's own design as it was drawn and sent beside their reference picture. */
+export type Turn = { id: number; q: string; picture: Picture | null; current?: Picture | null; a: string | null; links: AskLink[]; error: string | null }
 /** `draft`: words to put in the question box (`n` counts each, so the same words twice still land). */
 export type AskState = { turns: Turn[]; busy: boolean; focus: number; draft: { text: string; n: number } | null }
 
@@ -121,9 +123,14 @@ export class Conversation {
     this.set({ busy: true, turns: [...this.state.turns, { id, q, picture, a: null, links: [], error: null }] })
     const s = c.store.get()
     try {
+      // With a reference picture, a picture of theirs to compare it with (as
+      // the page is when they ask; null when the browser can't draw it).
+      const current = picture ? await snapshot(s, c.fonts, c.siteId) : null
+      if (current) this.patchTurn(id, { current })
       const res = await studioApi.ask(c.siteId, c.postId, {
         question: q, history, guide: guidePayload(), commands: commandsPayload(s), page: describeStudio(s),
         picture: picture ? { media_type: picture.media_type, data: picture.data } : null,
+        current: current ? { media_type: current.media_type, data: current.data } : null,
       })
       this.patchTurn(id, { a: res.answer, links: res.links })
     } catch (err) {

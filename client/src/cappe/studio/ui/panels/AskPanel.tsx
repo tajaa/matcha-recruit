@@ -67,7 +67,20 @@ function TurnView({ turn, last, onRetry }: { turn: Turn; last: boolean; onRetry:
   return (
     <div className="space-y-2">
       <div className="ml-6 rounded-lg bg-zinc-800 px-3 py-2 text-xs text-zinc-100">
-        {turn.picture && <img src={turn.picture.preview} alt="Your reference picture" className="mb-2 max-h-24 rounded" />}
+        {turn.picture && (
+          <div className="mb-2 flex items-end gap-2">
+            <figure className="min-w-0">
+              <img src={turn.picture.preview} alt="Your reference picture" className="max-h-24 rounded" />
+              <figcaption className="mt-0.5 text-[10px] text-zinc-500">The look you want</figcaption>
+            </figure>
+            {turn.current && (
+              <figure className="min-w-0">
+                <img src={turn.current.preview} alt="Your design, as sent" className="max-h-24 rounded border border-zinc-700" />
+                <figcaption className="mt-0.5 text-[10px] text-zinc-500">Yours now</figcaption>
+              </figure>
+            )}
+          </div>
+        )}
         <p className="whitespace-pre-wrap">{turn.q}</p>
       </div>
       {turn.a !== null && (

@@ -139,6 +139,32 @@ def test_a_reference_picture_goes_with_the_question_and_gets_more_thought(claude
     assert call["effort"] == "medium" and "The attached picture is the reference" in call["prompt"]
 
 
+def test_their_own_design_goes_after_the_reference_to_be_compared(claude):
+    q = ask.question(_raw(question="How can I make this look like this?",
+                          picture={"media_type": "image/png", "data": _picture()},
+                          current={"media_type": "image/jpeg", "data": _picture("JPEG", (400, 300))}))
+    run(ask.answer(q))
+    call = claude.calls[0]
+    # The reference first, then theirs, as the prompt says.
+    assert [a["source"]["media_type"] for a in call["attachments"]] == ["image/png", "image/jpeg"]
+    assert "The first is the reference" in call["prompt"] and "The second is their own design" in call["prompt"]
+    assert call["effort"] == "medium"
+
+
+def test_their_own_design_alone_is_described_as_theirs(claude):
+    q = ask.question(_raw(current={"media_type": "image/jpeg", "data": _picture("JPEG")}))
+    run(ask.answer(q))
+    call = claude.calls[0]
+    assert len(call["attachments"]) == 1 and call["effort"] == "medium"
+    assert "the person's own design as it looks now" in call["prompt"]
+    assert "is the reference" not in call["prompt"]
+
+
+def test_a_bad_picture_of_their_design_is_refused_like_a_reference():
+    with pytest.raises(ask.AskInvalid, match="JPEG, PNG or WebP"):
+        ask.question(_raw(current={"media_type": "image/gif", "data": _picture()}))
+
+
 def test_only_the_last_turns_go_with_a_question():
     turns = [{"q": f"q{i}", "a": f"a{i}"} for i in range(9)]
     q = ask.question(_raw(history=turns))
@@ -259,6 +285,13 @@ def wired(monkeypatch):
 def _post(body):
     with route_client(studio_mod.router, overrides={studio_mod.require_cappe_account: ACCOUNT}) as client:
         return client.post(f"/sites/{SITE}/studio/stories/{POST}/ask", json=body)
+
+
+def test_their_design_goes_through_the_route(wired):
+    res = _post(_raw(picture={"media_type": "image/png", "data": _picture()},
+                     current={"media_type": "image/jpeg", "data": _picture("JPEG")}))
+    assert res.status_code == 200
+    assert wired.answered[0].current["source"]["media_type"] == "image/jpeg"
 
 
 def test_a_question_is_answered(wired):

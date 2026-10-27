@@ -172,6 +172,12 @@ Website-builder frontend for the consumer brand **Gummfit**, host-routed on gumm
   `ui/menuRows.ts`; both run `COMMANDS`, never logic of their own. Align and Space evenly are `canvas/align.ts`
   (pasteboard points, so a spread's two pages line up; `rehome` puts anything whose middle crossed onto that page, the
   same step a drag's drop uses).
+  **Ask compares two pictures**: with a reference picture attached, `ui/ask/snapshot.ts` draws the selected part (else
+  the page in view) with the page renderer into an SVG `<foreignObject>`, fonts, graphics and pictures inlined as data
+  (library pictures through `/assets/{id}/pixels`, since the CDN copy may not allow reading), and sends it as `current`
+  (`studio/ask.py`: the reference first, theirs second). Load it from a `data:` URL, never a `blob:` one: Chromium taints
+  the canvas for a `blob:` SVG with HTML inside (WebKit and Chromium both read a `data:` one, checked 2026-10-27).
+  Any failure or 8 s without a picture just sends the question without it.
   **Editorial collections** (`ui/add/collections.ts`, `CollectionsTab.tsx`, `applyCollection.ts`): Templates opens
   on four ten-page art directions; Single pages keeps the original templates. A collection starts a blank
   story or inserts after the current spread (padding keeps its cover on the right and preserves original page sides), fitted to the story's
