@@ -6,6 +6,7 @@ import { facesCss, frameThreads, pageItemsHtml, type Draw } from '../render/layo
 import { setHtml } from '../render/sink'
 import { useStudio } from '../store/store'
 import { useCtx } from '../ui/context'
+import SelectionBar from '../ui/SelectionBar'
 import { Overlays } from './Overlays'
 import { Rulers, RULER } from './Rulers'
 import { TextOverlay } from './TextOverlay'
@@ -51,7 +52,8 @@ export default function Canvas() {
     <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden" style={{ background: PASTEBOARD }}>
       <style>{css}</style>
       {rulers && <Rulers scroller={scroller} lay={lay} />}
-      <div ref={scroller} data-studio-scroller onPointerDown={pointer.down} onDoubleClick={pointer.double} onDragOver={over} onDrop={drop}
+      <div ref={scroller} data-studio-scroller onPointerDown={pointer.down} onDoubleClick={pointer.double} onContextMenu={pointer.context}
+        onDragOver={over} onDrop={drop}
         className="absolute overflow-auto overscroll-contain"
         style={{ left: inset, top: inset, right: 0, bottom: 0, cursor, touchAction: 'none', containerType: 'size' }}>
         <div className="w-max" style={{ padding: '50cqh 50cqw' }}>
@@ -69,6 +71,7 @@ export default function Canvas() {
           </div>
         </div>
       </div>
+      <SelectionBar lay={lay} scroller={scroller} board={board} />
     </div>
   )
 }

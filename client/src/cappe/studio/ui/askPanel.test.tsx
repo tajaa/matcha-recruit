@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { CappeApiError } from '../../api'
 import type { Measure } from '../compose/compose'
@@ -23,6 +23,10 @@ vi.mock('./ask/conversation', async (importOriginal) => {
     }),
   }
 })
+
+// Drawing the person's own design needs a real browser: here it gives a stand-in.
+const snap = vi.hoisted(() => ({ calls: 0, result: null as null | { media_type: 'image/jpeg'; data: string; preview: string } }))
+vi.mock('./ask/snapshot', () => ({ snapshot: async () => { snap.calls++; return snap.result } }))
 
 const mono: Measure = { width: (c, t) => [...t].length * 0.5 * c.size, metrics: (c) => ({ asc: 0.8 * c.size, desc: 0.2 * c.size }) }
 const doc = (): Doc => ({
@@ -213,5 +217,99 @@ describe('Ask the Studio', () => {
     const input = screen.getByLabelText('Attach a picture', { selector: 'input' })
     fireEvent.change(input, { target: { files: [new File(['GIF89a'], 'a.gif', { type: 'image/gif' })] } })
     expect(await screen.findByRole('alert')).toHaveTextContent('Attach a JPEG, PNG or WebP picture.')
+  })
+})
+
+describe('matching a look from a picture', () => {
+  const dragged = (files: File[], types = ['Files']) => ({ dataTransfer: { types, files, dropEffect: 'none' } })
+  const section = () => screen.getByRole('region', { name: 'Ask the Studio' })
+
+  it('takes a screenshot dropped anywhere on the panel as the reference, and sends it', async () => {
+    prep.pending = []
+    const ask = vi.spyOn(studioApi, 'ask').mockResolvedValue({ answer: 'Bigger type, more white.', links: [] })
+    studio()
+    fireEvent.dragOver(section(), dragged([]))
+    expect(screen.getByText('Drop the picture of the look you want')).toBeInTheDocument()
+    fireEvent.drop(section(), dragged([new File(['x'], 'shot', { type: 'image/png' })]))
+    expect(screen.queryByText('Drop the picture of the look you want')).toBeNull()
+    await act(async () => { prep.pending[0].done() })
+    expect(screen.getByAltText('The picture to send')).toHaveAttribute('src', 'data:image/jpeg;base64,shot')
+    fireEvent.change(box(), { target: { value: 'Make this look like this' } })
+    fireEvent.keyDown(box(), { key: 'Enter' })
+    await screen.findByText('Bigger type, more white.')
+    expect(ask.mock.calls[0][2].picture).toEqual({ media_type: 'image/jpeg', data: 'shot' })
+  })
+
+  it('says what to do with something that isn’t a picture file', () => {
+    studio()
+    fireEvent.drop(section(), dragged([new File(['x'], 'notes.txt', { type: 'text/plain' })]))
+    expect(screen.getByRole('alert')).toHaveTextContent('Drop a JPEG, PNG or WebP picture.')
+    // Dragged out of another web page: only its address comes.
+    fireEvent.drop(section(), dragged([], ['text/uri-list']))
+    expect(screen.getByRole('alert')).toHaveTextContent('Save that picture first')
+    // Leaving the panel takes the drop sign away.
+    fireEvent.dragOver(section(), dragged([]))
+    fireEvent.dragLeave(section(), { relatedTarget: document.body })
+    expect(screen.queryByText('Drop the picture of the look you want')).toBeNull()
+  })
+
+  it('“Ask about this” opens Ask on the selection with the question started, and isn’t offered to the model', () => {
+    const { store, ctx } = studio()
+    const id = store.get().doc.items[0].id
+    expect(command('ask-about').enabled!(store.get())).toBe(false)
+    act(() => store.set({ selection: [id], panels: [] }))
+    act(() => command('ask-about').run(ctx))
+    expect(store.get().panels).toContain('ask')
+    expect(store.get().selection).toEqual([id])
+    expect(box()).toHaveValue('How can I make this look like the picture I’ve attached?')
+    expect(commandsPayload(store.get()).some((c) => c.id === 'ask-about')).toBe(false)
+    // Taken once: the panel reopened doesn't put it back over what was done since.
+    expect(conversation(store).get().draft).toBeNull()
+    fireEvent.change(box(), { target: { value: '' } })
+    cleanup()
+    render(<StudioContext.Provider value={ctx}><AskPanel /></StudioContext.Provider>)
+    expect(box()).toHaveValue('')
+    // Asked again, the words come again.
+    act(() => command('ask-about').run(ctx))
+    expect(box()).toHaveValue('How can I make this look like the picture I’ve attached?')
+  })
+})
+
+describe('comparing their design with the look they want', () => {
+  it('sends a picture of their design beside the reference, and shows both', async () => {
+    prep.pending = []
+    snap.calls = 0
+    snap.result = { media_type: 'image/jpeg', data: 'mine', preview: 'data:image/jpeg;base64,mine' }
+    const ask = vi.spyOn(studioApi, 'ask').mockResolvedValue({ answer: 'Tighter, heavier type.', links: [] })
+    studio()
+    fireEvent.change(screen.getByLabelText('Attach a picture', { selector: 'input' }), { target: { files: [new File(['x'], 'ref', { type: 'image/png' })] } })
+    await act(async () => { prep.pending[0].done() })
+    fireEvent.change(box(), { target: { value: 'Make this look like this' } })
+    fireEvent.keyDown(box(), { key: 'Enter' })
+    await screen.findByText('Tighter, heavier type.')
+    expect(ask.mock.calls[0][2]).toMatchObject({ picture: { data: 'ref' }, current: { media_type: 'image/jpeg', data: 'mine' } })
+    expect(screen.getByAltText('Your design, as sent')).toHaveAttribute('src', 'data:image/jpeg;base64,mine')
+    expect(screen.getByText('Yours now')).toBeInTheDocument()
+  })
+
+  it('draws nothing without a reference picture, and asks anyway when the drawing fails', async () => {
+    prep.pending = []
+    snap.calls = 0
+    snap.result = null
+    const ask = vi.spyOn(studioApi, 'ask').mockResolvedValue({ answer: 'Fine.', links: [] })
+    studio()
+    fireEvent.change(box(), { target: { value: 'How do I add a page?' } })
+    fireEvent.keyDown(box(), { key: 'Enter' })
+    await screen.findByText('Fine.')
+    expect(snap.calls).toBe(0)
+    expect(ask.mock.calls[0][2].current).toBeNull()
+    fireEvent.change(screen.getByLabelText('Attach a picture', { selector: 'input' }), { target: { files: [new File(['x'], 'ref2', { type: 'image/png' })] } })
+    await act(async () => { prep.pending[0].done() })
+    fireEvent.change(box(), { target: { value: 'Like this' } })
+    fireEvent.keyDown(box(), { key: 'Enter' })
+    await waitFor(() => expect(ask).toHaveBeenCalledTimes(2))
+    expect(snap.calls).toBe(1)
+    expect(ask.mock.calls[1][2]).toMatchObject({ picture: { data: 'ref2' }, current: null })
+    expect(screen.queryByText('Yours now')).toBeNull()
   })
 })

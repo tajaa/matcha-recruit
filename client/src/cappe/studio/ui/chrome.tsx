@@ -10,8 +10,9 @@ const MENUS: { label: string; items: (string | '-')[] }[] = [
   { label: 'Edit', items: ['undo', 'redo', '-', 'cut', 'copy', 'paste', 'duplicate', 'delete', '-', 'select-all', 'deselect'] },
   { label: 'Insert', items: ['add-templates', 'add-elements', 'add-text', 'add-photos', 'add-uploads', 'add-board', '-', 'place', 'tool-text'] },
   { label: 'Layout', items: ['board', '-', 'page-add', 'spread-add', 'page-delete', '-', 'page-up', 'page-down', '-', 'margins'] },
-  { label: 'Type', items: ['story-editor', 'tool-text', '-', 'fonts'] },
-  { label: 'Object', items: ['arrange-front', 'arrange-forward', 'arrange-backward', 'arrange-back', '-', 'lock', 'hide', 'show-all', '-', 'place', 'edit-picture', 'cut-out', 'subject-front', '-', 'across-spread', 'spine-clear', 'link-crops', 'unlink-crops'] },
+  { label: 'Type', items: ['edit-text', 'story-editor', 'tool-text', '-', 'fonts'] },
+  { label: 'Object', items: ['arrange-front', 'arrange-forward', 'arrange-backward', 'arrange-back', '-', 'align-left', 'align-centre', 'align-right',
+    'align-top', 'align-middle', 'align-bottom', 'space-across', 'space-down', '-', 'lock', 'hide', 'show-all', '-', 'place', 'edit-picture', 'cut-out', 'subject-front', '-', 'across-spread', 'spine-clear', 'link-crops', 'unlink-crops'] },
   { label: 'View', items: ['zoom-in', 'zoom-out', 'fit-page', 'fit-spread', 'actual', '-', 'view-rulers', 'view-guides', 'view-margins', 'view-baseline', 'view-grid', 'view-gutter', 'view-snap', '-', 'board'] },
 ]
 const HELP = { label: 'Help', items: ['ask', '-', 'guide', 'shortcuts'] }

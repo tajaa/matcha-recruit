@@ -175,6 +175,22 @@ Website-builder frontend for the consumer brand **Gummfit**, host-routed on gumm
   opens on a first visit (localStorage `cappe-studio-guide-seen`), from Help, the top bar's ? and the
   Picture Editor's ?. **A change to a tool, panel, menu or key changes its section in the same PR**; the
   shortcuts section is built from `COMMANDS`, and a test holds the tool keys to the commands.
+  **The selection bar and the right-click menu** (Canva-style, 2026-10-27): `ui/SelectionBar.tsx` floats over the
+  selection with the controls changed most (text: font, size, colour, B/I/U, alignment, spacing; pictures: replace, edit,
+  cut out, crop, across the spread; shapes and lines: fill and border; everything: position, transparency, lock,
+  duplicate, delete, more), placed by the pure `ui/barPlace.ts` (above, else below, else the top of the view). It is a
+  sibling of the scroller, never inside it, and nothing above it may get a `transform`/`filter`/`backdrop-filter`:
+  its popovers are `position: fixed`. It hides while `State.gesture` (set by `usePointer`'s `drag` on the first move).
+  `ui/ContextMenu.tsx` opens at `State.menu` (a right-click via `geometry.menuTarget`, or the bar's ⋯) with rows from
+  `ui/menuRows.ts`; both run `COMMANDS`, never logic of their own. Align and Space evenly are `canvas/align.ts`
+  (pasteboard points, so a spread's two pages line up; `rehome` puts anything whose middle crossed onto that page, the
+  same step a drag's drop uses).
+  **Ask compares two pictures**: with a reference picture attached, `ui/ask/snapshot.ts` draws the selected part (else
+  the page in view) with the page renderer into an SVG `<foreignObject>`, fonts, graphics and pictures inlined as data
+  (library pictures through `/assets/{id}/pixels`, since the CDN copy may not allow reading), and sends it as `current`
+  (`studio/ask.py`: the reference first, theirs second). Load it from a `data:` URL, never a `blob:` one: Chromium taints
+  the canvas for a `blob:` SVG with HTML inside (WebKit and Chromium both read a `data:` one, checked 2026-10-27).
+  Any failure or 8 s without a picture just sends the question without it.
   **Editorial collections** (`ui/add/collections.ts`, `CollectionsTab.tsx`, `applyCollection.ts`): Templates opens
   on four ten-page art directions; Single pages keeps the original templates. A collection starts a blank
   story or inserts after the current spread (padding keeps its cover on the right and preserves original page sides), fitted to the story's

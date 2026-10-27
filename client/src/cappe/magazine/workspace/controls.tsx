@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useRef, useState, type ReactNode, type RefObject } from 'react'
 import { ChevronDown, Pipette, Plus, Trash2 } from 'lucide-react'
 import type { Paint, PaintKind, Stop } from '../design/types'
 import { alphaOf, hexToHsva, hsvaToHex, readColour, swatchCss, withAlpha, type Hsva } from './color'
+import { usePopover } from './popover'
 import { evalSum } from './sum'
 
 /** The workspace's controls, as a design tool has them: numbers you drag a
@@ -150,32 +151,6 @@ const PRESETS = ['#ffffff', '#000000', '#111111', '#f4efe6', '#e11d48', '#f97316
 
 type EyeDropperCtor = new () => { open: () => Promise<{ sRGBHex: string }> }
 
-/** A popover kept on screen, placed by its anchor when opened, closed by a
- *  click outside it or Escape. */
-function usePopover(anchor: React.RefObject<HTMLElement | null>) {
-  const panel = useRef<HTMLDivElement>(null)
-  const [at, setAt] = useState<{ left: number; top: number } | null>(null)
-  const open = at !== null
-  const toggle = () => {
-    if (open || !anchor.current) { setAt(null); return }
-    const r = anchor.current.getBoundingClientRect()
-    const w = 248, h = 330
-    setAt({ left: Math.max(8, Math.min(window.innerWidth - w - 8, r.right - w)), top: r.bottom + h > window.innerHeight ? Math.max(8, r.top - h - 4) : r.bottom + 4 })
-  }
-  useEffect(() => {
-    if (!open) return
-    const down = (e: PointerEvent) => {
-      if (panel.current?.contains(e.target as Node) || anchor.current?.contains(e.target as Node)) return
-      setAt(null)
-    }
-    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') setAt(null) }
-    window.addEventListener('pointerdown', down, true)
-    window.addEventListener('keydown', key)
-    return () => { window.removeEventListener('pointerdown', down, true); window.removeEventListener('keydown', key) }
-  }, [open, anchor])
-  return { panel, at, toggle }
-}
-
 /** The picker: a square for strength and brightness, hue and opacity bars,
  *  a hex box, the magazine's accent, recent and preset colours, and the
  *  screen dropper where the browser has one. */
@@ -261,18 +236,27 @@ export function ColorField({ label, value, onChange, accent = '#10b981', auto }:
           style={{ background: `linear-gradient(${css},${css}),repeating-conic-gradient(#71717a 0 25%,#d4d4d8 0 50%) 0 0/6px 6px` }} />
         <span className={`truncate text-[11px] text-zinc-300 ${value ? 'font-mono' : ''}`}>{value === 'accent' ? 'Accent' : value || auto}</span>
       </button>
-      {at && (
-        <div ref={panel} className="fixed z-50 w-[248px] rounded-lg border border-zinc-700 bg-zinc-900 p-2.5 shadow-2xl" style={at} role="dialog" aria-label={label}>
-          {auto !== undefined && (
-            <button type="button" aria-pressed={!value} onClick={() => onChange('')}
-              className={`mb-2 w-full rounded-md border px-2 py-1 text-left text-[11px] ${value ? 'border-zinc-800 text-zinc-300 hover:border-zinc-600' : 'border-emerald-500 text-emerald-300'}`}>
-              {auto}
-            </button>
-          )}
-          <ColorPicker value={value || '#1a1a1a'} onChange={onChange} accent={accent} />
-        </div>
-      )}
+      {at && <ColorPanel panel={panel} at={at} label={label} value={value} onChange={onChange} accent={accent} auto={auto} />}
     </>
+  )
+}
+
+/** The panel a colour opens (`usePopover`'s `panel` and `at`): `auto`, what
+ *  '' means, offered first; then the picker. Also the Studio bar's swatches. */
+export function ColorPanel({ panel, at, label, value, onChange, accent = '#10b981', auto }: {
+  panel: RefObject<HTMLDivElement | null>; at: { left: number; top: number }
+  label: string; value: string; onChange: (c: string) => void; accent?: string; auto?: string
+}) {
+  return (
+    <div ref={panel} className="fixed z-50 w-[248px] rounded-lg border border-zinc-700 bg-zinc-900 p-2.5 shadow-2xl" style={at} role="dialog" aria-label={label}>
+      {auto !== undefined && (
+        <button type="button" aria-pressed={!value} onClick={() => onChange('')}
+          className={`mb-2 w-full rounded-md border px-2 py-1 text-left text-[11px] ${value ? 'border-zinc-800 text-zinc-300 hover:border-zinc-600' : 'border-emerald-500 text-emerald-300'}`}>
+          {auto}
+        </button>
+      )}
+      <ColorPicker value={value || '#1a1a1a'} onChange={onChange} accent={accent} />
+    </div>
   )
 }
 

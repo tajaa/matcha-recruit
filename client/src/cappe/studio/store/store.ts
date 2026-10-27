@@ -64,6 +64,11 @@ export type State = {
   notice?: string | null
   /** The magazine's own fonts (uploaded; `ui/FontsDialog.tsx`), as listed when the Studio opened or since. */
   fonts?: SiteFont[]
+  /** A drag on the pages is under way (moving, resizing, turning, a marquee):
+   *  the bar over the selection steps aside until it ends. */
+  gesture?: boolean
+  /** The right-click menu (`ui/ContextMenu.tsx`), open at this point of the window. */
+  menu?: { x: number; y: number } | null
 }
 
 type Listener = () => void

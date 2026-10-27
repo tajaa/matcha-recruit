@@ -9,6 +9,7 @@ import { studioApi } from '../api'
 import { MenuBar, StatusBar, ToolBar, TopBar } from './chrome'
 import { commandForKey } from './commands'
 import { StudioContext, useCtx, type StudioCtx } from './context'
+import ContextMenu from './ContextMenu'
 import { LibraryDialog, PictureDialog, RevisionsDialog, StoryDialog } from './dialogs'
 import { markGuideSeen } from './guideContent'
 import StudioGuide from './StudioGuide'
@@ -105,6 +106,7 @@ function Shell() {
       {dialog === 'fonts' && <FontsDialog />}
       {(dialog === 'picture' || dialog === 'cutout' || dialog === 'subject') && <PictureDialog cutout={dialog === 'cutout'} subject={dialog === 'subject'} />}
       {preview !== null && <Preview html={preview} onClose={() => setPreview(null)} />}
+      <ContextMenu />
       {guide && <StudioGuide section={guide} onClose={() => { markGuideSeen(); c.store.set({ guide: null }) }} />}
     </div>
   )
@@ -139,6 +141,12 @@ function useKeys(c: StudioCtx, paused: RefObject<boolean>) {
       if (paused.current) return
       const t = e.target as HTMLElement | null
       const s = c.store.get()
+      // The right-click menu keeps its own keys; Esc still closes it when the
+      // keyboard has left it.
+      if (s.menu) {
+        if (e.key === 'Escape') { e.preventDefault(); c.store.set({ menu: null }) }
+        return
+      }
       const typing = !!s.editing && !!t && c.editor.view?.dom.contains(t)
       const field = !!t && !typing && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))
       const cmd = commandForKey(e)

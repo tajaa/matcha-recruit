@@ -26,6 +26,8 @@ export type AskRequest = {
   commands: { id: string; label: string; keys: string; enabled: boolean }[]
   page: string
   picture: { media_type: 'image/jpeg'; data: string } | null
+  /** The selected part of the page as it looks now, to compare with `picture`. */
+  current?: { media_type: 'image/jpeg'; data: string } | null
 }
 
 const base = (siteId: string, postId: string) => `/sites/${siteId}/studio/stories/${postId}`

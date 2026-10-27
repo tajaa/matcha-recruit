@@ -271,6 +271,8 @@ class StudioAsk(BaseModel):
     commands: list[StudioCommand] = Field(default_factory=list, max_length=150)
     page: str = Field("", max_length=ask.MAX_PAGE_CHARS)
     picture: Optional[StudioPicture] = None
+    # The selected part of the page as it looks now, to compare with `picture`.
+    current: Optional[StudioPicture] = None
 
 
 def _stale(rev: int) -> HTTPException:

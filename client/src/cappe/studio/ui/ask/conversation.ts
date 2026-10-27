@@ -12,6 +12,7 @@ import { COMMANDS } from '../commands'
 import type { StudioCtx } from '../context'
 import { GUIDE, MORE_KEYS } from '../guideContent'
 import { clip, describeStudio } from './describe'
+import { snapshot } from './snapshot'
 
 export const MAX_QUESTION = 1_000
 const HISTORY = 6
@@ -26,11 +27,16 @@ export const SUGGESTIONS = [
 ]
 
 /** Commands the model isn't told about: asking itself, and leaving. */
-const UNSENT = new Set(['ask', 'close'])
+const UNSENT = new Set(['ask', 'ask-about', 'close'])
 
 export type Picture = { media_type: 'image/jpeg'; data: string; preview: string }
-export type Turn = { id: number; q: string; picture: Picture | null; a: string | null; links: AskLink[]; error: string | null }
-export type AskState = { turns: Turn[]; busy: boolean; focus: number }
+/** `current`: the person's own design as it was drawn and sent beside their reference picture. */
+export type Turn = { id: number; q: string; picture: Picture | null; current?: Picture | null; a: string | null; links: AskLink[]; error: string | null }
+/** `draft`: words to put in the question box (`n` counts each, so the same words twice still land). */
+export type AskState = { turns: Turn[]; busy: boolean; focus: number; draft: { text: string; n: number } | null }
+
+/** What "Ask about this" starts the question with. */
+export const MATCH_QUESTION = 'How can I make this look like the picture I’ve attached?'
 
 /** The guide as the server takes it; the shortcuts section gets the keys
  *  that aren't commands (the commands carry their own). */
@@ -69,8 +75,9 @@ export async function preparePicture(file: Blob): Promise<Picture> {
 }
 
 export class Conversation {
-  private state: AskState = { turns: [], busy: false, focus: 0 }
+  private state: AskState = { turns: [], busy: false, focus: 0, draft: null }
   private listeners = new Set<() => void>()
+  private drafts = 0 // `draft.n`: still counting after a draft is taken
   private next = 1
 
   get = (): AskState => this.state
@@ -94,6 +101,16 @@ export class Conversation {
     this.set({ focus: this.state.focus + 1 })
   }
 
+  /** Start a question with these words, for the person to finish (and give a picture to). */
+  prompt(text: string): void {
+    this.set({ draft: { text, n: ++this.drafts }, focus: this.state.focus + 1 })
+  }
+
+  /** The draft went into the question box. */
+  taken(): void {
+    if (this.state.draft) this.set({ draft: null })
+  }
+
   clear(): void {
     if (!this.state.busy) this.set({ turns: [] })
   }
@@ -107,9 +124,14 @@ export class Conversation {
     this.set({ busy: true, turns: [...this.state.turns, { id, q, picture, a: null, links: [], error: null }] })
     const s = c.store.get()
     try {
+      // With a reference picture, a picture of theirs to compare it with (as
+      // the page is when they ask; null when the browser can't draw it).
+      const current = picture ? await snapshot(s, c.fonts, c.siteId) : null
+      if (current) this.patchTurn(id, { current })
       const res = await studioApi.ask(c.siteId, c.postId, {
         question: q, history, guide: guidePayload(), commands: commandsPayload(s), page: describeStudio(s),
         picture: picture ? { media_type: picture.media_type, data: picture.data } : null,
+        current: current ? { media_type: current.media_type, data: current.data } : null,
       })
       this.patchTurn(id, { a: res.answer, links: res.links })
     } catch (err) {

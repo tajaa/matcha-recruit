@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent } from 'react'
+import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { ArrowUp, BookOpen, ImagePlus, Loader2, RotateCcw, Sparkles, X } from 'lucide-react'
+import { ArrowUp, BookOpen, ImagePlus, Loader2, RotateCcw, Sparkles, Upload, X } from 'lucide-react'
 import { useStudio } from '../../store/store'
 import type { AskLink } from '../../api'
 import { COMMANDS } from '../commands'
@@ -67,7 +67,20 @@ function TurnView({ turn, last, onRetry }: { turn: Turn; last: boolean; onRetry:
   return (
     <div className="space-y-2">
       <div className="ml-6 rounded-lg bg-zinc-800 px-3 py-2 text-xs text-zinc-100">
-        {turn.picture && <img src={turn.picture.preview} alt="Your reference picture" className="mb-2 max-h-24 rounded" />}
+        {turn.picture && (
+          <div className="mb-2 flex items-end gap-2">
+            <figure className="min-w-0">
+              <img src={turn.picture.preview} alt="Your reference picture" className="max-h-24 rounded" />
+              <figcaption className="mt-0.5 text-[10px] text-zinc-500">The look you want</figcaption>
+            </figure>
+            {turn.current && (
+              <figure className="min-w-0">
+                <img src={turn.current.preview} alt="Your design, as sent" className="max-h-24 rounded border border-zinc-700" />
+                <figcaption className="mt-0.5 text-[10px] text-zinc-500">Yours now</figcaption>
+              </figure>
+            )}
+          </div>
+        )}
         <p className="whitespace-pre-wrap">{turn.q}</p>
       </div>
       {turn.a !== null && (
@@ -95,8 +108,19 @@ function TurnView({ turn, last, onRetry }: { turn: Turn; last: boolean; onRetry:
 export function AskPanel() {
   const c = useCtx()
   const conv = conversation(c.store)
-  const { turns, busy, focus } = useConversation(c.store)
+  const { turns, busy, focus, draft } = useConversation(c.store)
   const [text, setText] = useState('')
+  // Words "Ask about this" started the question with: put in the box once,
+  // and taken, so closing and opening the panel doesn't put it back.
+  const [seenDraft, setSeenDraft] = useState<typeof draft>(null)
+  if (draft && draft !== seenDraft) {
+    setSeenDraft(draft)
+    setText(draft.text)
+  }
+  useEffect(() => {
+    if (draft) conv.taken()
+  }, [draft, conv])
+  const [over, setOver] = useState(false)
   const [picture, setPicture] = useState<Picture | null>(null)
   const [pictureError, setPictureError] = useState<string | null>(null)
   // A picture being read and made smaller: Ask waits for it. Each attach
@@ -117,6 +141,7 @@ export function AskPanel() {
   const send = (q = text) => {
     if (!q.trim() || busy || preparing) return
     void conv.ask(c, q, picture)
+    conv.taken()
     setText('')
     setPicture(null)
     generation.current++
@@ -150,9 +175,41 @@ export function AskPanel() {
     if (pasted) { e.preventDefault(); void attach(pasted) }
   }
   const close = () => c.store.set((s) => ({ panels: s.panels.filter((p) => p !== 'ask') }))
+  // A screenshot or a saved picture dropped anywhere on the panel is the reference.
+  const files = (e: DragEvent) => [...e.dataTransfer.types].includes('Files')
+  const dragOver = (e: DragEvent) => {
+    if (!files(e)) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'copy'
+    setOver(true)
+  }
+  const dragLeave = (e: DragEvent) => {
+    if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOver(false)
+  }
+  const drop = (e: DragEvent) => {
+    setOver(false)
+    if (!files(e)) {
+      // A picture dragged out of another web page comes as its address only.
+      if ([...e.dataTransfer.types].includes('text/uri-list')) {
+        e.preventDefault()
+        setPictureError('Save that picture first, or copy it and paste it here.')
+      }
+      return
+    }
+    e.preventDefault()
+    const f = [...e.dataTransfer.files].find((x) => x.type.startsWith('image/'))
+    if (f) void attach(f)
+    else setPictureError('Drop a JPEG, PNG or WebP picture.')
+  }
 
   return (
-    <section aria-label="Ask the Studio" className="flex min-h-[380px] flex-1 flex-col border-b border-zinc-800">
+    <section aria-label="Ask the Studio" onDragOver={dragOver} onDragLeave={dragLeave} onDrop={drop}
+      className={`relative flex min-h-[380px] flex-1 flex-col border-b border-zinc-800 ${over ? 'ring-2 ring-inset ring-emerald-500' : ''}`}>
+      {over && (
+        <div aria-hidden className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-zinc-950/85 text-xs text-emerald-300">
+          <Upload className="h-5 w-5" />Drop the picture of the look you want
+        </div>
+      )}
       <div className="flex items-center justify-between px-4 py-2">
         <h3 className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
           <Sparkles className="h-3 w-3 text-emerald-400" />Ask the Studio
@@ -169,7 +226,8 @@ export function AskPanel() {
       <div ref={list} className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 pb-3">
         {turns.length === 0 ? (
           <div className="space-y-2 text-xs text-zinc-400">
-            <p>Ask how to do something in the Studio, or how to make this page look the way you want. Attach a picture to show the look you’re after.</p>
+            <p>Ask how to do something in the Studio, or how to make this page look the way you want.</p>
+            <p>To match a look: select the part of your page, then drop, paste or attach a screenshot of a magazine you like and ask how to make yours look like it.</p>
             {SUGGESTIONS.map((q) => (
               <button key={q} type="button" onClick={() => send(q)} disabled={busy || preparing}
                 className="block w-full rounded border border-zinc-800 px-2.5 py-1.5 text-left text-zinc-300 hover:border-emerald-500 hover:text-white">{q}</button>
@@ -192,6 +250,12 @@ export function AskPanel() {
           </p>
         )}
         {pictureError && <p role="alert" className="mb-1 text-[11px] text-red-300">{pictureError}</p>}
+        {!picture && !preparing && (
+          <button type="button" onClick={() => file.current?.click()}
+            className="mb-2 flex w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-zinc-700 px-2 py-1.5 text-[11px] text-zinc-400 hover:border-emerald-500 hover:text-white">
+            <ImagePlus className="h-3.5 w-3.5" />Drop, paste or choose a picture of the look you want
+          </button>
+        )}
         <div className="flex items-end gap-1.5 rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1.5 focus-within:border-emerald-500">
           <textarea ref={box} value={text} rows={2} maxLength={MAX_QUESTION} aria-label="Your question"
             placeholder="How do I…?" onChange={(e) => setText(e.target.value)} onKeyDown={onKey} onPaste={onPaste}

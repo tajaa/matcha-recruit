@@ -6,7 +6,8 @@ import type { Doc, Item, Kind } from '../model/types'
 import { placeAt } from '../text/caret'
 import { useStudio } from '../store/store'
 import { useCtx } from '../ui/context'
-import { boardOffset, bounds, centre, hitItem, itemBox, pageAt, snap1, snapTargets, type Layout, type Pt } from './geometry'
+import { rehome } from './align'
+import { boardOffset, bounds, centre, hitItem, itemBox, menuTarget, pageAt, snap1, snapTargets, type Layout, type Pt } from './geometry'
 import { dragBox, resize, rotate } from './transform'
 
 const ZOOM_MIN = 0.05, ZOOM_MAX = 64
@@ -92,6 +93,8 @@ export function usePointer(scroller: RefObject<HTMLDivElement | null>, board: Re
     const onMove = (ev: PointerEvent) => {
       const p = toPt(ev)
       if (!moved && Math.hypot(p.x - start.x, p.y - start.y) * zoom() < 3) return
+      // The bar over the selection steps aside until the drag ends.
+      if (!moved) store.set({ gesture: true })
       moved = true
       move(p, ev)
     }
@@ -101,7 +104,7 @@ export function usePointer(scroller: RefObject<HTMLDivElement | null>, board: Re
       el.removeEventListener('pointercancel', onUp)
       up?.(toPt(ev), ev, moved)
       store.seal()
-      store.set({ snaps: null, marquee: null })
+      store.set({ snaps: null, marquee: null, gesture: false })
     }
     el.addEventListener('pointermove', onMove)
     el.addEventListener('pointerup', onUp)
@@ -161,21 +164,7 @@ export function usePointer(scroller: RefObject<HTMLDivElement | null>, board: Re
     }, (_p, _ev, moved) => {
       if (!moved) return
       // An item dropped on another page goes onto it.
-      store.edit((d) => {
-        let next = d
-        for (const id of ids) {
-          const item = next.items.find((i) => i.id === id)
-          if (!item) continue
-          const o = origin(next, item)
-          const c = centre(itemBox(item, o))
-          const page = pageAt(next, layRef.current, c)
-          const pid = next.pages[page].id
-          if (pid === item.page) continue
-          const no = layRef.current.origin[page]
-          next = updateItems(next, [id], (i) => ({ ...i, page: pid, x: round(i.x + o.x - no.x), y: round(i.y + o.y - no.y) }))
-        }
-        return next
-      }, { key: 'move' })
+      store.edit((d) => rehome(d, layRef.current, ids), { key: 'move' })
     })
   }
 
@@ -319,7 +308,8 @@ export function usePointer(scroller: RefObject<HTMLDivElement | null>, board: Re
   function down(e: React.PointerEvent): void {
     const s = store.get()
     if (e.button === 1 || space.current || s.tool === 'hand') { e.preventDefault(); pan(e); return }
-    if (e.button !== 0) return
+    // A Mac's Ctrl-click is a right-click: the menu (`context`) answers it.
+    if (e.button !== 0 || macRightClick(e)) return
     const p = toPt(e)
     const target = e.target as HTMLElement
     const lay = layRef.current
@@ -384,6 +374,16 @@ export function usePointer(scroller: RefObject<HTMLDivElement | null>, board: Re
     marquee(e, p)
   }
 
+  /** Right-click: select what is under the pointer (or nothing, on an
+   *  empty part of a page) and open the menu for it there. */
+  function context(e: React.MouseEvent): void {
+    e.preventDefault()
+    const s = store.get()
+    if (s.editing) editor.close()
+    const { selection, page } = menuTarget(s.doc, layRef.current, toPt(e), s.selection, 3 / zoom())
+    store.set({ selection, page, threading: null, menu: { x: e.clientX, y: e.clientY } })
+  }
+
   function double(e: React.MouseEvent): void {
     const s = store.get()
     if (s.tool !== 'select' && s.tool !== 'text') return
@@ -393,8 +393,13 @@ export function usePointer(scroller: RefObject<HTMLDivElement | null>, board: Re
     else if (hit?.kind === 'image' && !hit.locked) store.set({ selection: [hit.id], dialog: hit.asset_id ? 'picture' : 'library' })
   }
 
-  return { down, double, zoomAt }
+  return { down, double, context, zoomAt }
 }
+
+/** A Ctrl-click on a Mac: the browser sends it as a left button down, then
+ *  opens the menu for it. */
+export const macRightClick = (e: { ctrlKey: boolean }) =>
+  e.ctrlKey && typeof navigator !== 'undefined' && /Mac|iP(hone|ad|od)/.test(navigator.platform)
 
 /** A frame or shape made by a click: a standard size there; a text frame the
  *  width of the column clicked and down to the bottom margin. */
