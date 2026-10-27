@@ -266,7 +266,7 @@ describe('the right-click menu', () => {
     expect(document.activeElement).toBe(within(menu).getByRole('menuitem', { name: /Copy/ }))
     fireEvent.keyDown(menu, { key: 'ArrowUp' })
     fireEvent.keyDown(menu, { key: 'ArrowUp' })
-    expect(document.activeElement).toBe(within(menu).getByRole('menuitem', { name: /Hide/ }))
+    expect(document.activeElement).toBe(within(menu).getByRole('menuitem', { name: /Ask about this/ }))
     fireEvent.click(within(menu).getByRole('menuitem', { name: /Duplicate/ }))
     expect(store.get().doc.items).toHaveLength(2)
     expect(store.get().menu).toBeNull()

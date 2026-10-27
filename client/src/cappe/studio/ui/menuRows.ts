@@ -34,6 +34,6 @@ export function menuRows(s: State): Row[] {
     if (can('space-across')) align.push('-', { id: 'space-across' }, { id: 'space-down' })
     rows.push('-', { label: one ? 'Align to page' : 'Align', rows: align }, ARRANGE)
   }
-  rows.push('-', { id: 'lock', label: locked ? 'Unlock' : 'Lock' }, { id: 'hide' })
+  rows.push('-', { id: 'lock', label: locked ? 'Unlock' : 'Lock' }, { id: 'hide' }, '-', { id: 'ask-about' })
   return rows
 }

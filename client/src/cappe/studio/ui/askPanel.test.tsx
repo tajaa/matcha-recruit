@@ -215,3 +215,50 @@ describe('Ask the Studio', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Attach a JPEG, PNG or WebP picture.')
   })
 })
+
+describe('matching a look from a picture', () => {
+  const dragged = (files: File[], types = ['Files']) => ({ dataTransfer: { types, files, dropEffect: 'none' } })
+  const section = () => screen.getByRole('region', { name: 'Ask the Studio' })
+
+  it('takes a screenshot dropped anywhere on the panel as the reference, and sends it', async () => {
+    prep.pending = []
+    const ask = vi.spyOn(studioApi, 'ask').mockResolvedValue({ answer: 'Bigger type, more white.', links: [] })
+    studio()
+    fireEvent.dragOver(section(), dragged([]))
+    expect(screen.getByText('Drop the picture of the look you want')).toBeInTheDocument()
+    fireEvent.drop(section(), dragged([new File(['x'], 'shot', { type: 'image/png' })]))
+    expect(screen.queryByText('Drop the picture of the look you want')).toBeNull()
+    await act(async () => { prep.pending[0].done() })
+    expect(screen.getByAltText('The picture to send')).toHaveAttribute('src', 'data:image/jpeg;base64,shot')
+    fireEvent.change(box(), { target: { value: 'Make this look like this' } })
+    fireEvent.keyDown(box(), { key: 'Enter' })
+    await screen.findByText('Bigger type, more white.')
+    expect(ask.mock.calls[0][2].picture).toEqual({ media_type: 'image/jpeg', data: 'shot' })
+  })
+
+  it('says what to do with something that isn’t a picture file', () => {
+    studio()
+    fireEvent.drop(section(), dragged([new File(['x'], 'notes.txt', { type: 'text/plain' })]))
+    expect(screen.getByRole('alert')).toHaveTextContent('Drop a JPEG, PNG or WebP picture.')
+    // Dragged out of another web page: only its address comes.
+    fireEvent.drop(section(), dragged([], ['text/uri-list']))
+    expect(screen.getByRole('alert')).toHaveTextContent('Save that picture first')
+    // Leaving the panel takes the drop sign away.
+    fireEvent.dragOver(section(), dragged([]))
+    fireEvent.dragLeave(section(), { relatedTarget: document.body })
+    expect(screen.queryByText('Drop the picture of the look you want')).toBeNull()
+  })
+
+  it('“Ask about this” opens Ask on the selection with the question started, and isn’t offered to the model', () => {
+    const { store, ctx } = studio()
+    const id = store.get().doc.items[0].id
+    expect(command('ask-about').enabled!(store.get())).toBe(false)
+    act(() => store.set({ selection: [id], panels: [] }))
+    act(() => command('ask-about').run(ctx))
+    expect(store.get().panels).toContain('ask')
+    expect(store.get().selection).toEqual([id])
+    expect(box()).toHaveValue('How can I make this look like the picture I’ve attached?')
+    expect(commandsPayload(store.get()).some((c) => c.id === 'ask-about')).toBe(false)
+    expect(conversation(store).get().draft).not.toBeNull()
+  })
+})

@@ -12,7 +12,7 @@ import { resolveItem, resolveParas } from '../model/identity'
 import { addPages, arrange, deleteItems, deletePage, duplicate, ensureThread, movePage, patchItems, type Arrange } from '../model/ops'
 import type { Doc, Item, Thread } from '../model/types'
 import type { AddTab, State, Store, Tool } from '../store/store'
-import { conversation } from './ask/conversation'
+import { conversation, MATCH_QUESTION } from './ask/conversation'
 import type { StudioCtx } from './context'
 
 export type Command = {
@@ -253,6 +253,11 @@ export const COMMANDS: Command[] = [
     run: ({ store }) => {
       store.set((s) => ({ panels: s.panels.includes('ask') ? s.panels : [...s.panels, 'ask'] }))
       conversation(store).focus()
+    } },
+  { id: 'ask-about', label: 'Ask about this…', enabled: (s) => s.selection.length > 0,
+    run: ({ store }) => {
+      store.set((s) => ({ panels: s.panels.includes('ask') ? s.panels : [...s.panels, 'ask'] }))
+      conversation(store).prompt(MATCH_QUESTION)
     } },
   { id: 'guide', label: 'How the Studio works', run: ({ store }) => store.set({ guide: 'start' }) },
   { id: 'shortcuts', label: 'Keyboard shortcuts', run: ({ store }) => store.set({ guide: 'keys' }) },

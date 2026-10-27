@@ -10,7 +10,7 @@ import {
   AlignCenter, AlignCenterHorizontal, AlignCenterVertical, AlignEndHorizontal, AlignEndVertical, AlignHorizontalSpaceBetween,
   AlignJustify, AlignLeft, AlignRight, AlignStartHorizontal, AlignStartVertical, AlignVerticalSpaceBetween, Blend, Bold, Columns2,
   Copy, Crop, Ellipsis, Image as ImageIcon, Italic, LetterText, Link2, Lock, LockOpen, Minus, Plus, Scissors, SlidersHorizontal,
-  Square, Trash2, Underline,
+  Sparkles, Square, Trash2, Underline,
 } from 'lucide-react'
 import FontField from '../../magazine/workspace/FontField'
 import { ColorPicker, IconBtn, NumberField, Seg, Slider } from '../../magazine/workspace/controls'
@@ -282,6 +282,9 @@ function Common({ items, s }: { items: Item[]; s: State }) {
       <IconBtn title="Lock (⌘L)" onClick={() => command('lock').run(c)}><Lock className="h-4 w-4" /></IconBtn>
       <IconBtn title="Duplicate (⌘D)" onClick={() => command('duplicate').run(c)}><Copy className="h-4 w-4" /></IconBtn>
       <IconBtn title="Delete (⌫)" onClick={() => command('delete').run(c)}><Trash2 className="h-4 w-4" /></IconBtn>
+      <IconBtn title="Ask about this: how to make it look like a picture you like" onClick={() => command('ask-about').run(c)}>
+        <Sparkles className="h-4 w-4 text-emerald-400" />
+      </IconBtn>
       <More />
     </span>
   )

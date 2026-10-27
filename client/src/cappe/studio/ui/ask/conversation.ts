@@ -26,11 +26,15 @@ export const SUGGESTIONS = [
 ]
 
 /** Commands the model isn't told about: asking itself, and leaving. */
-const UNSENT = new Set(['ask', 'close'])
+const UNSENT = new Set(['ask', 'ask-about', 'close'])
 
 export type Picture = { media_type: 'image/jpeg'; data: string; preview: string }
 export type Turn = { id: number; q: string; picture: Picture | null; a: string | null; links: AskLink[]; error: string | null }
-export type AskState = { turns: Turn[]; busy: boolean; focus: number }
+/** `draft`: words to put in the question box (`n` counts each, so the same words twice still land). */
+export type AskState = { turns: Turn[]; busy: boolean; focus: number; draft: { text: string; n: number } | null }
+
+/** What "Ask about this" starts the question with. */
+export const MATCH_QUESTION = 'How can I make this look like the picture I’ve attached?'
 
 /** The guide as the server takes it; the shortcuts section gets the keys
  *  that aren't commands (the commands carry their own). */
@@ -69,7 +73,7 @@ export async function preparePicture(file: Blob): Promise<Picture> {
 }
 
 export class Conversation {
-  private state: AskState = { turns: [], busy: false, focus: 0 }
+  private state: AskState = { turns: [], busy: false, focus: 0, draft: null }
   private listeners = new Set<() => void>()
   private next = 1
 
@@ -92,6 +96,16 @@ export class Conversation {
   /** Ask the text box to take the keyboard (the panel listens). */
   focus(): void {
     this.set({ focus: this.state.focus + 1 })
+  }
+
+  /** Start a question with these words, for the person to finish (and give a picture to). */
+  prompt(text: string): void {
+    this.set({ draft: { text, n: (this.state.draft?.n ?? 0) + 1 }, focus: this.state.focus + 1 })
+  }
+
+  /** The draft went into the question box. */
+  taken(): void {
+    if (this.state.draft) this.set({ draft: null })
   }
 
   clear(): void {
