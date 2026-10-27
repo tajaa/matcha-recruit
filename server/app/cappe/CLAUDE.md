@@ -834,6 +834,49 @@ normalized paragraphs itself; a thread with no valid composition prints its word
   sent, and the panel never offers Cut, Delete, Delete this page or Close as a button. 20 questions a day, 150
   with `magazine` (`cappe_studio_ask`).
 
+## Mood boards (2026-10, `services/boards/`, `cappeboard01`)
+
+A site's pinboards of whatever inspires its owner: photos and screenshots, documents, notes and links, laid
+anywhere on a board, beside or on top of each other. Any site has them (business or writer), as many as
+`limits.MAX_BOARDS_PER_SITE`; owner-only, every answer `no-store, private`. Routes `routes/boards.py` under
+`/sites/{id}/boards…`; the client is `client/src/cappe/boards/` plus the Studio's Board tab.
+- **Tables**: `cappe_boards` (site, title) and `cappe_board_pins` (board, site, `kind` image/file/note/link, `x/y/w/h`
+  in board units, `rotation`, `z`). An image pin is EITHER a library picture (`asset_id`, FK cascades: deleting the
+  library picture takes the pin) OR its own private file (`file_path` + `thumb_path`), never both (a CHECK). Every
+  query names the site; adding a pin takes the site's advisory lock between the counts and the insert
+  (`MAX_PINS_PER_BOARD`, and `MAX_SITE_BYTES` of pinned files per site; a library picture costs nothing).
+- **A pin's own files are private, never the public CDN** (`files.py`): inspiration is mostly other people's work.
+  They go to the private bucket (`upload_private_file`, prefix `cappe/boards`; no S3 is a 503 for files, notes and
+  links still work). Photos are re-encoded first (`media.process_image`: no EXIF) with an 800 px WebP thumbnail; a PDF
+  gets its first page drawn (PyMuPDF; any failure is just a file card). Accepted: JPEG/PNG/GIF/WebP, PDF, Word,
+  Excel, text, CSV (`DOCUMENT_TYPES`, bytes checked by `upload_guard.verify_upload`; a vague browser type goes by
+  extension, a Windows "Excel" `.csv` is a CSV), 25 MB each.
+- **They are shown through signed links** `/public/board-files/<token>` (`routes/public/board_files.py`): the
+  dashboard's CSP loads images only from our origin and CloudFront and an `<img>` can't send the bearer token, so
+  the token (private path, image/doc, type, name, expiry, HMAC from `JWT_SECRET_KEY`, as `magazine/sources/thumbs.py`)
+  is the permission. Expiries round to a 6 h window so a file keeps its link and the browser caches it. A picture
+  streams from our origin (`nosniff`, `default-src 'none'`); a document 302s to a 5-minute presigned S3 URL with its
+  own name (`StorageService.get_presigned_download_url(disposition=)`), so its bytes never open on our origin. A pin
+  answer never carries a storage path (`store.pin_out`).
+- **A pasted link is a card** (`links.py`): the page fetched through `safe_fetch.fetch_public` with no connection
+  held, only its head read (Open Graph, Twitter card, `<title>`), its picture downloaded the same way and kept as a
+  private thumbnail (never hotlinked). A link straight to a picture becomes a photo pin keeping the address as its
+  `url`. Any failure is a plain card named by the host; a preview never refuses a pin.
+- **A pinned picture is reference until the owner says otherwise**: `POST …/pins/{id}/library` asks the library's
+  question (`rights_attested`, AI-made) and makes it a library picture (`media.store_processed` +
+  `cappe_assets.insert_upload`), then points the pin at it (`store.attach_asset`, only while the pin still holds
+  that file) and deletes the private copy. Stories and the Studio place pictures by library `asset_id` only, so this
+  is the one way a board picture reaches a page. `GET` a board returns its library pictures whole (`assets`) for
+  the Studio's placement.
+- **Files go when their rows do, after the commit**: deleting a pin, a board, or the site (`routes/sites.py`
+  reads `store.site_files` inside the delete's transaction) schedules `files.remove`, best effort.
+- **Moving is one call**: `PUT …/layout` sets x/y/w/h/rotation/z for many pins (a drag, a resize, a raise), pins
+  not on the board ignored. New pins land on top (`max(z)+1`); the client renumbers the board 1…n once z
+  passes `COMPACT_AT` (`client/src/cappe/boards/board.ts`).
+- Limits live in `services/boards/limits.py`, mirrored by `client/src/cappe/boards/limits.ts`
+  (`test_cappe_boards.py` holds them equal). Apply `cappeboard01` before deploying the backend; old versions ignore
+  the tables, and its downgrade refuses while any board exists.
+
 ## Social growth (2026-10, `services/social/`, migrations `cappesocial01`–`03`)
 
 Owners connect the Instagram business account and Facebook Page they already run, drop photos

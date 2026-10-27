@@ -379,20 +379,27 @@ class StorageService:
         return f"s3://{bucket}/{key}"
 
     def get_presigned_download_url(
-        self, path: str, expires_in: int = 900
+        self, path: str, expires_in: int = 900, *, disposition: Optional[str] = None
     ) -> Optional[str]:
-        """Get a time-limited presigned download URL for a private s3:// path."""
+        """Get a time-limited presigned download URL for a private s3:// path.
+
+        ``disposition`` is a whole Content-Disposition value for S3 to answer
+        with (e.g. ``attachment; filename*=UTF-8''report.pdf``), so the file
+        downloads under its own name rather than its generated key."""
         if not path.startswith("s3://") or not self.s3_client:
             return None
 
         parts = path[5:].split("/", 1)
         bucket = parts[0]
         key = parts[1] if len(parts) > 1 else ""
+        params = {"Bucket": bucket, "Key": key}
+        if disposition:
+            params["ResponseContentDisposition"] = disposition
 
         try:
             return self.s3_client.generate_presigned_url(
                 "get_object",
-                Params={"Bucket": bucket, "Key": key},
+                Params=params,
                 ExpiresIn=expires_in,
             )
         except ClientError:

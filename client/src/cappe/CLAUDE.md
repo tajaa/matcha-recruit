@@ -128,6 +128,19 @@ Website-builder frontend for the consumer brand **Gummfit**, host-routed on gumm
   Article bodies reject pasted and dropped text through `magazine/writing.ts`; the frame applies it to
   rich body fields, and Studio applies it to paragraphs with the Body text role (including the default).
   Headlines, captions and other text roles keep paste. This is an editor rule, not authorship verification.
+- `boards/` — **mood boards** (server spec: `server/app/cappe/CLAUDE.md` §Mood boards). `BoardsPage.tsx`
+  (`sites/:siteId/boards`, the wall, "Mood boards" in both sidebars) and `BoardPage.tsx` (`…/boards/:boardId`): the
+  page owns the pins and saves; `BoardCanvas.tsx` is the plane (drag the background or scroll to pan, ⌘/Ctrl-scroll
+  or pinch to zoom at the Studio's rates, drag a pin anywhere, a corner to size it, a handle to turn it) and reports
+  everything up. Pure parts: `board.ts` (view maths, `fitView`, `raise` with renumbering past `COMPACT_AT`,
+  `resized` keeping a picture's shape unless Shift, `angleTo` snapping to straight, `cascade`) and `paste.ts` (a drop
+  or ⌘V anywhere outside a field: files first, then an address as a link card, else a note). A drag, resize, turn
+  or raise is saved once on release as one `PUT …/layout`; arrow-key nudges after 500 ms. Pin pictures are signed
+  links under the API (`api.ts` `fileUrl`). A private picture (lock badge) reaches the library only through
+  `ToLibraryForm.tsx`. `limits.ts` mirrors the server's (a server test reads it). The Studio's **Board** tab
+  (`studio/ui/add/BoardTab.tsx`, Insert → Mood boards…) shows a board beside the pages: a library picture places like
+  one of Yours (`addPicture`, drag via `drag.ts`'s `asset`), a private one goes through `ToLibraryForm` and then onto
+  the page.
 - `studio/` — **Gummfit Studio** (2026-10-22), the design application for stories made of pages, full
   screen at `/cappe/studio/:siteId/story/:postId` (outside `CappeLayout`; the classic `StoryEditor` hands a
   paged story to it). Server spec: `server/app/cappe/CLAUDE.md` §Gummfit Studio. Its core is plain

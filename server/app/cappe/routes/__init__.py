@@ -15,6 +15,7 @@ from .admin_billing import router as admin_billing_router
 from .auth import router as auth_router
 from .billing import router as billing_router
 from .blog import router as blog_router
+from .boards import router as boards_router
 from .magazine import router as magazine_router
 from .library import router as library_router
 from .magazine_ai import router as magazine_ai_router
@@ -137,6 +138,8 @@ cappe_router.include_router(magazine_paid_router)
 cappe_router.include_router(reader_router)
 cappe_router.include_router(reader_annotations_router)
 cappe_router.include_router(uploads_router)
+# Mood boards: a site's pinboards of photos, documents, notes and links.
+cappe_router.include_router(boards_router)
 # Social growth: connected accounts, scheduled posts, the AI reply inbox.
 cappe_router.include_router(social_router)
 cappe_router.include_router(social_chat_router)

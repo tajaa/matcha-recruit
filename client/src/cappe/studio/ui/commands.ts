@@ -162,6 +162,7 @@ export const COMMANDS: Command[] = [
   drawer('text', 'Text styles and pairings…'),
   drawer('photos', 'Free photos and AI pictures…'),
   drawer('uploads', 'Your pictures…'),
+  drawer('board', 'Mood boards…'),
   // Layout
   { id: 'page-add', label: 'Add a page', keys: '⇧⌘P',
     run: ({ store }) => store.edit((d) => addPages(d, store.get().page), { extra: { page: store.get().page + 1 } }) },
