@@ -4,6 +4,7 @@ both built into `fonts_manifest.json` by `scripts/build_magazine_fonts.py`.
 
 Run from server/:  ./venv/bin/python -m pytest tests/cappe/test_cappe_studio_fonts_catalog.py -q
 """
+import asyncio
 import json
 import re
 from io import BytesIO
@@ -19,7 +20,7 @@ from app.cappe.services.magazine.studio import render as R
 from app.cappe.services.magazine.studio import schema as S
 from app.cappe.services.magazine.studio.cuts import CUTS
 from app.cappe.services.magazine.studio.font_build import rename
-from scripts.build_magazine_fonts import merge
+from scripts.build_magazine_fonts import merge, upload
 
 ROOT = Path(__file__).resolve().parents[3]
 CUTS_TS = ROOT / "client/src/cappe/studio/fonts/cuts.ts"
@@ -123,3 +124,37 @@ def test_adding_families_leaves_the_rest_of_the_manifest_as_it_was():
     assert len(out) == len(kept) and out[0] == rebuilt and out[1:] == kept[1:]
     cut = {"family": "Fraunces Display", "weight": 100, "italic": False, "sha": "e" * 64}
     assert merge([f for f in kept if f["family"] != "Fraunces Display"], [cut], ["Fraunces Display"])[-1]["family"] in CUTS
+
+
+def test_upload_loads_settings_before_opening_storage(monkeypatch, tmp_path):
+    """A standalone script has to load settings itself: --upload used to call
+    get_storage() first and die with 'Settings not initialized'."""
+    import app.config
+    import app.core.services.storage
+
+    calls, stored = [], {}
+
+    class FakeStorage:
+        async def get_key(self, key):
+            return stored.get(key)
+
+        async def put_key(self, key, data, content_type):
+            stored[key] = (data, content_type)
+
+    def fake_get_storage():
+        assert calls == ["settings"], "storage opened before settings were loaded"
+        return FakeStorage()
+
+    monkeypatch.setattr(app.config, "load_settings", lambda: calls.append("settings"))
+    monkeypatch.setattr(app.core.services.storage, "get_storage", fake_get_storage)
+    sha = "a" * 64
+    (tmp_path / f"{sha}.ttf").write_bytes(b"face")
+    stored[f"cappe/fonts/{'b' * 64}.ttf"] = (b"old", "font/ttf")
+    faces_ = [{"sha": sha}, {"sha": "b" * 64}]
+
+    asyncio.run(upload(faces_, tmp_path, dry_run=True))
+    assert f"cappe/fonts/{sha}.ttf" not in stored
+    calls.clear()
+    asyncio.run(upload(faces_, tmp_path, dry_run=False))
+    assert stored[f"cappe/fonts/{sha}.ttf"] == (b"face", "font/ttf")
+    assert stored[f"cappe/fonts/{'b' * 64}.ttf"] == (b"old", "font/ttf")

@@ -141,8 +141,12 @@ def build(families: list[str], out: Path, cache: Path) -> list[dict]:
 
 async def upload(faces: list[dict], out: Path, dry_run: bool) -> None:
     from app.cappe.routes.public.fonts import FONT_KEY
+    from app.config import load_settings
     from app.core.services.storage import get_storage
 
+    # Storage reads its bucket from settings, which a standalone script has to
+    # load itself; without this --upload died before its first face.
+    load_settings()
     storage = get_storage()
     for f in faces:
         key = FONT_KEY.format(sha=f["sha"])
