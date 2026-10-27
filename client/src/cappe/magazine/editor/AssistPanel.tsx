@@ -2,31 +2,27 @@ import { useState } from 'react'
 import { Check, Loader2, Search, Wand2, X } from 'lucide-react'
 import { cappeApi } from '../../api'
 import { ui } from '../../components/ui'
-import type { CappeAsset, CappeStoryAssist, StoryAssistAction, StoryBlock } from '../../types'
+import type { CappeAsset, CappeStoryAssist, StoryBlock } from '../../types'
 import { STOCK_SOURCES, thumbUrl } from '../library/assets'
-import type { RtDoc } from '../canvas/rt'
-import { textPreview } from './blocks'
 
 type Term = NonNullable<CappeStoryAssist['terms']>[number]
 type Headline = NonNullable<CappeStoryAssist['headlines']>[number]
-type Draft = NonNullable<CappeStoryAssist['draft']>
+type AssistAction = 'headlines' | 'captions' | 'search_terms'
 
-const TABS: { key: StoryAssistAction; label: string; hint: string }[] = [
-  { key: 'draft', label: 'Draft', hint: 'A first draft from your notes and the pictures in this story.' },
+const TABS: { key: AssistAction; label: string; hint: string }[] = [
   { key: 'headlines', label: 'Headlines', hint: 'Five headline, dek and kicker sets, each a different angle.' },
   { key: 'captions', label: 'Captions', hint: 'A caption and alt text for each picture in the story.' },
-  { key: 'tighten', label: 'Tighten', hint: 'One passage, shorter and sharper, in your words.' },
   { key: 'search_terms', label: 'Find pictures', hint: 'Searches of the free archives that would suit this story.' },
 ]
 
 /**
  * The story editor's Assist: fixed writing actions on Claude. Each one
  * returns a proposal shown here; nothing changes in the story until the
- * writer applies it (and nothing is saved until they save). The server never
- * invents facts or quotes; where a fact is missing a draft says "[check: …]".
+ * writer applies it (and nothing is saved until they save). Article bodies
+ * are written directly by the writer, so draft and rewrite actions aren't offered.
  */
 export default function AssistPanel({ siteId, postId, title, excerpt, blocks, assets, onHeadline, onCaption,
-  onAlt, onTighten, onDraft, onFind, onClose }: {
+  onAlt, onFind, onClose }: {
   siteId: string
   postId: string
   title: string
@@ -36,36 +32,22 @@ export default function AssistPanel({ siteId, postId, title, excerpt, blocks, as
   onHeadline: (h: Headline) => void
   onCaption: (assetId: string, caption: string) => void
   onAlt: (asset: CappeAsset) => void
-  onTighten: (block: number, md: string, rt?: RtDoc) => void
-  onDraft: (draft: Draft) => void
   onFind: (term: Term) => void
   onClose: () => void
 }) {
-  const [tab, setTab] = useState<StoryAssistAction>('headlines')
-  const [notes, setNotes] = useState('')
-  const [block, setBlock] = useState<number | null>(null)
+  const [tab, setTab] = useState<AssistAction>('headlines')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [results, setResults] = useState<Partial<Record<StoryAssistAction, CappeStoryAssist>>>({})
+  const [results, setResults] = useState<Partial<Record<AssistAction, CappeStoryAssist>>>({})
   const [used, setUsed] = useState<Set<string>>(new Set())
-  // The words Tighten was asked about: the passage it replaces is found by
-  // them, not by its place (blocks can move while the answer is read).
-  const [tightened, setTightened] = useState<string | null>(null)
-
-  const textBlocks = blocks.map((b, i) => ({ b, i })).filter(({ b }) => b.type === 'text' && b.md.trim())
-  const chosenBlock = block ?? textBlocks[0]?.i ?? null
   const result = results[tab]
 
   const ask = async () => {
     setBusy(true)
     setError(null)
     const body: Record<string, unknown> = { action: tab, content: { blocks }, title, excerpt }
-    if (tab === 'draft') body.notes = notes
-    if (tab === 'tighten') body.block = chosenBlock
-    const asked = tab === 'tighten' && chosenBlock !== null ? (blocks[chosenBlock] as Extract<StoryBlock, { type: 'text' }>).md : null
     try {
       const res = await cappeApi.post<CappeStoryAssist>(`/sites/${siteId}/posts/${postId}/assist`, body)
-      if (tab === 'tighten') setTightened(asked)
       setResults((r) => ({ ...r, [tab]: res }))
       setUsed(new Set())
     } catch (e) {
@@ -88,21 +70,7 @@ export default function AssistPanel({ siteId, postId, title, excerpt, blocks, as
     mark(c.asset_id)
   }
 
-  const applyDraft = (draft: Draft) => {
-    // Words or pictures anywhere (a photo essay may have no text yet).
-    const hasWork = blocks.some((b) => /"(md|a_md|q|text|caption|asset_id)":"\s*\S/.test(JSON.stringify(b)))
-    if (hasWork && !window.confirm('Replace the story’s blocks with this draft? You can still leave without saving.')) return
-    onDraft(draft)
-    mark('draft')
-  }
-
-  const tightenAt = tightened === null ? -1
-    : blocks.findIndex((b) => b.type === 'text' && b.md === tightened)
-
-  const canAsk = tab === 'tighten' ? chosenBlock !== null : tab === 'draft' ? notes.trim().length > 0 || blocks.length > 0 : true
-
   return (
-    // Its fields keep the browser's own undo, not the story's.
     <section className={`${ui.card} space-y-3 p-4`} aria-label="Assist" data-native-undo>
       <div className="flex items-center justify-between gap-2">
         <h2 className="inline-flex items-center gap-2 text-sm font-medium text-zinc-100"><Wand2 className="h-4 w-4" /> Assist</h2>
@@ -117,28 +85,9 @@ export default function AssistPanel({ siteId, postId, title, excerpt, blocks, as
         ))}
       </div>
       <p className="text-xs text-zinc-500">{TABS.find((t) => t.key === tab)?.hint} Proposals only: read them before you use them.</p>
+      <p className="text-xs text-zinc-500">Article bodies are written directly in the editor. Assist helps with headlines, captions and finding pictures.</p>
 
-      {tab === 'draft' && (
-        <label className="block">
-          <span className={ui.label}>Your notes</span>
-          <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={4} maxLength={2000} className={ui.input}
-            placeholder="What happened, who you met, what you saw. Quotes you want used, word for word." />
-        </label>
-      )}
-      {tab === 'tighten' && (
-        textBlocks.length ? (
-          <label className="block">
-            <span className={ui.label}>Passage</span>
-            <select value={chosenBlock ?? ''} onChange={(e) => setBlock(Number(e.target.value))} className={ui.input}>
-              {textBlocks.map(({ b, i }) => (
-                <option key={i} value={i}>Block {i + 1}: {b.type === 'text' ? textPreview(b.md) : ''}</option>
-              ))}
-            </select>
-          </label>
-        ) : <p className="text-sm text-zinc-400">Write a text block first, then tighten it here.</p>
-      )}
-
-      <button type="button" className={ui.btnPrimary} disabled={busy || !canAsk} onClick={ask}>
+      <button type="button" className={ui.btnPrimary} disabled={busy} onClick={ask}>
         {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
         {busy ? 'Writing…' : result ? 'Try again' : 'Ask'}
       </button>
@@ -179,29 +128,6 @@ export default function AssistPanel({ siteId, postId, title, excerpt, blocks, as
         </ul>
       )}
 
-      {result?.md !== undefined && tab === 'tighten' && tightenAt === -1 && !used.has('tighten') && (
-        <p className="text-sm text-zinc-400">That passage has changed since you asked. Ask again to tighten it as it is now.</p>
-      )}
-      {result?.md !== undefined && tightenAt !== -1 && (
-        <div className="space-y-2">
-          <div className="grid gap-3 md:grid-cols-2">
-            <div>
-              <p className={ui.label}>Now</p>
-              <p className="whitespace-pre-wrap rounded-lg bg-zinc-950 p-3 text-sm text-zinc-400">
-                {(blocks[tightenAt] as Extract<StoryBlock, { type: 'text' }>).md}
-              </p>
-            </div>
-            <div>
-              <p className={ui.label}>Tighter</p>
-              <p className="whitespace-pre-wrap rounded-lg bg-zinc-950 p-3 text-sm text-zinc-100">{result.md}</p>
-            </div>
-          </div>
-          <button type="button" className={ui.btnGhost} onClick={() => { onTighten(tightenAt, result.md!, result.rt); setTightened(result.md!); mark('tighten') }}>
-            {used.has('tighten') ? <><Check className="h-4 w-4" /> Replaced</> : 'Replace the passage'}
-          </button>
-        </div>
-      )}
-
       {result?.terms && (
         <ul className="space-y-1" aria-label="Searches">
           {result.terms.map((t, n) => (
@@ -214,24 +140,6 @@ export default function AssistPanel({ siteId, postId, title, excerpt, blocks, as
         </ul>
       )}
 
-      {result?.draft && (
-        <div className="space-y-2 rounded-lg border border-zinc-800 p-3">
-          {result.draft.kicker && <p className="text-[11px] uppercase tracking-wide text-zinc-500">{result.draft.kicker}</p>}
-          <p className="font-medium text-zinc-100">{result.draft.title || title}</p>
-          {result.draft.excerpt && <p className="text-sm text-zinc-400">{result.draft.excerpt}</p>}
-          <ol className="list-decimal space-y-1 pl-5 text-sm text-zinc-300">
-            {result.draft.content.blocks.map((b, n) => (
-              <li key={n}>{b.type === 'text' ? textPreview(b.md, 14) : b.type === 'quote' ? `“${b.text}”` : b.type}</li>
-            ))}
-          </ol>
-          {JSON.stringify(result.draft).includes('[check:') && (
-            <p className="text-xs text-amber-300">Fill in each [check: …] before you publish.</p>
-          )}
-          <button type="button" className={ui.btnPrimary} onClick={() => applyDraft(result.draft!)}>
-            {used.has('draft') ? <><Check className="h-4 w-4" /> In the editor</> : 'Use this draft'}
-          </button>
-        </div>
-      )}
     </section>
   )
 }

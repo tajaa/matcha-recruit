@@ -41,7 +41,7 @@ const body = (text: string): Part => p(text, {}, { role: 'p', lead: 14.5, fi: 12
 const BODY = [
   'The boats leave before light. By the time the first café opens its shutters, the harbour is already half empty, and the gulls have moved on to the next pier. Nobody here sets an alarm; the tide does that for them.',
   'Marta has fished these waters for thirty-one years. She keeps a notebook of every morning: the wind, the swell, the colour of the sky over the point. “You learn to read it,” she says, “the way you read a face you love.”',
-  'Write your story here. Type over these words, or paste your own, and the text flows on through every linked frame. Add more pages from the Pages panel and link a frame on each to keep it running.',
+  'Write your story here. Type over these words and the text flows on through every linked frame. Add more pages from the Pages panel and link a frame on each to keep it running.',
   'By noon the boats are back and the market is loud with weighing and bargaining. The best of the catch goes to three restaurants on the front; the rest is sold by the kilo to anyone who asks the right way.',
 ]
 

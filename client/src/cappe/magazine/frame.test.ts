@@ -137,6 +137,18 @@ describe('the editor on the page', () => {
     expect(sent.at(-1)).toEqual({ type: 'mz-key', key: 'save' })
   })
 
+  it('rejects article-body paste with an explanation and preserves the current words', () => {
+    const words = field('[data-mz-b="1"]')
+    const before = words.editor!.getJSON()
+    words.editor!.view.pasteText('Pasted prose', new Event('paste') as ClipboardEvent)
+    words.editor!.view.pasteHTML('<p>Pasted prose</p>', new Event('paste') as ClipboardEvent)
+    expect(words.editor!.getJSON()).toEqual(before)
+    expect(document.querySelector('[role="status"]')?.textContent).toContain('Write article bodies directly here')
+    const paste = new Event('paste', { bubbles: true, cancelable: true })
+    words.dispatchEvent(paste)
+    expect(paste.defaultPrevented).toBe(true)
+  })
+
   it('stops typing when focus leaves a half-typed link for the page', async () => {
     const words = field('[data-mz-b="1"]')
     words.focus()

@@ -1,7 +1,10 @@
 import { Editor, type JSONContent } from '@tiptap/core'
 import { cleanRt, type RtDoc } from '../canvas/rt'
+import { isRichField } from '../canvas/fields'
+import { bodyWritingProps } from '../writing'
 import { richExtensions } from './extensions'
 import { blockOf } from './targets'
+import { writingNotice } from './writing'
 
 /** Fields of rich text (a text block, a sidebar, an interview's answers):
  *  each is a Tiptap editor mounted on the field itself, so the page keeps
@@ -46,6 +49,7 @@ export function makeRich(f: HTMLElement, onUpdate: (f: HTMLElement) => void, onS
     extensions: richExtensions(f.getAttribute('data-mz-ph') || ''),
     content,
     editorProps: {
+      ...(isRichField(f.getAttribute('data-mz-f') ?? '') ? bodyWritingProps(() => true, writingNotice) : {}),
       attributes: { spellcheck: 'true' },
       // The book turns to the words being typed (typing.ts); the editor
       // scrolling the book itself would leave it between two pages.
