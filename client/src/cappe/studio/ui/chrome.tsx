@@ -15,7 +15,7 @@ const MENUS: { label: string; items: (string | '-')[] }[] = [
     'align-top', 'align-middle', 'align-bottom', 'space-across', 'space-down', '-', 'lock', 'hide', 'show-all', '-', 'place', 'edit-picture', 'cut-out', 'subject-front', '-', 'across-spread', 'spine-clear', 'link-crops', 'unlink-crops'] },
   { label: 'View', items: ['zoom-in', 'zoom-out', 'fit-page', 'fit-spread', 'actual', '-', 'view-rulers', 'view-guides', 'view-margins', 'view-baseline', 'view-grid', 'view-gutter', 'view-snap', '-', 'board'] },
 ]
-const HELP = { label: 'Help', items: ['ask', '-', 'guide', 'shortcuts'] }
+const HELP = { label: 'Help', items: ['ask', 'merlin', '-', 'guide', 'shortcuts'] }
 
 /** The menus: every command with the key that does it too. */
 export function MenuBar() {

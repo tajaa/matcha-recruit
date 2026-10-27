@@ -154,22 +154,23 @@ function pictureLoader(siteId: string, assets: Record<string, Asset>): Loader['p
   }
 }
 
-/** The selected part of the page (else the page in view) as a JPEG, or null
+/** The selected part of the page (else the page in view; with `whole`, the
+ *  page in view whatever is selected: what Merlin designs) as a JPEG, or null
  *  when the browser can't draw it. */
-export async function snapshot(s: State, fonts: FontLoader, siteId: string): Promise<Picture | null> {
+export async function snapshot(s: State, fonts: FontLoader, siteId: string, { whole = false }: { whole?: boolean } = {}): Promise<Picture | null> {
   let timer: ReturnType<typeof setTimeout> | undefined
   const timeout = new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), WAIT_MS) })
   try {
-    return await Promise.race([draw(s, fonts, siteId).catch(() => null), timeout])
+    const crop = whole ? { page: s.page, x: 0, y: 0, w: s.doc.size.w, h: s.doc.size.h } : cropFor(s)
+    return await Promise.race([draw(s, crop, fonts, siteId).catch(() => null), timeout])
   } finally {
     clearTimeout(timer)
   }
 }
 
-async function draw(s: State, fonts: FontLoader, siteId: string): Promise<Picture | null> {
+async function draw(s: State, crop: Crop, fonts: FontLoader, siteId: string): Promise<Picture | null> {
   const { doc } = s
-  if (!doc.pages[s.page]) return null
-  const crop = cropFor(s)
+  if (!doc.pages[crop.page]) return null
   const scale = scaleFor(crop)
   const d: Draw = { assets: s.assets, faces: fonts.book.face, used: new Map(), threads: frameThreads(doc) }
   const html = pageItemsHtml(doc, crop.page, d)

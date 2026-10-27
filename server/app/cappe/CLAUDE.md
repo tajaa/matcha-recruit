@@ -833,6 +833,31 @@ normalized paragraphs itself; a thread with no valid composition prints its word
   manifest's families by kind. An answer's buttons survive only if they name a guide section or command that was
   sent, and the panel never offers Cut, Delete, Delete this page or Close as a button. 20 questions a day, 150
   with `magazine` (`cappe_studio_ask`).
+- **Merlin in the Studio** (`studio/merlin.py`, `POST …/studio/stories/{id}/merlin`; client `ui/ask/merlinOps.ts`,
+  `Conversation.design` in `ui/ask/conversation.ts`, the Ask/Merlin switch in `AskPanel.tsx`): Merlin designs the
+  page in view instead of answering. Separate from the website Merlin (`services/merlin/`), sharing only the name.
+  **The browser runs the rounds**, at most 3, one Messages call each (`MODEL_SECONDS` 50 because a round is one
+  request through CloudFront's 60 s origin timeout). **`merlin.tier` picks the model per round, with no router
+  call:** Sonnet (`gummfit.studio_merlin`, `claude_default(..., builtin=CLAUDE_SONNET)`, high effort) decides the
+  look: a design's first round, unless it is narrow (1-2 frames selected, no reference picture), and any round
+  after one whose edits mostly didn't take (`previous[-1].skipped > did`). Haiku (`gummfit.studio_merlin_refine`,
+  medium effort, about a twentieth of the price) takes the polish rounds and narrow changes; a failed polish round
+  is retried on Sonnet while `RETRY_SECONDS` are left. Measured on dev 2026-10-27: a Sonnet round ~11-17 s, ~$0.03.
+  The reply is held to `REPLY_SCHEMA` by structured outputs (`generate_text(schema=...)`): without it Sonnet
+  sometimes wrote tool-call markup instead of JSON (1 in 4 replays). The schema has **no optional fields**
+  (structured outputs refuse more than 24): each edit kind is its own shape and what it sets is a list of
+  `{name, value}` pairs that `_flatten` turns back into a plain edit. Each round sends the request, the page in words with ids, paragraph
+  numbers and points (`describeStudio(s, { forMerlin: true })`), a JPEG of the whole page as it is now
+  (`snapshot(..., { whole: true })`), the reference picture and what earlier rounds did and skipped. The reply is
+  `{say, ops, done}`; **the edits are a closed list** (`set`, `type`, `case`, `add`, `arrange`), cleaned here
+  (fields of the right type, the document's limits, hex colours, manifest families, ≤40 edits and ≤8 additions a
+  round) and checked again in the browser against the document (on the page it started on or selected, not
+  locked, a field its kind has); `merlinOps.fitOps` then takes back any edit that would make text that fits
+  overflow, telling the next round about how much room it needed. **Never deletes, never writes a story's words**: `case` skips body text, `add`
+  text is a label of ≤80 characters with a heading or caption role. Rounds after the first join the first's undo
+  step (`Store.edit(..., { join: true })`) only while `Store.changes` hasn't moved, so one ⌘Z or Undo Merlin takes
+  the whole design back; any other change to the document stops Merlin. Each round spends one of the day's rounds
+  (`cappe_studio_merlin`): 3 designs × 3 rounds without `magazine`, 20 × 3 with it.
 
 ## Social growth (2026-10, `services/social/`, migrations `cappesocial01`–`03`)
 

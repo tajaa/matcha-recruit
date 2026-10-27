@@ -238,6 +238,16 @@ async def test_generate_text_sends_json_instruction_and_attachments(monkeypatch,
 
 
 @pytest.mark.asyncio
+async def test_generate_text_with_a_schema_asks_for_structured_output(monkeypatch, ledger):
+    fake = _FakeAnthropic(_message(text='{"ok": true}', model="claude-sonnet-5-5"))
+    monkeypatch.setattr(anthropic_messages, "get_async_client", lambda: fake)
+    schema = {"type": "object", "properties": {"ok": {"type": "boolean"}}, "required": ["ok"], "additionalProperties": False}
+    await anthropic_messages.generate_text("Check", model="claude-sonnet-5-5", effort="high", schema=schema)
+    assert fake.params["output_config"] == {"effort": "high", "format": {"type": "json_schema", "schema": schema}}
+    assert fake.params["thinking"] == {"type": "adaptive"}
+
+
+@pytest.mark.asyncio
 async def test_generate_text_without_system_or_json(monkeypatch, ledger):
     fake = _FakeAnthropic(_message(text="Plain."))
     monkeypatch.setattr(anthropic_messages, "get_async_client", lambda: fake)

@@ -8,7 +8,7 @@
 import type { LucideIcon } from 'lucide-react'
 import {
   BookOpen, CaseSensitive, Columns2, FileStack, FileType, Image, Keyboard, LayoutGrid, LayoutTemplate, Link2, MousePointer2, MousePointerClick, Move, PanelsTopLeft,
-  PersonStanding, Ruler, Save, Scissors, Shapes, SlidersHorizontal, Smartphone, Sparkles, Type, WrapText, ZoomIn,
+  PersonStanding, Ruler, Save, Scissors, Shapes, SlidersHorizontal, Smartphone, Sparkles, Type, WandSparkles, WrapText, ZoomIn,
 } from 'lucide-react'
 
 export type GuideSection = {
@@ -64,8 +64,20 @@ export const GUIDE: GuideSection[] = [
       'Open it with Ask in the top bar, Help → Ask the Studio…, or Window → Ask the Studio. With something selected, the ✦ on the bar over it (or Ask about this… when you right-click it) opens Ask about just that, the question already started.',
       'It knows this guide, every menu command, the fonts you can use and what is on the page in view: each frame’s place, size, type and colours. Select something first to ask about just that.',
       'To match a look you like: select the part of your page, then give Ask a picture of the look: drag a screenshot onto the panel, paste one (a screenshot taken to the clipboard works), or choose one. Ask “how can I make this look like this?”: the Studio also sends a picture of the part you selected (or the page in view) as it looks now, so the answer compares the two side by side. Both show above the answer. You can also name a style or a kind of magazine instead.',
-      'Buttons under an answer open this guide at the right section or start what the answer describes. It never changes your page itself: you make each change, and ⌘Z undoes it.',
+      'Buttons under an answer open this guide at the right section or start what the answer describes. Ask never changes your page itself: you make each change, and ⌘Z undoes it. To have the changes made for you, switch to Merlin (below).',
       'Answers come from AI and can be wrong. Questions aren’t saved, and closing the Studio clears them.',
+    ],
+  },
+  {
+    id: 'merlin', group: 'Start', icon: WandSparkles, title: 'Design with Merlin',
+    body: 'Merlin designs the page in view for you. Switch the bar under Ask the Studio from Ask to Merlin, say what you want (“make this feel like a fashion magazine”), or give it a picture of a look you like, and send.',
+    points: [
+      'Open it from the Merlin switch in Ask the Studio, Help → Design with Merlin…, or right-click: Design with Merlin… (on an empty part of the page, Design this page with Merlin…). Select something first and Merlin works on that, changing the rest of the page only as much as it needs.',
+      'Merlin works in rounds, three at most: it looks at a picture of your page, makes its changes, then looks at the result and refines it. Each round says what it changed and why. Stop ends it after the step it is on; what it already changed stays.',
+      'It moves, resizes and restyles frames (fonts, sizes, colours, spacing, columns), crops pictures in their frames, changes what is in front, hides things, changes the letter case of headings and captions, and adds shapes, rules and short labels. It never writes or rewrites your story’s words, never deletes anything and leaves locked frames alone.',
+      'Everything Merlin does is one step: Undo Merlin, under its last round, or one ⌘Z takes the whole design back. If you change the page while it works, it stops there, and ⌘Z undoes your change first.',
+      'It works on the page you were on when you sent it, even if you scroll away, and uses only fonts the Studio has.',
+      'Merlin uses AI and can get things wrong: check what it did. You can ask it for 20 designs a day with a magazine plan (3 without). Requests aren’t saved.',
     ],
   },
   {
@@ -138,7 +150,7 @@ export const GUIDE: GuideSection[] = [
       'Pictures: Replace, Edit (light, colour and filters), Cut out, Crop (fill or fit the frame, zoom, and the part to keep in view) and Across, which runs the picture over both pages of the spread. An empty frame shows Choose a picture.',
       'Shapes and lines: the fill (or No fill), and the border’s colour and weight; a rectangle’s corners too.',
       'Everything: Position (line it up with the page, or several things with each other, and space three or more evenly), Transparency, Lock, Duplicate, Delete, ✦ to ask how to make it look like a picture you like (see Ask the Studio), and ⋯ for the right-click menu. Something locked shows only Unlock.',
-      'Right-click anything for Cut, Copy, Paste, Duplicate and Delete, what that kind of thing can do (type in it, replace or edit a picture, run it across the spread, link crops), Align, Arrange, Lock, Hide and Ask about this…. Right-click an empty part of a page to paste, select everything on it, add or delete a page, or open the templates or the issue board.',
+      'Right-click anything for Cut, Copy, Paste, Duplicate and Delete, what that kind of thing can do (type in it, replace or edit a picture, run it across the spread, link crops), Align, Arrange, Lock, Hide, Ask about this… and Design with Merlin…. Right-click an empty part of a page to paste, select everything on it, add or delete a page, open the templates or the issue board, or have Merlin design the page.',
       'In the menu, the arrow keys move through it, → opens Align or Arrange, ← goes back and Esc closes it.',
     ],
   },

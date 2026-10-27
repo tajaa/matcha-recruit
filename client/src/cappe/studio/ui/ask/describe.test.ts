@@ -137,3 +137,34 @@ describe('what Ask the Studio sends about the page', () => {
     expect(frame.join(' ')).toContain('Inter')
   })
 })
+
+describe('what Merlin is told about the page', () => {
+  it('gives every length in points, each frame’s id, each paragraph’s number and the page’s side', () => {
+    const { store, text, image } = studio()
+    const out = describeStudio(store.get(), { forMerlin: true })
+    expect(out).toContain('each 612 pt wide × 792 pt high')
+    expect(out).toContain('units: points')
+    expect(out).toContain('It is a left-hand page: its inside margin is on its right.')
+    expect(out).toContain(`[selected] Text frame "${text}" [id ${text}]:`)
+    expect(out).toContain('at 36 pt from the left, 72 pt from the top; 540 pt × 200 pt')
+    expect(out).toContain(`Picture frame "${image}" [id ${image}]`)
+    expect(out).toMatch(/· ¶0 Headline: "The tide comes in twice a day"/)
+    expect(out).toMatch(/· ¶1 Body text: "Body copy starts here"/)
+    expect(out).toMatch(/540 pt × 200 pt; \d+ lines? set in it/)
+    // Ask's own description keeps the document's units and no ids.
+    const ask = describeStudio(store.get())
+    expect(ask).not.toContain('[id ')
+    expect(ask).not.toContain('¶0')
+    expect(ask).not.toContain('-hand page')
+  })
+})
+
+it('tells Merlin how much of an overflowing frame’s text has no room', () => {
+  const { store, text } = studio()
+  store.edit((d) => ({ ...d, items: d.items.map((i) => (i.id === text ? { ...i, h: 60 } : i)) }))
+  const out = describeStudio(store.get(), { forMerlin: true })
+  const line = out.split('\n').find((l) => l.includes(`[id ${text}]`))!
+  expect(line).toMatch(/some of its text doesn't fit: \d+ characters have no room/)
+  expect(describeStudio(store.get())).toContain("some of its text doesn't fit")
+  expect(describeStudio(store.get())).not.toContain('have no room')
+})

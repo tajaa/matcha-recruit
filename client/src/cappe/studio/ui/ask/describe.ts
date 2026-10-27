@@ -5,7 +5,7 @@
 // question, so it stays short: long text is cut to its start.
 
 import { groupOf } from '../../model/crops'
-import { CUSTOM_FAMILY, spreads } from '../../model/doc'
+import { CUSTOM_FAMILY, pageSide, spreads } from '../../model/doc'
 import { runs } from '../../model/sections'
 import { CHAR_DEFAULTS, PARA_DEFAULTS } from '../../model/limits'
 import type { Asset, Doc, Face, Item, Para, Run, Stroke, Thread, Units } from '../../model/types'
@@ -26,12 +26,12 @@ const FIT = { fill: 'Fill', fit: 'Fit', stretch: 'Stretch' } as const
 
 const n = (v: number) => String(Math.round(v * 100) / 100)
 
-function describeDoc(doc: Doc): string {
-  const len = (pt: number) => `${show(pt, doc.units)}${SUFFIX[doc.units]}`
+function describeDoc(doc: Doc, units: Units): string {
+  const len = (pt: number) => `${show(pt, units)}${SUFFIX[units]}`
   const m = doc.margins
   const lines = [
     `Document: ${doc.pages.length} page${doc.pages.length === 1 ? '' : 's'}, each ${len(doc.size.w)} wide × ${len(doc.size.h)} high; `
-      + `${doc.facing ? 'facing pages (they pair up as spreads)' : 'single pages'}; units: ${UNIT_NAME[doc.units]}.`,
+      + `${doc.facing ? 'facing pages (they pair up as spreads)' : 'single pages'}; units: ${UNIT_NAME[units]}.`,
     `Margins: top ${len(m.t)}, bottom ${len(m.b)}, inside ${len(m.i)}, outside ${len(m.o)}. `
       + `${doc.cols.n} column${doc.cols.n === 1 ? '' : 's'}, gutter ${len(doc.cols.g)}. `
       + `Baseline grid every ${n(doc.baseline.step)} pt. Bleed ${len(doc.bleed)}. Paper colour ${doc.paper}.`,
@@ -79,13 +79,13 @@ export function clip(s: string, n: number): string {
   return s.slice(0, code >= 0xd800 && code <= 0xdbff ? n - 1 : n)
 }
 
-function paraLine(p: Para, fonts: Face[]): string {
+function paraLine(p: Para, fonts: Face[], k: number | null): string {
   const text = p.runs.map((r) => r.t).join('').replace(/\s+/g, ' ').trim()
   const excerpt = text.length > EXCERPT ? `${clip(text, EXCERPT)}…` : text
   const first = p.runs.find((r) => r.t.trim()) ?? p.runs[0] ?? { t: '' }
   const mixed = p.runs.some((r) => r.t.trim() && (r.font !== first.font || r.size !== first.size || r.color !== first.color
     || r.wt !== first.wt || !!r.it !== !!first.it))
-  return `    · ${ROLE[p.role ?? PARA_DEFAULTS.role]}: "${excerpt || '(empty)'}" in ${runStyle(first, p, fonts)}${mixed ? ' (some words styled differently)' : ''}`
+  return `    · ${k === null ? '' : `¶${k} `}${ROLE[p.role ?? PARA_DEFAULTS.role]}: "${excerpt || '(empty)'}" in ${runStyle(first, p, fonts)}${mixed ? ' (some words styled differently)' : ''}`
 }
 
 /** The part of a paragraph from `start` to `end` (UTF-16), its runs cut to fit. */
@@ -104,9 +104,9 @@ function slicePara(p: Para, start: number, end: number): Para {
  *  paragraph set in it (a paragraph running on from the page before shows
  *  its own words and type here, not its beginning); else (an empty or new
  *  thread) the first paragraphs when it is the thread's first frame. */
-function frameParas(item: Item, threads: Thread[]): { paras: Para[]; more: number; thread: Thread | null } {
+function frameParas(item: Item, threads: Thread[]): { paras: Para[]; index: number[]; more: number; thread: Thread | null } {
   const thread = threads.find((t) => t.frames.includes(item.id)) ?? null
-  if (!thread) return { paras: [], more: 0, thread }
+  if (!thread) return { paras: [], index: [], more: 0, thread }
   const at = thread.frames.indexOf(item.id)
   const ranges = new Map<number, [number, number]>()
   for (const l of thread.comp?.lines ?? []) {
@@ -116,12 +116,22 @@ function frameParas(item: Item, threads: Thread[]): { paras: Para[]; more: numbe
   }
   let shown = [...ranges.keys()]
   if (!shown.length && at === 0 && !thread.comp?.lines.length) shown = thread.paras.map((_, i) => i)
-  const paras = shown.slice(0, MAX_PARAS).flatMap((i) => {
-    const p = thread.paras[i]
+  const index = shown.slice(0, MAX_PARAS).filter((i) => thread.paras[i])
+  const paras = index.map((i) => {
     const r = ranges.get(i)
-    return !p ? [] : r ? [slicePara(p, r[0], r[1])] : [p]
+    return r ? slicePara(thread.paras[i], r[0], r[1]) : thread.paras[i]
   })
-  return { paras, more: Math.max(0, shown.length - MAX_PARAS), thread }
+  return { paras, index, more: Math.max(0, shown.length - MAX_PARAS), thread }
+}
+
+/** How many characters of a thread no line holds (its overflow). */
+function unset(t: Thread): number {
+  const last = t.comp?.lines[t.comp.lines.length - 1]
+  const len = (k: number) => [...t.paras[k].runs.map((r) => r.t).join('')].length
+  if (!last) return t.paras.reduce((n, _, k) => n + len(k), 0)
+  const [, para, , end] = last
+  const rest = [...t.paras[para].runs.map((r) => r.t).join('').slice(end)].length
+  return rest + t.paras.slice(para + 1).reduce((n, _, k) => n + len(para + 1 + k), 0)
 }
 
 function pictureText(asset: Asset | undefined): string {
@@ -138,10 +148,10 @@ function pictureText(asset: Asset | undefined): string {
   return bits.join(', ')
 }
 
-function itemLines(item: Item, s: State, len: (pt: number) => string): string[] {
+function itemLines(item: Item, s: State, len: (pt: number) => string, ids: boolean): string[] {
   const head = [
     `- ${s.selection.includes(item.id) ? '[selected] ' : ''}${KIND[item.kind]} "${item.name || item.id}"`
-      + `${item.hidden ? ' (hidden)' : ''}${item.locked ? ' (locked)' : ''}:`,
+      + `${ids ? ` [id ${item.id}]` : ''}${item.hidden ? ' (hidden)' : ''}${item.locked ? ' (locked)' : ''}:`,
     `at ${len(item.x)} from the left, ${len(item.y)} from the top; ${len(item.w)} × ${len(item.h)}`,
   ]
   if (item.rot) head.push(`turned ${n(item.rot)}°`)
@@ -154,15 +164,20 @@ function itemLines(item: Item, s: State, len: (pt: number) => string): string[] 
       if (item.valign !== 'top') extra.push(`text ${item.valign === 'center' ? 'centred' : item.valign === 'bottom' ? 'at the bottom' : 'justified'} vertically`)
       if (item.fill) extra.push(fillText(item.fill))
       if (item.stroke) extra.push(strokeText(item.stroke))
-      const { paras, more, thread } = frameParas(item, s.doc.threads)
+      const { paras, index, more, thread } = frameParas(item, s.doc.threads)
       if (thread && thread.frames.length > 1) {
         extra.push(`frame ${thread.frames.indexOf(item.id) + 1} of ${thread.frames.length} its text flows through`)
       }
+      if (ids && thread?.comp) {
+        const at = thread.frames.indexOf(item.id)
+        const held = thread.comp.lines.filter((l) => l[0] === at).length
+        extra.push(`${held} line${held === 1 ? '' : 's'} set in it`)
+      }
       if (thread && s.overset.has(thread.id) && thread.frames[thread.frames.length - 1] === item.id) {
-        extra.push("some of its text doesn't fit")
+        extra.push(ids ? `some of its text doesn't fit: ${unset(thread)} characters have no room` : "some of its text doesn't fit")
       }
       const lines = [[...head, ...extra].join('; ')]
-      lines.push(...(paras.length ? paras.map((p) => paraLine(p, s.fonts ?? s.doc.faces ?? [])) : ['    · (no text)']))
+      lines.push(...(paras.length ? paras.map((p, k) => paraLine(p, s.fonts ?? s.doc.faces ?? [], ids ? index[k] : null)) : ['    · (no text)']))
       if (more) lines.push(`    · …and ${more} more paragraph${more === 1 ? '' : 's'}`)
       return lines
     }
@@ -199,15 +214,20 @@ function itemLines(item: Item, s: State, len: (pt: number) => string): string[] 
   return [[...head, ...extra].join('; ')]
 }
 
-/** The words Ask the Studio sends about the document and the page in view. */
-export function describeStudio(s: State): string {
+/** The words Ask the Studio sends about the document and the page in view.
+ *  `forMerlin`: in points, with each frame's id and each paragraph's number,
+ *  the names Merlin's edits use (ui/ask/merlinOps.ts). */
+export function describeStudio(s: State, { forMerlin = false }: { forMerlin?: boolean } = {}): string {
   const { doc } = s
-  const len = (pt: number) => `${show(pt, doc.units)}${SUFFIX[doc.units]}`
+  const units: Units = forMerlin ? 'pt' : doc.units
+  const len = (pt: number) => `${show(pt, units)}${SUFFIX[units]}`
   const page = doc.pages[s.page]
   const spread = spreads(doc).find((sp) => sp.includes(s.page)) ?? [s.page]
-  const out = [describeDoc(doc)]
+  const out = [describeDoc(doc, units)]
   out.push(`In view: page ${s.page + 1} of ${doc.pages.length}`
-    + `${spread.length > 1 ? ` (a spread with page ${spread.find((p) => p !== s.page)! + 1})` : ''}.`)
+    + `${spread.length > 1 ? ` (a spread with page ${spread.find((p) => p !== s.page)! + 1})` : ''}.`
+    + (forMerlin && doc.facing ? ` It is a ${pageSide(doc, s.page)}-hand page: its inside margin is on its `
+      + `${pageSide(doc, s.page) === 'right' ? 'left' : 'right'}.` : ''))
   out.push(s.selection.length ? `Selected: ${s.selection.length} thing${s.selection.length === 1 ? '' : 's'}, marked [selected] below.` : 'Nothing is selected.')
   if (s.editing) out.push('The person is typing in a text frame.')
 
@@ -215,9 +235,9 @@ export function describeStudio(s: State): string {
   const elsewhere = doc.items.filter((i) => s.selection.includes(i.id) && i.page !== page?.id)
   const body = [
     `On page ${s.page + 1}, back to front (the last is on top):`,
-    ...(onPage.length ? onPage.flatMap((i) => itemLines(i, s, len)) : ['(nothing on this page yet)']),
+    ...(onPage.length ? onPage.flatMap((i) => itemLines(i, s, len, forMerlin)) : ['(nothing on this page yet)']),
   ]
-  if (elsewhere.length) body.push('Selected on other pages:', ...elsewhere.flatMap((i) => itemLines(i, s, len)))
+  if (elsewhere.length) body.push('Selected on other pages:', ...elsewhere.flatMap((i) => itemLines(i, s, len, forMerlin)))
   const tail = `The Picture Editor's looks: ${LOOKS.map((l) => l.label).join(', ')}.`
 
   let text = [...out, ...body, tail].join('\n')
@@ -229,7 +249,7 @@ export function describeStudio(s: State): string {
     const kept: string[] = []
     let size = head.length + tail.length + 160, left = 0
     for (const i of [...onPage.filter(isSel), ...elsewhere, ...onPage.filter((x) => !isSel(x))]) {
-      const lines = itemLines(i, s, len)
+      const lines = itemLines(i, s, len, forMerlin)
       const n = lines.reduce((a, l) => a + l.length + 1, 0)
       if (size + n > MAX_DESCRIPTION) { left++; continue }
       kept.push(...lines)

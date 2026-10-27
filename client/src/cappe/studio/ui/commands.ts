@@ -259,6 +259,12 @@ export const COMMANDS: Command[] = [
       store.set((s) => ({ panels: s.panels.includes('ask') ? s.panels : [...s.panels, 'ask'] }))
       conversation(store).prompt(MATCH_QUESTION)
     } },
+  { id: 'merlin', label: 'Design with Merlin…',
+    run: ({ store }) => {
+      store.set((s) => ({ panels: s.panels.includes('ask') ? s.panels : [...s.panels, 'ask'] }))
+      conversation(store).setMode('merlin')
+      conversation(store).focus()
+    } },
   { id: 'guide', label: 'How the Studio works', run: ({ store }) => store.set({ guide: 'start' }) },
   { id: 'shortcuts', label: 'Keyboard shortcuts', run: ({ store }) => store.set({ guide: 'keys' }) },
   { id: 'zoom-in', label: 'Zoom in', keys: '⌘=', run: (c) => zoomTo(c, c.store.get().view.zoom * 1.25) },

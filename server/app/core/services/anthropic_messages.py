@@ -116,16 +116,17 @@ async def claude_override(surface: str) -> Optional[str]:
     return choice if choice in CLAUDE_MODELS else None
 
 
-async def claude_default(surface: str) -> Optional[str]:
+async def claude_default(surface: str, builtin: str = CLAUDE_HAIKU) -> Optional[str]:
     """For a surface whose built-in provider was OpenAI Luna: the Claude model
-    the setting routes it to, else Claude Haiku whenever this server has an
-    Anthropic key. None, which sends the caller down its Luna path, only on a
-    server with no Anthropic key: we run on Claude, and Luna is the safety net.
+    the setting routes it to, else `builtin` (Claude Haiku, or the surface's
+    own Claude) whenever this server has an Anthropic key. None, which sends
+    the caller down its Luna path, only on a server with no Anthropic key: we
+    run on Claude, and Luna is the safety net.
 
     Surfaces whose built-in is Gemini (voice, Google-grounded research) keep
     `claude_override`, where "default" still means Gemini.
     """
-    return await claude_override(surface) or (CLAUDE_HAIKU if anthropic_configured() else None)
+    return await claude_override(surface) or (builtin if anthropic_configured() else None)
 
 
 def offered_models(*, configured: bool | None = None) -> tuple[str, ...]:
@@ -224,6 +225,7 @@ async def generate_text(
     effort: str = "low",
     timeout_seconds: float = 60.0,
     deadline: float | None = None,
+    schema: dict[str, Any] | None = None,
 ) -> str:
     """One Messages call; returns the reply text. Raises RuntimeError on any
     API failure, after writing the ledger row; with `deadline` (seconds,
@@ -232,6 +234,8 @@ async def generate_text(
     `attachments` are Messages content blocks (`image_block`/`pdf_block`)
     placed before the prompt. `json_output` adds a JSON-only instruction —
     callers still parse with `parse_json_object`, which tolerates fences.
+    `schema`: a JSON schema the reply must follow (structured outputs,
+    `output_config.format`), for a reply that is always that object.
     `max_tokens` covers thinking too, so it is floored at 4096: a small cap
     with adaptive thinking on can spend it all before the answer.
     """
@@ -242,7 +246,7 @@ async def generate_text(
         "max_tokens": max(max_tokens, 4_096),
         "messages": [{"role": "user", "content": content}],
         "thinking": {"type": "adaptive"},
-        "output_config": {"effort": effort},
+        "output_config": {"effort": effort, **({"format": {"type": "json_schema", "schema": schema}} if schema else {})},
         **request_extras(model),
     }
     if system_text:

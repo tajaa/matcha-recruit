@@ -178,6 +178,16 @@ Website-builder frontend for the consumer brand **Gummfit**, host-routed on gumm
   (`studio/ask.py`: the reference first, theirs second). Load it from a `data:` URL, never a `blob:` one: Chromium taints
   the canvas for a `blob:` SVG with HTML inside (WebKit and Chromium both read a `data:` one, checked 2026-10-27).
   Any failure or 8 s without a picture just sends the question without it.
+  **Merlin** (the Ask panel's Ask/Merlin switch, Help → Design with Merlin…, the right-click menu): designs the page
+  in view itself (server `studio/merlin.py`). `Conversation.design` runs up to three rounds, each a whole-page
+  snapshot plus `describeStudio(s, { forMerlin: true })` (points, `[id …]`, `¶n`) sent, edits back, applied by the
+  pure `ui/ask/merlinOps.ts` `fitOps` (`applyOps`, then any edit that would make fitting text overflow taken back
+  out) after `fonts.ensureDoc` loads their faces. Each round also sends `selected` and the last rounds' `did` /
+  `skipped`: the server picks Sonnet or Haiku from them (`merlin.tier`). Rounds after the first pass
+  `join: true` to `Store.edit`, so the design is one undo step; `Store.changes` (edits, undos, redos, replaces; not
+  recomposes) moving between rounds means the person changed the page, and Merlin stops. Undo Merlin is offered
+  only while `Store.changes` still equals the value after Merlin's last edit. It never deletes and never writes a
+  story's words (`case` skips body text; added text is a short heading or caption label).
   **Editorial collections** (`ui/add/collections.ts`, `CollectionsTab.tsx`, `applyCollection.ts`): Templates opens
   on four ten-page art directions; Single pages keeps the original templates. A collection starts a blank
   story or inserts after the current spread (padding keeps its cover on the right and preserves original page sides), fitted to the story's

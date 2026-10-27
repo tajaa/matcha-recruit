@@ -15,7 +15,7 @@ export function menuRows(s: State): Row[] {
   const items = s.doc.items.filter((i) => s.selection.includes(i.id))
   if (!items.length) {
     return [{ id: 'paste' }, { id: 'select-all' }, { id: 'show-all' }, '-', { id: 'page-add' }, ...when('page-delete'),
-      '-', { id: 'add-templates', label: 'Page templates…' }, { id: 'board' }]
+      '-', { id: 'add-templates', label: 'Page templates…' }, { id: 'board' }, '-', { id: 'merlin', label: 'Design this page with Merlin…' }]
   }
   const one = items.length === 1 ? items[0] : null
   const locked = items.every((i) => i.locked)
@@ -34,6 +34,6 @@ export function menuRows(s: State): Row[] {
     if (can('space-across')) align.push('-', { id: 'space-across' }, { id: 'space-down' })
     rows.push('-', { label: one ? 'Align to page' : 'Align', rows: align }, ARRANGE)
   }
-  rows.push('-', { id: 'lock', label: locked ? 'Unlock' : 'Lock' }, { id: 'hide' }, '-', { id: 'ask-about' })
+  rows.push('-', { id: 'lock', label: locked ? 'Unlock' : 'Lock' }, { id: 'hide' }, '-', { id: 'ask-about' }, { id: 'merlin' })
   return rows
 }

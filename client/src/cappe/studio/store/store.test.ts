@@ -59,6 +59,29 @@ describe('the store', () => {
     expect(xs).toEqual([4, 3, 2, 0])
   })
 
+  it('joins an edit to the step on top however long after, and counts every change but a recompose', () => {
+    vi.useFakeTimers()
+    const s = store()
+    s.edit((d) => addItem(d, 'rect', 'p1', { x: 0, y: 0, w: 10, h: 10 }).doc)
+    const added = s.changes
+    s.edit((d) => moveItems(d, ['r1'], 5, 0))
+    vi.advanceTimersByTime(60_000)
+    s.edit((d) => moveItems(d, ['r1'], 5, 0), { join: true })
+    expect(s.changes).toBe(added + 2)
+    s.edit((d) => d) // nothing changed: not counted
+    s.recompose()
+    expect(s.changes).toBe(added + 2)
+    s.undo()
+    expect(s.get().doc.items[0].x).toBe(0) // both moves were one step
+    expect(s.changes).toBe(added + 3)
+    s.redo()
+    s.replace(doc())
+    expect(s.changes).toBe(added + 5)
+    // With nothing to join, a joined edit is a step of its own.
+    s.edit((d) => addItem(d, 'rect', 'p1', { x: 0, y: 0, w: 10, h: 10 }).doc, { join: true })
+    expect(s.canUndo()).toBe(true)
+  })
+
   it('an edit that changes nothing is no step, and a new edit clears redo', () => {
     const s = store()
     const before = s.get().doc
