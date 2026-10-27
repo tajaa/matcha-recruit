@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import { ChevronDown, Pipette, Plus, Trash2 } from 'lucide-react'
 import type { Paint, PaintKind, Stop } from '../design/types'
 import { alphaOf, hexToHsva, hsvaToHex, readColour, swatchCss, withAlpha, type Hsva } from './color'
+import { usePopover } from './popover'
 import { evalSum } from './sum'
 
 /** The workspace's controls, as a design tool has them: numbers you drag a
@@ -149,32 +150,6 @@ const RECENT: string[] = []
 const PRESETS = ['#ffffff', '#000000', '#111111', '#f4efe6', '#e11d48', '#f97316', '#facc15', '#10b981', '#0ea5e9', '#6366f1', '#a855f7', '#78716c']
 
 type EyeDropperCtor = new () => { open: () => Promise<{ sRGBHex: string }> }
-
-/** A popover kept on screen, placed by its anchor when opened, closed by a
- *  click outside it or Escape. */
-function usePopover(anchor: React.RefObject<HTMLElement | null>) {
-  const panel = useRef<HTMLDivElement>(null)
-  const [at, setAt] = useState<{ left: number; top: number } | null>(null)
-  const open = at !== null
-  const toggle = () => {
-    if (open || !anchor.current) { setAt(null); return }
-    const r = anchor.current.getBoundingClientRect()
-    const w = 248, h = 330
-    setAt({ left: Math.max(8, Math.min(window.innerWidth - w - 8, r.right - w)), top: r.bottom + h > window.innerHeight ? Math.max(8, r.top - h - 4) : r.bottom + 4 })
-  }
-  useEffect(() => {
-    if (!open) return
-    const down = (e: PointerEvent) => {
-      if (panel.current?.contains(e.target as Node) || anchor.current?.contains(e.target as Node)) return
-      setAt(null)
-    }
-    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') setAt(null) }
-    window.addEventListener('pointerdown', down, true)
-    window.addEventListener('keydown', key)
-    return () => { window.removeEventListener('pointerdown', down, true); window.removeEventListener('keydown', key) }
-  }, [open, anchor])
-  return { panel, at, toggle }
-}
 
 /** The picker: a square for strength and brightness, hue and opacity bars,
  *  a hex box, the magazine's accent, recent and preset colours, and the

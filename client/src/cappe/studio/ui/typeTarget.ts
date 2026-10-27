@@ -63,3 +63,12 @@ export function setPara(c: StudioCtx, attrs: ParaAttrs): void {
   if (!threads.length) return
   c.store.edit((d) => everywhere(d, threads, (paras) => applyPara(paras, 0, paras.length - 1, attrs)))
 }
+
+/** Character attributes, then the faces they need loaded before the text is
+ *  set again in them. */
+export function charSetter(c: StudioCtx) {
+  return (attrs: CharAttrs) => {
+    setChar(c, attrs)
+    void c.fonts.ensureDoc(c.store.get().doc).then(() => c.store.recompose(), () => {})
+  }
+}

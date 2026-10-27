@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { newItem } from '../model/doc'
 import type { Doc, Item } from '../model/types'
-import { GAP, PASTE, bounds, hitItem, hits, layout, pageAt, snap1, snapTargets, turn } from './geometry'
+import { GAP, PASTE, bounds, hitItem, hits, layout, menuTarget, pageAt, snap1, snapTargets, turn } from './geometry'
+import { alignItems, canSpace, rehome, spaceItems } from './align'
 import { dragBox, resize, rotate } from './transform'
 
 const doc = (over: Partial<Doc> = {}): Doc => ({
@@ -114,5 +115,83 @@ describe('transforms', () => {
     expect(dragBox({ x: 0, y: 0 }, { x: 10, y: 30 }, { square: true })).toMatchObject({ w: 30, h: 30 })
     const line = dragBox({ x: 0, y: 0 }, { x: 10, y: 9 }, { square: true, line: true })
     expect(line.w).toBeCloseTo(line.h)
+  })
+})
+
+describe('lining things up', () => {
+  const at = (d: Doc, id: string) => d.items.find((i) => i.id === id)!
+  const r = (id: string, x: number, y: number, w: number, h: number, over: Partial<Item> = {}): Item =>
+    ({ ...newItem('rect', 'p1', id, { x, y, w, h }), ...over } as Item)
+
+  it('lines one thing up with its page', () => {
+    const d = doc({ items: [r('a', 100, 100, 200, 100)] })
+    expect(at(alignItems(d, ['a'], 'right'), 'a').x).toBe(400)
+    expect(at(alignItems(d, ['a'], 'centre'), 'a').x).toBe(200)
+    expect(at(alignItems(d, ['a'], 'bottom'), 'a').y).toBe(700)
+    expect(at(alignItems(d, ['a'], 'middle'), 'a').y).toBe(350)
+    // Already there: the same document, so no undo step and nothing to save.
+    const centred = alignItems(d, ['a'], 'centre')
+    expect(alignItems(centred, ['a'], 'centre')).toBe(centred)
+  })
+
+  it('lines several up with the box around them; a locked one stays put but counts', () => {
+    const d = doc({ items: [r('a', 100, 100, 200, 100), r('b', 50, 300, 100, 50)] })
+    const left = alignItems(d, ['a', 'b'], 'left')
+    expect([at(left, 'a').x, at(left, 'b').x]).toEqual([50, 50])
+    const right = alignItems(d, ['a', 'b'], 'right')
+    expect([at(right, 'a').x, at(right, 'b').x]).toEqual([100, 200])
+    const top = alignItems(d, ['a', 'b'], 'top')
+    expect(at(top, 'b').y).toBe(100)
+    const held = doc({ items: [r('a', 100, 100, 200, 100), r('l', 10, 300, 50, 50, { locked: true })] })
+    const out = alignItems(held, ['a', 'l'], 'left')
+    expect(at(out, 'a').x).toBe(10)
+    expect(at(out, 'l')).toBe(at(held, 'l'))
+    // Nothing that can move: the same document.
+    expect(alignItems(held, ['l'], 'left')).toBe(held)
+  })
+
+  it('lines a turned thing up by the corners it shows', () => {
+    const d = doc({ items: [r('a', 100, 100, 200, 100, { rot: 90 }), r('b', 50, 400, 100, 50)] })
+    // Turned a quarter, it shows 100 wide from x 150: its box moves 100 left.
+    expect(at(alignItems(d, ['a', 'b'], 'left'), 'a').x).toBe(0)
+  })
+
+  it('puts something that lands on the other page of a spread onto that page', () => {
+    const d = doc({ items: [r('a', 500, 100, 50, 50, { page: 'p2' }), r('b', 300, 100, 50, 50, { page: 'p3' })] })
+    const out = alignItems(d, ['a', 'b'], 'right')
+    expect(at(out, 'a')).toMatchObject({ page: 'p3', x: 300, y: 100 })
+    expect(at(out, 'b')).toMatchObject({ page: 'p3', x: 300 })
+  })
+
+  it('spaces three or more evenly, the first and last staying put', () => {
+    const d = doc({ items: [r('a', 0, 0, 10, 10), r('c', 200, 300, 10, 10), r('b', 50, 100, 20, 30)] })
+    const across = spaceItems(d, ['a', 'b', 'c'], 'across')
+    expect([at(across, 'a').x, at(across, 'b').x, at(across, 'c').x]).toEqual([0, 95, 200])
+    const down = spaceItems(d, ['a', 'b', 'c'], 'down')
+    // 310 tall with 50 of boxes: two gaps of 130.
+    expect([at(down, 'a').y, at(down, 'b').y, at(down, 'c').y]).toEqual([0, 140, 300])
+    expect(canSpace(d, ['a', 'b'])).toBe(false)
+    expect(spaceItems(d, ['a', 'b'], 'across')).toBe(d)
+    const locked = doc({ items: [...d.items.slice(0, 2), { ...d.items[2], locked: true }] })
+    expect(canSpace(locked, ['a', 'b', 'c'])).toBe(false)
+  })
+
+  it('rehomes only what has crossed onto another page', () => {
+    const d = doc({ items: [r('a', 100, 100, 50, 50, { page: 'p2' }), r('b', 700, 100, 50, 50, { page: 'p2' })] })
+    const out = rehome(d, layout(d), ['a', 'b', 'gone'])
+    expect(at(out, 'a')).toBe(at(d, 'a'))
+    expect(at(out, 'b')).toMatchObject({ page: 'p3', x: 100 })
+  })
+})
+
+describe('what a right-click is about', () => {
+  it('the thing under it (keeping the selection it is part of), else nothing and the page under it', () => {
+    const d = doc({ items: [rect({ id: 'a' }), rect({ id: 'b', x: 350 })] })
+    const lay = layout(d)
+    const on = (x: number, y: number) => ({ x: lay.origin[0].x + x, y: lay.origin[0].y + y })
+    expect(menuTarget(d, lay, on(150, 150), [])).toEqual({ selection: ['a'], page: 0 })
+    expect(menuTarget(d, lay, on(150, 150), ['a', 'b'])).toEqual({ selection: ['a', 'b'], page: 0 })
+    expect(menuTarget(d, lay, on(150, 150), ['b'])).toEqual({ selection: ['a'], page: 0 })
+    expect(menuTarget(d, lay, { x: lay.origin[2].x + 10, y: lay.origin[2].y + 700 }, ['a'])).toEqual({ selection: [], page: 2 })
   })
 })

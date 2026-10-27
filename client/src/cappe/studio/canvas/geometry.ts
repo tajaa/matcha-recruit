@@ -102,6 +102,15 @@ export function hitItem(doc: Doc, lay: Layout, p: Pt, slop = 0, held?: ReadonlyS
   return null
 }
 
+/** What a right-click at `p` is about: the thing under it (the selection
+ *  when it is part of it, else it alone) and its page, or nothing and the
+ *  page under the pointer. */
+export function menuTarget(doc: Doc, lay: Layout, p: Pt, selection: readonly string[], slop = 0): { selection: string[]; page: number } {
+  const hit = hitItem(doc, lay, p, slop, new Set(selection))
+  if (!hit) return { selection: [], page: pageAt(doc, lay, p) }
+  return { selection: selection.includes(hit.id) ? [...selection] : [hit.id], page: doc.pages.findIndex((pg) => pg.id === hit.page) }
+}
+
 /** The page under `p` (or the nearest page of the spread it is beside). */
 export function pageAt(doc: Doc, lay: Layout, p: Pt): number {
   let best = 0, bd = Infinity

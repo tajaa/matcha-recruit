@@ -7,7 +7,7 @@
 
 import type { LucideIcon } from 'lucide-react'
 import {
-  BookOpen, CaseSensitive, Columns2, FileStack, FileType, Image, Keyboard, LayoutGrid, LayoutTemplate, Link2, MousePointer2, Move, PanelsTopLeft,
+  BookOpen, CaseSensitive, Columns2, FileStack, FileType, Image, Keyboard, LayoutGrid, LayoutTemplate, Link2, MousePointer2, MousePointerClick, Move, PanelsTopLeft,
   PersonStanding, Ruler, Save, Scissors, Shapes, SlidersHorizontal, Smartphone, Sparkles, Type, WrapText, ZoomIn,
 } from 'lucide-react'
 
@@ -43,6 +43,7 @@ export const GUIDE: GuideSection[] = [
       'The side panel, at the far left: Templates, Elements, Text, Photos and Yours (your pictures). Click anything there to add it, or drag it onto a page.',
       'Tools, beside it: what a click or a drag on the page makes or does.',
       'The pages, in the middle, on a grey pasteboard you can park things on.',
+      'The bar over what you select: its font, size and colour, a picture’s crop, a shape’s fill, lining things up, and lock, duplicate and delete. Right-click anything for the rest (see The bar and the right-click menu).',
       'Panels, down the right: Pages, Magazine identity, Object, Character and Paragraph, plus the Story Editor. Window shows and hides each.',
       'Status bar, along the bottom: the zoom, the page you’re on, what the tool in hand does, a red note when text doesn’t fit, and whether everything is saved.',
     ],
@@ -124,7 +125,21 @@ export const GUIDE: GuideSection[] = [
       'Drag a handle to resize (Shift keeps its shape, Alt resizes from the middle). Drag the round handle above it to turn it (Shift: 15° at a time).',
       'The arrow keys nudge by a point, with Shift by ten.',
       'The Object panel has the exact position, size, turn and opacity, plus fill, stroke and corners. Its arrange buttons, or ⌘] and ⌘[, bring things forward and send them back.',
+      'Object → Align lines one thing up with its page, or several with each other; Space evenly across or down puts even gaps between three or more. The bar’s Position button does the same.',
       'Lock (⌘L) stops something moving. Hide (⌘3) hides it, and Show all (⌥⌘3) brings back everything hidden on the page. ⌘D duplicates.',
+    ],
+  },
+  {
+    id: 'bar', group: 'Make', icon: MousePointerClick, title: 'The bar and the right-click menu',
+    body: 'Select something and a bar appears just above it with what you change most. It moves out of the way while you drag, '
+      + 'and the panels on the right still hold every exact setting.',
+    points: [
+      'Text: the font, its size (− and + step a point), colour, bold, italic, underline, alignment (click to go left, centre, right, justified) and Spacing for the letters and the lines. Select words to change just those; select the frame to change all of its words. While you type, the bar shows only these.',
+      'Pictures: Replace, Edit (light, colour and filters), Cut out, Crop (fill or fit the frame, zoom, and the part to keep in view) and Across, which runs the picture over both pages of the spread. An empty frame shows Choose a picture.',
+      'Shapes and lines: the fill (or No fill), and the border’s colour and weight; a rectangle’s corners too.',
+      'Everything: Position (line it up with the page, or several things with each other, and space three or more evenly), Transparency, Lock, Duplicate, Delete, and ⋯ for the right-click menu. Something locked shows only Unlock.',
+      'Right-click anything for Cut, Copy, Paste, Duplicate and Delete, what that kind of thing can do (type in it, replace or edit a picture, run it across the spread, link crops), Align, Arrange, Lock and Hide. Right-click an empty part of a page to paste, select everything on it, add or delete a page, or open the templates or the issue board.',
+      'In the menu, the arrow keys move through it, → opens Align or Arrange, ← goes back and Esc closes it.',
     ],
   },
   {
@@ -167,7 +182,7 @@ export const GUIDE: GuideSection[] = [
     id: 'text', group: 'Words', icon: Type, title: 'Type',
     points: [
       'With the Type tool (T), click a page or drag out a frame, then type. Click any text frame later to type in it again.',
-      'Select words and use the Character panel: the font (102 families, each with its weights and italics, 11 Gummfit cuts, or one of your own), size, leading, tracking, kerning, colour and underline.',
+      'Select words and use the bar over them for the font, size, colour, bold, italic, underline, alignment and spacing. The Character panel has all of it and more: the font (102 families, each with its weights and italics, 11 Gummfit cuts, or one of your own), size, leading, tracking, kerning, colour and underline.',
       'The Paragraph panel sets a paragraph’s alignment (left, centre, right or justified), indents, and space before and after.',
       'Paragraph styles (Body text, Headline, Heading, Subheading, Pull quote, Caption) also say what each paragraph is in the Text view readers get on phones.',
       'Write article bodies directly in the editor. Body text does not accept pasted or dropped text, on the page or in the Story Editor. Headlines, headings, pull quotes and captions still accept paste. Typing, spelling corrections and undo work as usual.',
@@ -298,6 +313,7 @@ export const MORE_KEYS: [string, string][] = [
   ['Esc', 'Put the tool down, then let go of the selection'],
   ['Alt + drag', 'Move a copy'],
   ['Double-click', 'Type in a text frame, edit a picture'],
+  ['Right-click', 'The menu for what is under the pointer (arrows move through it, Esc closes it)'],
   ['\\ (Picture Editor)', 'Hold to see the picture before'],
   ['⌥← / ⌥→ (typing)', 'Kern the two letters at the caret (⌥⌘: ×5); with letters selected, their tracking'],
   ['⌥← / ⌥→ (issue board)', 'Move the selected pages a spread earlier or later'],

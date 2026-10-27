@@ -6,20 +6,11 @@ import { WEIGHT_NAMES } from '../../../magazine/workspace/fontPreview'
 import { ColorField, IconBtn, NumberField, Row, Section, Seg, Select } from '../../../magazine/workspace/controls'
 import { CUSTOM_FAMILY, customFamily } from '../../model/doc'
 import { LIMITS } from '../../model/limits'
-import type { Align, CharAttrs, Role } from '../../model/types'
+import type { Align, Role } from '../../model/types'
 import { useStudio } from '../../store/store'
-import { useCtx, type StudioCtx } from '../context'
+import { useCtx } from '../context'
 import { LengthField, Labeled } from '../fields'
-import { currentType, hasTypeTarget, selectedThreads, setChar, setPara } from '../typeTarget'
-
-/** Character attributes, then the faces they need loaded before the text is
- *  set again in them. */
-function charSetter(c: StudioCtx) {
-  return (attrs: CharAttrs) => {
-    setChar(c, attrs)
-    void c.fonts.ensureDoc(c.store.get().doc).then(() => c.store.recompose(), () => {})
-  }
-}
+import { charSetter, currentType, hasTypeTarget, selectedThreads, setPara } from '../typeTarget'
 
 const styleKey = (wt: number, it: boolean) => `${wt}|${it ? 1 : 0}`
 

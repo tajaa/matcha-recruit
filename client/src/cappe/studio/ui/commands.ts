@@ -1,6 +1,7 @@
 // Everything the Studio can do from a menu, a key or a button: one list, so a
 // menu shows the key that does the same thing.
 
+import { alignItems, canSpace, spaceItems, type Align } from '../canvas/align'
 import { boardOffset } from '../canvas/geometry'
 import { acrossSpread, facingPage, groupOf, linkFrames, linkProblem, unlinkFrames } from '../model/crops'
 import { cutoutFor, subjectProblem } from '../model/subject'
@@ -8,7 +9,7 @@ import { placeSubject } from './subject'
 import { allIds, newId } from '../model/doc'
 import { SPINE_CLEAR } from '../model/gutter'
 import { resolveItem, resolveParas } from '../model/identity'
-import { addPages, arrange, deleteItems, deletePage, duplicate, movePage, patchItems, type Arrange } from '../model/ops'
+import { addPages, arrange, deleteItems, deletePage, duplicate, ensureThread, movePage, patchItems, type Arrange } from '../model/ops'
 import type { Doc, Item, Thread } from '../model/types'
 import type { AddTab, State, Store, Tool } from '../store/store'
 import { conversation } from './ask/conversation'
@@ -109,6 +110,18 @@ const arrangeCmd = (id: Arrange, label: string, keys: string): Command => ({
   run: ({ store }) => store.edit((d) => arrange(d, store.get().selection, id)),
 })
 
+/** Something selected that can move: what lining up acts on. */
+const alignable = (s: State) => selected(s) && s.doc.items.some((i) => s.selection.includes(i.id) && !i.locked)
+
+const alignCmd = (how: Align, label: string): Command => ({
+  id: `align-${how}`, label, enabled: alignable,
+  run: ({ store }) => store.edit((d) => alignItems(d, store.get().selection, how)),
+})
+
+/** One unlocked text frame selected, to type in. */
+const oneText = (s: State) => !s.editing && s.selection.length === 1
+  && s.doc.items.some((i) => i.id === s.selection[0] && i.kind === 'text' && !i.locked)
+
 const tool = (t: Tool, label: string, keys: string): Command => ({
   id: `tool-${t}`, label, keys, run: ({ store, editor }) => { editor.close(); store.set({ tool: t, threading: null }) },
 })
@@ -183,6 +196,17 @@ export const COMMANDS: Command[] = [
   arrangeCmd('forward', 'Bring forward', '⌘]'),
   arrangeCmd('backward', 'Send backward', '⌘['),
   arrangeCmd('back', 'Send to back', '⇧⌘['),
+  // One thing lines up with its page; several with each other.
+  alignCmd('left', 'Align left'),
+  alignCmd('centre', 'Align centre'),
+  alignCmd('right', 'Align right'),
+  alignCmd('top', 'Align top'),
+  alignCmd('middle', 'Align middle'),
+  alignCmd('bottom', 'Align bottom'),
+  { id: 'space-across', label: 'Space evenly across', enabled: (s) => selected(s) && canSpace(s.doc, s.selection),
+    run: ({ store }) => store.edit((d) => spaceItems(d, store.get().selection, 'across')) },
+  { id: 'space-down', label: 'Space evenly down', enabled: (s) => selected(s) && canSpace(s.doc, s.selection),
+    run: ({ store }) => store.edit((d) => spaceItems(d, store.get().selection, 'down')) },
   { id: 'lock', label: 'Lock / unlock', keys: '⌘L', enabled: selected,
     run: ({ store }) => {
       const s = store.get()
@@ -209,6 +233,14 @@ export const COMMANDS: Command[] = [
       else c.store.set({ dialog: 'subject' })
     } },
   { id: 'fonts', label: 'Your fonts…', run: ({ store }) => store.set({ dialog: 'fonts' }) },
+  { id: 'edit-text', label: 'Type in this frame', enabled: oneText,
+    run: ({ store, editor }) => {
+      const frame = store.get().selection[0]
+      let thread = ''
+      store.edit((d) => { const r = ensureThread(d, frame); thread = r.thread; return r.doc })
+      store.set({ selection: [frame], tool: 'select' })
+      editor.open(thread)
+    } },
   { id: 'across-spread', label: 'Run the picture across the spread', enabled: spreadable, run: (c) => across(c, 0) },
   { id: 'spine-clear', label: 'Split the picture clear of the spine', enabled: spreadable, run: (c) => across(c, SPINE_CLEAR) },
   { id: 'link-crops', label: 'Link crops (one picture through the frames)', enabled: linkable,
