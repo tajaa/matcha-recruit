@@ -12,6 +12,7 @@ import { writerPaths } from '../magazine/writers/writerPaths'
 import { confirmLeave } from '../utils/unsavedGuard'
 import { BILLING_PATH } from '../pages/CappeBilling/paths'
 import type { CappeAccount, CappeThread } from '../types'
+import { cappeAuthPaths } from '../host'
 
 const linkBase = 'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors'
 const linkIdle = 'text-zinc-400 hover:bg-zinc-800/70 hover:text-zinc-100'
@@ -111,7 +112,7 @@ export default function CappeSidebar({ account, open = false, onClose }: {
     clearCappeTokens()
     invalidateCappeMeCache()
     navigate(account?.account_type === 'creator' ? creatorPaths.login
-      : account?.account_type === 'writer' ? writerPaths.login : '/cappe/login')
+      : account?.account_type === 'writer' ? writerPaths.login : cappeAuthPaths.login)
   }
 
   return (

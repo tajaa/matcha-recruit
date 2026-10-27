@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { Loader2, MailCheck } from 'lucide-react'
 import { CappeApiError, cappePublicPost } from '../api'
 import { ui } from '../components/ui'
+import { cappeAuthPaths } from '../host'
 
 const SHELL = 'flex min-h-screen items-center justify-center bg-zinc-950 bg-[radial-gradient(60rem_40rem_at_50%_-10%,rgba(198,241,107,0.08),transparent)] px-4'
 
@@ -52,7 +53,7 @@ export default function CappeForgotPassword() {
             </button>
             .
           </p>
-          <Link to="/cappe/login" className="mt-6 inline-block text-sm font-medium text-lime-400 hover:text-lime-300">
+          <Link to={cappeAuthPaths.login} className="mt-6 inline-block text-sm font-medium text-lime-400 hover:text-lime-300">
             Back to sign in
           </Link>
         </div>
@@ -94,7 +95,7 @@ export default function CappeForgotPassword() {
         </form>
         <p className="mt-4 text-center text-sm text-zinc-500">
           Remembered it?{' '}
-          <Link to="/cappe/login" className="font-medium text-lime-400 hover:text-lime-300">Sign in</Link>
+          <Link to={cappeAuthPaths.login} className="font-medium text-lime-400 hover:text-lime-300">Sign in</Link>
         </p>
       </div>
     </div>

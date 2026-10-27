@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
 import { fetchCappePricing } from '../../api'
 import type { CappePublicPlan, CappePublicPricing } from '../../types'
+import { cappeAuthPaths } from '../../host'
 
 export const WRAP = 'mx-auto max-w-7xl px-4 sm:px-8 lg:px-12'
 export const LIME_BUTTON =
   'inline-flex items-center justify-center gap-2 rounded-full bg-[#d4ff72] px-6 py-3.5 text-sm font-bold text-[#182115] transition hover:-translate-y-0.5 hover:bg-[#e2ff9a]'
 export const EYEBROW = 'text-xs font-bold uppercase tracking-[0.18em]'
-export const SIGNUP_PATH = '/gummfit/website-setup'
+export const SIGNUP_PATH = cappeAuthPaths.signup
 
 /** Signup link that remembers a paid plan picked on the pricing cards, so the
  *  person lands in checkout for it after confirming their email. */

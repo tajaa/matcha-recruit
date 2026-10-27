@@ -12,6 +12,7 @@ import {
   Stars,
 } from 'lucide-react'
 import { creatorPaths } from './creatorPaths'
+import { cappePath } from '../host'
 
 const creatorBenefits = [
   {
@@ -50,15 +51,15 @@ export default function CreatorsLanding() {
 
       <header className="relative z-10 px-5 py-5 sm:px-8 lg:px-12">
         <div className="mx-auto flex max-w-7xl items-center justify-between">
-          <Link to="/gummfit/creators" className="group flex items-center gap-2.5" aria-label="Gummfit Creators home">
+          <Link to={cappePath('/gummfit/creators')} className="group flex items-center gap-2.5" aria-label="Gummfit Creators home">
             <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[#d4ff72] text-sm font-black tracking-tighter text-[#14170f] shadow-[0_0_28px_rgba(212,255,114,0.25)]">G</span>
             <span className="text-sm font-semibold tracking-[-0.02em] text-[#f7f5ee]">Gummfit <em className="font-normal text-[#d4ff72]">Creators</em></span>
           </Link>
           <nav className="flex items-center gap-3 sm:gap-5">
-            <Link to="/gummfit/creators/directory" className="hidden text-sm font-medium text-[#c9c9c0] transition hover:text-white sm:block">Explore talent</Link>
+            <Link to={cappePath('/gummfit/creators/directory')} className="hidden text-sm font-medium text-[#c9c9c0] transition hover:text-white sm:block">Explore talent</Link>
             <Link to={creatorPaths.login} className="text-sm font-medium text-[#deded5] transition hover:text-white">Creator sign in</Link>
             <Link to={creatorPaths.brandLogin} className="rounded-full border border-white/15 px-3 py-2 text-sm font-medium text-[#deded5] transition hover:border-[#d4ff72]/50 hover:text-white">Brand sign in</Link>
-            <Link to="/gummfit/creators/signup" className="rounded-full bg-[#d4ff72] px-4 py-2 text-sm font-semibold text-[#14170f] transition hover:-translate-y-0.5 hover:bg-[#e1ff9a] sm:px-5">Join creators</Link>
+            <Link to={cappePath('/gummfit/creators/signup')} className="rounded-full bg-[#d4ff72] px-4 py-2 text-sm font-semibold text-[#14170f] transition hover:-translate-y-0.5 hover:bg-[#e1ff9a] sm:px-5">Join creators</Link>
           </nav>
         </div>
       </header>
@@ -75,10 +76,10 @@ export default function CreatorsLanding() {
             Gummfit Creators is the place to turn your point of view into partnerships that respect your work, your audience, and your time.
           </p>
           <div className="mt-9 flex flex-col gap-3 sm:flex-row sm:items-center">
-            <Link to="/gummfit/creators/signup" className="inline-flex items-center justify-center gap-2 rounded-full bg-[#d4ff72] px-6 py-3.5 text-sm font-bold text-[#14170f] transition hover:-translate-y-0.5 hover:bg-[#e1ff9a] hover:shadow-[0_12px_30px_rgba(212,255,114,0.16)]">
+            <Link to={cappePath('/gummfit/creators/signup')} className="inline-flex items-center justify-center gap-2 rounded-full bg-[#d4ff72] px-6 py-3.5 text-sm font-bold text-[#14170f] transition hover:-translate-y-0.5 hover:bg-[#e1ff9a] hover:shadow-[0_12px_30px_rgba(212,255,114,0.16)]">
               Build your profile <ArrowRight className="h-4 w-4" />
             </Link>
-            <Link to="/gummfit/creators/directory" className="inline-flex items-center justify-center gap-2 px-4 py-3 text-sm font-semibold text-[#e5e5dc] transition hover:text-[#d4ff72]">
+            <Link to={cappePath('/gummfit/creators/directory')} className="inline-flex items-center justify-center gap-2 px-4 py-3 text-sm font-semibold text-[#e5e5dc] transition hover:text-[#d4ff72]">
               See the network <ArrowUpRight className="h-4 w-4" />
             </Link>
           </div>
@@ -157,10 +158,10 @@ export default function CreatorsLanding() {
 
       <section className="relative px-5 py-24 text-center sm:px-8 lg:px-12 lg:py-32">
         <div className="pointer-events-none absolute left-1/2 top-1/2 h-72 w-72 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#d4ff72]/10 blur-3xl" />
-        <div className="relative mx-auto max-w-2xl"><HeartHandshake className="mx-auto h-7 w-7 text-[#d4ff72]" /><h2 className="mt-5 text-4xl font-semibold leading-[0.98] tracking-[-0.055em] text-[#f7f5ee] sm:text-5xl">Make work you’re proud to put your name on.</h2><p className="mt-5 text-lg text-[#aeb0a4]">Set up your profile in minutes. The right partnership could start today.</p><Link to="/gummfit/creators/signup" className="mt-9 inline-flex items-center gap-2 rounded-full bg-[#d4ff72] px-6 py-3.5 text-sm font-bold text-[#14170f] transition hover:-translate-y-0.5 hover:bg-[#e1ff9a]">Join Gummfit Creators <ArrowRight className="h-4 w-4" /></Link></div>
+        <div className="relative mx-auto max-w-2xl"><HeartHandshake className="mx-auto h-7 w-7 text-[#d4ff72]" /><h2 className="mt-5 text-4xl font-semibold leading-[0.98] tracking-[-0.055em] text-[#f7f5ee] sm:text-5xl">Make work you’re proud to put your name on.</h2><p className="mt-5 text-lg text-[#aeb0a4]">Set up your profile in minutes. The right partnership could start today.</p><Link to={cappePath('/gummfit/creators/signup')} className="mt-9 inline-flex items-center gap-2 rounded-full bg-[#d4ff72] px-6 py-3.5 text-sm font-bold text-[#14170f] transition hover:-translate-y-0.5 hover:bg-[#e1ff9a]">Join Gummfit Creators <ArrowRight className="h-4 w-4" /></Link></div>
       </section>
 
-      <footer className="border-t border-white/10 px-5 py-7 text-xs text-[#85897d] sm:px-8 lg:px-12"><div className="mx-auto flex max-w-7xl flex-col justify-between gap-3 sm:flex-row"><span>© {new Date().getFullYear()} Gummfit Creators</span><div className="flex gap-5"><Link to="/gummfit/creators/directory" className="hover:text-white">Explore talent</Link><Link to={creatorPaths.login} className="hover:text-white">Creator sign in</Link><Link to={creatorPaths.brandLogin} className="hover:text-white">Brand sign in</Link></div></div></footer>
+      <footer className="border-t border-white/10 px-5 py-7 text-xs text-[#85897d] sm:px-8 lg:px-12"><div className="mx-auto flex max-w-7xl flex-col justify-between gap-3 sm:flex-row"><span>© {new Date().getFullYear()} Gummfit Creators</span><div className="flex gap-5"><Link to={cappePath('/gummfit/creators/directory')} className="hover:text-white">Explore talent</Link><Link to={creatorPaths.login} className="hover:text-white">Creator sign in</Link><Link to={creatorPaths.brandLogin} className="hover:text-white">Brand sign in</Link></div></div></footer>
     </main>
   )
 }

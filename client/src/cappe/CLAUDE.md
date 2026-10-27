@@ -11,7 +11,7 @@ Website-builder frontend for the consumer brand **Gummfit**, host-routed on gumm
 - `onboarding/` — `CappeOnboardingWizard`
 - `api.ts` — `cappeApi`, own http client (not `api/client.ts`)
 - `hooks/useCappeMe.ts` — own auth-state hook (not `hooks/useMe`)
-- `host.ts` — `isCappeHost` / `cappeSiteHost` host detection
+- `host.ts` — `isCappeHost` / `cappeSiteHost` host detection; `cappePath()` drops the `/gummfit` or `/cappe` prefix on gummfit.com (the tree is served at `/` there), and `cappeAuthPaths` holds the sign-in, setup and reset links. Use them for public and sign-in links, not literal `/gummfit/...`. `App.tsx` redirects old `gummfit.com/gummfit/...` links to the root
 - `types.ts`, `data/` — cappe types, `cappeThemes`/`cappePagePresets`/`timezones`
 - `components/TemplateGallery.tsx` — the template shelf (category filter chips, full-site preview
   modal, "For you" ordering by the Discover category the wizard asked for). Shared by

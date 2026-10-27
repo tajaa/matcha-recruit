@@ -8,6 +8,7 @@ import { fmtCents, type PublicCreatorProfile } from '../types'
 import SendOfferSheet from './SendOfferSheet'
 import { creatorPaths } from './creatorPaths'
 import { safeCssUrl, safeHttpUrl } from '../utils/safeUrl'
+import { cappeAuthPaths } from '../host'
 
 export default function CreatorPublicProfile() {
   const { handle } = useParams<{ handle: string }>()
@@ -66,7 +67,7 @@ export default function CreatorPublicProfile() {
             canOffer ? (
               <button onClick={() => setShowOffer(true)} className={ui.btnPrimary}>Send an offer</button>
             ) : isLoggedOut ? (
-              <button onClick={() => navigate('/cappe/login')} className={ui.btnPrimary}>Work with {profile.display_name}</button>
+              <button onClick={() => navigate(cappeAuthPaths.login)} className={ui.btnPrimary}>Work with {profile.display_name}</button>
             ) : null
           )}
         </div>

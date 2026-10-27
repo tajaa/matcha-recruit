@@ -12,6 +12,7 @@ import type {
   PublicCreatorProfile,
 } from './types'
 import { creatorPaths } from './creators/creatorPaths'
+import { cappeAuthPaths } from './host'
 
 const BASE = `${import.meta.env.VITE_API_URL ?? '/api'}/cappe`
 
@@ -159,7 +160,7 @@ function _networkError(): CappeApiError {
 // dead end — that form does not accept a creator or brand account.
 const CREATOR_AREA = /(^|\/)(gummfit\/)?creators?(\/|$)/
 const BRAND_AREA = /\/creators\/brands(\/|$)/
-const BUSINESS_LOGIN = '/cappe/login'
+const BUSINESS_LOGIN = cappeAuthPaths.login
 
 function _loginPathFor(pathname: string): string {
   if (BRAND_AREA.test(pathname)) return creatorPaths.brandLogin
