@@ -13,6 +13,7 @@ from fastapi import APIRouter
 
 from . import (
     blog,
+    board_files,
     booking_suggestion_access,
     booking_selfserve,
     bookings,
@@ -61,3 +62,5 @@ router.include_router(stock.router)
 router.include_router(magazine.router)
 router.include_router(fonts.router)
 router.include_router(graphics.router)
+# A mood board's private files, by signed link (`services/boards/files.py`).
+router.include_router(board_files.router)

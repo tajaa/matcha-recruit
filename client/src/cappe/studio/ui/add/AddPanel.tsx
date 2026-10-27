@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { ArrowLeft, ChevronsLeft, Image as ImageIcon, Images, LayoutTemplate, Search, Shapes, Type } from 'lucide-react'
+import { ArrowLeft, ChevronsLeft, Image as ImageIcon, Images, LayoutDashboard, LayoutTemplate, Search, Shapes, Type } from 'lucide-react'
 import { graphicsApi, matchPicks, type GraphicBrowse, type GraphicCard, type GraphicGroup } from '../../model/graphics'
 import { familyName } from '../../fonts/faces'
 import { CHAR_DEFAULTS } from '../../model/limits'
 import type { Doc } from '../../model/types'
 import { useStudio, type AddTab } from '../../store/store'
 import { useCtx } from '../context'
+import BoardTab from './BoardTab'
 import { ELEMENT_GROUPS, ELEMENTS, TEXT_COMBOS, TEXT_STYLES, facesOf, type ElementSpec, type TextPart, type TextStyle } from './catalog'
 import { endDrag, startDrag } from './drag'
 import { GROUP_TITLE } from './graphicSearch'
@@ -20,6 +21,7 @@ const TABS: { key: AddTab; label: string; title: string; icon: ReactNode }[] = [
   { key: 'text', label: 'Text', title: 'Text', icon: <Type className="h-5 w-5" /> },
   { key: 'photos', label: 'Photos', title: 'Free photos', icon: <ImageIcon className="h-5 w-5" /> },
   { key: 'uploads', label: 'Yours', title: 'Your pictures', icon: <Images className="h-5 w-5" /> },
+  { key: 'board', label: 'Board', title: 'Mood boards', icon: <LayoutDashboard className="h-5 w-5" /> },
 ]
 
 /** The side panel, Canva's way: tabs down the far left, and beside them what
@@ -53,6 +55,7 @@ export default function AddPanel() {
             {tab === 'text' && <TextTab />}
             {tab === 'photos' && <PhotosTab />}
             {tab === 'uploads' && <YourPicturesTab />}
+            {tab === 'board' && <BoardTab />}
           </div>
         </aside>
       )}

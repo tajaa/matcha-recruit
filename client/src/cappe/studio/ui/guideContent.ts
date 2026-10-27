@@ -40,7 +40,7 @@ export const GUIDE: GuideSection[] = [
     points: [
       'Top bar: the story’s name (click it for its settings: headline, kicker, dek, byline, topic and who can read it), Board (every page at once), Preview, and Publish.',
       'Menus: everything the Studio can do, with the key that does the same thing beside it.',
-      'The side panel, at the far left: Templates, Elements, Text, Photos and Yours (your pictures). Click anything there to add it, or drag it onto a page.',
+      'The side panel, at the far left: Templates, Elements, Text, Photos, Yours (your pictures) and Board (your mood boards). Click anything there to add it, or drag it onto a page.',
       'Tools, beside it: what a click or a drag on the page makes or does.',
       'The pages, in the middle, on a grey pasteboard you can park things on.',
       'Panels, down the right: Pages, Magazine identity, Object, Character and Paragraph, plus the Story Editor. Window shows and hides each.',
@@ -77,6 +77,7 @@ export const GUIDE: GuideSection[] = [
       'Text: a heading, a subheading or body text, the small styles (kicker, pull quote, caption), and font pairings set together in one frame. Double-click it on the page to type your own words.',
       'Photos: opens on free photos, modern stock you may use any way you like (CC0, from StockSnap.io, WordPress and Nappy), with Gummfit’s own picks above them; search, or tap a topic. The archives (Openverse, the Smithsonian, The Met, NASA) are a tap away, each picture credited. The first click puts it in your library too. Make an AI picture is here too.',
       'Yours: everything in your library. Upload a picture here, then click it, or drag it onto a picture frame to fill the frame.',
+      'Board: your mood boards, beside the pages while you design. Choose a board at the top (↗ opens it in the dashboard, where you pin photos, screenshots, documents, notes and links). A library picture on it goes onto the page like one of Yours. A picture with a lock is private reference: click it, confirm you took it or may publish it, and it joins your library and lands on the page. Notes are there to read, and links and files open in a new tab.',
       'Insert in the menus opens each tab too.',
     ],
   },

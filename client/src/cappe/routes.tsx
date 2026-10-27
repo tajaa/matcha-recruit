@@ -46,6 +46,8 @@ const Messages = lazy(() => import('./pages/site/Messages'))
 const Clients = lazy(() => import('./pages/site/Clients'))
 const Reviews = lazy(() => import('./pages/site/Reviews'))
 const Library = lazy(() => import('./magazine/library/LibraryPage'))
+const BoardsPage = lazy(() => import('./boards/BoardsPage'))
+const BoardPage = lazy(() => import('./boards/BoardPage'))
 const Social = lazy(() => import('./pages/site/Social'))
 const Stories = lazy(() => import('./magazine/stories/Stories'))
 const StoryEditor = lazy(() => import('./magazine/editor/StoryEditor'))
@@ -154,6 +156,8 @@ export default function CappeRoutes() {
           <Route path="sites/:siteId/magazine" element={<MagazineSettings />} />
           <Route path="sites/:siteId/magazine/view" element={<ReaderView />} />
           <Route path="sites/:siteId/library" element={<Library />} />
+          <Route path="sites/:siteId/boards" element={<BoardsPage />} />
+          <Route path="sites/:siteId/boards/:boardId" element={<BoardPage />} />
           <Route path="sites/:siteId/emails" element={<Emails />} />
           <Route path="sites/:siteId/issues" element={<IssuesPage />} />
           <Route path="sites/:siteId/issues/:issueId" element={<IssueEditor />} />

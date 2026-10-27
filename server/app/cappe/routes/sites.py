@@ -27,6 +27,8 @@ from ..models.cappe import (
 from ..services.design_gate import gate_content, gate_theme
 from ..services.entitlements import require_fulfillment, resolve_entitlements
 from ..services import quick_store
+from ..services.boards import files as board_files
+from ..services.boards import store as board_store
 from ..services.directory import (
     CATEGORY_LABELS,
     apply_inferred_listing,
@@ -665,9 +667,14 @@ async def delete_site(
                    RETURNING cf_tenant_id, domain""",
                 site_id,
             )
+            # Mood-board files are private, not rows: read them before the
+            # cascade takes the pins, remove them once the delete commits.
+            pinned = await board_store.site_files(conn, site_id)
             await conn.execute(
                 "DELETE FROM cappe_sites WHERE id = $1 AND account_id = $2", site_id, account.id
             )
+    if pinned:
+        background.add_task(board_files.remove, pinned)
     if tenants:
         background.add_task(
             _delete_edge_tenants, [(t["cf_tenant_id"], t["domain"]) for t in tenants]
