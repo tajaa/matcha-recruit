@@ -3,10 +3,16 @@ then run the owner's reply policy on each new one.
 
 On-demand (dispatched via .delay() from the public webhook route, NOT
 scheduled). The route has already verified the signature and parsed the
-payload into `InboundEvent` dicts; this task finds the connection each one
-belongs to, inserts what is new (re-deliveries drop on the unique key), and
-hands each new row to `autoreply.handle_item`, which decides between sending,
-drafting for approval, escalating, or leaving it — per the site's settings.
+payload into `InboundEvent` dicts; this task finds the connections each one
+belongs to (live, inbox on), drops what the accounts sent themselves (our own
+replies come back as comments), inserts what is new (re-deliveries drop on the
+unique key), and hands each new row to `autoreply.handle_item`, which decides
+between sending, drafting for approval, escalating, or leaving it — per the
+site's settings.
+
+`run_cappe_social_inbox_sweep` (hourly, `cappe_social_inbox_sweep` scheduler
+row) runs the policy again on what it left: the model unavailable or at its
+cap, a draft that failed, a task that died after storing.
 """
 import asyncio
 import logging
@@ -20,9 +26,24 @@ from app.cappe.services.social.providers.base import InboundEvent
 from app.cappe.services.social.providers.meta import MetaConfig
 
 from ..celery_app import celery_app
-from ..utils import get_db_connection
+from ..utils import get_db_connection, scheduler_settings_row
 
 logger = logging.getLogger(__name__)
+
+SWEEP_KEY = "cappe_social_inbox_sweep"
+# A DM can be answered only within 24 hours of the customer's message; a
+# reply half a day late is still worth sending, later isn't.
+SWEEP_WINDOW_HOURS = 12
+# `handle_item` reasons that mean the owner's settings or plan, not a failure
+# or a wait, kept it from answering.
+_TURNED_AWAY = frozenset({"off", "comments_off", "messages_off"})
+
+
+def _sender(conn, cfg: MetaConfig):
+    async def send(item: dict[str, Any], body: str) -> str:
+        return await outbound.send_reply(conn, cfg, item, body)
+
+    return send
 
 
 async def effective_settings(conn, site_id) -> dict[str, Any]:
@@ -45,18 +66,21 @@ async def effective_settings(conn, site_id) -> dict[str, Any]:
 
 async def process_events(conn, cfg: MetaConfig, events: list[InboundEvent]) -> dict[str, Any]:
     """Store and handle. Returns counts by outcome."""
-    outcomes: dict[str, int] = {"stored": 0, "unmatched": 0}
+    outcomes: dict[str, int] = {"stored": 0, "unmatched": 0, "own": 0}
     by_recipient: dict[tuple[str, str], list[InboundEvent]] = {}
     for event in events:
         by_recipient.setdefault((event.platform, event.recipient_external_id), []).append(event)
-
-    async def _send(item: dict[str, Any], body: str) -> str:
-        return await outbound.send_reply(conn, cfg, item, body)
+    _send = _sender(conn, cfg)
 
     for (platform, external_id), group in by_recipient.items():
         connections = await conn_store.by_external_id(conn, platform, external_id)
         if not connections:
             outcomes["unmatched"] += len(group)
+            continue
+        theirs = await inbox_store.without_own(conn, connections, group)
+        outcomes["own"] += len(group) - len(theirs)
+        group = theirs
+        if not group:
             continue
         for index, connection in enumerate(connections):
             new_items = await inbox_store.ingest_events(conn, connection=connection, events=group)
@@ -99,3 +123,61 @@ def run_cappe_social_inbound(self, raw_events: list[dict[str, Any]]) -> dict[str
     except Exception as exc:
         logger.exception("Cappe social inbound failed")
         raise self.retry(exc=exc, countdown=30)
+
+
+async def sweep(conn, cfg: MetaConfig, *, limit: int) -> dict[str, Any]:
+    """Run the policy on the items it left (`inbox.unhandled`), oldest first.
+    Stops at the first "no model": the shared budget is full or there is no
+    model, and every other item would find the same. Sites at their own cap
+    are left out of the query, so they don't use up its slots.
+
+    An item the policy turns away because the owner's plan no longer includes
+    replies (`effective_settings` forces the mode off, which the query can't
+    see) counts as an attempt, so it ages out instead of heading the list
+    every hour."""
+    items = await inbox_store.unhandled(conn, limit=limit, within_hours=SWEEP_WINDOW_HOURS,
+                                        max_attempts=autoreply.MAX_ATTEMPTS,
+                                        model_cap=autoreply.MODEL_CALLS_PER_HOUR)
+    outcomes: dict[str, Any] = {"items": len(items)}
+    settings_by_site: dict[Any, dict[str, Any]] = {}
+    send = _sender(conn, cfg)
+    for item in items:
+        site_id = item["site_id"]
+        if site_id not in settings_by_site:
+            settings_by_site[site_id] = await effective_settings(conn, site_id)
+        try:
+            result = await autoreply.handle_item(conn, item, settings_by_site[site_id], send=send)
+        except Exception:  # noqa: BLE001 — one bad item must not stop the sweep
+            logger.exception("cappe social inbox sweep: handling inbox %s failed", item["id"])
+            result = {"outcome": "error"}
+        outcomes[result["outcome"]] = outcomes.get(result["outcome"], 0) + 1
+        if result["outcome"] == "left" and result.get("reason") in _TURNED_AWAY:
+            await inbox_store.note_attempt(conn, item["id"], result["reason"])
+        if result.get("reason") == "no_model":
+            break
+    return outcomes
+
+
+async def _run_sweep() -> dict[str, Any]:
+    conn = await get_db_connection()
+    try:
+        setting = await scheduler_settings_row(conn, SWEEP_KEY)
+        if not setting or not setting["enabled"]:
+            return {"skipped": True}
+        cfg = MetaConfig.from_settings()
+        if cfg is None:
+            return {"skipped": True, "reason": "meta_not_configured"}
+        limit = max(1, min(int(setting["max_per_cycle"] or 50), 500))
+        return await sweep(conn, cfg, limit=limit)
+    finally:
+        await conn.close()
+
+
+@celery_app.task(bind=True, max_retries=1)
+def run_cappe_social_inbox_sweep(self) -> dict[str, Any]:
+    """Retry the reply policy on social comments and messages it left (hourly)."""
+    try:
+        return {"status": "success", **asyncio.run(_run_sweep())}
+    except Exception as exc:
+        logger.exception("Cappe social inbox sweep failed")
+        raise self.retry(exc=exc, countdown=300)

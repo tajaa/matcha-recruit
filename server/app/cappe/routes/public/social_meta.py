@@ -31,6 +31,23 @@ MAX_WEBHOOK_BYTES = 256 * 1024
 _NO_STORE = {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}
 
 
+def connect_notes(drafts, rows: list[dict]) -> dict[str, str]:
+    """What the owner should know after a Connect that worked, as query
+    params for the redirect: the permissions they didn't grant
+    (`social_missing`, a comma list of scope names) and how many accounts
+    this Connect added with their inbox off (`social_inbox_off`). Codes, not
+    prose: the page words them itself, so a crafted link can't put its own
+    text in the owner's banner."""
+    notes: dict[str, str] = {}
+    missing = sorted({s for d in drafts for s in meta.missing_scopes(d)})
+    if missing:
+        notes["social_missing"] = ",".join(missing)
+    off = sum(1 for r in rows if r.get("is_new") and r.get("inbox_enabled") is False)
+    if off:
+        notes["social_inbox_off"] = str(off)
+    return notes
+
+
 def _back(site_id, **params) -> RedirectResponse:
     """Back to the Social page, the one-time nonce cookie spent."""
     query = "&".join(f"{k}={quote(str(v))}" for k, v in params.items())
@@ -75,7 +92,8 @@ async def meta_callback(request: Request):
     for draft in drafts:
         if draft.platform == "facebook":
             await meta.subscribe_page(cfg, draft.external_id, draft.access_token)
-    return _back(site_id, connected=",".join(sorted({r["platform"] for r in rows})))
+    return _back(site_id, connected=",".join(sorted({r["platform"] for r in rows})),
+                 **connect_notes(drafts, rows))
 
 
 @router.get("/public/social/meta/webhook")

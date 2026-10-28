@@ -18,6 +18,12 @@ KEY = "not-a-real-key-0123456789"
     (f'GET https://a.test/?access_token={KEY} "HTTP/1.1 200 OK"', 'GET https://a.test/?access_token=*** "HTTP/1.1 200 OK"'),
     (f"https://b.s3.amazonaws.com/f?X-Amz-Credential={KEY}&X-Amz-Signature={KEY}",
      "https://b.s3.amazonaws.com/f?X-Amz-Credential=***&X-Amz-Signature=***"),
+    # Meta's token exchange: the short-lived user token rides as `fb_exchange_token`.
+    (f"https://graph.facebook.com/v21.0/oauth/access_token?grant_type=fb_exchange_token&client_id=1"
+     f"&client_secret={KEY}&fb_exchange_token={KEY}",
+     "https://graph.facebook.com/v21.0/oauth/access_token?grant_type=fb_exchange_token&client_id=1"
+     "&client_secret=***&fb_exchange_token=***"),
+    (f"https://a.test/?refresh_token={KEY}&id_token={KEY}", "https://a.test/?refresh_token=***&id_token=***"),
     # Not a secret parameter, or not a query parameter at all: left as it is.
     ("https://a.test/search?q=api_key&monkey=1", "https://a.test/search?q=api_key&monkey=1"),
     ("the api_key=abc was refused", "the api_key=abc was refused"),

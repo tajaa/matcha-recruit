@@ -14,7 +14,7 @@ vi.mock('../../../api', () => ({ cappeApi: api }))
 const CONN: CappeSocialConnection = {
   id: 'c-1', platform: 'instagram', external_id: 'ig1', handle: 'pocoffee', display_name: 'pocoffee', avatar_url: null,
   status: 'connected', last_error: null, followers_count: 812, metrics: {}, metrics_at: null, token_expires_at: null,
-  connected_at: '2026-10-01T00:00:00Z',
+  connected_at: '2026-10-01T00:00:00Z', inbox_enabled: true,
 }
 const SETTINGS: CappeSocialSettings = {
   autoreply_mode: 'review', reply_to_comments: true, reply_to_messages: true, tone: 'friendly', business_facts: '',
@@ -85,6 +85,37 @@ describe('Social', () => {
   it('reports the OAuth round trip once', async () => {
     load('/sites/s-1/social?social_error=User%20denied')
     expect(await screen.findByText('Couldn’t connect: User denied')).toBeInTheDocument()
+  })
+
+  it('says what Connect left to do alongside what it connected', async () => {
+    load('/sites/s-1/social?connected=facebook%2Cinstagram&social_missing=instagram_manage_messages&social_inbox_off=1')
+    const notice = await screen.findByText(/Connected facebook and instagram\. Meta didn’t allow Instagram messages\./)
+    expect(notice.className).toContain('amber')
+    expect(notice).toHaveTextContent('1 account came in with its comments and messages off')
+  })
+
+  it('words the Connect banner itself: a crafted link can’t put its own text in it', async () => {
+    load('/sites/s-1/social?connected=instagram&social_warning=Call%20555-0100%20to%20verify&social_missing=made_up_scope')
+    expect(await screen.findByText('Connected instagram.')).toBeInTheDocument()
+    expect(screen.queryByText(/555-0100/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/made_up_scope/)).not.toBeInTheDocument()
+  })
+
+  it('shows no Connect banner for a platform it does not know', async () => {
+    load('/sites/s-1/social?connected=evil.example&social_inbox_off=3')
+    await screen.findByRole('checkbox', { name: 'Inbox' })
+    expect(screen.queryByText(/evil\.example/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/accounts came in/)).not.toBeInTheDocument()
+  })
+
+  it('turns an account’s inbox off and on from Accounts', async () => {
+    load('/sites/s-1/social?connected=instagram')
+    const inbox = await screen.findByRole('checkbox', { name: 'Inbox' })
+    expect(inbox).toBeChecked()
+    api.patch.mockResolvedValue({ ...CONN, inbox_enabled: false })
+    fireEvent.click(inbox)
+    await waitFor(() => expect(api.patch).toHaveBeenCalledWith('/sites/s-1/social/connections/c-1', { inbox_enabled: false }))
+    await waitFor(() => expect(screen.getByRole('checkbox', { name: 'Inbox' })).not.toBeChecked())
   })
 
   it('saves a caption-only draft to no account', async () => {

@@ -289,10 +289,14 @@ class Settings:
     # `cappe_meta_verify_token` is the string Meta echoes on webhook
     # subscription (GET hub.challenge); `cappe_meta_app_secret` signs the
     # POSTs (X-Hub-Signature-256) and the OAuth code exchange.
+    # `cappe_meta_login_config_id` is the Facebook Login for Business
+    # configuration a Business-type app logs in with (it replaces the scope
+    # list); unset, the dialog asks for `meta.SCOPES` the classic way.
     cappe_meta_app_id: Optional[str] = None
     cappe_meta_app_secret: Optional[str] = None
     cappe_meta_verify_token: Optional[str] = None
     cappe_meta_graph_version: str = "v21.0"
+    cappe_meta_login_config_id: Optional[str] = None
 
     # Cappe domain reselling (Porkbun registrar). We register under our own
     # funded Porkbun account and resell to tenants at wholesale + a flat markup.
@@ -528,6 +532,7 @@ def load_settings() -> Settings:
         cappe_meta_app_secret=os.getenv("CAPPE_META_APP_SECRET"),
         cappe_meta_verify_token=os.getenv("CAPPE_META_VERIFY_TOKEN"),
         cappe_meta_graph_version=os.getenv("CAPPE_META_GRAPH_VERSION", "v21.0"),
+        cappe_meta_login_config_id=os.getenv("CAPPE_META_LOGIN_CONFIG_ID") or None,
         porkbun_api_key=os.getenv("PORKBUN_API_KEY"),
         porkbun_secret_key=os.getenv("PORKBUN_SECRET_KEY"),
         cappe_domain_markup_cents=int(os.getenv("CAPPE_DOMAIN_MARKUP_CENTS", "800")),

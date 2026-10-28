@@ -17,6 +17,7 @@ import hashlib
 import hmac
 import json
 import os
+from urllib.parse import parse_qs, urlsplit
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
@@ -209,6 +210,16 @@ def test_disconnect(world):
     world.mp.setattr(conn_store, "delete_connection", AsyncMock(side_effect=[True, False]))
     assert world.client.delete(f"{BASE}/connections/{CONN_ID}").status_code == 204
     assert world.client.delete(f"{BASE}/connections/{CONN_ID}").status_code == 404
+
+
+def test_an_accounts_inbox_is_switched_on_its_own_site(world):
+    setter = AsyncMock(side_effect=[connection(inbox_enabled=False), None])
+    world.mp.setattr(conn_store, "set_inbox_enabled", setter)
+    resp = world.client.patch(f"{BASE}/connections/{CONN_ID}", json={"inbox_enabled": False})
+    assert resp.status_code == 200 and resp.json()["inbox_enabled"] is False
+    assert setter.await_args.args[1:] == (SITE, CONN_ID, False)
+    assert world.client.patch(f"{BASE}/connections/{CONN_ID}", json={"inbox_enabled": True}).status_code == 404
+    assert world.client.patch(f"{BASE}/connections/{CONN_ID}", json={}).status_code == 422
 
 
 def test_settings_read_and_the_ai_inbox_gate(world):
@@ -599,7 +610,8 @@ def public(monkeypatch):
     monkeypatch.setattr(social_meta, "get_connection", lambda: conn)
     monkeypatch.setattr(social_meta, "check_rate_limit", AsyncMock())
     monkeypatch.setattr(meta.MetaConfig, "from_settings", staticmethod(lambda: CFG))
-    drafts = [ConnectionDraft("facebook", "p1", "pt"), ConnectionDraft("instagram", "ig1", "pt")]
+    drafts = [ConnectionDraft("facebook", "p1", "pt", scopes=meta.SCOPES),
+              ConnectionDraft("instagram", "ig1", "pt", scopes=meta.SCOPES)]
     monkeypatch.setattr(meta, "exchange_code", AsyncMock(return_value=drafts))
     monkeypatch.setattr(meta, "subscribe_page", AsyncMock(return_value=True))
     monkeypatch.setattr(conn_store, "save_drafts", AsyncMock(return_value=[{"platform": "facebook"},
@@ -625,6 +637,35 @@ def test_callback_connects_and_sends_the_owner_back(public):
     kw = conn_store.save_drafts.await_args.kwargs
     assert kw["site_id"] == SITE and kw["account_id"] == ACCOUNT.id
     meta.subscribe_page.assert_awaited_once_with(CFG, "p1", "pt")
+
+
+def test_callback_says_what_wasnt_granted_and_which_inboxes_start_off(public):
+    drafts = [ConnectionDraft("facebook", "p1", "pt", scopes=("pages_show_list", "pages_manage_posts")),
+              ConnectionDraft("instagram", "ig1", "pt", scopes=("instagram_basic", "instagram_content_publish"))]
+    public.mp.setattr(meta, "exchange_code", AsyncMock(return_value=drafts))
+    public.mp.setattr(conn_store, "save_drafts", AsyncMock(return_value=[
+        {"platform": "facebook", "inbox_enabled": False, "is_new": True},
+        {"platform": "facebook", "inbox_enabled": False, "is_new": True},
+        {"platform": "instagram", "inbox_enabled": True, "is_new": True}]))
+    location = _callback(public, code="the-code").headers["location"]
+    query = parse_qs(urlsplit(location).query)
+    # Codes, never prose: the page words them, so a crafted link can't speak for us.
+    assert query["social_missing"] == ["instagram_manage_comments,instagram_manage_messages,"
+                                       "pages_manage_engagement,pages_messaging"]
+    assert query["social_inbox_off"] == ["2"] and "social_warning" not in query
+
+
+def test_connect_notes_are_empty_when_all_is_well():
+    drafts = [ConnectionDraft("facebook", "p1", "pt", scopes=meta.SCOPES)]
+    assert social_meta.connect_notes(drafts, [{"inbox_enabled": True, "is_new": True}]) == {}
+
+
+def test_connect_notes_count_only_the_accounts_this_connect_added_with_their_inbox_off():
+    drafts = [ConnectionDraft("facebook", "p1", "pt", scopes=meta.SCOPES)]
+    rows = [{"inbox_enabled": False, "is_new": False},   # the owner's own earlier choice
+            {"inbox_enabled": False, "is_new": True},
+            {"inbox_enabled": True, "is_new": True}]
+    assert social_meta.connect_notes(drafts, rows) == {"social_inbox_off": "1"}
 
 
 def test_callback_from_another_browser_is_refused(public):
@@ -822,6 +863,7 @@ async def test_inbound_stores_handles_and_survives_a_bad_item(monkeypatch):
         [connection()] if ext == "ig1" else [])))
     new = [inbox_item(id=uuid4()), inbox_item(id=uuid4())]
     monkeypatch.setattr(inbox_store, "ingest_events", AsyncMock(return_value=new))
+    monkeypatch.setattr(inbox_store, "without_own", AsyncMock(side_effect=lambda conn, connections, events: events))
     monkeypatch.setattr(inbound_task, "effective_settings", AsyncMock(return_value={"autoreply_mode": "auto"}))
     send = AsyncMock(return_value="r1")
     monkeypatch.setattr(outbound, "send_reply", send)
@@ -834,7 +876,7 @@ async def test_inbound_stores_handles_and_survives_a_bad_item(monkeypatch):
 
     monkeypatch.setattr(autoreply, "handle_item", handle)
     out = await inbound_task.process_events(object(), CFG, events)
-    assert out == {"stored": 2, "unmatched": 1, "sent": 1, "error": 1}
+    assert out == {"stored": 2, "unmatched": 1, "own": 0, "sent": 1, "error": 1}
     send.assert_awaited_once()
 
 
@@ -844,11 +886,12 @@ async def test_a_page_on_two_sites_is_answered_once(monkeypatch):
     monkeypatch.setattr(conn_store, "by_external_id", AsyncMock(return_value=[first, second]))
     ingest = AsyncMock(side_effect=lambda conn, connection, events: [inbox_item(id=uuid4())])
     monkeypatch.setattr(inbox_store, "ingest_events", ingest)
+    monkeypatch.setattr(inbox_store, "without_own", AsyncMock(side_effect=lambda conn, connections, events: events))
     monkeypatch.setattr(inbound_task, "effective_settings", AsyncMock(return_value={"autoreply_mode": "auto"}))
     handle = AsyncMock(return_value={"outcome": "sent"})
     monkeypatch.setattr(autoreply, "handle_item", handle)
     out = await inbound_task.process_events(object(), CFG, [InboundEvent("instagram", "ig1", "comment", "c", "x")])
-    assert out == {"stored": 2, "unmatched": 0, "sent": 1}
+    assert out == {"stored": 2, "unmatched": 0, "own": 0, "sent": 1}
     assert ingest.await_count == 2 and handle.await_count == 1
 
 
@@ -856,11 +899,99 @@ async def test_a_page_on_two_sites_is_answered_once(monkeypatch):
 async def test_inbound_with_nothing_new_handles_nothing(monkeypatch):
     monkeypatch.setattr(conn_store, "by_external_id", AsyncMock(return_value=[connection()]))
     monkeypatch.setattr(inbox_store, "ingest_events", AsyncMock(return_value=[]))
+    monkeypatch.setattr(inbox_store, "without_own", AsyncMock(side_effect=lambda conn, connections, events: events))
     handle = AsyncMock()
     monkeypatch.setattr(autoreply, "handle_item", handle)
     assert await inbound_task.process_events(object(), CFG, [InboundEvent("instagram", "ig1", "comment", "c", "x")]) == {
-        "stored": 0, "unmatched": 0}
+        "stored": 0, "unmatched": 0, "own": 0}
     handle.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_our_own_reply_coming_back_is_never_stored_or_answered(monkeypatch):
+    monkeypatch.setattr(conn_store, "by_external_id", AsyncMock(return_value=[connection()]))
+    own = InboundEvent("instagram", "ig1", "comment", "r9", "Thanks so much!", author_name="pocoffee")
+    theirs = InboundEvent("instagram", "ig1", "comment", "c5", "Do you ship?", author_name="maya")
+    conn = TxConn(fetch={"FROM cappe_social_replies WHERE external_reply_id": []})
+    ingest = AsyncMock(return_value=[])
+    monkeypatch.setattr(inbox_store, "ingest_events", ingest)
+    out = await inbound_task.process_events(conn, CFG, [own, theirs])
+    assert out == {"stored": 0, "unmatched": 0, "own": 1}
+    assert ingest.await_args.kwargs["events"] == [theirs]
+    # Nothing left once ours is dropped: nothing to ingest.
+    ingest.reset_mock()
+    assert (await inbound_task.process_events(conn, CFG, [own]))["own"] == 1
+    ingest.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_the_inbox_sweep_retries_what_the_policy_left(monkeypatch):
+    other_site = uuid4()
+    items = [inbox_item(id=uuid4()), inbox_item(id=uuid4()), inbox_item(id=uuid4(), site_id=other_site),
+             inbox_item(id=uuid4())]
+    unhandled = AsyncMock(return_value=items)
+    monkeypatch.setattr(inbox_store, "unhandled", unhandled)
+    settings = AsyncMock(return_value={"autoreply_mode": "auto"})
+    monkeypatch.setattr(inbound_task, "effective_settings", settings)
+    attempts = []
+    monkeypatch.setattr(inbox_store, "note_attempt", AsyncMock(side_effect=lambda c, i, r: attempts.append(r)))
+    results = iter([{"outcome": "sent"}, RuntimeError("bug"), {"outcome": "left", "reason": "off"},
+                    {"outcome": "left", "reason": "no_model"}])
+
+    async def handle(conn, it, s, *, send):
+        result = next(results)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    monkeypatch.setattr(autoreply, "handle_item", handle)
+    out = await inbound_task.sweep(object(), CFG, limit=50)
+    assert out == {"items": 4, "sent": 1, "error": 1, "left": 2}
+    assert unhandled.await_args.kwargs == {"limit": 50, "within_hours": inbound_task.SWEEP_WINDOW_HOURS,
+                                           "max_attempts": autoreply.MAX_ATTEMPTS,
+                                           "model_cap": autoreply.MODEL_CALLS_PER_HOUR}
+    assert settings.await_count == 2  # once per site
+    # A plan that no longer includes replies turns the item away every hour:
+    # counted, so it ages out instead of heading the list for 12 hours. A wait
+    # for the model isn't counted here (the policy counted it itself).
+    assert attempts == ["off"]
+
+    # "No model" is the same for everyone after it: the sweep stops there.
+    results = iter([{"outcome": "left", "reason": "no_model"}, {"outcome": "sent"}])
+    monkeypatch.setattr(inbox_store, "unhandled", AsyncMock(return_value=items[:2]))
+    assert await inbound_task.sweep(object(), CFG, limit=50) == {"items": 2, "left": 1}
+
+
+@pytest.mark.asyncio
+async def test_inbox_sweep_run_respects_its_row_and_the_meta_setup(monkeypatch):
+    conn = TxConn()
+    monkeypatch.setattr(inbound_task, "get_db_connection", AsyncMock(return_value=conn))
+    row = AsyncMock(return_value={"enabled": False, "max_per_cycle": 50})
+    monkeypatch.setattr(inbound_task, "scheduler_settings_row", row)
+    assert await inbound_task._run_sweep() == {"skipped": True} and conn.closed
+    row.return_value = {"enabled": True, "max_per_cycle": 9999}
+    monkeypatch.setattr(meta.MetaConfig, "from_settings", staticmethod(lambda: None))
+    assert (await inbound_task._run_sweep())["reason"] == "meta_not_configured"
+    monkeypatch.setattr(meta.MetaConfig, "from_settings", staticmethod(lambda: CFG))
+    sweep = AsyncMock(return_value={"items": 0})
+    monkeypatch.setattr(inbound_task, "sweep", sweep)
+    assert await inbound_task._run_sweep() == {"items": 0}
+    assert sweep.await_args.kwargs == {"limit": 500}
+
+
+def test_inbox_sweep_task_wrapper(monkeypatch):
+    async def run():
+        return {"items": 3}
+
+    monkeypatch.setattr(inbound_task, "_run_sweep", run)
+    assert inbound_task.run_cappe_social_inbox_sweep() == {"status": "success", "items": 3}
+
+    async def boom():
+        raise RuntimeError("x")
+
+    monkeypatch.setattr(inbound_task, "_run_sweep", boom)
+    with pytest.raises(RuntimeError):
+        inbound_task.run_cappe_social_inbox_sweep()
 
 
 @pytest.mark.asyncio

@@ -1978,6 +1978,8 @@ export type CappeSocialConnection = {
   metrics_at: string | null
   token_expires_at: string | null
   connected_at: string
+  // Whether its comments and DMs reach the inbox (and the AI replies).
+  inbox_enabled: boolean
 }
 
 export type CappeSocialConnections = { configured: boolean; connections: CappeSocialConnection[] }

@@ -334,6 +334,18 @@ async def record_failure(conn, target_id: UUID, attempts: int, error: ProviderEr
     return "failed"
 
 
+async def save_state(conn, target_id: UUID, state: dict[str, Any]) -> None:
+    """Where a publish got to (a container id, the time of a final write),
+    written before the call that makes the post live. A retryable failure
+    keeps it, so the retry asks the network whether that call went out
+    instead of making it again; so does a killed worker's
+    `recover_stale_claims`."""
+    await conn.execute(
+        "UPDATE cappe_social_post_targets SET state = $2::jsonb WHERE id = $1 AND status = 'publishing'",
+        target_id, json.dumps(state),
+    )
+
+
 async def record_pending(conn, target_id: UUID, pending: Pending) -> None:
     """The network is still working on it: keep where it got to and look
     again later. Hands back the attempt the claim counted — a check isn't a
@@ -499,6 +511,6 @@ __all__ = [
     "validate_for_targets", "create_post", "set_targets", "set_content",
     "attach_posters", "get_post",
     "targets_for", "list_posts", "update_post", "set_schedule", "publish_now", "cancel_post", "delete_post",
-    "claim_due_targets", "record_success", "record_failure", "record_pending", "recover_stale_claims",
+    "claim_due_targets", "record_success", "record_failure", "save_state", "record_pending", "recover_stale_claims",
     "hold_for_renders", "release_rendered", "fail_rendering", "rollup_status", "rollup_post",
 ]

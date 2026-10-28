@@ -277,6 +277,9 @@ export default function PlanCard({ siteId, conversationId, card, connections, on
               </span>
             </label>
           ) : <p className="text-xs text-zinc-500">No link.</p>}
+          {plan.link.url && keepLink && (
+            <p className="mt-1 text-xs text-zinc-500">Goes on Facebook. On Instagram, put it in your bio.</p>
+          )}
         </div>
       </div>
 

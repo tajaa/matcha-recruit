@@ -54,10 +54,15 @@ async def publish_target(conn, cfg: MetaConfig, claim: dict[str, Any]) -> str:
         # The chat composer writes each network its own copy; the form's posts
         # share the post's caption and link.
         content = loads(claim.get("content"))
+
+        async def checkpoint(state: dict[str, Any]) -> None:
+            await post_store.save_state(conn, target_id, state)
+
         result = await provider_for(cred["platform"]).publish(
             cfg, platform=cred["platform"], external_id=cred["external_id"], token=cred["token"],
             caption=content.get("text") or post["caption"] or "", media=media,
             link_url=content.get("link_url") or post["link_url"], state=loads(claim.get("state")),
+            checkpoint=checkpoint,
         )
     except ProviderError as exc:
         if exc.code in _TOKEN_CODES and cred:
