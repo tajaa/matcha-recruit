@@ -305,6 +305,11 @@ async def test_rollup_post_writes_the_rolled_status():
 
 # ── connections ─────────────────────────────────────────────────────────────
 
+def KNOWN_CONNECTIONS(rows):
+    """What `save_drafts` finds the site already has."""
+    return {"FROM cappe_social_connections WHERE site_id": rows}
+
+
 def conn_row(**over):
     return {"id": CONN, "site_id": SITE, "account_id": ACCOUNT, "platform": "instagram", "external_id": "ig1",
             "handle": "pocoffee", "display_name": "pocoffee", "avatar_url": None, "status": "connected",
@@ -314,7 +319,7 @@ def conn_row(**over):
 
 @pytest.mark.asyncio
 async def test_tokens_are_encrypted_at_rest_and_never_returned():
-    conn = QueryConn(fetchrow={"INSERT INTO cappe_social_connections": conn_row()})
+    conn = QueryConn(fetchrow={"INSERT INTO cappe_social_connections": conn_row()}, fetch=KNOWN_CONNECTIONS([]))
     draft = ConnectionDraft(platform="instagram", external_id="ig1", access_token="EAAB-secret", scopes=("a",))
     rows = await conn_store.save_drafts(conn, site_id=SITE, account_id=ACCOUNT, drafts=[draft])
     stored = conn.args_for("INSERT INTO cappe_social_connections")[7]
@@ -368,18 +373,38 @@ async def test_a_webhook_reaches_only_live_connections_with_their_inbox_on():
 async def test_inbox_starts_off_when_connect_brings_several_pages():
     one_page = [ConnectionDraft("facebook", "p1", "t"), ConnectionDraft("instagram", "ig1", "t")]
     assert conn_store.inbox_default(one_page) is True
-    conn = QueryConn(fetchrow={"INSERT INTO cappe_social_connections": conn_row()})
-    await conn_store.save_drafts(conn, site_id=SITE, account_id=ACCOUNT, drafts=one_page)
-    assert conn.args_for("INSERT INTO cappe_social_connections")[11] is True
+    conn = QueryConn(fetchrow={"INSERT INTO cappe_social_connections": conn_row()}, fetch=KNOWN_CONNECTIONS([]))
+    rows = await conn_store.save_drafts(conn, site_id=SITE, account_id=ACCOUNT, drafts=one_page)
+    assert conn.args_for("INSERT INTO cappe_social_connections")[11] is True and rows[0]["is_new"] is True
 
     several = [*one_page, ConnectionDraft("facebook", "p2", "t")]
     assert conn_store.inbox_default(several) is False
-    conn = QueryConn(fetchrow={"INSERT INTO cappe_social_connections": conn_row()})
+    conn = QueryConn(fetchrow={"INSERT INTO cappe_social_connections": conn_row()}, fetch=KNOWN_CONNECTIONS([]))
     await conn_store.save_drafts(conn, site_id=SITE, account_id=ACCOUNT, drafts=several)
     inserts = [args for _, sql, args in conn.calls if "INSERT INTO cappe_social_connections" in sql]
     assert len(inserts) == 3 and all(args[11] is False for args in inserts)
     # A reconnect keeps the owner's choice.
     assert "inbox_enabled = EXCLUDED" not in conn.sql_for("fetchrow")[0]
+
+
+@pytest.mark.asyncio
+async def test_a_later_connect_that_adds_a_second_page_starts_it_off():
+    """The store's Page is already there; a friend's or an agency's arriving
+    alone in the next Connect is still the site's second Page."""
+    assert conn_store.inbox_default([ConnectionDraft("facebook", "p2", "t")], ["p1"]) is False
+    have = KNOWN_CONNECTIONS([{"platform": "facebook", "external_id": "p1"},
+                              {"platform": "instagram", "external_id": "ig1"}])
+    conn = QueryConn(fetchrow={"INSERT INTO cappe_social_connections": conn_row()}, fetch=have)
+    rows = await conn_store.save_drafts(conn, site_id=SITE, account_id=ACCOUNT,
+                                        drafts=[ConnectionDraft("facebook", "p2", "t")])
+    assert conn.args_for("INSERT INTO cappe_social_connections")[11] is False and rows[0]["is_new"] is True
+    assert conn.args_for("FROM cappe_social_connections WHERE site_id") == (SITE,)
+
+    # Connecting the store's own Page again isn't a second one, and isn't new.
+    conn = QueryConn(fetchrow={"INSERT INTO cappe_social_connections": conn_row()}, fetch=have)
+    rows = await conn_store.save_drafts(conn, site_id=SITE, account_id=ACCOUNT,
+                                        drafts=[ConnectionDraft("facebook", "p1", "t")])
+    assert conn.args_for("INSERT INTO cappe_social_connections")[11] is True and rows[0]["is_new"] is False
 
 
 @pytest.mark.asyncio
@@ -498,28 +523,56 @@ async def test_our_own_replies_never_come_back_into_the_inbox():
 
 @pytest.mark.asyncio
 async def test_attempts_and_model_calls_are_counted_on_the_item():
-    conn = QueryConn(fetchval={"(classification->>'drafted_at')::timestamptz": Queue([7, None])})
+    conn = QueryConn(fetchval={"model_called_at > NOW()": Queue([7, None])})
     await inbox_store.note_attempt(conn, CONN, "no_model")
     sql, args = conn.calls[-1][1], conn.calls[-1][2]
     assert "'attempts', COALESCE((classification->>'attempts')::int, 0) + 1" in sql and args == (CONN, "no_model")
+    assert "claimed_at = NULL" in sql  # an attempt hands the item back
     await inbox_store.note_model_call(conn, CONN)
-    assert "'drafted_at', NOW()" in conn.calls[-1][1]
+    assert "model_called_at = NOW()" in conn.calls[-1][1]
     assert await inbox_store.model_calls_last_hour(conn, SITE) == 7
+    # A real column, so the index on (site_id, model_called_at) answers it.
+    assert "classification" not in conn.calls[-1][1] and conn.calls[-1][2] == (SITE,)
     assert await inbox_store.model_calls_last_hour(conn, SITE) == 0
+
+
+@pytest.mark.asyncio
+async def test_an_item_is_claimed_once_and_the_claim_lapses():
+    conn = QueryConn(fetchrow={"SET claimed_at = NOW()": Queue([{"id": CONN}, None])})
+    assert await inbox_store.claim_item(conn, CONN) is True
+    assert await inbox_store.claim_item(conn, CONN) is False
+    sql, args = conn.calls[0][1], conn.calls[0][2]
+    # Only a `new` item, and only one nobody holds (or whose hold ran out).
+    assert "status = 'new'" in sql and "claimed_at < NOW() - make_interval(secs => $2)" in sql
+    assert args == (CONN, float(inbox_store.CLAIM_LEASE_SECONDS))
+    await inbox_store.release_item(conn, CONN)
+    assert "claimed_at = NULL" in conn.calls[-1][1]
+    await inbox_store.set_item_status(conn, CONN, "skipped")
+    assert "claimed_at = NULL" in conn.calls[-1][1]
 
 
 @pytest.mark.asyncio
 async def test_the_sweep_takes_only_what_the_inbound_worker_would_answer():
     conn = QueryConn(fetch={"WHERE i.status = 'new'": [item()]})
-    rows = await inbox_store.unhandled(conn, limit=50, within_hours=12, max_attempts=3)
+    rows = await inbox_store.unhandled(conn, limit=50, within_hours=12, max_attempts=3, model_cap=60)
     assert rows[0]["classification"] == {}
     sql = conn.sql_for("fetch")[0]
-    assert conn.args_for("WHERE i.status = 'new'") == (50, 12, 3)
+    assert conn.args_for("WHERE i.status = 'new'") == (50, 12, 3, 60, float(inbox_store.CLAIM_LEASE_SECONDS))
     assert "s.autoreply_mode <> 'off'" in sql and "c.status = 'connected' AND c.inbox_enabled" in sql
+    # Not items the policy would turn away for the owner's own settings (they
+    # would head the list every hour), a worker's live claim, or a site that
+    # has used its hour of model calls (its items would fill the slots).
+    assert "i.kind = 'comment' AND COALESCE(s.reply_to_comments, true)" in sql
+    assert "i.kind = 'message' AND COALESCE(s.reply_to_messages, true)" in sql
+    assert "i.claimed_at IS NULL OR i.claimed_at < NOW() - make_interval(secs => $5)" in sql
+    assert "k.model_called_at > NOW() - INTERVAL '1 hour') < $4" in sql
     # Never a second site's copy of a comment: not while an earlier live
     # connection has it, nor once any copy was answered.
     assert "(o.connected_at, o.id) < (c.connected_at, c.id)" in sql
     assert "r.status IN ('sending', 'sent')" in sql
+    # ... and that includes this item's own: a reply left `sending` by a
+    # worker that died mid-send is never sent a second time.
+    assert "j.id <> i.id" not in sql
 
 
 # ── the Claude gate ─────────────────────────────────────────────────────────
@@ -605,6 +658,28 @@ async def test_automatic_calls_are_counted_from_the_rate_limit_rows(monkeypatch)
     assert await ai.automatic_calls_last_hour() == 12
     assert conn.args_for("FROM api_rate_limits") == ("cappe_social", ai.AUTOMATIC_ENDPOINT)
     assert "provider = 'anthropic'" in conn.sql_for("fetchval")[0]
+
+
+@pytest.mark.asyncio
+async def test_the_share_check_uses_the_callers_connection_not_a_new_one(monkeypatch):
+    """It runs on every inbound comment; a giveaway must not open one
+    connection per comment."""
+    from app import database
+    from app.core.services import anthropic_messages, rate_limiter
+
+    def no_new_connection():
+        raise AssertionError("opened its own connection")
+
+    monkeypatch.setattr(database, "connection_or_direct", no_new_connection)
+    conn = QueryConn(fetchval={"FROM api_rate_limits": 12})
+    assert await ai.automatic_calls_last_hour(conn) == 12
+
+    bucket = Bucket()
+    bucket.hourly_limit = 200
+    monkeypatch.setattr(anthropic_messages, "claude_default", AsyncMock(return_value="claude-haiku-5-5"))
+    monkeypatch.setattr(rate_limiter, "get_rate_limiter", lambda provider="gemini": bucket)
+    assert await ai.model_for("reply", automatic=True, conn=conn) == "claude-haiku-5-5"
+    assert conn.args_for("FROM api_rate_limits") == ("cappe_social", ai.AUTOMATIC_ENDPOINT)
 
 
 # ── captions ────────────────────────────────────────────────────────────────
@@ -802,6 +877,12 @@ PRICED = autoreply.Grounding(
     ("Beans are $1,800.00 a sack", None),
     ("Students get 10% off with ID.", None),
     ("Free shipping on orders over 40 dollars!", None),
+    ("The Oat Latte is 5,50 € today", None),
+    ("Beans are 1.800,00 € a sack", None),
+    ("It's 12,50 € today", "price"),
+    ("Just 3€!", "price"),
+    ("Just ten dollars!", "price"),
+    ("Twenty-five bucks and it's yours", "price"),
     ("It's $3 today only", "price"),
     ("Only 4.99 USD!", "price"),
     ("Yes, 50% off today!", "discount"),
@@ -814,6 +895,8 @@ def test_reply_guard_holds_prices_and_offers_the_facts_dont_state(reply, reason)
 
 def test_money_and_percent_parsing():
     assert autoreply.money_amounts("€12, £3.5, 7 bucks, 1,250.00 dollars and 9am") == {1200, 350, 700, 125000}
+    # A symbol after the number, and the decimal comma.
+    assert autoreply.money_amounts("12,50 €, 3€, 1.250,00 euros, $1,250 and 4,5 dollars") == {1250, 300, 125000, 450}
     assert autoreply.percents("10% or 12.5 percent") == {10.0, 12.5}
 
 
@@ -833,8 +916,11 @@ def test_prefilter_skips_comments_with_no_words(text, expected):
 class InboxSpy:
     """The inbox store calls `handle_item` makes, recorded."""
 
-    def __init__(self, monkeypatch, *, sent_last_hour=0, model_calls=0):
+    def __init__(self, monkeypatch, *, sent_last_hour=0, model_calls=0, claim=True):
         self.statuses, self.replies, self.marks, self.attempts, self.model_calls = [], [], [], [], []
+        self.claims, self.released, self._claim_ok = [], [], claim
+        monkeypatch.setattr(inbox_store, "claim_item", self._claim)
+        monkeypatch.setattr(inbox_store, "release_item", self._release)
         monkeypatch.setattr(inbox_store, "set_item_status", self._status)
         monkeypatch.setattr(inbox_store, "create_reply", self._create)
         monkeypatch.setattr(inbox_store, "mark_reply", self._mark)
@@ -842,6 +928,13 @@ class InboxSpy:
         monkeypatch.setattr(inbox_store, "model_calls_last_hour", AsyncMock(return_value=model_calls))
         monkeypatch.setattr(inbox_store, "note_attempt", self._attempt)
         monkeypatch.setattr(inbox_store, "note_model_call", self._model_call)
+
+    async def _claim(self, conn, inbox_id):
+        self.claims.append(inbox_id)
+        return self._claim_ok
+
+    async def _release(self, conn, inbox_id):
+        self.released.append(inbox_id)
 
     async def _attempt(self, conn, inbox_id, reason):
         self.attempts.append(reason)
@@ -902,19 +995,50 @@ async def test_without_a_model_a_hard_stop_still_escalates_and_the_rest_waits(mo
     assert out == {"outcome": "left", "reason": "no_model"}
     # Counted, so the sweep retries it a bounded number of times.
     assert spy.attempts == ["no_model"]
-    assert autoreply.model_for.await_args.kwargs == {"automatic": True}
+    # The caller's connection comes along: the share check runs on it.
+    assert autoreply.model_for.await_args.kwargs == {"automatic": True, "conn": None}
 
 
 @pytest.mark.asyncio
 async def test_a_site_at_its_hourly_model_cap_waits_without_a_model_call(monkeypatch):
     spy = InboxSpy(monkeypatch, model_calls=autoreply.MODEL_CALLS_PER_HOUR)
     _wire(monkeypatch)
-    out = await autoreply.handle_item(None, item(), AUTO, send=AsyncMock())
-    assert out == {"outcome": "left", "reason": "site_cap"} and spy.attempts == ["site_cap"]
+    it = item()
+    out = await autoreply.handle_item(None, it, AUTO, send=AsyncMock())
+    # Waiting for the hour is the cap working, not a failed try: no attempt is
+    # spent (a giveaway's backlog would otherwise be abandoned after two
+    # sweeps), and the claim goes back.
+    assert out == {"outcome": "left", "reason": "site_cap"} and spy.attempts == [] and spy.released == [it["id"]]
     assert autoreply.model_for.await_count == 0
     # A hard stop still reaches the owner.
     out = await autoreply.handle_item(None, item(text="I want a refund"), AUTO, send=AsyncMock())
     assert out["outcome"] == "escalated"
+
+
+@pytest.mark.asyncio
+async def test_an_item_another_worker_holds_is_left_alone(monkeypatch):
+    """The inbound worker and the sweep can reach the same comment; the second
+    one must not draft or send it."""
+    spy = InboxSpy(monkeypatch, claim=False)
+    _wire(monkeypatch)
+    send = AsyncMock()
+    it = item()
+    out = await autoreply.handle_item(None, it, AUTO, send=send)
+    assert out == {"outcome": "left", "reason": "claimed"} and spy.claims == [it["id"]]
+    assert autoreply.model_for.await_count == 0 and autoreply.draft_reply.await_count == 0
+    send.assert_not_awaited()
+    assert spy.statuses == [] and spy.replies == [] and spy.attempts == [] and spy.model_calls == []
+
+
+@pytest.mark.asyncio
+async def test_the_claim_is_taken_after_the_cheap_checks_and_before_the_model(monkeypatch):
+    spy = InboxSpy(monkeypatch)
+    _wire(monkeypatch)
+    await autoreply.handle_item(None, item(), {"autoreply_mode": "off"}, send=AsyncMock())
+    await autoreply.handle_item(None, item(text="🔥"), AUTO, send=AsyncMock())
+    assert spy.claims == []  # off, and nothing to answer: never claimed
+    await autoreply.handle_item(None, item(), AUTO, send=AsyncMock(return_value="r1"))
+    assert len(spy.claims) == 1
 
 
 @pytest.mark.asyncio

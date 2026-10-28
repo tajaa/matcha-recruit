@@ -91,6 +91,10 @@ REQUIRED_SCOPES = {
 # 9007: the media container isn't ready to publish yet — a later try
 # recreates it.
 _RETRYABLE_CODES = frozenset({1, 2, 4, 17, 32, 341, 368, 613, 9007})
+# The retryable ones where Meta refused the call outright, so nothing was
+# posted. 1 and 2 ("unknown error", "service unavailable") are not here: Meta
+# gives them for posts that went live, and a timeout carries no code at all.
+_NOT_POSTED_CODES = frozenset({4, 17, 32, 341, 368, 613})
 _TIMEOUT = httpx.Timeout(20.0, connect=10.0)
 # A Facebook post found among the Page's recent ones counts as ours when its
 # text matches and it was made at most this long before the checkpoint.
@@ -299,6 +303,23 @@ async def _save(checkpoint: Optional[Checkpoint], state: dict[str, Any]) -> None
     """Record where a publish got to, before a call that can't be repeated."""
     if checkpoint is not None:
         await checkpoint(state)
+
+
+async def _live_write(checkpoint: Optional[Checkpoint], state: dict[str, Any],
+                      write: Callable[[], Awaitable[dict[str, Any]]]) -> dict[str, Any]:
+    """The one call that makes a post live: checkpointed first, so a retry
+    asks the Page whether it went out. When Meta refuses it outright (a rate
+    limit) nothing was posted, so the checkpoint is forgotten and the retry
+    just writes — a post with no text can't be found among the Page's others,
+    and would otherwise fail for good on a hiccup. A timeout or an "unknown
+    error" stays checkpointed."""
+    await _save(checkpoint, state)
+    try:
+        return await write()
+    except ProviderError as exc:
+        if exc.code in _NOT_POSTED_CODES:
+            await _save(checkpoint, {})
+        raise
 
 
 async def _ig_permalink(cfg, media_id: str, token: str, client) -> Optional[str]:
@@ -526,9 +547,11 @@ async def _publish_fb_video(cfg, page_id: str, token: str, caption: str, video: 
             if found:
                 return Pending("facebook_processing", {"video_id": found.external_post_id, "checks": 0},
                                FIRST_CHECK_SECONDS)
-            await _save(checkpoint, {"final_write_at": _now_iso(), "phase": "facebook_uploading"})
-            out = await call(cfg, "POST", f"{page_id}/videos", token=token,
-                             data={"file_url": video["url"], "description": caption, "published": "true"}, client=client)
+            out = await _live_write(
+                checkpoint, {"final_write_at": _now_iso(), "phase": "facebook_uploading"},
+                lambda: call(cfg, "POST", f"{page_id}/videos", token=token,
+                             data={"file_url": video["url"], "description": caption, "published": "true"},
+                             client=client))
             video_id = str(out.get("id") or "")
         else:
             # The Reel's id is kept before anything is uploaded, so a retry
@@ -588,21 +611,22 @@ async def _publish_facebook(cfg, page_id: str, token: str, caption: str, media: 
             photo = await call(cfg, "POST", f"{page_id}/photos", token=token,
                                data={"url": item["url"], "published": "false"}, client=client)
             attached.append({"media_fbid": str(photo.get("id"))})
-    await _save(checkpoint, {"final_write_at": _now_iso(), "phase": "facebook_publishing"})
-    if len(images) == 1:
-        out = await call(cfg, "POST", f"{page_id}/photos", token=token,
-                         data={"url": images[0]["url"], "message": caption, "published": "true"}, client=client)
-        post_id = str(out.get("post_id") or out.get("id") or "")
-    elif images:
-        out = await call(cfg, "POST", f"{page_id}/feed", token=token,
-                         data={"message": caption, "attached_media": json.dumps(attached)}, client=client)
-        post_id = str(out.get("id") or "")
-    else:
+
+    async def write() -> dict[str, Any]:
+        if len(images) == 1:
+            return await call(cfg, "POST", f"{page_id}/photos", token=token,
+                              data={"url": images[0]["url"], "message": caption, "published": "true"}, client=client)
+        if images:
+            return await call(cfg, "POST", f"{page_id}/feed", token=token,
+                              data={"message": caption, "attached_media": json.dumps(attached)}, client=client)
         data: dict[str, Any] = {"message": caption}
         if link_url:
             data["link"] = link_url
-        out = await call(cfg, "POST", f"{page_id}/feed", token=token, data=data, client=client)
-        post_id = str(out.get("id") or "")
+        return await call(cfg, "POST", f"{page_id}/feed", token=token, data=data, client=client)
+
+    out = await _live_write(checkpoint, {"final_write_at": _now_iso(), "phase": "facebook_publishing"}, write)
+    # A photo answers with `post_id` (and a photo `id`); a feed post with `id`.
+    post_id = str(out.get("post_id") or out.get("id") or "")
     if not post_id:
         raise ProviderError("Facebook returned no post id", retryable=True)
     return PublishResult(external_post_id=post_id, permalink=await _fb_permalink(cfg, post_id, token, client))

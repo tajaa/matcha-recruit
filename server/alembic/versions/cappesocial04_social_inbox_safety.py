@@ -7,9 +7,16 @@ answered as the store. Existing rows keep today's behaviour (true); a new
 Connect that returns more than one Page leaves them off until the owner
 turns on the ones that are the store's.
 
+`cappe_social_inbox.claimed_at` — a short lease the reply policy takes on an
+item before it drafts or sends, so the inbound worker and the hourly sweep
+never both answer the same comment. `model_called_at` — when the policy last
+asked the model about the item; a real column (with an index) because the
+site's hourly model cap counts it on every inbound item.
+
 Indexes for the lookups the inbound worker and the sweep now make: a sent
 reply by its network id (our own reply coming back as a webhook is dropped),
-`new` items by time, and an item by its network id across sites.
+`new` items by time, an item by its network id across sites, and a site's
+recent model calls.
 
 `scheduler_settings` rows:
   * `cappe_social_inbox_sweep` (seeded ON) — the hourly retry for comments
@@ -20,7 +27,7 @@ reply by its network id (our own reply coming back as a webhook is dropped),
     hourly check that catches a token Meta no longer accepts (a former Page
     admin's), which takes that connection out of the inbox fan-out.
 
-Additive + idempotent; the downgrade drops the column, the indexes and the
+Additive + idempotent; the downgrade drops the columns, the indexes and the
 sweep row and turns metrics back off.
 
 Revision ID: cappesocial04
@@ -39,6 +46,10 @@ _UPGRADE = [
     "ON cappe_social_replies (external_reply_id) WHERE external_reply_id IS NOT NULL",
     "CREATE INDEX IF NOT EXISTS idx_cappe_social_inbox_new ON cappe_social_inbox (received_at) WHERE status = 'new'",
     "CREATE INDEX IF NOT EXISTS idx_cappe_social_inbox_external ON cappe_social_inbox (external_id)",
+    "ALTER TABLE cappe_social_inbox ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMPTZ",
+    "ALTER TABLE cappe_social_inbox ADD COLUMN IF NOT EXISTS model_called_at TIMESTAMPTZ",
+    "CREATE INDEX IF NOT EXISTS idx_cappe_social_inbox_model_calls "
+    "ON cappe_social_inbox (site_id, model_called_at) WHERE model_called_at IS NOT NULL",
     """
     INSERT INTO scheduler_settings (task_key, display_name, description, enabled, max_per_cycle)
     VALUES ('cappe_social_inbox_sweep', 'Cappe Social Inbox Sweep',
@@ -62,6 +73,9 @@ _DOWNGRADE = [
      WHERE task_key = 'cappe_social_metrics'
     """,
     "DELETE FROM scheduler_settings WHERE task_key = 'cappe_social_inbox_sweep'",
+    "DROP INDEX IF EXISTS idx_cappe_social_inbox_model_calls",
+    "ALTER TABLE cappe_social_inbox DROP COLUMN IF EXISTS model_called_at",
+    "ALTER TABLE cappe_social_inbox DROP COLUMN IF EXISTS claimed_at",
     "DROP INDEX IF EXISTS idx_cappe_social_inbox_external",
     "DROP INDEX IF EXISTS idx_cappe_social_inbox_new",
     "DROP INDEX IF EXISTS idx_cappe_social_replies_external",

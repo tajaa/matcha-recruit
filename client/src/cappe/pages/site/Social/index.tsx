@@ -5,6 +5,7 @@ import { cappeApi } from '../../../api'
 import SurfaceShell from '../../../components/SurfaceShell'
 import type { CappeSocialConnection, CappeSocialConnections, CappeSocialOverview, CappeSocialSettings } from '../../../types'
 import Chat from './Chat'
+import { connectNotice } from './connectNotice'
 import Composer from './Composer'
 import Exports from './Exports'
 import Inbox from './Inbox'
@@ -30,16 +31,9 @@ export default function Social() {
   const { siteId = '' } = useParams<{ siteId: string }>()
   const [params, setParams] = useSearchParams()
   const [notice, setNotice] = useState<{ tone: 'ok' | 'warn' | 'err'; text: string } | null>(() => {
-    const connected = params.get('connected')
     const failed = params.get('social_error')
-    // Permissions not granted, or Pages whose inbox starts off.
-    const warning = params.get('social_warning')
     if (failed) return { tone: 'err', text: `Couldn’t connect: ${failed}` }
-    if (connected) {
-      const text = `Connected ${connected.split(',').join(' and ')}.`
-      return warning ? { tone: 'warn', text: `${text} ${warning}` } : { tone: 'ok', text }
-    }
-    return null
+    return connectNotice(params)
   })
   const [tab, setTab] = useState<Tab | null>(() => (params.get('connected') || params.get('social_error') ? 'setup' : null))
   const [overview, setOverview] = useState<CappeSocialOverview | null>(null)

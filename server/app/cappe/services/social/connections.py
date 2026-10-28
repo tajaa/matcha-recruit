@@ -7,7 +7,7 @@ module returns a token in a row the HTTP layer could serialize.
 from __future__ import annotations
 
 import json
-from typing import Any, Optional
+from typing import Any, Iterable, Optional
 from uuid import UUID
 
 from app.core.services.secret_crypto import decrypt_secret, encrypt_secret
@@ -30,20 +30,28 @@ def _public(row) -> dict:
     return d
 
 
-def inbox_default(drafts: list[ConnectionDraft]) -> bool:
+def inbox_default(drafts: list[ConnectionDraft], known_pages: Iterable[str] = ()) -> bool:
     """Whether accounts new to the site start with their inbox on. Connect
     brings in every Page the person manages (an agency's, a friend's band's),
     and an inbox that's on is answered as this store. One Page is the store's;
-    several, and the owner turns on the ones that are."""
-    return sum(1 for d in drafts if d.platform == "facebook") <= 1
+    several, and the owner turns on the ones that are. `known_pages` are the
+    Pages the site already has: a later Connect that adds a second Page must
+    not start it on just because it brought only that one."""
+    pages = {d.external_id for d in drafts if d.platform == "facebook"} | set(known_pages)
+    return len(pages) <= 1
 
 
 async def save_drafts(conn, *, site_id: UUID, account_id: UUID, drafts: list[ConnectionDraft]) -> list[dict]:
     """Insert or refresh one row per draft. Re-connecting an account the site
     already has replaces its token and clears any error, and keeps the
-    owner's inbox choice."""
+    owner's inbox choice. Each row carries `is_new`: whether this Connect
+    added it."""
+    existing = await conn.fetch(
+        "SELECT platform, external_id FROM cappe_social_connections WHERE site_id = $1", site_id,
+    )
+    known = {(r["platform"], r["external_id"]) for r in existing}
+    inbox = inbox_default(drafts, (r["external_id"] for r in existing if r["platform"] == "facebook"))
     rows: list[dict] = []
-    inbox = inbox_default(drafts)
     for draft in drafts:
         row = await conn.fetchrow(
             f"""INSERT INTO cappe_social_connections
@@ -61,7 +69,9 @@ async def save_drafts(conn, *, site_id: UUID, account_id: UUID, drafts: list[Con
             draft.avatar_url, encrypt_secret(draft.access_token), draft.token_expires_at,
             list(draft.scopes), draft.followers_count, inbox,
         )
-        rows.append(_public(row))
+        public = _public(row)
+        public["is_new"] = (draft.platform, draft.external_id) not in known
+        rows.append(public)
     return rows
 
 

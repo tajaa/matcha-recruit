@@ -88,9 +88,24 @@ describe('Social', () => {
   })
 
   it('says what Connect left to do alongside what it connected', async () => {
-    load('/sites/s-1/social?connected=facebook%2Cinstagram&social_warning=Facebook%20didn%27t%20allow%20Instagram%20messages.')
-    const notice = await screen.findByText(/Connected facebook and instagram\. Facebook didn't allow Instagram messages\./)
+    load('/sites/s-1/social?connected=facebook%2Cinstagram&social_missing=instagram_manage_messages&social_inbox_off=1')
+    const notice = await screen.findByText(/Connected facebook and instagram\. Meta didn’t allow Instagram messages\./)
     expect(notice.className).toContain('amber')
+    expect(notice).toHaveTextContent('1 account came in with its comments and messages off')
+  })
+
+  it('words the Connect banner itself: a crafted link can’t put its own text in it', async () => {
+    load('/sites/s-1/social?connected=instagram&social_warning=Call%20555-0100%20to%20verify&social_missing=made_up_scope')
+    expect(await screen.findByText('Connected instagram.')).toBeInTheDocument()
+    expect(screen.queryByText(/555-0100/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/made_up_scope/)).not.toBeInTheDocument()
+  })
+
+  it('shows no Connect banner for a platform it does not know', async () => {
+    load('/sites/s-1/social?connected=evil.example&social_inbox_off=3')
+    await screen.findByRole('checkbox', { name: 'Inbox' })
+    expect(screen.queryByText(/evil\.example/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/accounts came in/)).not.toBeInTheDocument()
   })
 
   it('turns an account’s inbox off and on from Accounts', async () => {

@@ -34,6 +34,9 @@ SWEEP_KEY = "cappe_social_inbox_sweep"
 # A DM can be answered only within 24 hours of the customer's message; a
 # reply half a day late is still worth sending, later isn't.
 SWEEP_WINDOW_HOURS = 12
+# `handle_item` reasons that mean the owner's settings or plan, not a failure
+# or a wait, kept it from answering.
+_TURNED_AWAY = frozenset({"off", "comments_off", "messages_off"})
 
 
 def _sender(conn, cfg: MetaConfig):
@@ -125,10 +128,16 @@ def run_cappe_social_inbound(self, raw_events: list[dict[str, Any]]) -> dict[str
 async def sweep(conn, cfg: MetaConfig, *, limit: int) -> dict[str, Any]:
     """Run the policy on the items it left (`inbox.unhandled`), oldest first.
     Stops at the first "no model": the shared budget is full or there is no
-    model, and every other item would find the same. A site at its own cap
-    only skips that site's items."""
+    model, and every other item would find the same. Sites at their own cap
+    are left out of the query, so they don't use up its slots.
+
+    An item the policy turns away because the owner's plan no longer includes
+    replies (`effective_settings` forces the mode off, which the query can't
+    see) counts as an attempt, so it ages out instead of heading the list
+    every hour."""
     items = await inbox_store.unhandled(conn, limit=limit, within_hours=SWEEP_WINDOW_HOURS,
-                                        max_attempts=autoreply.MAX_ATTEMPTS)
+                                        max_attempts=autoreply.MAX_ATTEMPTS,
+                                        model_cap=autoreply.MODEL_CALLS_PER_HOUR)
     outcomes: dict[str, Any] = {"items": len(items)}
     settings_by_site: dict[Any, dict[str, Any]] = {}
     send = _sender(conn, cfg)
@@ -142,6 +151,8 @@ async def sweep(conn, cfg: MetaConfig, *, limit: int) -> dict[str, Any]:
             logger.exception("cappe social inbox sweep: handling inbox %s failed", item["id"])
             result = {"outcome": "error"}
         outcomes[result["outcome"]] = outcomes.get(result["outcome"], 0) + 1
+        if result["outcome"] == "left" and result.get("reason") in _TURNED_AWAY:
+            await inbox_store.note_attempt(conn, item["id"], result["reason"])
         if result.get("reason") == "no_model":
             break
     return outcomes

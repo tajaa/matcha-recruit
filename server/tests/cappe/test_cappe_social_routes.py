@@ -644,18 +644,28 @@ def test_callback_says_what_wasnt_granted_and_which_inboxes_start_off(public):
               ConnectionDraft("instagram", "ig1", "pt", scopes=("instagram_basic", "instagram_content_publish"))]
     public.mp.setattr(meta, "exchange_code", AsyncMock(return_value=drafts))
     public.mp.setattr(conn_store, "save_drafts", AsyncMock(return_value=[
-        {"platform": "facebook", "inbox_enabled": False}, {"platform": "facebook", "inbox_enabled": False},
-        {"platform": "instagram", "inbox_enabled": True}]))
+        {"platform": "facebook", "inbox_enabled": False, "is_new": True},
+        {"platform": "facebook", "inbox_enabled": False, "is_new": True},
+        {"platform": "instagram", "inbox_enabled": True, "is_new": True}]))
     location = _callback(public, code="the-code").headers["location"]
-    warning = parse_qs(urlsplit(location).query)["social_warning"][0]
-    assert ("Facebook didn't allow replying to Facebook comments, Facebook messages, Instagram comments, "
-            "Instagram messages.") in warning
-    assert "2 accounts came in with their comments and messages off" in warning
+    query = parse_qs(urlsplit(location).query)
+    # Codes, never prose: the page words them, so a crafted link can't speak for us.
+    assert query["social_missing"] == ["instagram_manage_comments,instagram_manage_messages,"
+                                       "pages_manage_engagement,pages_messaging"]
+    assert query["social_inbox_off"] == ["2"] and "social_warning" not in query
 
 
-def test_connect_warning_is_none_when_all_is_well():
+def test_connect_notes_are_empty_when_all_is_well():
     drafts = [ConnectionDraft("facebook", "p1", "pt", scopes=meta.SCOPES)]
-    assert social_meta.connect_warning(drafts, [{"inbox_enabled": True}]) is None
+    assert social_meta.connect_notes(drafts, [{"inbox_enabled": True, "is_new": True}]) == {}
+
+
+def test_connect_notes_count_only_the_accounts_this_connect_added_with_their_inbox_off():
+    drafts = [ConnectionDraft("facebook", "p1", "pt", scopes=meta.SCOPES)]
+    rows = [{"inbox_enabled": False, "is_new": False},   # the owner's own earlier choice
+            {"inbox_enabled": False, "is_new": True},
+            {"inbox_enabled": True, "is_new": True}]
+    assert social_meta.connect_notes(drafts, rows) == {"social_inbox_off": "1"}
 
 
 def test_callback_from_another_browser_is_refused(public):
@@ -923,7 +933,9 @@ async def test_the_inbox_sweep_retries_what_the_policy_left(monkeypatch):
     monkeypatch.setattr(inbox_store, "unhandled", unhandled)
     settings = AsyncMock(return_value={"autoreply_mode": "auto"})
     monkeypatch.setattr(inbound_task, "effective_settings", settings)
-    results = iter([{"outcome": "sent"}, RuntimeError("bug"), {"outcome": "left", "reason": "site_cap"},
+    attempts = []
+    monkeypatch.setattr(inbox_store, "note_attempt", AsyncMock(side_effect=lambda c, i, r: attempts.append(r)))
+    results = iter([{"outcome": "sent"}, RuntimeError("bug"), {"outcome": "left", "reason": "off"},
                     {"outcome": "left", "reason": "no_model"}])
 
     async def handle(conn, it, s, *, send):
@@ -936,8 +948,13 @@ async def test_the_inbox_sweep_retries_what_the_policy_left(monkeypatch):
     out = await inbound_task.sweep(object(), CFG, limit=50)
     assert out == {"items": 4, "sent": 1, "error": 1, "left": 2}
     assert unhandled.await_args.kwargs == {"limit": 50, "within_hours": inbound_task.SWEEP_WINDOW_HOURS,
-                                           "max_attempts": autoreply.MAX_ATTEMPTS}
+                                           "max_attempts": autoreply.MAX_ATTEMPTS,
+                                           "model_cap": autoreply.MODEL_CALLS_PER_HOUR}
     assert settings.await_count == 2  # once per site
+    # A plan that no longer includes replies turns the item away every hour:
+    # counted, so it ages out instead of heading the list for 12 hours. A wait
+    # for the model isn't counted here (the policy counted it itself).
+    assert attempts == ["off"]
 
     # "No model" is the same for everyone after it: the sweep stops there.
     results = iter([{"outcome": "left", "reason": "no_model"}, {"outcome": "sent"}])

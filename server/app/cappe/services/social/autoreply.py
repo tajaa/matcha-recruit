@@ -8,7 +8,9 @@ The order matters and is fixed:
      (refunds, disputes, injuries, legal threats) or the owner's own list
      escalates: the owner sees it, the model may draft, nothing is ever sent
      by itself. A site asks the model about at most `MODEL_CALLS_PER_HOUR`
-     items an hour; what waits is retried by the hourly inbox sweep.
+     items an hour; what waits is retried by the hourly inbox sweep. An item
+     is claimed (`inbox_store.claim_item`) before anything below runs, so the
+     inbound worker and the sweep never both answer it.
   2. `draft_reply` — one Claude call, grounded ONLY on the store's catalog,
      its contact details and the owner's notes. It classifies the intent and
      writes a reply; when the answer isn't in the facts it must say so and
@@ -62,8 +64,9 @@ MAX_PRODUCTS = 40
 # Model calls one site's inbound comments and DMs may make in an hour,
 # whatever the owner's send cap: past it items wait for the sweep.
 MODEL_CALLS_PER_HOUR = 60
-# Times the policy may be put off (no model, the cap, a failed draft) before
-# an item is left for the owner alone.
+# Times the policy may be put off (no model, a failed draft, a plan without
+# replies) before an item is left for the owner alone. Waiting for the site's
+# own hourly cap isn't one: that is the cap working, not a failure.
 MAX_ATTEMPTS = 3
 # Offers an automatic reply may make only when the owner's facts make them.
 OFFER_WORDS = ("discount*", "coupon*", "promo*", "voucher*", "on sale", "free shipping", "bogo", "price match*")
@@ -83,12 +86,22 @@ _URL_RE = re.compile(r"(?:https?://|www\.)\S+", re.I)
 _EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
 _PHONE_RE = re.compile(r"\+?\d[\d\s().-]{7,}\d")
 _TAG_RE = re.compile(r"[@#][\w.]+")
-# "$12", "€12.50", "12.50 USD", "12 dollars" — a money amount, either way round.
+# "$12", "€12.50", "12,50 €", "12.50 USD", "12 dollars" — a money amount, a
+# symbol or a currency word on either side. `_cents` reads the separators.
+_NUM = r"\d(?:[\d.,]*\d)?"
+_CURRENCY_WORD = r"(?:usd|eur|gbp|cad|aud|dollars?|euros?|pounds?|bucks)\b"
 _MONEY_RE = re.compile(
-    r"[$€£¥]\s?(\d[\d,]*(?:\.\d{1,2})?)"
-    r"|(\d[\d,]*(?:\.\d{1,2})?)\s?(?:usd|eur|gbp|cad|aud|dollars?|euros?|pounds?|bucks)\b",
+    rf"[$€£¥]\s?({_NUM})"
+    rf"|({_NUM})\s?(?:[$€£¥]|{_CURRENCY_WORD})",
     re.I,
 )
+# "ten dollars", "twenty-five bucks": a price in words can't be compared with
+# the facts, so one the facts don't also spell out holds the reply.
+_NUMBER_WORDS = (
+    "one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|"
+    "seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand"
+)
+_WORD_MONEY_RE = re.compile(rf"\b(?:{_NUMBER_WORDS})\b(?:[\s-]+(?:{_NUMBER_WORDS}|and))*\s+{_CURRENCY_WORD}", re.I)
 _PERCENT_RE = re.compile(r"(\d+(?:\.\d+)?)\s?(?:%|percent\b)", re.I)
 
 
@@ -244,8 +257,16 @@ def _digits(text: str) -> str:
 
 
 def _cents(number: str) -> Optional[int]:
+    """`1,250.00` and `1.250,00` are 1250; `12,50` is 12.5 (a comma followed
+    by anything but three digits is a decimal comma); `1,250` is 1250."""
+    s = number
+    if "," in s and "." in s:
+        decimal = "," if s.rfind(",") > s.rfind(".") else "."
+        s = s.replace("." if decimal == "," else ",", "").replace(decimal, ".")
+    elif "," in s:
+        s = s.replace(",", "") if re.fullmatch(r"\d{1,3}(?:,\d{3})+", s) else s.replace(",", ".")
     try:
-        return round(float(number.replace(",", "")) * 100)
+        return round(float(s) * 100)
     except ValueError:
         return None
 
@@ -266,6 +287,8 @@ def _offer_problem(reply: str, grounding: Grounding) -> Optional[str]:
     known = money_amounts(facts) | {int(p["price_cents"]) for p in grounding.products
                                     if isinstance(p.get("price_cents"), int)}
     if money_amounts(reply) - known:
+        return "price"
+    if _WORD_MONEY_RE.search(reply) and not _WORD_MONEY_RE.search(facts):
         return "price"
     if percents(reply) - percents(facts):
         return "discount"
@@ -327,8 +350,8 @@ SendFn = Callable[[dict[str, Any], str], Awaitable[str]]
 async def handle_item(conn, item: dict[str, Any], settings: dict[str, Any], *, send: SendFn) -> dict[str, Any]:
     """Run the policy for one inbox row. `send(item, body)` performs the
     network call and returns the sent id. Returns `{"outcome": ...}`:
-    left (mode off, kind not handled, or no model), skipped, escalated,
-    drafted, sent, failed."""
+    left (mode off, kind not handled, held by another worker, at the site's
+    cap, or no model), skipped, escalated, drafted, sent, failed."""
     mode = settings.get("autoreply_mode") or "off"
     if mode == "off":
         return {"outcome": "left", "reason": "off"}
@@ -342,8 +365,12 @@ async def handle_item(conn, item: dict[str, Any], settings: dict[str, Any], *, s
         await inbox_store.set_item_status(conn, item["id"], "skipped", {"reason": hit})
         return {"outcome": "skipped", "reason": hit}
 
+    # Past the cheap checks, before any model call: one worker at a time.
+    if not await inbox_store.claim_item(conn, item["id"]):
+        return {"outcome": "left", "reason": "claimed"}
+
     capped = await inbox_store.model_calls_last_hour(conn, item["site_id"]) >= MODEL_CALLS_PER_HOUR
-    model = None if capped else await model_for("reply", automatic=True)
+    model = None if capped else await model_for("reply", automatic=True, conn=conn)
     if not model:
         # No model, not now, or this site's hour is used up. The item stays
         # new; the inbox sweep or the owner's own "Draft a reply" picks it
@@ -351,9 +378,11 @@ async def handle_item(conn, item: dict[str, Any], settings: dict[str, Any], *, s
         if pre == "escalate":
             await inbox_store.set_item_status(conn, item["id"], "escalated", {"escalated_on": hit})
             return {"outcome": "escalated", "reason": hit}
-        reason = "site_cap" if capped else "no_model"
-        await inbox_store.note_attempt(conn, item["id"], reason)
-        return {"outcome": "left", "reason": reason}
+        if capped:
+            await inbox_store.release_item(conn, item["id"])
+            return {"outcome": "left", "reason": "site_cap"}
+        await inbox_store.note_attempt(conn, item["id"], "no_model")
+        return {"outcome": "left", "reason": "no_model"}
 
     grounding = await load_grounding(conn, item["site_id"])
     await inbox_store.note_model_call(conn, item["id"])

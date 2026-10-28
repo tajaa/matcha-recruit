@@ -30,22 +30,33 @@ class AiUnavailable(RuntimeError):
     """No model is configured, or the bucket is full right now."""
 
 
-async def automatic_calls_last_hour() -> int:
+_AUTOMATIC_COUNT_SQL = (
+    "SELECT count(*) FROM api_rate_limits WHERE provider = 'anthropic' AND service_name = $1 "
+    "AND endpoint = $2 AND called_at > NOW() - INTERVAL '1 hour'"
+)
+
+
+async def automatic_calls_last_hour(conn=None) -> int:
+    """Automatic calls in the last hour. Pass the caller's `conn` when it has
+    one: this runs on every inbound comment, and a giveaway's worth of fresh
+    connections is a real cost."""
+    if conn is not None:
+        return int(await conn.fetchval(_AUTOMATIC_COUNT_SQL, SERVICE, AUTOMATIC_ENDPOINT) or 0)
     from app.database import connection_or_direct
 
-    async with connection_or_direct() as conn:
-        return int(await conn.fetchval(
-            "SELECT count(*) FROM api_rate_limits WHERE provider = 'anthropic' AND service_name = $1 "
-            "AND endpoint = $2 AND called_at > NOW() - INTERVAL '1 hour'",
-            SERVICE, AUTOMATIC_ENDPOINT,
-        ) or 0)
+    async with connection_or_direct() as own:
+        return int(await own.fetchval(_AUTOMATIC_COUNT_SQL, SERVICE, AUTOMATIC_ENDPOINT) or 0)
 
 
-async def model_for(endpoint: str, *, automatic: bool = False) -> Optional[str]:
+async def model_for(endpoint: str, *, automatic: bool = False, conn=None) -> Optional[str]:
     """The model to call for `endpoint` ("reply" / "captions"), or None when
     there is none or the bucket says not now. Counts the call. `automatic`
     is a call nobody on our side asked for (an inbound comment's draft): it
-    also stops at its share of the bucket."""
+    also stops at its share of the bucket, counted on `conn` when given.
+
+    The check and the record are two statements, as in every limiter user; the
+    inbound task and the sweep run on the worker's one process, so the share
+    can be overshot only by the calls in flight, not by a race."""
     model = await anthropic_messages.claude_default(agent_surfaces.GUMMFIT_SOCIAL)
     if not model:
         return None
@@ -57,7 +68,7 @@ async def model_for(endpoint: str, *, automatic: bool = False) -> Optional[str]:
         await limiter.check_limit(SERVICE, label)
         if automatic:
             share = max(1, int(limiter.hourly_limit * AUTOMATIC_SHARE))
-            used = await automatic_calls_last_hour()
+            used = await automatic_calls_last_hour(conn)
             if used >= share:
                 logger.warning("cappe social: automatic replies at their share of the anthropic bucket (%d/%d)",
                                used, share)

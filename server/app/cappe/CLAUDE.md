@@ -922,7 +922,10 @@ now, and answer comments/DMs from an inbox where Claude Haiku 5.5 drafts replies
   again; IN_PROGRESS → `Pending`); Facebook saves `final_write_at`, and a retry looks among the
   Page's `published_posts` (or `videos`) for that exact text made since, failing with
   `meta.MAYBE_POSTED` when there is no text to match. `record_failure`'s retryable path keeps
-  `state`; `recover_stale_claims` resumes from it.
+  `state`; `recover_stale_claims` resumes from it. **A write Meta refuses outright forgets its
+  checkpoint** (`meta._live_write`: rate-limit codes `_NOT_POSTED_CODES`): nothing was posted,
+  and a photo with no caption would otherwise fail for good on a hiccup. A timeout or code 1/2
+  ("unknown error") stays checkpointed — those can follow a post that went live.
 - **Instagram captions carry no link** (`meta.publish` appends `link_url` to Facebook text
   only): Instagram doesn't make caption links clickable and the link counted against 2,200.
 - **Replies: deterministic first, model second, owner's mode last** (`autoreply.py`). The
@@ -934,7 +937,9 @@ now, and answer comments/DMs from an inbox where Claude Haiku 5.5 drafts replies
   (deterministic, after the model) holds any reply with a link off the store's own site, contact
   details that aren't the store's, or a hard-stop subject — a commenter can't plant one through
   the prompt. Since 2026-10-27 it also holds a price, percentage or offer word (discount, coupon,
-  on sale, free shipping…) that the facts (catalog prices + notes) don't state. A partial post's
+  on sale, free shipping…) that the facts (catalog prices + notes) don't state — amounts read with
+  the symbol on either side, a decimal comma (`12,50 €`) and spelled out ("ten dollars"). It errs
+  towards holding: "100% cotton" or "we don't offer discounts" go to the owner as a draft. A partial post's
   "Post now" re-tries only its unpublished targets. The reply row is
   written before the network call. The inbound worker re-checks the plan (`social_autoreply`) before running the model — a
   downgrade keeps the stored mode, the plan decides.
@@ -946,22 +951,35 @@ now, and answer comments/DMs from an inbox where Claude Haiku 5.5 drafts replies
 - **Inbound is bounded before the model** (strangers drive it — a giveaway is hundreds of
   "@friend 🔥"): text with no letters or digits once @tags/#hashtags are gone is skipped
   (`prefilter` → `no_words`); a site asks the model about at most `autoreply.MODEL_CALLS_PER_HOUR`
-  items an hour (`inbox.note_model_call` stamps `classification.drafted_at`); automatic calls
-  (`ai.model_for(..., automatic=True)`, recorded as endpoint `reply_auto`) stop at
+  items an hour (`inbox.note_model_call` stamps the `model_called_at` column, indexed with
+  `site_id`); automatic calls (`ai.model_for(..., automatic=True, conn=conn)` — the caller's
+  connection, no new one per comment — recorded as endpoint `reply_auto`) stop at
   `ai.AUTOMATIC_SHARE` of the server-wide `anthropic` hourly limit, so one store can't starve
   Espresso/Huume/Merlin. What waits is counted (`inbox.note_attempt`, ≤ `MAX_ATTEMPTS`) and
   retried by **`cappe_social_inbox_sweep`** (hourly, seeded ON in `cappesocial04`; items `new`
-  within 12 h; stops at the first "no model"), which takes only the copy the inbound worker would
-  answer (`inbox.unhandled`).
+  within 12 h; stops at the first "no model"). Waiting for the site's own hourly cap is **not**
+  an attempt (a giveaway backlog would be abandoned after two sweeps); the sweep's query leaves
+  capped sites, `reply_to_comments`/`reply_to_messages`-off kinds and held items out so they don't
+  fill its slots, and an item a downgraded plan turns away counts an attempt so it ages out.
+- **One worker answers an item** (`inbox.claim_item`, `claimed_at`, a `CLAIM_LEASE_SECONDS`
+  lease): `handle_item` claims a `new` item after its cheap checks and before any model call, so
+  the inbound worker and the hourly sweep never both draft and send the same comment. A
+  claim is released by `set_item_status`, `note_attempt` or `release_item`; a worker that died
+  holding one is retried when the lease runs out. `inbox.unhandled` also skips any item with a
+  reply already `sending`/`sent` (its own included — a send that died mid-way is never repeated).
+- **Only the copy the inbound worker would answer** reaches the sweep (`inbox.unhandled`): the
+  first-connected live connection for that account, no copy of the comment already answered on
+  another site.
 - **Inbox fan-out** (`connections.by_external_id`): only `status='connected'` rows with
   `inbox_enabled`, first-connected (`connected_at, id` — the table has no `created_at`; ordering by
   it failed every webhook before 2026-10-27) answers. A token Meta refuses (often a former Page
   admin's, on their own account) is marked `expired` by a publish, a reply or the hourly
   `cappe_social_metrics` check (turned ON in `cappesocial04`) and then gets nobody's DMs.
   `inbox_enabled` (`PATCH …/social/connections/{id}`, the Accounts tab's Inbox box) starts off for
-  every account a Connect brings in when it returned more than one Page
-  (`connections.inbox_default`), since Connect saves every Page the person manages; a reconnect
-  keeps the owner's choice.
+  every account a Connect brings in when the site would then have more than one Page — the
+  Pages it already has count, so a later Connect adding a second Page starts it off too
+  (`connections.inbox_default(drafts, known_pages)`), since Connect saves every Page the person
+  manages; a reconnect keeps the owner's choice.
 - **Models.** Admin → Settings → AI models row `gummfit.social`; default Claude Haiku 5.5 with an
   Anthropic key, nothing without one (no Gemini fallback for words sent under the owner's name).
   Every call counts in the `anthropic` bucket via `social/ai.py`; a full bucket means "not now".
@@ -1100,8 +1118,11 @@ set `CAPPE_META_APP_ID`, `CAPPE_META_APP_SECRET`, `CAPPE_META_VERIFY_TOKEN` (opt
 Business takes a configuration, not a scope list** (Meta: scope "should not be used" with it):
 create one listing every permission in `meta.SCOPES` and set `CAPPE_META_LOGIN_CONFIG_ID`;
 unset, the dialog sends the classic `scope=` list. Connect reads what was actually granted
-(`meta.granted_scopes`, `/me/permissions`) and the callback's `social_warning` says what's
-missing (`meta.REQUIRED_SCOPES`) and which Pages' inboxes start off. Outside development mode
+(`meta.granted_scopes`, `/me/permissions`) and the callback redirects with codes —
+`social_missing` (scope names missing, from `meta.REQUIRED_SCOPES`) and `social_inbox_off` (how
+many accounts this Connect *added* with their inbox off) — which the Social page words itself
+(`Social/connectNotice.ts`; unknown codes and platforms are ignored, so a crafted link can't put
+text in the banner). Outside development mode
 the permissions in `meta.SCOPES` (including `instagram_manage_insights`, which Instagram post
 insights need) require Meta App Review and business verification. Unset ⇒ Connect
 and Publish 503 with a setup message; the composer and queue still work. The token exchange's

@@ -501,6 +501,63 @@ async def test_facebook_retry_that_cant_check_asks_the_owner():
 
 
 @pytest.mark.asyncio
+async def test_a_write_meta_refuses_outright_forgets_its_checkpoint():
+    """A photo with no caption can't be found among the Page's posts, so a
+    checkpoint left behind a rate limit would fail the retry for good ("may
+    already have this post") when nothing was posted."""
+    refused = Graph({("POST", "p1/photos"): (400, {"error": {"message": "limit", "code": 17}})})
+    saved = []
+
+    async def checkpoint(state):
+        saved.append(state)
+
+    async with refused.client() as client:
+        with pytest.raises(ProviderError) as info:
+            await meta.publish(CFG, platform="facebook", external_id="p1", token="t", caption="",
+                               media=[IMG], client=client, checkpoint=checkpoint)
+    assert info.value.retryable is True and info.value.code == 17
+    assert saved[0]["phase"] == "facebook_publishing" and saved[-1] == {}
+
+    # The retry carries no checkpoint, so it writes instead of asking the owner.
+    retry = Graph({("POST", "p1/photos"): {"post_id": "p1_9"}, ("GET", "p1_9"): {}})
+    async with retry.client() as client:
+        result = await meta.publish(CFG, platform="facebook", external_id="p1", token="t", caption="",
+                                    media=[IMG], state=saved[-1], client=client, checkpoint=checkpoint)
+    assert result.external_post_id == "p1_9" and ("GET", "p1/published_posts") not in retry.paths()
+
+    # A Page video with no description, the same.
+    video = {"url": "https://cdn.example.test/v.mp4", "kind": "video", "format": "video"}
+    saved.clear()
+    refused_video = Graph({("POST", "p1/videos"): (400, {"error": {"message": "limit", "code": 4}})})
+    async with refused_video.client() as client:
+        with pytest.raises(ProviderError):
+            await meta.publish(CFG, platform="facebook", external_id="p1", token="t", caption="",
+                               media=[video], client=client, checkpoint=checkpoint)
+    assert saved[-1] == {}
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_error_keeps_the_checkpoint_because_the_post_may_have_gone_out():
+    graph = Graph({("POST", "p1/photos"): (500, {"error": {"message": "unknown", "code": 2}})})
+    saved = []
+
+    async def checkpoint(state):
+        saved.append(state)
+
+    async with graph.client() as client:
+        with pytest.raises(ProviderError) as info:
+            await meta.publish(CFG, platform="facebook", external_id="p1", token="t", caption="",
+                               media=[IMG], client=client, checkpoint=checkpoint)
+    assert info.value.retryable is True and len(saved) == 1 and saved[0]["final_write_at"]
+    # With nothing to match the photo by, the retry asks the owner to check.
+    async with Graph({}).client() as client:
+        with pytest.raises(ProviderError) as again:
+            await meta.publish(CFG, platform="facebook", external_id="p1", token="t", caption="",
+                               media=[IMG], state=saved[0], client=client)
+    assert str(again.value) == meta.MAYBE_POSTED
+
+
+@pytest.mark.asyncio
 async def test_instagram_carousel_builds_children_then_the_album():
     counter = iter(range(1, 10))
 
