@@ -198,6 +198,24 @@ async def check_rate_limit(ip: str, action: str, limit: int, window: int) -> Non
     _rl_attempts[fk].append(now)
 
 
+async def refund_rate_limit(ip: str, action: str) -> None:
+    """Give back one `check_rate_limit` charge, for a call that failed on our
+    side (the model was down) and shouldn't use up the person's allowance.
+    Never raises; a counter already at zero stays there."""
+    redis = get_redis_cache()
+    if redis:
+        try:
+            key = f"rl:{action}:{ip}"
+            if await redis.decr(key) <= 0:
+                await redis.delete(key)  # nothing left to count (or a key that was never there)
+            return
+        except Exception:
+            pass
+    attempts = _rl_attempts.get(f"{action}:{ip}")
+    if attempts:
+        attempts.pop()
+
+
 async def get_rate_limit_state(key: str, action: str, limit: int, window: int) -> Optional[dict]:
     """Read a `check_rate_limit` counter WITHOUT incrementing it — meter/
     display use only. Returns {"used", "limit", "remaining",

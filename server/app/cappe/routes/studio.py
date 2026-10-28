@@ -29,7 +29,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.routing import APIRoute
 from pydantic import BaseModel, Field
 
-from ...core.services.redis_cache import check_rate_limit
+from ...core.services.redis_cache import check_rate_limit, refund_rate_limit
 from ...database import get_connection
 from ..dependencies import require_cappe_account
 from ..models.cappe import CappeAccount
@@ -510,7 +510,8 @@ async def merlin_round(site_id: UUID, post_id: UUID, body: StudioMerlin,
     """One round of Merlin designing the page in view: `{"say", "ops":
     [edit], "done", "dropped"}`. The Studio checks and applies the edits;
     nothing is saved here. Each round counts against the day's allowance
-    (`merlin.daily_rounds`: three rounds a design)."""
+    (`merlin.daily_rounds`: three rounds a design), unless it fails on our side
+    (no model, or a reply that couldn't be used): that one is given back."""
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
         fmt = await conn.fetchval("SELECT format FROM cappe_posts WHERE id = $1 AND site_id = $2", post_id, site_id)
@@ -527,6 +528,10 @@ async def merlin_round(site_id: UUID, post_id: UUID, body: StudioMerlin,
     try:
         return await merlin.design(r)
     except merlin.MerlinUnavailable as exc:
+        await refund_rate_limit(str(account.id), "cappe_studio_merlin")
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=merlin.UNAVAILABLE) from exc
     except merlin.MerlinFailed as exc:
+        # A round that gave the person nothing doesn't count against the day:
+        # a design takes up to three, and the model's failures aren't theirs.
+        await refund_rate_limit(str(account.id), "cappe_studio_merlin")
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=merlin.FAILED) from exc

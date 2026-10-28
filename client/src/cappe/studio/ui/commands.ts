@@ -249,14 +249,18 @@ export const COMMANDS: Command[] = [
     run: ({ store }) => store.edit((d) => unlinkFrames(d, store.get().selection)) },
   // View
   // Help
+  // Ask and Ask about this answer, even when the panel was last left on Merlin
+  // (which would design from the same words, and change the page).
   { id: 'ask', label: 'Ask the Studio…',
     run: ({ store }) => {
       store.set((s) => ({ panels: s.panels.includes('ask') ? s.panels : [...s.panels, 'ask'] }))
+      conversation(store).setMode('ask')
       conversation(store).focus()
     } },
   { id: 'ask-about', label: 'Ask about this…', enabled: (s) => s.selection.length > 0,
     run: ({ store }) => {
       store.set((s) => ({ panels: s.panels.includes('ask') ? s.panels : [...s.panels, 'ask'] }))
+      conversation(store).setMode('ask')
       conversation(store).prompt(MATCH_QUESTION)
     } },
   { id: 'merlin', label: 'Design with Merlin…',

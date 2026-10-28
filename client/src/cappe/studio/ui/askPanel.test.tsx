@@ -6,7 +6,8 @@ import { addItem } from '../model/ops'
 import type { Doc, RectItem } from '../model/types'
 import { DEFAULT_VIEW, Store, type State } from '../store/store'
 import { studioApi, type MerlinReply } from '../api'
-import { commandsPayload, conversation, guidePayload, MERLIN_SUGGESTIONS, SUGGESTIONS } from './ask/conversation'
+import { commandsPayload, conversation, guidePayload, MATCH_QUESTION, MERLIN_SUGGESTIONS, roundNotes, SUGGESTIONS } from './ask/conversation'
+import type { Applied } from './ask/merlinOps'
 import { command } from './commands'
 import { StudioContext, type StudioCtx } from './context'
 import { GUIDE } from './guideContent'
@@ -415,6 +416,42 @@ describe('Merlin', () => {
     expect(screen.getAllByText('Bolder')).toHaveLength(1)
   })
 
+  it('goes on to the next round when every edit it sent was unusable, telling the next round so', async () => {
+    const merlin = vi.spyOn(studioApi, 'merlin')
+      .mockResolvedValueOnce({ say: 'Tried a grid.', ops: [], done: false, dropped: 3 })
+      .mockResolvedValueOnce({ say: 'Made the box red.', ops: [{ op: 'set', id: 'r1', fill: '#ff0000' }], done: true, dropped: 0 })
+    const { store } = studio()
+    design('Bolder')
+    await screen.findByText('Merlin made 1 change.')
+    expect(merlin).toHaveBeenCalledTimes(2)
+    expect(merlin.mock.calls[1][2].previous).toEqual([
+      { say: 'Tried a grid.', notes: ['3 edits couldn’t be used and were left out.'], did: 0, skipped: 1 }])
+    expect(rect(store).fill).toBe('#ff0000')
+  })
+
+  it('stops when the model sent nothing at all, or says it is done', async () => {
+    const merlin = vi.spyOn(studioApi, 'merlin').mockResolvedValueOnce({ say: 'It already matches.', ops: [], done: false, dropped: 0 })
+    studio()
+    design('Bolder')
+    await screen.findByText('Merlin left the page as it was.')
+    expect(merlin).toHaveBeenCalledTimes(1)
+  })
+
+  it('Ask the Studio and Ask about this answer, even when the panel was last left on Merlin', () => {
+    const { store, ctx } = studio()
+    const id = store.get().doc.items[0].id
+    act(() => command('merlin').run(ctx))
+    expect(conversation(store).get().mode).toBe('merlin')
+    act(() => command('ask').run(ctx))
+    expect(conversation(store).get().mode).toBe('ask')
+    // "Ask about this" starts a question; sent from Merlin's box it would design from the same words.
+    act(() => command('merlin').run(ctx))
+    act(() => store.set({ selection: [id] }))
+    act(() => command('ask-about').run(ctx))
+    expect(conversation(store).get().mode).toBe('ask')
+    expect(box()).toHaveValue(MATCH_QUESTION)
+  })
+
   it('Help → Design with Merlin opens the panel in Merlin; Merlin isn’t a command Ask offers', () => {
     const { store, ctx } = studio()
     act(() => store.set({ panels: [] }))
@@ -422,5 +459,35 @@ describe('Merlin', () => {
     expect(store.get().panels).toContain('ask')
     expect(conversation(store).get().mode).toBe('merlin')
     expect(commandsPayload(store.get()).map((c) => c.id)).not.toContain('merlin')
+  })
+})
+
+describe('what a round tells the next one', () => {
+  const applied = (did: number, skipped: number): Applied => ({
+    doc: doc(),
+    did: Array.from({ length: did }, (_, k) => `Did ${k}`),
+    skipped: Array.from({ length: skipped }, (_, k) => `Skipped ${k}`),
+  })
+
+  it('counts what took and what didn’t, and says how many edits were left out', () => {
+    const r = roundNotes(true, applied(2, 1), 1)
+    expect(r).toEqual({ notes: ['Did 0', 'Did 1', 'Skipped 0', '1 edit couldn’t be used and was left out.'], did: 2, skipped: 2 })
+    expect(roundNotes(true, applied(1, 0), 3).notes.at(-1)).toBe('3 edits couldn’t be used and were left out.')
+  })
+
+  it('counts nothing as done when the page didn’t change', () => {
+    const r = roundNotes(false, applied(2, 1), 0)
+    expect(r.did).toBe(0)
+    expect(r.notes[0]).toMatch(/^None of these edits took/)
+    expect(r.skipped).toBe(2)
+  })
+
+  it('never sends more than the server takes: 60 notes, and no more skipped than that', () => {
+    // 40 edits made and 70 not (many text frames pushed past their size): the next request would be refused over 60.
+    const r = roundNotes(true, applied(40, 70), 2)
+    expect(r.notes).toHaveLength(60)
+    expect(r.did).toBe(40)
+    expect(r.skipped).toBe(60)
+    expect(roundNotes(true, applied(0, 90), 0).skipped).toBe(60)
   })
 })

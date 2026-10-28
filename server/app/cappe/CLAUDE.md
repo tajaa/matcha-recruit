@@ -851,13 +851,21 @@ normalized paragraphs itself; a thread with no valid composition prints its word
   (`snapshot(..., { whole: true })`), the reference picture and what earlier rounds did and skipped. The reply is
   `{say, ops, done}`; **the edits are a closed list** (`set`, `type`, `case`, `add`, `arrange`), cleaned here
   (fields of the right type, the document's limits, hex colours, manifest families, ≤40 edits and ≤8 additions a
-  round) and checked again in the browser against the document (on the page it started on or selected, not
-  locked, a field its kind has); `merlinOps.fitOps` then takes back any edit that would make text that fits
-  overflow, telling the next round about how much room it needed. **Never deletes, never writes a story's words**: `case` skips body text, `add`
-  text is a label of ≤80 characters with a heading or caption role. Rounds after the first join the first's undo
+  round; a weight sent with its font is snapped to one the family has, a drop cap is 0 or 2-6 lines, a new
+  rectangle/ellipse/label is at least `MIN_FRAME` pt each way and a line needs a length) and checked again in the
+  browser against the document (on the page it started on or selected, not locked, a field its kind has);
+  `merlinOps.fitOps` then takes back any edit that would make text that fits overflow (the text's own edits first,
+  then only the size fields of a `set`), telling the next round about how much room it needed. **Never deletes,
+  never writes a story's words**: `case` recases only headings and captions (never body text or a quote), `add`
+  text is a label of ≤80 characters with a heading or caption role. Everything sent inside a tag (the page, the
+  request, the talk, earlier rounds) has its `<` escaped (`_esc`), so a story's `</page>` can't close the section.
+  **`done` is the model's word, or no edits sent at all**: edits that were all unusable (`dropped`) leave the design
+  open for the next round. Rounds after the first join the first's undo
   step (`Store.edit(..., { join: true })`) only while `Store.changes` hasn't moved, so one ⌘Z or Undo Merlin takes
   the whole design back; any other change to the document stops Merlin. Each round spends one of the day's rounds
-  (`cappe_studio_merlin`): 3 designs × 3 rounds without `magazine`, 20 × 3 with it.
+  (`cappe_studio_merlin`): 3 designs × 3 rounds without `magazine`, 20 × 3 with it. **A round that fails on our
+  side is given back** (`redis_cache.refund_rate_limit`, on `MerlinUnavailable` and `MerlinFailed`); a refused
+  request never spent one. (Ask's route has the same charge-then-call shape and does not refund.)
 
 ## Social growth (2026-10, `services/social/`, migrations `cappesocial01`–`03`)
 

@@ -5,7 +5,8 @@
 // what only the document knows: the frame is there, on the page Merlin is
 // working on (or selected), not locked, and of a kind that has the field. The
 // words of a story are the writer's: a letter case changes only headings,
-// captions and labels, and a new label is never body text.
+// captions and labels (not body text, not a pull quote), and a new label is
+// never body text.
 
 import { composeDoc, type Measure } from '../../compose/compose'
 import { allIds, newId, paraText, sparseChar, sparsePara } from '../../model/doc'
@@ -51,6 +52,9 @@ const OWN: Record<Kind, readonly (keyof ItemFields)[]> = {
 const CHAR_FIELDS = ['font', 'wt', 'it', 'size', 'track', 'color', 'u'] as const
 const PARA_FIELDS = ['align', 'lead', 'sb', 'sa', 'li', 'ri', 'fi', 'dc', 'dcn'] as const
 const NOTE = 300 // the server keeps each note to this
+const MIN_FRAME = 4 // pt: the smallest a rectangle, ellipse, label or picture is made (a line may have no height or width)
+/** The roles whose letters Merlin may recase. */
+const CASED = new Set<Role>(['h1', 'h2', 'h3', 'caption'])
 
 const note = (s: string) => (s.length > NOTE ? `${s.slice(0, NOTE - 1)}…` : s)
 const show = (op: MerlinOp) => JSON.stringify(op)
@@ -65,7 +69,8 @@ function itemPatch(item: Item, op: ItemFields): Record<string, unknown> {
     if (typeof v === 'number' && !Number.isFinite(v)) continue
     if (k === 'stroke' && v === null && item.kind === 'line') continue
     if (k === 'color' && (item.kind !== 'graphic' || item.color === null || typeof v !== 'string')) continue
-    patch[k] = v
+    // A frame too small to see or pick up is made the least that can be.
+    patch[k] = (k === 'w' || k === 'h') && item.kind !== 'line' && typeof v === 'number' ? Math.max(MIN_FRAME, v) : v
   }
   // A colour set by hand is no longer the magazine's swatch.
   if ('fill' in patch || 'color' in patch) patch.fill_swatch = undefined
@@ -90,7 +95,8 @@ function typeAttrs(op: TypeFields, hasFamily: Scope['hasFamily']): { char: CharA
   return { char, para }
 }
 
-/** The paragraphs an edit names (all of them when it names none). */
+/** The paragraphs an edit names (all of them when it names none); none when
+ *  it names only paragraphs the text doesn't have. */
 function which(paras: Para[], named?: number[]): number[] {
   const all = paras.map((_, k) => k)
   return named?.length ? named.filter((k) => k >= 0 && k < paras.length) : all
@@ -155,12 +161,16 @@ function change(doc: Doc, op: Exclude<MerlinOp, { op: 'add' }>, scope: Scope, in
       if (op.op === 'type') {
         const attrs = typeAttrs(op, scope.hasFamily)
         if (!Object.keys(attrs.char).length && !Object.keys(attrs.para).length) return 'no type the Studio can set'
-        return setParas(doc, thread.id, restyle(thread.paras, which(thread.paras, op.paras), attrs))
+        const named = which(thread.paras, op.paras)
+        if (!named.length) return `${op.id} has no paragraph ${op.paras!.join(', ')}`
+        return setParas(doc, thread.id, restyle(thread.paras, named, attrs))
       }
-      // Body text is the writer's, letter for letter.
+      // Only headings and captions are recased: body text and quotes are the writer's, letter for letter.
+      const named = which(thread.paras, op.paras)
+      if (!named.length) return `${op.id} has no paragraph ${op.paras!.join(', ')}`
       const roles = resolveParas(thread.paras, doc.identity).map((p) => p.role ?? 'p')
-      const ks = which(thread.paras, op.paras).filter((k) => roles[k] !== 'p')
-      if (!ks.length) return `${op.id}'s text is body text, which keeps its letters`
+      const ks = named.filter((k) => CASED.has(roles[k]))
+      if (!ks.length) return `${op.id}'s text is body text or a quote, which keeps its letters`
       const paras = thread.paras.map((p, k) => {
         if (!ks.includes(k)) return p
         let before = ''
@@ -214,36 +224,72 @@ function roomFor(doc: Doc, thread: string, measure: Measure): number | null {
   return Math.ceil((base + 0.3 * step) / 5) * 5
 }
 
+/** What changes how much room text has, by who is to blame: the words and
+ *  type (an edit to the text itself, or a label added) come back first; then
+ *  the sizes, columns and insets of its frames, taken out of the edit that set
+ *  them and leaving the rest of it (a fill, a rotation) alone. */
+const TEXTUAL = new Set<MerlinOp['op']>(['type', 'case', 'add'])
+const LAYOUT = ['x', 'y', 'w', 'h', 'rot', 'cols', 'gutter', 'inset'] as const
+
+/** `keep` less what tier `tier` takes back from the frames in `frames` (frame →
+ *  its thread), each noted in `left` with about how much room the text needed
+ *  (so the next round can make the frame bigger or the type smaller); null when
+ *  there is nothing of that kind to take back. */
+function takeBack(tier: 0 | 1, keep: MerlinOp[], touched: (string | null)[], frames: Map<string, string>,
+  doc: Doc, measure: Measure, left: string[]): MerlinOp[] | null {
+  const why = (id: string) => {
+    const room = roomFor(doc, frames.get(id)!, measure)
+    const frame = doc.items.find((i) => i.id === id)
+    return `the text in ${id} would no longer fit its frame`
+      + (room && frame ? ` (it would need about ${room} pt of height at ${Math.round(frame.w)} pt wide)` : '')
+      + '; make the frame bigger or the type smaller'
+  }
+  let changed = false
+  const kept = keep.flatMap((op, k) => {
+    const id = touched[k]
+    if (id === null || !frames.has(id)) return [op]
+    if (tier === 0) {
+      if (!TEXTUAL.has(op.op)) return [op]
+      changed = true
+      left.push(note(`Skipped ${show(op)}: ${why(id)}`))
+      return []
+    }
+    if (op.op !== 'set') return [op]
+    const fields = LAYOUT.filter((f) => op[f] !== undefined)
+    if (!fields.length) return [op]
+    changed = true
+    left.push(note(`Left out ${fields.join(', ')} of ${show(op)}: ${why(id)}`))
+    const rest: Record<string, unknown> = { ...op }
+    for (const f of fields) delete rest[f]
+    return Object.keys(rest).length > 2 ? [rest as MerlinOp] : [] // more than its `op` and `id`
+  })
+  return changed ? kept : null
+}
+
 /** `applyOps`, keeping text that fitted its frames fitting: when an edit
- *  would leave a thread's text overflowing that didn't before, its type
- *  changes come out first, then everything else done to its frames, each
- *  noted with about how much room the text needed (so the next round can
- *  make the frame bigger or the type smaller). */
+ *  would leave a thread's text overflowing that didn't before, what was done
+ *  to the text itself comes out first, then the sizes of its frames (and only
+ *  those), each noted with about how much room the text needed. A tier with
+ *  nothing to take back costs no second layout. */
 export function fitOps(doc: Doc, ops: MerlinOp[], scope: Scope, measure: Measure): Applied {
   const before = composeDoc(doc, measure).overset
   const left: string[] = []
   let keep = ops
-  for (let pass = 0; ; pass++) {
-    const out = applyOps(doc, keep, scope)
+  let out = applyOps(doc, keep, scope)
+  let tier = 0
+  for (;;) {
     const { overset } = composeDoc(out.doc, measure)
     const fresh = out.doc.threads.filter((t) => overset.has(t.id) && !before.has(t.id))
-    if (!fresh.length || pass === 2) {
-      // Past both passes, something else made it overflow (a picture moved over it): say so.
+    if (!fresh.length) return { doc: out.doc, did: out.did, skipped: [...out.skipped, ...left] }
+    const frames = new Map(fresh.flatMap((t) => t.frames.map((f) => [f, t.id] as const)))
+    let back: MerlinOp[] | null = null
+    while (!back && tier < 2) back = takeBack(tier++ as 0 | 1, keep, out.touched, frames, out.doc, measure, left)
+    if (!back) {
+      // Both tiers spent: something else made it overflow (a picture moved over it). Say so.
       const still = fresh.map((t) => note(`The text in ${t.frames[t.frames.length - 1]} doesn't fit its frame now.`))
       return { doc: out.doc, did: out.did, skipped: [...out.skipped, ...left, ...still] }
     }
-    const frames = new Map(fresh.flatMap((t) => t.frames.map((f) => [f, t.id] as const)))
-    keep = keep.filter((op, k) => {
-      const id = out.touched[k]
-      const culprit = id !== null && frames.has(id) && (pass === 1 || op.op === 'type' || op.op === 'add')
-      if (culprit) {
-        const room = roomFor(out.doc, frames.get(id)!, measure)
-        const frame = out.doc.items.find((i) => i.id === id)
-        left.push(note(`Skipped ${show(op)}: the text in ${id} would no longer fit its frame`
-          + (room && frame ? ` (it would need about ${room} pt of height at ${Math.round(frame.w)} pt wide)` : '')
-          + '; make the frame bigger or the type smaller'))
-      }
-      return !culprit
-    })
+    keep = back
+    out = applyOps(doc, keep, scope)
   }
 }

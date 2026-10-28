@@ -96,6 +96,18 @@ function message(err: unknown, mode: Mode = 'ask'): string {
 
 const CHANGED = 'You changed the page while Merlin worked, so it stopped there.'
 
+/** What a round tells the next one: a line for each edit made or not, and how
+ *  many of each. Kept to what the server takes (`MERLIN_NOTES` lines, and as
+ *  many `skipped`): a round of 40 edits that mostly missed can note more, and
+ *  the next request would be refused. `took`: whether the page changed. */
+export function roundNotes(took: boolean, out: Applied, dropped: number): { notes: string[]; did: number; skipped: number } {
+  const notes = took ? [...out.did, ...out.skipped]
+    : out.did.length ? ['None of these edits took: the page would hold more than a story can.', ...out.skipped] : [...out.skipped]
+  if (dropped) notes.push(`${dropped} edit${dropped === 1 ? '' : 's'} couldn’t be used and ${dropped === 1 ? 'was' : 'were'} left out.`)
+  const did = took ? out.did.length : 0
+  return { notes: notes.slice(0, MERLIN_NOTES), did, skipped: Math.min(MERLIN_NOTES, notes.length - did) }
+}
+
 /** A picture, at most 1,280 px on its longest side, as a JPEG to send. */
 export async function preparePicture(file: Blob): Promise<Picture> {
   const bitmap = await createImageBitmap(file)
@@ -258,15 +270,13 @@ export class Conversation {
           stepped = true
           mark = c.store.changes
         }
-        const notes = took ? [...out.did, ...out.skipped]
-          : out.did.length ? ['None of these edits took: the page would hold more than a story can.', ...out.skipped] : out.skipped
-        if (res.dropped) notes.push(`${res.dropped} edit${res.dropped === 1 ? '' : 's'} couldn’t be used and ${res.dropped === 1 ? 'was' : 'were'} left out.`)
-        const did = took ? out.did.length : 0
-        previous.push({ say: res.say, notes: notes.slice(0, MERLIN_NOTES), did, skipped: notes.length - did })
+        const { notes, did, skipped } = roundNotes(took, out, res.dropped)
+        previous.push({ say: res.say, notes, did, skipped })
         if (res.say) says.push(res.say)
-        rounds = [...rounds, { say: res.say, did, skipped: notes.length - did }]
+        rounds = [...rounds, { say: res.say, did, skipped }]
         this.patchRun(id, { rounds, changes: stepped ? mark : null })
-        if (res.done || !res.ops.length) break
+        // Edits that were all unusable are not "nothing to do": the next round can put them right.
+        if (res.done || (!res.ops.length && !res.dropped)) break
       }
       if (this.halt) stop('Stopped.')
     } catch (err) {

@@ -103,8 +103,49 @@ describe('Merlin’s edits', () => {
     const title = applyOps(doc(), [{ op: 'case', id: 't1', to: 'title' }], scope)
     expect(title.doc.threads[0].paras[0].runs.map((r) => r.t).join('')).toBe('The Tide Comes In')
     const body = applyOps(doc(), [{ op: 'case', id: 't1', paras: [1], to: 'upper' }], scope)
-    expect(body.skipped[0]).toMatch(/t1's text is body text, which keeps its letters$/)
+    expect(body.skipped[0]).toMatch(/t1's text is body text or a quote, which keeps its letters$/)
     expect(body.doc.threads).toEqual(doc().threads)
+  })
+
+  it('recases headings and captions, never a pull quote or body text', () => {
+    const mixed: Doc = { ...doc(), threads: [{ id: 's1', frames: ['t1'], paras: [
+      { role: 'quote', runs: [{ t: 'We stay on the water.' }] },
+      { role: 'caption', runs: [{ t: 'photo by a. person' }] },
+      { runs: [{ t: 'Body copy.' }] },
+    ] }] }
+    const out = applyOps(mixed, [{ op: 'case', id: 't1', to: 'upper' }], scope)
+    expect(out.doc.threads[0].paras.map((p) => p.runs[0].t)).toEqual(['We stay on the water.', 'PHOTO BY A. PERSON', 'Body copy.'])
+    // Named on its own, the quote is the writer's: nothing is made of the edit.
+    const quote = applyOps(mixed, [{ op: 'case', id: 't1', paras: [0], to: 'lower' }], scope)
+    expect(quote.doc).toBe(mixed)
+    expect(quote.did).toEqual([])
+    expect(quote.skipped[0]).toMatch(/body text or a quote, which keeps its letters$/)
+  })
+
+  it('fails an edit that names only paragraphs the text doesn’t have, instead of counting it as done', () => {
+    const d = doc()
+    for (const op of [{ op: 'type', id: 't1', paras: [12], size: 20 }, { op: 'case', id: 't1', paras: [7, 9], to: 'upper' }] as MerlinOp[]) {
+      const out = applyOps(d, [op], scope)
+      expect(out.doc).toBe(d) // no change, so no undo step either
+      expect(out.did).toEqual([])
+      expect(out.skipped[0]).toMatch(/t1 has no paragraph \d/)
+    }
+    // Some in range and some not: the ones that exist are restyled.
+    const some = applyOps(d, [{ op: 'type', id: 't1', paras: [1, 12], size: 20 }], scope)
+    expect(some.doc.threads[0].paras[1].runs[0].size).toBe(20)
+    expect(some.doc.threads[0].paras[0]).toEqual(d.threads[0].paras[0])
+    expect(some.skipped).toEqual([])
+  })
+
+  it('never makes a frame too small to see; a rule may have no height or width', () => {
+    const out = applyOps(doc(), [
+      { op: 'set', id: 'r1', w: 0, h: 1 },
+      { op: 'set', id: 'l1', h: 0, w: 300 },
+      { op: 'add', kind: 'ellipse', x: 5, y: 5, w: 0, h: 0 },
+    ], scope)
+    expect(item(out.doc, 'r1')).toMatchObject({ w: 4, h: 4 })
+    expect(item(out.doc, 'l1')).toMatchObject({ w: 300, h: 0 })
+    expect(out.doc.items.at(-1)).toMatchObject({ kind: 'ellipse', w: 4, h: 4 })
   })
 
   it('adds shapes and short labels on its page, behind everything when asked, as headings or captions', () => {
@@ -166,6 +207,37 @@ describe('keeping text that fits fitting', () => {
     const out = fitOps(doc(), [{ op: 'add', kind: 'text', x: 36, y: 40, w: 40, h: 12, text: 'A LONG SECTION NAME', role: 'h3', type: { size: 11 } }], scope, mono)
     expect(out.doc.items).toHaveLength(doc().items.length)
     expect(out.skipped[0]).toMatch(/would no longer fit its frame/)
+  })
+
+  it('takes back only a frame’s size when that is what made the text overflow, keeping its other edits', () => {
+    const out = fitOps(doc(), [
+      { op: 'set', id: 't1', h: 20, fill: '#ffeecc' },
+      { op: 'arrange', id: 't1', to: 'front' },
+      { op: 'set', id: 'r1', fill: '#ff0000' },
+    ], scope, mono)
+    expect(fits(out.doc)).toBe(true)
+    expect(item<TextItem>(out.doc, 't1')).toMatchObject({ h: 200, fill: '#ffeecc' })
+    expect(out.doc.items.at(-1)!.id).toBe('t1') // brought to the front, and stays there
+    expect(item<RectItem>(out.doc, 'r1').fill).toBe('#ff0000')
+    expect(out.did).toEqual([
+      'Did {"op":"set","id":"t1","fill":"#ffeecc"}', 'Did {"op":"arrange","id":"t1","to":"front"}',
+      'Did {"op":"set","id":"r1","fill":"#ff0000"}',
+    ])
+    expect(out.skipped).toHaveLength(1)
+    expect(out.skipped[0]).toMatch(/^Left out h of \{"op":"set","id":"t1","h":20,"fill":"#ffeecc"\}: the text in t1 would no longer fit its frame \(it would need about \d+ pt/)
+  })
+
+  it('takes back what was done to the text before the size of its frame', () => {
+    const out = fitOps(doc(), [
+      { op: 'type', id: 't1', paras: [0], size: 200 },
+      { op: 'set', id: 't1', w: 560, fill: '#ffeecc' },
+    ], scope, mono)
+    expect(fits(out.doc)).toBe(true)
+    // The type is what overflowed: it comes out, and the frame's new width and fill stay.
+    expect(out.doc.threads[0].paras[0].runs[0].size).toBe(48)
+    expect(item<TextItem>(out.doc, 't1')).toMatchObject({ w: 560, fill: '#ffeecc' })
+    expect(out.skipped).toHaveLength(1)
+    expect(out.skipped[0]).toMatch(/^Skipped \{"op":"type"/)
   })
 
   it('doesn’t police text that already overflowed', () => {

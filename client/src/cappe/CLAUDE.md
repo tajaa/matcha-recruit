@@ -182,12 +182,17 @@ Website-builder frontend for the consumer brand **Gummfit**, host-routed on gumm
   in view itself (server `studio/merlin.py`). `Conversation.design` runs up to three rounds, each a whole-page
   snapshot plus `describeStudio(s, { forMerlin: true })` (points, `[id …]`, `¶n`) sent, edits back, applied by the
   pure `ui/ask/merlinOps.ts` `fitOps` (`applyOps`, then any edit that would make fitting text overflow taken back
-  out) after `fonts.ensureDoc` loads their faces. Each round also sends `selected` and the last rounds' `did` /
-  `skipped`: the server picks Sonnet or Haiku from them (`merlin.tier`). Rounds after the first pass
+  out, by cause: what was done to the text itself first, then only the size/column/inset fields of a `set`, so its
+  fill or stacking order stay) after `fonts.ensureDoc` loads their faces. Each round also sends `selected` and the
+  last rounds' `did` / `skipped` (`roundNotes`, kept to the 60 the server takes): the server picks Sonnet or Haiku
+  from them (`merlin.tier`). A round whose edits were all unusable (`dropped` with no `ops`) doesn't end the design. Rounds after the first pass
   `join: true` to `Store.edit`, so the design is one undo step; `Store.changes` (edits, undos, redos, replaces; not
   recomposes) moving between rounds means the person changed the page, and Merlin stops. Undo Merlin is offered
   only while `Store.changes` still equals the value after Merlin's last edit. It never deletes and never writes a
-  story's words (`case` skips body text; added text is a short heading or caption label).
+  story's words (`case` recases only headings and captions, not body text or a pull quote; added text is a short
+  heading or caption label). An edit naming only paragraphs the text doesn't have fails (no undo step); a new or
+  resized rectangle, ellipse, label or picture is at least 4 pt each way (a rule may have no height or width). Help →
+  Ask the Studio and Ask about this switch the panel to Ask first: Send in Merlin mode designs, and would change the page.
   **Editorial collections** (`ui/add/collections.ts`, `CollectionsTab.tsx`, `applyCollection.ts`): Templates opens
   on four ten-page art directions; Single pages keeps the original templates. A collection starts a blank
   story or inserts after the current spread (padding keeps its cover on the right and preserves original page sides), fitted to the story's

@@ -43,7 +43,7 @@ from .....core.services import agent_surfaces, anthropic_messages
 from . import limits as L
 from .ask import MAX_HISTORY, MAX_PAGE_CHARS, MAX_QUESTION, MAX_TURN, AskInvalid, picture_block, fonts_text
 from .fonts import manifest
-from .schema import num
+from .schema import char_attrs, num
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +55,10 @@ MAX_SAY = 1_000
 MAX_NOTES = 60
 MAX_NOTE = 300
 MAX_PARAS = 64
+# The smallest a new rectangle, ellipse or label may be, in points (a line may
+# have no height or no width, but not both): smaller is a frame nobody can see
+# or pick up.
+MIN_FRAME = 4.0
 # One round is one request through CloudFront, whose origin timeout is 60 s.
 MODEL_SECONDS = 50.0
 # A polish round that fails is tried again as a design round only with this
@@ -196,16 +200,22 @@ def request(raw: dict) -> Round:
     return r
 
 
+def _esc(text: str) -> str:
+    """`text` with its `<` escaped: what is sent inside a tag (a story's words,
+    the request) can't close the tag and pass for the prompt's own words."""
+    return text.replace("<", "&lt;")
+
+
 def _prompt(r: Round) -> str:
-    parts = [f"<fonts>\n{fonts_text()}\n</fonts>", f"<page>\n{r.page.strip() or '(not sent)'}\n</page>"]
+    parts = [f"<fonts>\n{fonts_text()}\n</fonts>", f"<page>\n{_esc(r.page.strip()) or '(not sent)'}\n</page>"]
     if r.history:
-        turns = "\n\n".join(f"Q: {a[:MAX_TURN]}\nA: {b[:MAX_TURN]}" for a, b in r.history)
+        turns = "\n\n".join(f"Q: {_esc(a[:MAX_TURN])}\nA: {_esc(b[:MAX_TURN])}" for a, b in r.history)
         parts.append(f"<conversation>\n{turns}\n</conversation>")
     if r.previous:
         done = []
         for k, p in enumerate(r.previous, 1):
-            notes = "\n".join(f"- {n}" for n in p["notes"]) or "- (no edits)"
-            done.append(f"Round {k}: {p['say']}\n{notes}")
+            notes = "\n".join(f"- {_esc(n)}" for n in p["notes"]) or "- (no edits)"
+            done.append(f"Round {k}: {_esc(p['say'])}\n{notes}")
         parts.append("<earlier_rounds>\n" + "\n\n".join(done) + "\n</earlier_rounds>")
     pictures = []
     if r.picture:
@@ -216,7 +226,7 @@ def _prompt(r: Round) -> str:
         order = ["first", "second"]
         parts.append("Attached: " + "; ".join(f"the {order[k]} picture is {p}" for k, p in enumerate(pictures)) + ".")
     parts.append(f"This is round {r.round} of {MAX_ROUNDS}." + (" It is the last: finish the page." if r.round == MAX_ROUNDS else ""))
-    parts.append(f"<request>\n{r.request}\n</request>")
+    parts.append(f"<request>\n{_esc(r.request)}\n</request>")
     parts.append(_TASK)
     return "\n\n".join(parts)
 
@@ -273,6 +283,8 @@ def _field(key: str, value: Any) -> Any:
         n = _num(value, *_NUMBERS[key])
         if n is None:
             return ...
+        if key == "dc" and int(math.floor(n + 0.5)) == 1:
+            return ...  # a drop cap is none (0) or 2 to DROPCAP_LINES lines deep
         if key == "wt":
             return int(math.floor(n / 100 + 0.5)) * 100
         return int(math.floor(n + 0.5)) if key in _WHOLE else n
@@ -349,6 +361,16 @@ def _fields(raw: dict, allowed: frozenset[str]) -> dict:
     return out
 
 
+def _type_fields(raw: dict) -> dict:
+    """The type fields of `raw`, cleaned. A weight that comes with its font
+    is the weight the family has nearest to it, as the document keeps it on
+    save: the page is measured and drawn before that."""
+    fields = _fields(raw, TYPE_FIELDS)
+    if "font" in fields and "wt" in fields:
+        fields["wt"] = char_attrs({"font": fields["font"], "wt": fields["wt"]})["wt"]
+    return fields
+
+
 def _paras(value: Any) -> Optional[list[int]]:
     if not isinstance(value, list):
         return None
@@ -372,6 +394,11 @@ def clean_op(raw: Any) -> Optional[dict]:
         box = {k: _field(k, raw.get(k)) for k in ("x", "y", "w", "h")}
         if any(v is ... for v in box.values()):
             return None
+        if kind == "line":
+            if max(box["w"], box["h"]) < MIN_FRAME:
+                return None
+        else:
+            box["w"], box["h"] = max(MIN_FRAME, box["w"]), max(MIN_FRAME, box["h"])
         out: dict[str, Any] = {"op": "add", "kind": kind, **_fields(raw, ITEM_FIELDS), **box}
         if raw.get("to") in ("back", "front"):
             out["to"] = raw["to"]
@@ -381,7 +408,7 @@ def clean_op(raw: Any) -> Optional[dict]:
                 return None
             # Its type as a `type` object, or (the reply schema is flat) on the edit itself.
             out.update(text=text, role=raw["role"],
-                       type=_fields(raw["type"] if isinstance(raw.get("type"), dict) else raw, TYPE_FIELDS))
+                       type=_type_fields(raw["type"] if isinstance(raw.get("type"), dict) else raw))
         return out
     target = raw.get("id")
     if not isinstance(target, str) or not _ID.match(target):
@@ -390,7 +417,7 @@ def clean_op(raw: Any) -> Optional[dict]:
         fields = _fields(raw, ITEM_FIELDS)
         return {"op": "set", "id": target, **fields} if fields else None
     if op == "type":
-        fields = _fields(raw, TYPE_FIELDS)
+        fields = _type_fields(raw)
         if not fields:
             return None
         paras = _paras(raw.get("paras"))
@@ -427,7 +454,10 @@ def _shape(data: dict) -> dict:
     ops, dropped = clean_ops(data.get("ops"))
     if not say and not ops:
         raise MerlinFailed("nothing in the reply")
-    return {"say": say, "ops": ops, "done": bool(data.get("done")) or not ops, "dropped": dropped}
+    # Done when the model says so or sent no edits. Edits that were all unusable
+    # aren't "nothing left to do": the next round can put them right.
+    sent = isinstance(data.get("ops"), list) and bool(data["ops"])
+    return {"say": say, "ops": ops, "done": bool(data.get("done")) or not sent, "dropped": dropped}
 
 
 def tier(r: Round) -> str:
