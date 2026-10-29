@@ -10,6 +10,7 @@ from fastapi import HTTPException
 
 from app.matcha.models.matcha_work.job_search import JobCriteria, JobSearchCreate, JobWeights
 from app.matcha.services.matcha_work.agent_runtime import enqueue as assistant_enqueue, grants
+from app.matcha.services.matcha_work.agent_tasks import allowance
 from app.matcha.services.matcha_work.job_search import enqueue
 from tests.agent_runtime.helpers import FakeConn, connection
 
@@ -17,6 +18,12 @@ from ._fixtures import COMPANY, SEARCH, USER, search_row
 
 CLIENT = SimpleNamespace(id=USER, role="client")
 ADMIN = SimpleNamespace(id=USER, role="admin")
+
+
+@pytest.fixture(autouse=True)
+def no_bonus(monkeypatch):
+    """The limit reads the person's admin top-up from the database; none here."""
+    monkeypatch.setattr(allowance, "bonus_units", AsyncMock(return_value=0))
 
 
 @pytest.fixture

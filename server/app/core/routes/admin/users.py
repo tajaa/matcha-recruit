@@ -183,9 +183,23 @@ async def patch_user_beta_flags(
     These double as no-Stripe COMP GRANTS: the Werk plan resolver
     (entitlements_service) maps beta_full → Pro and beta_lite → Lite, so
     checking a box here grants the full paid tier without a subscription.
+
+    `matcha_work_bonus_units` (a whole number, 0 to MAX_BONUS_UNITS) tops up the
+    person's monthly background-work allowance (job searches cost 5 units each);
+    0 removes it.
     """
+    from app.matcha.services.matcha_work.agent_tasks import allowance
+
     allowed = {"matcha_work_beta_lite", "matcha_work_beta_full"}
     patch = {k: v for k, v in body.items() if k in allowed and isinstance(v, bool)}
+    if allowance.BONUS_KEY in body:
+        bonus = body[allowance.BONUS_KEY]
+        if isinstance(bonus, bool) or not isinstance(bonus, int) or not 0 <= bonus <= allowance.MAX_BONUS_UNITS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{allowance.BONUS_KEY} must be a whole number from 0 to {allowance.MAX_BONUS_UNITS}",
+            )
+        patch[allowance.BONUS_KEY] = bonus
     if not patch:
         raise HTTPException(status_code=400, detail="No valid beta flag keys provided")
     # Audit: comp grants are money-equivalent — record actor + target + change.

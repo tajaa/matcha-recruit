@@ -21,6 +21,12 @@ ADMIN = SimpleNamespace(id=USER, role="admin")
 RESEARCH = playbooks.get("research")
 
 
+@pytest.fixture(autouse=True)
+def no_bonus(monkeypatch):
+    """The limit reads the person's admin top-up from the database; none here."""
+    monkeypatch.setattr(allowance, "bonus_units", AsyncMock(return_value=0))
+
+
 @pytest.fixture
 def gates(monkeypatch):
     from app.core.services import redis_cache

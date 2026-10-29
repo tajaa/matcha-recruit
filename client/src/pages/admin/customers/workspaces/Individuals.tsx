@@ -22,7 +22,7 @@ interface IndividualUser {
   subscription_token_limit: number
   subscription_tokens_remaining: number
   has_active_subscription: boolean
-  beta_features?: Record<string, boolean>
+  beta_features?: Record<string, boolean | number>
   is_suspended?: boolean
   subscription?: {
     pack_id: string
@@ -33,6 +33,17 @@ interface IndividualUser {
     current_period_end: string | null
     canceled_at: string | null
   } | null
+}
+
+// An admin's top-up to a person's monthly allowance of background work (job
+// searches cost 5 units each); mirrors allowance.BONUS_KEY / MAX_BONUS_UNITS.
+const BONUS_KEY = 'matcha_work_bonus_units'
+const MAX_BONUS_UNITS = 2000
+const BONUS_PRESETS = [25, 50, 100]
+
+function bonusUnits(user: IndividualUser): number {
+  const value = user.beta_features?.[BONUS_KEY]
+  return typeof value === 'number' && value > 0 ? value : 0
 }
 
 function fmtUsd(cents: number) {
@@ -61,6 +72,9 @@ export default function Individuals({ embedded = false }: { embedded?: boolean }
   const [grantTarget, setGrantTarget] = useState<IndividualUser | null>(null)
   const [grantAmount, setGrantAmount] = useState('')
   const [granting, setGranting] = useState(false)
+  const [bonusTarget, setBonusTarget] = useState<IndividualUser | null>(null)
+  const [bonusAmount, setBonusAmount] = useState('')
+  const [savingBonus, setSavingBonus] = useState(false)
   const [showInvite, setShowInvite] = useState(false)
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteResult, setInviteResult] = useState<{ invite_url: string; email: string; reused: boolean } | null>(null)
@@ -142,6 +156,20 @@ export default function Individuals({ embedded = false }: { embedded?: boolean }
       setGrantAmount('')
     } catch { /* Preserve the existing best-effort fallback. */ }
     setGranting(false)
+  }
+
+  async function handleSaveBonus() {
+    if (!bonusTarget || bonusAmount === '') return
+    const units = parseInt(bonusAmount, 10)
+    if (isNaN(units) || units < 0 || units > MAX_BONUS_UNITS) return
+    setSavingBonus(true)
+    try {
+      await api.patch(`/admin/users/${bonusTarget.user_id}/beta-flags`, { [BONUS_KEY]: units })
+      await fetchUsers()
+      setBonusTarget(null)
+      setBonusAmount('')
+    } catch { /* Preserve the existing best-effort fallback. */ }
+    setSavingBonus(false)
   }
 
   async function toggleSuspend(u: IndividualUser) {
@@ -249,6 +277,7 @@ export default function Individuals({ embedded = false }: { embedded?: boolean }
                   <div className="mt-0.5 text-[10px] text-zinc-500">{fmtUsd(user.subscription.amount_cents)}{user.subscription.current_period_end && <> · renews {new Date(user.subscription.current_period_end).toLocaleDateString()}</>}</div>
                 </> : user.beta_features?.matcha_work_beta_full ? <span className="admin-badge">Pro · comped</span>
                   : user.beta_features?.matcha_work_beta_lite ? <span className="admin-badge">Lite · comped</span> : <span className="text-zinc-500">Free</span>}
+                {bonusUnits(user) > 0 && <div className="mt-0.5 text-[10px] text-zinc-500" title="Extra monthly units for job searches and tasks">+{bonusUnits(user)} task units</div>}
               </td>
               <td className="tabular-nums">
                 <span className={low ? 'text-red-400' : warn ? 'text-amber-400' : 'text-zinc-300'}>{formatTokens(user.free_tokens_used)}</span>
@@ -267,6 +296,7 @@ export default function Individuals({ embedded = false }: { embedded?: boolean }
                 <Link to={`/admin/companies/${user.company_id}`} className="text-xs text-zinc-400 hover:text-zinc-100" title="Billing, refunds, and account details">Manage</Link>
                 <AdminActionMenu label={`Actions for ${user.email}`} items={[
                   { label: 'Grant tokens', onSelect: () => { setGrantTarget(user); setGrantAmount('') } },
+                  { label: 'Set extra job searches', onSelect: () => { setBonusTarget(user); setBonusAmount(String(bonusUnits(user))) } },
                   { label: 'Reset password', onSelect: () => issuePasswordReset(user) },
                   { label: user.is_suspended ? 'Unsuspend account' : 'Suspend account', danger: !user.is_suspended, onSelect: () => toggleSuspend(user) },
                   ...(user.subscription ? [{ label: 'Open Stripe subscription', href: `https://dashboard.stripe.com/subscriptions/${user.subscription.stripe_subscription_id}` }] : []),
@@ -391,6 +421,56 @@ export default function Individuals({ embedded = false }: { embedded?: boolean }
               >
                 {granting ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}
                 Grant {grantAmount ? formatTokens(parseInt(grantAmount, 10) || 0) : ''}
+              </AdminButton>
+            </div>
+          </AdminCard>
+        </div>
+      )}
+
+      {/* Extra job searches modal */}
+      {bonusTarget && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+          <AdminCard className="w-full max-w-sm">
+            <h3 className="text-sm font-semibold text-zinc-100 mb-1">Extra Job Searches</h3>
+            <p className="text-xs text-zinc-500 mb-4">{bonusTarget.email}</p>
+            <p className="text-[11px] text-zinc-500 mb-3">
+              Added to their plan's monthly allowance of task units (Pro 60, Business 150), every month, until set back to 0.
+              A job search costs 5 units, so 50 units is 10 more searches. They need a Pro plan or a Pro comp.
+            </p>
+            <div className="flex gap-2 mb-4">
+              {BONUS_PRESETS.map((units) => (
+                <button
+                  key={units}
+                  onClick={() => setBonusAmount(String(units))}
+                  className={`px-2 py-1 rounded text-[10px] font-medium transition-colors ${
+                    bonusAmount === String(units) ? 'bg-emerald-700 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'
+                  }`}
+                >
+                  {units} units · {units / 5} searches
+                </button>
+              ))}
+            </div>
+            <AdminInput
+              aria-label="Extra task units"
+              value={bonusAmount}
+              onChange={(e) => setBonusAmount(e.target.value.replace(/\D/g, '').slice(0, 4))}
+              placeholder={`Units, 0 to ${MAX_BONUS_UNITS}`}
+              className="mb-4"
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => { setBonusTarget(null); setBonusAmount('') }}
+                className="px-3 py-1.5 rounded-lg text-xs text-zinc-400 hover:text-zinc-200"
+              >
+                Cancel
+              </button>
+              <AdminButton
+                onClick={handleSaveBonus}
+                disabled={bonusAmount === '' || parseInt(bonusAmount, 10) > MAX_BONUS_UNITS || savingBonus}
+                className="gap-1.5 disabled:opacity-40" variant="success"
+              >
+                {savingBonus ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}
+                Save
               </AdminButton>
             </div>
           </AdminCard>

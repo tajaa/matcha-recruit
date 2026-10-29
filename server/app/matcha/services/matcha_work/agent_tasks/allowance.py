@@ -47,8 +47,43 @@ FREE_CARD_SENDBACKS = 4
 ROUND_UNITS: dict[str, int] = {"refine": 0, "more": 1, "document": 0, "action": 0}
 
 
+# An admin's per-person top-up, stored in `users.beta_features` beside the comp
+# flags (`PATCH /admin/users/{id}/beta-flags`). Units added to the plan's own
+# monthly limit, every month, until the admin sets it back to zero.
+BONUS_KEY = "matcha_work_bonus_units"
+MAX_BONUS_UNITS = 2000
+
+
 def limit_for_plan(plan: str | None) -> int:
     return AGENT_TASK_MONTHLY_UNITS.get(plan or "", 0)
+
+
+def clean_bonus(value) -> int:
+    """A stored bonus as a count of units; anything that isn't a whole number
+    from 0 up reads as no bonus."""
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        return 0
+    try:
+        return max(0, min(MAX_BONUS_UNITS, int(value)))
+    except ValueError:
+        return 0
+
+
+async def bonus_units(user_id: UUID | str) -> int:
+    async with connection_or_direct() as conn:
+        raw = await conn.fetchval(
+            "SELECT beta_features ->> $2 FROM users WHERE id = $1", UUID(str(user_id)), BONUS_KEY,
+        )
+    return clean_bonus(raw)
+
+
+async def limit_for_user(user_id: UUID | str, plan: str | None) -> int:
+    """The monthly units this person has: their plan's, plus the admin's top-up.
+    A plan with no allowance (Free, Lite) stays at zero, whatever is stored."""
+    base = limit_for_plan(plan)
+    if base <= 0:
+        return base
+    return base + await bonus_units(user_id)
 
 
 def card_round_cost(round_no: int) -> int:
@@ -114,7 +149,7 @@ async def task_usage(user_id: UUID | str, *, plan: str | None = None) -> dict:
     plan = plan or await resolve_plan_for_user(user_id)
     async with connection_or_direct() as conn:
         used = await used_units(conn, user_id)
-    return usage_payload(limit_for_plan(plan), used)
+    return usage_payload(await limit_for_user(user_id, plan), used)
 
 
 def over(limit: int | None, used: int, cost: int) -> bool:

@@ -204,7 +204,7 @@ async def create_task(user, company_id: UUID, body, *,
         return await job_tasks.start(user, company_id, body, brief, origin=origin,
                                      **({"recap_parent_run_id": recap_parent_run_id} if recap_parent_run_id else {}))
     plan = await preflight(user, company_id, playbook, consent_version=body.consent_version)
-    limit = allowance.limit_for_plan(plan) if plan is not None else None
+    limit = await allowance.limit_for_user(user.id, plan) if plan is not None else None
     cost = allowance.WEIGHTS[playbook.key]
     # Settled now, like the assistant's: a later admin change applies to new tasks.
     model = await model_run.default_model()
@@ -281,7 +281,7 @@ async def start_round(user, task_id: UUID, body) -> dict:
     if kind == "refine" and len(directive) < 3:
         raise HTTPException(status_code=422, detail="Say what to change.")
     plan = None if _is_admin(user) else await require_plan(user.id, PLAN_PRO, ENTITLEMENT)
-    limit = allowance.limit_for_plan(plan) if plan is not None else None
+    limit = await allowance.limit_for_user(user.id, plan) if plan is not None else None
     if plan is not None and kind != "document":
         from app.matcha.services.billing import token_budget_service
 

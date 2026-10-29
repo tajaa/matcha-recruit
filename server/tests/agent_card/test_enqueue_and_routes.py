@@ -12,6 +12,13 @@ from fastapi import HTTPException
 from app.core.services import redis_cache
 from app.matcha.services.billing import entitlements_service, token_budget_service
 from app.matcha.services.matcha_work.agent_card import enqueue, quota
+from app.matcha.services.matcha_work.agent_tasks import allowance
+
+
+@pytest.fixture(autouse=True)
+def no_bonus(monkeypatch):
+    """The limit reads the person's admin top-up from the database; none here."""
+    monkeypatch.setattr(allowance, "bonus_units", AsyncMock(return_value=0))
 
 
 def _user(role="client"):
