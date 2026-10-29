@@ -82,6 +82,12 @@ function setItem(doc: Doc, id: string, patch: Record<string, unknown>): Doc {
   return { ...doc, items: doc.items.map((i) => (i.id === id ? ({ ...i, ...patch } as Item) : i)) }
 }
 
+const same = (a: unknown, b: unknown) => a === b || JSON.stringify(a) === JSON.stringify(b)
+
+/** Why an edit that changes nothing is skipped: it isn't one Merlin made, and
+ *  counted as made it would hide a round that went wrong (`merlin.tier`). */
+const ALREADY = 'it is already so'
+
 function typeAttrs(op: TypeFields, hasFamily: Scope['hasFamily']): { char: CharAttrs; para: ParaAttrs } {
   const char: CharAttrs = {}
   const para: ParaAttrs = {}
@@ -149,10 +155,14 @@ function change(doc: Doc, op: Exclude<MerlinOp, { op: 'add' }>, scope: Scope, in
   switch (op.op) {
     case 'set': {
       const patch = itemPatch(item, op)
-      return Object.keys(patch).length ? setItem(doc, item.id, patch) : `none of those fields apply to a ${item.kind}`
+      if (!Object.keys(patch).length) return `none of those fields apply to a ${item.kind}`
+      const was = item as unknown as Record<string, unknown>
+      return Object.entries(patch).every(([k, v]) => same(was[k], v)) ? ALREADY : setItem(doc, item.id, patch)
     }
-    case 'arrange':
-      return arrange(doc, [item.id], op.to)
+    case 'arrange': {
+      const next = arrange(doc, [item.id], op.to)
+      return next.items.every((i, k) => i === doc.items[k]) ? ALREADY : next
+    }
     case 'type':
     case 'case': {
       if (item.kind !== 'text') return `${op.id} isn't a text frame`
@@ -163,7 +173,8 @@ function change(doc: Doc, op: Exclude<MerlinOp, { op: 'add' }>, scope: Scope, in
         if (!Object.keys(attrs.char).length && !Object.keys(attrs.para).length) return 'no type the Studio can set'
         const named = which(thread.paras, op.paras)
         if (!named.length) return `${op.id} has no paragraph ${op.paras!.join(', ')}`
-        return setParas(doc, thread.id, restyle(thread.paras, named, attrs))
+        const paras = restyle(thread.paras, named, attrs)
+        return same(paras, thread.paras) ? ALREADY : setParas(doc, thread.id, paras)
       }
       // Only headings and captions are recased: body text and quotes are the writer's, letter for letter.
       const named = which(thread.paras, op.paras)
@@ -180,7 +191,7 @@ function change(doc: Doc, op: Exclude<MerlinOp, { op: 'add' }>, scope: Scope, in
           return { ...r, t }
         }) }
       })
-      return setParas(doc, thread.id, paras)
+      return same(paras, thread.paras) ? ALREADY : setParas(doc, thread.id, paras)
     }
   }
 }
@@ -200,7 +211,7 @@ export function applyOps(doc: Doc, ops: MerlinOp[], scope: Scope): Applied & { t
       skipped.push(note(`Skipped ${show(op)}: ${out}`))
       touched.push(null)
     } else {
-      if (out.doc !== next) did.push(note(`Did ${show(op)}`))
+      did.push(note(`Did ${show(op)}`))
       touched.push(out.id)
       next = out.doc
     }
@@ -237,8 +248,14 @@ const LAYOUT = ['x', 'y', 'w', 'h', 'rot', 'cols', 'gutter', 'inset'] as const
  *  there is nothing of that kind to take back. */
 function takeBack(tier: 0 | 1, keep: MerlinOp[], touched: (string | null)[], frames: Map<string, string>,
   doc: Doc, measure: Measure, left: string[]): MerlinOp[] | null {
+  // A whole layout each: worked out once a thread, however many of its edits come back.
+  const rooms = new Map<string, number | null>()
+  const roomOf = (thread: string) => {
+    if (!rooms.has(thread)) rooms.set(thread, roomFor(doc, thread, measure))
+    return rooms.get(thread)!
+  }
   const why = (id: string) => {
-    const room = roomFor(doc, frames.get(id)!, measure)
+    const room = roomOf(frames.get(id)!)
     const frame = doc.items.find((i) => i.id === id)
     return `the text in ${id} would no longer fit its frame`
       + (room && frame ? ` (it would need about ${room} pt of height at ${Math.round(frame.w)} pt wide)` : '')

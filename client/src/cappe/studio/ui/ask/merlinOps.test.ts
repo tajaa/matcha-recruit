@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { composeDoc, type Measure } from '../../compose/compose'
+import { charOf } from '../../model/doc'
 import { addItem, patchItems } from '../../model/ops'
 import type { Doc, GraphicItem, Item, LineItem, RectItem, TextItem } from '../../model/types'
 import { applyOps, fitOps, type MerlinOp, type Scope } from './merlinOps'
@@ -174,6 +175,35 @@ describe('Merlin’s edits', () => {
     const long = applyOps(doc(), [{ op: 'set', id: 'r3', x: 1, y: 2, w: 3, h: 4, rot: 5, opacity: 6, fill: '#123456', stroke: { c: '#654321', w: 7 }, radius: 8 }
       , ...Array.from({ length: 3 }, () => ({ op: 'arrange', id: 'x'.repeat(12), to: 'front' }) as MerlinOp)], scope)
     for (const n of long.skipped) expect(n.length).toBeLessThanOrEqual(300)
+  })
+})
+
+describe('edits that change nothing', () => {
+  it('are skipped, not counted as made, and leave the document as it was', () => {
+    const d = doc()
+    const out = applyOps(d, [
+      { op: 'set', id: 'r1', x: 0, y: 0 },
+      { op: 'arrange', id: 't1', to: 'back' }, // t1 is already behind everything
+      { op: 'type', id: 't1', paras: [0], size: 48 }, // only its first run is 48: the second changes
+      { op: 'type', id: 't1', paras: [0], size: 48 },
+      { op: 'case', id: 't1', paras: [0], to: 'lower' },
+    ], scope)
+    expect(out.did).toHaveLength(1)
+    expect(out.did[0]).toMatch(/"op":"type"/)
+    expect(out.skipped).toHaveLength(4)
+    for (const line of out.skipped) expect(line).toMatch(/it is already so$/)
+    expect(out.touched).toEqual([null, null, 't1', null, null])
+  })
+})
+
+describe('a weight set without its font', () => {
+  it('is set and measured at the weight the family has, as the document keeps it on save', () => {
+    // Bebas Neue is cut in one weight; 800 asked for is drawn, measured (compose reads each run
+    // through `charOf`) and saved (`schema.char_attrs`) as 400.
+    let d = doc()
+    d = { ...d, threads: [{ ...d.threads[0], paras: [{ role: 'h1', runs: [{ t: 'Kicker', font: 'Bebas Neue', size: 40 }] }] }] }
+    const out = applyOps(d, [{ op: 'type', id: 't1', wt: 800 }], scope)
+    expect(charOf(out.doc.threads[0].paras[0].runs[0])).toMatchObject({ font: 'Bebas Neue', wt: 400 })
   })
 })
 

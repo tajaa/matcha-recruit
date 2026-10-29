@@ -37,7 +37,9 @@ import time
 import re
 from dataclasses import dataclass, field
 from functools import lru_cache
-from typing import Any, Optional
+from typing import Any, Awaitable, Callable, Optional
+
+import anthropic
 
 from .....core.services import agent_surfaces, anthropic_messages
 from . import limits as L
@@ -71,6 +73,11 @@ DESIGN, POLISH = "design", "polish"
 _clock = time.monotonic  # the round's own clock (tests move it)
 FREE_RUNS_PER_DAY = 3
 MAGAZINE_RUNS_PER_DAY = 20
+# Rounds a day on the design model, a design at most this many (its first
+# round and one put right): the tier is worked out from what the Studio sends,
+# so this is what holds the dearer model to what a design costs. Past it a
+# round runs on the polish model.
+DESIGN_ROUNDS_PER_RUN = 2
 UNAVAILABLE = "Merlin isn't available right now. Try again in a few minutes."
 FAILED = "Merlin couldn't design that this time. Try again."
 
@@ -156,7 +163,13 @@ class MerlinUnavailable(Exception):
 
 
 class MerlinFailed(Exception):
-    """The model call failed or its reply couldn't be used."""
+    """The model call failed or its reply couldn't be used. `billed`: whether
+    the model may have charged for it (it answered, or ran until the time ran
+    out); False only when the provider turned the call away."""
+
+    def __init__(self, reason: str = "", *, billed: bool = True):
+        super().__init__(reason)
+        self.billed = billed
 
 
 @dataclass
@@ -171,9 +184,18 @@ class Round:
     current: Optional[dict] = None  # the page in view as it looks now
 
 
+def _runs(features: dict[str, Any]) -> int:
+    return MAGAZINE_RUNS_PER_DAY if features.get("magazine") else FREE_RUNS_PER_DAY
+
+
 def daily_rounds(features: dict[str, Any]) -> int:
     """Rounds a day: a design takes up to `MAX_ROUNDS`, so this many designs."""
-    return (MAGAZINE_RUNS_PER_DAY if features.get("magazine") else FREE_RUNS_PER_DAY) * MAX_ROUNDS
+    return _runs(features) * MAX_ROUNDS
+
+
+def daily_design_rounds(features: dict[str, Any]) -> int:
+    """Of those, the most a day on the design model (`DESIGN_ROUNDS_PER_RUN`)."""
+    return _runs(features) * DESIGN_ROUNDS_PER_RUN
 
 
 def request(raw: dict) -> Round:
@@ -372,10 +394,17 @@ def _type_fields(raw: dict) -> dict:
 
 
 def _paras(value: Any) -> Optional[list[int]]:
+    """The paragraphs an edit names: [] for all of them (none named), None when
+    any it names can't be one. An edit that names only bad numbers is not an
+    edit to the whole text."""
+    if value is None or value == []:
+        return []
     if not isinstance(value, list):
         return None
-    picked = sorted({int(v) for v in value if isinstance(v, int) and not isinstance(v, bool) and 0 <= v < L.MAX_PARAS})
-    return picked[:MAX_PARAS] or None
+    if not all(isinstance(v, int) and not isinstance(v, bool) and 0 <= v < L.MAX_PARAS for v in value):
+        return None
+    picked = sorted(set(value))
+    return picked if len(picked) <= MAX_PARAS else None
 
 
 def _label(value: Any) -> str:
@@ -421,11 +450,15 @@ def clean_op(raw: Any) -> Optional[dict]:
         if not fields:
             return None
         paras = _paras(raw.get("paras"))
+        if paras is None:
+            return None
         return {"op": "type", "id": target, **({"paras": paras} if paras else {}), **fields}
     if op == "case":
         if raw.get("to") not in CASES:
             return None
         paras = _paras(raw.get("paras"))
+        if paras is None:
+            return None
         return {"op": "case", "id": target, "to": raw["to"], **({"paras": paras} if paras else {})}
     return {"op": "arrange", "id": target, "to": raw["to"]} if raw.get("to") in ARRANGE else None
 
@@ -496,20 +529,42 @@ async def _ask(r: Round, which: str, seconds: float) -> dict:
         return _shape(anthropic_messages.parse_json_object(reply))
     except (RuntimeError, ValueError, json.JSONDecodeError, TimeoutError) as exc:
         logger.info("studio merlin %s round failed: %s", which, type(exc).__name__)
-        raise MerlinFailed(type(exc).__name__) from exc
+        raise MerlinFailed(type(exc).__name__, billed=_billed(exc)) from exc
 
 
-async def design(r: Round) -> dict:
+def _billed(exc: BaseException) -> bool:
+    """Whether a failed call may still have been charged: anything but the
+    provider turning it away (an API error that isn't a timeout). A reply that
+    couldn't be used, or one cut off by the time, was paid for."""
+    cause = exc.__cause__
+    return not (isinstance(exc, RuntimeError) and isinstance(cause, anthropic.APIError)
+                and not isinstance(cause, anthropic.APITimeoutError))
+
+
+async def _yes() -> bool:
+    return True
+
+
+async def design(r: Round, *, may_design: Callable[[], Awaitable[bool]] = _yes) -> dict:
     """One round: `{"say", "ops": [edit], "done", "dropped"}`, on the model
     `tier` picks; a polish round that fails is tried again on the design
-    model while there is time. Hold no database connection while this runs.
-    Raises `MerlinUnavailable` or `MerlinFailed`."""
+    model while there is time. `may_design` is asked before each call on the
+    design model (it takes one of the day's design rounds); no means the
+    polish model, or no retry. Hold no database connection while this runs.
+    Raises `MerlinUnavailable` or `MerlinFailed` (billed when any try was)."""
     which = tier(r)
+    if which == DESIGN and not await may_design():
+        which = POLISH
     started = _clock()
     try:
         return await _ask(r, which, MODEL_SECONDS)
-    except MerlinFailed:
+    except MerlinFailed as first:
         left = MODEL_SECONDS - (_clock() - started)
-        if which == DESIGN or left < RETRY_SECONDS:
+        if which == DESIGN or left < RETRY_SECONDS or not await may_design():
             raise
-    return await _ask(r, DESIGN, left)
+        billed = first.billed
+    try:
+        return await _ask(r, DESIGN, left)
+    except MerlinFailed as exc:
+        exc.billed = exc.billed or billed
+        raise

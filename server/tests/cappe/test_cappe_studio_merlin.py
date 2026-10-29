@@ -31,7 +31,10 @@ import io
 import json
 from types import SimpleNamespace
 
+import anthropic
+import httpx
 import pytest
+from fastapi import HTTPException
 from PIL import Image
 
 from app.cappe.routes import studio as studio_mod
@@ -189,6 +192,66 @@ def test_a_failed_design_round_or_one_out_of_time_is_not_tried_again(claude, mon
     assert len(claude.calls) == 2
 
 
+def test_the_design_model_is_used_only_while_the_day_has_design_rounds(claude):
+    asked = []
+
+    async def none_left():
+        asked.append(1)
+        return False
+
+    run(merlin.design(merlin.request(_raw()), may_design=none_left))
+    assert [c["model"] for c in claude.calls] == [anthropic_messages.CLAUDE_HAIKU]
+    claude.calls.clear()
+    # A failed polish round isn't tried again on Sonnet either.
+    claude.reply = RuntimeError("bad reply")
+    with pytest.raises(merlin.MerlinFailed):
+        run(merlin.design(merlin.request(_raw(selected=1)), may_design=none_left))
+    assert [c["model"] for c in claude.calls] == [anthropic_messages.CLAUDE_HAIKU] and len(asked) == 2
+
+
+def test_a_polish_round_never_asks_for_a_design_round(claude):
+    async def never():
+        raise AssertionError("a polish round took a design round")
+
+    run(merlin.design(merlin.request(_raw(round=2, previous=[GOOD])), may_design=never))
+
+
+def _api_error(cls):
+    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    if cls in (anthropic.APITimeoutError, anthropic.APIConnectionError):
+        return cls(request=request)
+    return cls("overloaded", response=httpx.Response(529, request=request), body=None)
+
+
+def _wrapped(cls):
+    """As `anthropic_messages._create` raises an API error."""
+    exc = RuntimeError("Anthropic Messages request failed")
+    exc.__cause__ = _api_error(cls)
+    return exc
+
+
+@pytest.mark.parametrize("error, billed", [
+    (lambda: _wrapped(anthropic.InternalServerError), False),  # turned away: nothing was paid for
+    (lambda: _wrapped(anthropic.APIConnectionError), False),
+    (lambda: _wrapped(anthropic.APITimeoutError), True),  # ran until the time was up
+    (TimeoutError, True),
+    (lambda: ValueError("no JSON object in the reply"), True),  # it answered, unusably
+    (lambda: RuntimeError("Anthropic Messages declined the request"), True),
+])
+def test_a_failed_round_says_whether_it_was_paid_for(claude, error, billed):
+    claude.reply = error()
+    with pytest.raises(merlin.MerlinFailed) as caught:
+        run(merlin.design(merlin.request(_raw())))
+    assert caught.value.billed is billed
+
+
+def test_a_retry_that_fails_unpaid_after_a_paid_try_is_still_paid_for(claude):
+    claude.replies = [ValueError("no JSON object in the reply"), _wrapped(anthropic.InternalServerError)]
+    with pytest.raises(merlin.MerlinFailed) as caught:
+        run(merlin.design(merlin.request(_raw(selected=1))))
+    assert len(claude.calls) == 2 and caught.value.billed is True
+
+
 def test_no_claude_means_unavailable(claude):
     claude.configured = False
     with pytest.raises(merlin.MerlinUnavailable):
@@ -301,7 +364,7 @@ def test_fill_and_stroke_can_be_taken_away():
 
 
 def test_type_takes_fonts_the_studio_has_and_weights_by_the_hundred():
-    op = merlin.clean_op({"op": "type", "id": "t1", "paras": [2, 0, 0, -1, "1", True], "font": "Source Serif 4",
+    op = merlin.clean_op({"op": "type", "id": "t1", "paras": [2, 0, 0], "font": "Source Serif 4",
                           "wt": 650, "it": True, "size": 2_000, "track": -900, "align": "c", "lead": 80, "dc": 9})
     assert op == {"op": "type", "id": "t1", "paras": [0, 2], "font": "Source Serif 4", "wt": 700, "it": True,
                   "size": 1296, "track": -500, "align": "c", "lead": 80, "dc": 6}
@@ -318,6 +381,15 @@ def test_a_weight_that_comes_with_its_font_is_one_the_family_has():
     assert label["type"] == {"font": "Bebas Neue", "wt": 400}
     # A weight without a font is left as asked: the frame's own font isn't known here.
     assert merlin.clean_op({"op": "type", "id": "t1", "wt": 800}) == {"op": "type", "id": "t1", "wt": 800}
+
+
+@pytest.mark.parametrize("paras", [[-1], [20_000], [0, -1], ["1"], [True], "0", list(range(merlin.MAX_PARAS + 1))])
+@pytest.mark.parametrize("op", ["type", "case"])
+def test_an_edit_naming_paragraphs_that_cant_be_is_left_out_not_made_to_all(op, paras):
+    # Left out, its numbers dropped, it would restyle or recase the whole frame.
+    raw = {"op": op, "id": "t1", "paras": paras, "size": 12, "to": "upper"}
+    assert merlin.clean_op(raw) is None
+    assert merlin.clean_op({**raw, "paras": []}) is not None  # none named: all of them
 
 
 @pytest.mark.parametrize("dc, kept", [(0, 0), (1, None), (2, 2), (6, 6), (9, 6)])
@@ -452,9 +524,10 @@ def wired(monkeypatch):
     async def entitlements(plan, *, conn=None):
         return SimpleNamespace(features=state.features)
 
-    async def design(r):
+    async def design(r, *, may_design):
         assert state.open == 0, "Claude must not design while a connection is held"
         state.rounds.append(r)
+        state.may_design = may_design
         if isinstance(state.answer, Exception):
             raise state.answer
         return state.answer
@@ -515,16 +588,36 @@ def test_requests_out_of_bounds_spend_nothing(wired, over):
     assert wired.limits == [] and wired.rounds == []
 
 
-@pytest.mark.parametrize("error, code, says", [
-    (merlin.MerlinUnavailable(), 503, merlin.UNAVAILABLE),
-    (merlin.MerlinFailed("x"), 502, merlin.FAILED),
+@pytest.mark.parametrize("error, code, says, refunded", [
+    (merlin.MerlinUnavailable(), 503, merlin.UNAVAILABLE, True),
+    (merlin.MerlinFailed("x", billed=False), 502, merlin.FAILED, True),
+    # A timeout or an unusable reply was paid for: it counts, or a request that
+    # always overruns would cost the caller nothing.
+    (merlin.MerlinFailed("x"), 502, merlin.FAILED, False),
 ])
-def test_failures_say_what_to_do(wired, error, code, says):
+def test_failures_say_what_to_do(wired, error, code, says, refunded):
     wired.answer = error
     res = _post(_raw())
     assert res.status_code == code and res.json()["detail"] == says
-    # The day's round is given back: a design takes up to three, and these are ours to bear.
-    assert wired.limits and wired.refunds == [(str(ACCOUNT.id), "cappe_studio_merlin")]
+    assert wired.limits and wired.refunds == ([(str(ACCOUNT.id), "cappe_studio_merlin")] if refunded else [])
+
+
+def test_a_design_round_takes_one_of_the_days_design_rounds(wired):
+    assert _post(_raw()).status_code == 200
+    assert run(wired.may_design()) is True
+    assert wired.limits[-1] == (str(ACCOUNT.id), "cappe_studio_merlin_design", merlin.daily_design_rounds({"magazine": True}), 86_400)
+    assert merlin.daily_design_rounds({"magazine": True}) == 40 and merlin.daily_design_rounds({}) == 6
+
+
+def test_with_no_design_rounds_left_a_round_is_not_refused(wired, monkeypatch):
+    async def limit(key, action, n, window):
+        if action == "cappe_studio_merlin_design":
+            raise HTTPException(status_code=429, detail="Too many requests.")
+        wired.limits.append((key, action, n, window))
+
+    monkeypatch.setattr(studio_mod, "check_rate_limit", limit)
+    assert _post(_raw()).status_code == 200
+    assert run(wired.may_design()) is False
 
 
 def test_a_refused_request_is_never_refunded(wired):

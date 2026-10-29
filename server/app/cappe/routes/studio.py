@@ -510,8 +510,10 @@ async def merlin_round(site_id: UUID, post_id: UUID, body: StudioMerlin,
     """One round of Merlin designing the page in view: `{"say", "ops":
     [edit], "done", "dropped"}`. The Studio checks and applies the edits;
     nothing is saved here. Each round counts against the day's allowance
-    (`merlin.daily_rounds`: three rounds a design), unless it fails on our side
-    (no model, or a reply that couldn't be used): that one is given back."""
+    (`merlin.daily_rounds`: three rounds a design), unless nothing was paid
+    for it (no model, or the provider turned the call away): that one is given
+    back. A round on the design model also takes one of the day's design rounds
+    (`merlin.daily_design_rounds`); with none left it runs on the polish model."""
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
         fmt = await conn.fetchval("SELECT format FROM cappe_posts WHERE id = $1 AND site_id = $2", post_id, site_id)
@@ -525,13 +527,23 @@ async def merlin_round(site_id: UUID, post_id: UUID, body: StudioMerlin,
     except ask.AskInvalid as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     await check_rate_limit(str(account.id), "cappe_studio_merlin", merlin.daily_rounds(ent.features), 86_400)
+
+    async def may_design() -> bool:
+        try:
+            await check_rate_limit(str(account.id), "cappe_studio_merlin_design",
+                                   merlin.daily_design_rounds(ent.features), 86_400)
+        except HTTPException:
+            return False
+        return True
+
     try:
-        return await merlin.design(r)
+        return await merlin.design(r, may_design=may_design)
     except merlin.MerlinUnavailable as exc:
         await refund_rate_limit(str(account.id), "cappe_studio_merlin")
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=merlin.UNAVAILABLE) from exc
     except merlin.MerlinFailed as exc:
-        # A round that gave the person nothing doesn't count against the day:
-        # a design takes up to three, and the model's failures aren't theirs.
-        await refund_rate_limit(str(account.id), "cappe_studio_merlin")
+        # Given back only when nothing was paid for: a timeout or a reply that
+        # couldn't be used cost the same as one that worked.
+        if not exc.billed:
+            await refund_rate_limit(str(account.id), "cappe_studio_merlin")
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=merlin.FAILED) from exc

@@ -842,7 +842,11 @@ normalized paragraphs itself; a thread with no valid composition prints its word
   look: a design's first round, unless it is narrow (1-2 frames selected, no reference picture), and any round
   after one whose edits mostly didn't take (`previous[-1].skipped > did`). Haiku (`gummfit.studio_merlin_refine`,
   medium effort, about a twentieth of the price) takes the polish rounds and narrow changes; a failed polish round
-  is retried on Sonnet while `RETRY_SECONDS` are left. Measured on dev 2026-10-27: a Sonnet round ~11-17 s, ~$0.03.
+  is retried on Sonnet while `RETRY_SECONDS` are left. **The tier is worked out from what the browser sends**
+  (`round`, `previous`, `selected`), so a caller could ask for Sonnet every round: each Sonnet call also takes one
+  of the day's design rounds (`cappe_studio_merlin_design`, `daily_design_rounds`: 2 a design, so 6 / 40), asked
+  through `design(..., may_design=)`; with none left the round runs on Haiku and a failed polish round isn't
+  retried, never a 429. Measured on dev 2026-10-27: a Sonnet round ~11-17 s, ~$0.03.
   The reply is held to `REPLY_SCHEMA` by structured outputs (`generate_text(schema=...)`): without it Sonnet
   sometimes wrote tool-call markup instead of JSON (1 in 4 replays). The schema has **no optional fields**
   (structured outputs refuse more than 24): each edit kind is its own shape and what it sets is a list of
@@ -851,7 +855,7 @@ normalized paragraphs itself; a thread with no valid composition prints its word
   (`snapshot(..., { whole: true })`), the reference picture and what earlier rounds did and skipped. The reply is
   `{say, ops, done}`; **the edits are a closed list** (`set`, `type`, `case`, `add`, `arrange`), cleaned here
   (fields of the right type, the document's limits, hex colours, manifest families, ≤40 edits and ≤8 additions a
-  round; a weight sent with its font is snapped to one the family has, a drop cap is 0 or 2-6 lines, a new
+  round; an edit naming any paragraph number that can't be one is left out, not applied to all its text; a weight sent with its font is snapped to one the family has, a drop cap is 0 or 2-6 lines, a new
   rectangle/ellipse/label is at least `MIN_FRAME` pt each way and a line needs a length) and checked again in the
   browser against the document (on the page it started on or selected, not locked, a field its kind has);
   `merlinOps.fitOps` then takes back any edit that would make text that fits overflow (the text's own edits first,
@@ -862,10 +866,14 @@ normalized paragraphs itself; a thread with no valid composition prints its word
   **`done` is the model's word, or no edits sent at all**: edits that were all unusable (`dropped`) leave the design
   open for the next round. Rounds after the first join the first's undo
   step (`Store.edit(..., { join: true })`) only while `Store.changes` hasn't moved, so one ⌘Z or Undo Merlin takes
-  the whole design back; any other change to the document stops Merlin. Each round spends one of the day's rounds
-  (`cappe_studio_merlin`): 3 designs × 3 rounds without `magazine`, 20 × 3 with it. **A round that fails on our
-  side is given back** (`redis_cache.refund_rate_limit`, on `MerlinUnavailable` and `MerlinFailed`); a refused
-  request never spent one. (Ask's route has the same charge-then-call shape and does not refund.)
+  the whole design back; any other change to the document stops Merlin. Stop aborts the request in flight (the
+  server's round still counts), and Try again after a later round failed carries on from that round in the same
+  undo step, while `Store.changes` hasn't moved. Each round spends one of the day's rounds
+  (`cappe_studio_merlin`): 3 designs × 3 rounds without `magazine`, 20 × 3 with it. **A round is given back
+  only when nothing was paid for** (`redis_cache.refund_rate_limit`): `MerlinUnavailable`, or a `MerlinFailed`
+  with `billed=False` (the provider turned the call away: an `anthropic.APIError` that isn't a timeout). A
+  timeout, a refusal or a reply that couldn't be used was paid for and counts, or a request built to overrun would
+  cost nothing; a retried polish round is billed when either try was. A refused request never spent one. (Ask's route has the same charge-then-call shape and does not refund.)
 
 ## Social growth (2026-10, `services/social/`, migrations `cappesocial01`–`03`)
 

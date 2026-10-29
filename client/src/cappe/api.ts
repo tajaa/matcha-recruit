@@ -270,8 +270,8 @@ export async function cappePublicPost<T>(path: string, body: unknown): Promise<T
 
 export const cappeApi = {
   get: <T>(path: string) => request<T>(path),
-  post: <T>(path: string, body?: unknown) =>
-    request<T>(path, { method: 'POST', body: body ? JSON.stringify(body) : undefined }),
+  post: <T>(path: string, body?: unknown, opts?: { signal?: AbortSignal }) =>
+    request<T>(path, { method: 'POST', body: body ? JSON.stringify(body) : undefined, signal: opts?.signal }),
   put: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: 'PUT', body: body ? JSON.stringify(body) : undefined }),
   patch: <T>(path: string, body?: unknown) =>

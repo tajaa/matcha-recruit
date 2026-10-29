@@ -100,7 +100,8 @@ export const studioApi = {
   /** Ask the Studio: an answer, saved nowhere (server studio/ask.py). */
   ask: (siteId: string, postId: string, body: AskRequest) => cappeApi.post<AskAnswer>(`${base(siteId, postId)}/ask`, body),
   /** Merlin: one round of edits to the page in view, applied by the Studio (ui/ask/merlinOps.ts). */
-  merlin: (siteId: string, postId: string, body: MerlinRequest) => cappeApi.post<MerlinReply>(`${base(siteId, postId)}/merlin`, body),
+  merlin: (siteId: string, postId: string, body: MerlinRequest, signal?: AbortSignal) =>
+    cappeApi.post<MerlinReply>(`${base(siteId, postId)}/merlin`, body, { signal }),
   preview: (siteId: string, post: StudioPost, doc: Doc) => cappeApi.postHtml(`/sites/${siteId}/stories/preview`, {
     title: post.title, excerpt: post.excerpt, kicker: post.kicker, topic: post.topic, byline: post.byline,
     access: post.access, format: 'pages', content: { doc },

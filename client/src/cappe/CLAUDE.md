@@ -190,7 +190,12 @@ Website-builder frontend for the consumer brand **Gummfit**, host-routed on gumm
   recomposes) moving between rounds means the person changed the page, and Merlin stops. Undo Merlin is offered
   only while `Store.changes` still equals the value after Merlin's last edit. It never deletes and never writes a
   story's words (`case` recases only headings and captions, not body text or a pull quote; added text is a short
-  heading or caption label). An edit naming only paragraphs the text doesn't have fails (no undo step); a new or
+  heading or caption label). An edit naming only paragraphs the text doesn't have fails (no undo step), and one
+  that changes nothing ("it is already so") is skipped, not counted as made, so a round of no-ops still reads as
+  one that went wrong to `merlin.tier`; a weight set without its font needs no snapping here, since compose reads
+  every run through `charOf`; Stop aborts the round's request (`studioApi.merlin(..., signal)`), and Try again after
+  a later round failed resumes at that round (`Conversation.rounds`, same undo step) unless the page changed since;
+  a Merlin suggestion chip fills the box rather than designing; no page in view leaves the request in an error turn; a new or
   resized rectangle, ellipse, label or picture is at least 4 pt each way (a rule may have no height or width). Help →
   Ask the Studio and Ask about this switch the panel to Ask first: Send in Merlin mode designs, and would change the page.
   **Editorial collections** (`ui/add/collections.ts`, `CollectionsTab.tsx`, `applyCollection.ts`): Templates opens

@@ -125,6 +125,15 @@ export async function preparePicture(file: Blob): Promise<Picture> {
   return { media_type: 'image/jpeg', data: preview.slice(preview.indexOf(',') + 1), preview }
 }
 
+/** A design under way: what each round sends, and what the rounds so far did. */
+type Design = {
+  turn: number; q: string; picture: Picture | null; history: { q: string; a: string }[]
+  pageId: string; selection: string[]; scope: Scope
+  previous: MerlinRequest['previous']; says: string[]; rounds: MerlinRound[]
+  /** `Store.changes` after Merlin's last edit (or when it started), and whether it has made one. */
+  mark: number; stepped: boolean
+}
+
 export class Conversation {
   private state: AskState = { turns: [], busy: false, focus: 0, draft: null, mode: 'ask' }
   private listeners = new Set<() => void>()
@@ -132,6 +141,9 @@ export class Conversation {
   private next = 1
   private halt = false
   private running: number | null = null
+  private abort: AbortController | null = null
+  /** The design that failed last, to carry on from. */
+  private left: Design | null = null
 
   get = (): AskState => this.state
 
@@ -207,10 +219,19 @@ export class Conversation {
     }
   }
 
-  /** Ask the last question again (or have Merlin try again), after it failed. */
+  /** Ask the last question again (or have Merlin try again), after it failed.
+   *  A design that made changes before it failed carries on from the round
+   *  that failed, in the same undo step, while nothing else has changed the
+   *  page; else it starts again. */
   async retry(c: StudioCtx): Promise<void> {
     const last = this.state.turns[this.state.turns.length - 1]
     if (!last?.error || this.state.busy) return
+    const left = this.left
+    if (last.merlin && left?.turn === last.id && left.mark === c.store.changes) {
+      this.patchTurn(last.id, { error: null })
+      await this.rounds(c, left)
+      return
+    }
     // A design that made changes before it failed stays, with its Undo.
     if (!last.merlin?.rounds.length) this.set({ turns: this.state.turns.slice(0, -1) })
     await (last.merlin ? this.design(c, last.q, last.picture) : this.ask(c, last.q, last.picture))
@@ -219,82 +240,103 @@ export class Conversation {
   /** Merlin designs the page in view: rounds of edits, each looked at before the next. */
   async design(c: StudioCtx, request: string, picture: Picture | null = null): Promise<void> {
     const q = clip(request.trim(), MAX_QUESTION)
+    if (!q || this.state.busy) return
     const start = c.store.get()
     const pageId = start.doc.pages[start.page]?.id
-    if (!q || !pageId || this.state.busy) return
-    const history = this.history()
     const id = this.next++
-    const run: MerlinRun = { rounds: [], stage: 'looking', stopped: null, changes: null, undone: false }
+    const run: MerlinRun = { rounds: [], stage: null, stopped: null, changes: null, undone: false }
+    const turn: Turn = { id, q, picture, a: null, links: [], error: null, merlin: run }
+    if (!pageId) {
+      // The box was emptied when this was sent: the turn keeps the words and picture.
+      this.set({ turns: [...this.state.turns, { ...turn, error: 'There’s no page in view for Merlin to design.' }] })
+      return
+    }
+    const history = this.history()
+    this.set({ turns: [...this.state.turns, turn] })
+    await this.rounds(c, {
+      turn: id, q, picture, history, pageId, selection: start.selection,
+      scope: { page: pageId, selection: start.selection,
+        hasFamily: (family) => c.fonts.book.manifest.faces.some((f) => f.family === family) },
+      previous: [], says: [], rounds: [], mark: c.store.changes, stepped: false,
+    })
+  }
+
+  /** The rounds of a design from where `d` left off (`d.rounds.length` made). */
+  private async rounds(c: StudioCtx, d: Design): Promise<void> {
+    const id = d.turn
     this.halt = false
     this.running = id
-    this.set({ busy: true, turns: [...this.state.turns, { id, q, picture, a: null, links: [], error: null, merlin: run }] })
-    const scope: Scope = { page: pageId, selection: start.selection,
-      hasFamily: (family) => c.fonts.book.manifest.faces.some((f) => f.family === family) }
-    const previous: MerlinRequest['previous'] = []
-    const says: string[] = []
-    let rounds: MerlinRound[] = []
-    let mark = c.store.changes
-    let stepped = false
+    this.left = null
+    this.abort = new AbortController()
+    const signal = this.abort.signal
+    this.set({ busy: true })
+    this.patchRun(id, { stage: 'looking', stopped: null })
     const stop = (why: string) => this.patchRun(id, { stopped: why })
     try {
-      for (let round = 1; round <= MERLIN_ROUNDS; round++) {
+      for (let round = d.rounds.length + 1; round <= MERLIN_ROUNDS; round++) {
         const now = c.store.get()
-        const page = now.doc.pages.findIndex((p) => p.id === pageId)
+        const page = now.doc.pages.findIndex((p) => p.id === d.pageId)
         if (page < 0) { stop('The page Merlin was designing is gone.'); break }
         // The page it started on, as it is now, with what was selected then.
-        const s = { ...now, page, selection: start.selection.filter((sel) => now.doc.items.some((i) => i.id === sel)) }
+        const s = { ...now, page, selection: d.selection.filter((sel) => now.doc.items.some((i) => i.id === sel)) }
         this.patchRun(id, { stage: 'looking' })
         const current = await snapshot(s, c.fonts, c.siteId, { whole: true })
         if (round === 1 && current) this.patchTurn(id, { current })
         if (this.halt) break
         this.patchRun(id, { stage: 'designing' })
         const res = await studioApi.merlin(c.siteId, c.postId, {
-          request: q, round, history, page: describeStudio(s, { forMerlin: true }), previous: [...previous],
+          request: d.q, round, history: d.history, page: describeStudio(s, { forMerlin: true }), previous: [...d.previous],
           selected: s.selection.length,
-          picture: picture ? { media_type: picture.media_type, data: picture.data } : null,
+          picture: d.picture ? { media_type: d.picture.media_type, data: d.picture.data } : null,
           current: current ? { media_type: current.media_type, data: current.data } : null,
-        })
+        }, signal)
         if (this.halt) break
-        if (c.store.changes !== mark) { stop(CHANGED); break }
+        if (c.store.changes !== d.mark) { stop(CHANGED); break }
         this.patchRun(id, { stage: 'applying' })
         // The faces the edits set, loaded first, so the text is set in them.
-        await c.fonts.ensureDoc(applyOps(c.store.get().doc, res.ops, scope).doc).catch(() => {})
+        await c.fonts.ensureDoc(applyOps(c.store.get().doc, res.ops, d.scope).doc).catch(() => {})
         if (this.halt) break
-        if (c.store.changes !== mark) { stop(CHANGED); break }
+        if (c.store.changes !== d.mark) { stop(CHANGED); break }
         const before = c.store.get().doc
         let out: Applied = { doc: before, did: [], skipped: [] }
         // Measured in the faces just loaded: an edit that would leave text overflowing is left out.
-        c.store.edit((doc) => (out = fitOps(doc, res.ops, scope, c.store.measure)).doc, { join: stepped })
+        c.store.edit((doc) => (out = fitOps(doc, res.ops, d.scope, c.store.measure)).doc, { join: d.stepped })
         const took = c.store.get().doc !== before
         if (took) {
-          stepped = true
-          mark = c.store.changes
+          d.stepped = true
+          d.mark = c.store.changes
         }
         const { notes, did, skipped } = roundNotes(took, out, res.dropped)
-        previous.push({ say: res.say, notes, did, skipped })
-        if (res.say) says.push(res.say)
-        rounds = [...rounds, { say: res.say, did, skipped }]
-        this.patchRun(id, { rounds, changes: stepped ? mark : null })
+        d.previous.push({ say: res.say, notes, did, skipped })
+        if (res.say) d.says.push(res.say)
+        d.rounds = [...d.rounds, { say: res.say, did, skipped }]
+        this.patchRun(id, { rounds: d.rounds, changes: d.stepped ? d.mark : null })
         // Edits that were all unusable are not "nothing to do": the next round can put them right.
         if (res.done || (!res.ops.length && !res.dropped)) break
       }
       if (this.halt) stop('Stopped.')
     } catch (err) {
-      this.patchTurn(id, { error: message(err, 'merlin') })
+      if (this.halt) stop('Stopped.')
+      else {
+        this.patchTurn(id, { error: message(err, 'merlin') })
+        this.left = d // "Try again" carries on from here
+      }
     } finally {
-      if (says.length) this.patchTurn(id, { a: says.join(' ') })
+      if (d.says.length) this.patchTurn(id, { a: d.says.join(' ') })
       this.patchRun(id, { stage: null })
       this.running = null
+      this.abort = null
       this.set({ busy: false })
     }
   }
 
-  /** Stop Merlin after what it is doing now: a round already asked for is
-   *  left unmade; what earlier rounds did stays. */
+  /** Stop Merlin now: a round asked for is called off and left unmade; what
+   *  earlier rounds did stays. A round the server has started still counts. */
   stop(): void {
     if (this.running === null || this.halt) return
     this.halt = true
-    this.patchRun(this.running, { stopped: 'Stopping after this step…' })
+    this.patchRun(this.running, { stopped: 'Stopping…' })
+    this.abort?.abort()
   }
 
   /** Take Merlin's design back: one undo, while nothing else has changed the page. */

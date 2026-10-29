@@ -392,15 +392,80 @@ describe('Merlin', () => {
 
   it('Stop leaves the round it asked for unmade', async () => {
     const one = later()
-    vi.spyOn(studioApi, 'merlin').mockReturnValueOnce(one.promise)
+    const merlin = vi.spyOn(studioApi, 'merlin').mockReturnValueOnce(one.promise)
     const { store } = studio()
     design('Bolder')
     fireEvent.click(await screen.findByRole('button', { name: 'Stop' }))
-    expect(screen.getByText('Stopping after this step…')).toBeInTheDocument()
+    expect(screen.getByText('Stopping…')).toBeInTheDocument()
+    expect(merlin.mock.calls[0][3]?.aborted).toBe(true) // the request is called off, not waited for
     await act(async () => one.resolve({ say: 'Red.', ops: [{ op: 'set', id: 'r1', fill: '#ff0000' }], done: true, dropped: 0 }))
     await screen.findByText('Stopped.')
     expect(rect(store).fill).toBe('#d9d4cc')
     expect(store.canUndo()).toBe(false)
+  })
+
+  it('Stop while a request is called off shows Stopped, not an error', async () => {
+    vi.spyOn(studioApi, 'merlin').mockImplementationOnce((_s, _p, _b, signal) => new Promise((_, reject) => {
+      signal?.addEventListener('abort', () => reject(new DOMException('The operation was aborted.', 'AbortError')))
+    }))
+    studio()
+    design('Bolder')
+    fireEvent.click(await screen.findByRole('button', { name: 'Stop' }))
+    await screen.findByText('Stopped.')
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('Try again after a later round failed carries on from that round, in the same undo step', async () => {
+    const merlin = vi.spyOn(studioApi, 'merlin')
+      .mockResolvedValueOnce({ say: 'Made the box red.', ops: [{ op: 'set', id: 'r1', fill: '#ff0000' }], done: false, dropped: 0 })
+      .mockRejectedValueOnce(new Error('Merlin couldn’t design that this time. Try again.'))
+      .mockResolvedValueOnce({ say: 'Moved it.', ops: [{ op: 'set', id: 'r1', x: 50 }], done: true, dropped: 0 })
+    const { store } = studio()
+    const before = store.get().doc
+    design('Bolder')
+    await screen.findByRole('alert')
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    await screen.findByText('Merlin made 2 changes.')
+    expect(merlin.mock.calls.map((call) => call[2].round)).toEqual([1, 2, 2])
+    expect(merlin.mock.calls[2][2].previous).toHaveLength(1)
+    expect(screen.getAllByText('Bolder')).toHaveLength(1)
+    expect(rect(store)).toMatchObject({ fill: '#ff0000', x: 50 })
+    act(() => store.undo())
+    expect(store.get().doc).toBe(before) // one undo takes both rounds back
+  })
+
+  it('Try again starts over when the page was changed after the failure', async () => {
+    const merlin = vi.spyOn(studioApi, 'merlin')
+      .mockResolvedValueOnce({ say: 'Red.', ops: [{ op: 'set', id: 'r1', fill: '#ff0000' }], done: false, dropped: 0 })
+      .mockRejectedValueOnce(new Error('Try again.'))
+      .mockResolvedValueOnce({ say: 'Done.', ops: [], done: true, dropped: 0 })
+    const { store } = studio()
+    design('Bolder')
+    await screen.findByRole('alert')
+    act(() => store.edit((d) => ({ ...d, paper: '#000000' })))
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    await waitFor(() => expect(merlin).toHaveBeenCalledTimes(3))
+    expect(merlin.mock.calls[2][2]).toMatchObject({ round: 1, previous: [] })
+  })
+
+  it('with no page in view, the request is kept in a turn that says so', () => {
+    const merlin = vi.spyOn(studioApi, 'merlin')
+    const { store } = studio()
+    act(() => store.set({ page: 5 }))
+    design('Bolder')
+    expect(screen.getByRole('alert')).toHaveTextContent('There’s no page in view for Merlin to design.')
+    expect(screen.getByText('Bolder')).toBeInTheDocument()
+    expect(merlin).not.toHaveBeenCalled()
+  })
+
+  it('a Merlin suggestion fills the box rather than changing the page', () => {
+    const merlin = vi.spyOn(studioApi, 'merlin')
+    studio()
+    fireEvent.click(screen.getByRole('radio', { name: /Merlin/ }))
+    fireEvent.change(screen.getByRole('textbox', { name: 'What Merlin should design' }), { target: { value: 'my draft' } })
+    fireEvent.click(screen.getByRole('button', { name: MERLIN_SUGGESTIONS[1] }))
+    expect(screen.getByRole('textbox', { name: 'What Merlin should design' })).toHaveValue(MERLIN_SUGGESTIONS[1])
+    expect(merlin).not.toHaveBeenCalled()
   })
 
   it('says when the day’s designs are used up, and tries again', async () => {

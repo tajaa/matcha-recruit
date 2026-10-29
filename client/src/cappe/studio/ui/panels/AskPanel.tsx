@@ -310,7 +310,8 @@ export function AskPanel() {
               </>
             )}
             {(merlin ? MERLIN_SUGGESTIONS : SUGGESTIONS).map((q) => (
-              <button key={q} type="button" onClick={() => send(q)} disabled={busy || preparing}
+              // Ask answers straight away; Merlin changes the page, so its suggestion only fills the box.
+              <button key={q} type="button" onClick={() => (merlin ? conv.prompt(q) : send(q))} disabled={busy || preparing}
                 className="block w-full rounded border border-zinc-800 px-2.5 py-1.5 text-left text-zinc-300 hover:border-emerald-500 hover:text-white">{q}</button>
             ))}
           </div>
