@@ -12,7 +12,7 @@ import { Value } from './buyers/Value'
 import { useHashScroll } from './useHashScroll'
 import { useSchedulingPrice } from './useSchedulingPrice'
 
-/** `/` — the scheduling home page. */
+/** `/scheduling` — the scheduling product page. */
 export default function SchedulingTab({ onContact }: { onContact: () => void }) {
   useHashScroll()
   // One fetch for every price on the page: the product "Start now" buys.

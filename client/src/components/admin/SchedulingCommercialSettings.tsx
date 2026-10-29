@@ -47,7 +47,7 @@ export function SchedulingCommercialSettings() {
     try {
       const url = await landingMedia.uploadCommercial(file, item.slot, setProgress)
       setDraft((current) => ({ ...current, [`${item.slot}_url`]: url }))
-      setMessage(`${file.name} uploaded and verified. Preview it, enable the commercial when ready, then choose Save commercial to publish on the home page.`)
+      setMessage(`${file.name} uploaded and verified. Preview it, enable the commercial when ready, then choose Save commercial to publish on the scheduling page.`)
     } catch (err) { setError(err instanceof Error ? err.message : 'Upload failed.') }
     finally { setUploading(null) }
   }
@@ -59,7 +59,7 @@ export function SchedulingCommercialSettings() {
     try {
       const result = await landingMedia.saveCommercial(draft)
       setDraft(result.value)
-      setMessage(result.value.enabled ? 'Commercial enabled on the home page.' : 'Commercial settings saved. The commercial is disabled.')
+      setMessage(result.value.enabled ? 'Commercial enabled on the scheduling page.' : 'Commercial settings saved. The commercial is disabled.')
     } catch (err) { setError(err instanceof Error ? err.message : 'Could not save the commercial.') }
     finally { setSaving(false) }
   }
@@ -68,13 +68,13 @@ export function SchedulingCommercialSettings() {
     <Card>
       <div className="space-y-6 p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
-          <AdminSectionHeader title={<>Scheduling commercial</>} description={<>Upload a desktop film, preview it, turn on the checkbox, then save. The film appears on the <a href="/" target="_blank" rel="noreferrer" className="underline">home page</a>. Uploading alone does not publish it.</>} />
+          <AdminSectionHeader title={<>Scheduling commercial</>} description={<>Upload a desktop film, preview it, turn on the checkbox, then save. The film appears on the <a href="/scheduling" target="_blank" rel="noreferrer" className="underline">scheduling page</a>. Uploading alone does not publish it.</>} />
           <Button type="button" disabled={!loaded || busy || (draft.enabled && !draft.desktop_video_url)} onClick={save}>{saving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}Save commercial</Button>
         </div>
         {!loaded && !error && <p className="text-sm text-zinc-400">Loading commercial settings…</p>}
         {error && <p role="alert" className="rounded border border-red-900/40 bg-red-950/20 p-3 text-sm text-red-300">{error}</p>}
         {message && <p role="status" className="text-sm text-emerald-400">{message}</p>}
-        <label className="flex items-center gap-3 text-sm text-zinc-200"><input type="checkbox" checked={draft.enabled} disabled={!loaded || busy || !draft.desktop_video_url} onChange={(event) => setDraft((current) => ({ ...current, enabled: event.target.checked }))} />Show the commercial on the home page</label>
+        <label className="flex items-center gap-3 text-sm text-zinc-200"><input type="checkbox" checked={draft.enabled} disabled={!loaded || busy || !draft.desktop_video_url} onChange={(event) => setDraft((current) => ({ ...current, enabled: event.target.checked }))} />Show the commercial on the scheduling page</label>
         <div className="space-y-1">
           <label className="flex items-center gap-3 text-sm text-zinc-200"><input type="checkbox" checked={draft.sound_enabled} disabled={!loaded || busy} onChange={(event) => setDraft((current) => ({ ...current, sound_enabled: event.target.checked }))} />Play the commercial with sound</label>
           <p className="pl-7 text-xs leading-relaxed text-zinc-500">{draft.sound_enabled ? 'Visitors can start the film with sound and switch it off with the Sound off button. They can also skip straight to the schedule.' : 'The film plays silently only — no sound controls are shown. Visitors can still skip straight to the schedule.'}</p>

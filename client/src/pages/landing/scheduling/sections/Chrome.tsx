@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { KitStyles } from '../../../../components/marketing/kit/Chrome'
 import { Reveal } from '../../../../components/marketing/kit/motion'
 import { WRAP, display, mono } from '../../../../components/marketing/kit/styles'
+import { ProductNav } from '../../ProductNav'
 import { SCHEDULING_SIGNUP_PATH } from '../signup'
 import { ALL_STEPS, INCIDENT_STEPS, STEPS, type LandingTab, type StepDef, type StepId } from '../styles'
 import { AMBER, BOARD, INK, INK_SOFT, PAPER, STAMP, hexA } from '../../../../components/marketing/kit/theme'
@@ -70,40 +71,10 @@ export function StepHead({
   )
 }
 
-/** The two products this page sells, as routes: crawlable, linkable, and the
- *  back button works. The active tab is the one with the underline. */
-function TabSwitch({ tab, scrolled }: { tab: LandingTab; scrolled: boolean }) {
-  const tabs: { id: LandingTab; to: string; label: string }[] = [
-    { id: 'scheduling', to: '/', label: 'Scheduling' },
-    { id: 'incidents', to: '/incidents', label: 'Incidents' },
-  ]
-  return (
-    <nav aria-label="Product" className="flex shrink-0 items-center gap-0.5 sm:gap-2">
-      {tabs.map((t) => {
-        const on = t.id === tab
-        return (
-          <Link
-            key={t.id}
-            to={t.to}
-            aria-current={on ? 'page' : undefined}
-            className="sched-focus relative rounded-full px-2.5 py-1.5 transition-[background-color,color] duration-200 sm:px-3"
-            style={mono('10.5px', {
-              color: on ? (scrolled ? PAPER : INK) : 'inherit',
-              fontWeight: on ? 600 : 400,
-              backgroundColor: on ? (scrolled ? INK : PAPER) : 'transparent',
-              opacity: on ? 1 : 0.86,
-            })}
-          >
-            {t.label}
-          </Link>
-        )
-      })}
-    </nav>
-  )
-}
-
 export function TopBar({ onContact, tab = 'scheduling' }: { onContact: () => void; tab?: LandingTab }) {
-  const steps: readonly StepDef[] = tab === 'incidents' ? INCIDENT_STEPS : STEPS
+  const steps: readonly Pick<StepDef, 'id' | 'label'>[] = tab === 'home'
+    ? [{ id: 'services', label: 'Services' }, { id: 'approach', label: 'How we work' }]
+    : tab === 'incidents' ? INCIDENT_STEPS : STEPS
   const [scrolled, setScrolled] = useState(false)
   useEffect(() => {
     const on = () => setScrolled(window.scrollY > 8)
@@ -113,30 +84,30 @@ export function TopBar({ onContact, tab = 'scheduling' }: { onContact: () => voi
   }, [])
   return (
     <div
-      className="sticky top-0 z-50 transition-[background-color,box-shadow,color] duration-300"
+      className={`sticky top-0 z-50 transition-[background-color,box-shadow,color] duration-300 ${scrolled ? '' : 'sched-dark'}`}
       style={{
         color: scrolled ? INK : PAPER,
-        backgroundColor: scrolled ? hexA(PAPER, 0.84) : 'transparent',
+        backgroundColor: scrolled ? hexA(PAPER, 0.84) : BOARD.PAPER,
         backdropFilter: scrolled ? 'blur(14px) saturate(1.3)' : 'none',
         WebkitBackdropFilter: scrolled ? 'blur(14px) saturate(1.3)' : 'none',
         boxShadow: scrolled ? `0 1px 0 ${hexA(INK, 0.1)}` : 'none',
       }}
     >
-      <div className={`${WRAP} flex h-16 items-center justify-between gap-3 sm:gap-6`}>
-        <Link to="/" className="sched-focus flex items-baseline gap-2 rounded" aria-label="Matcha home">
+      <div className={`${WRAP} flex min-h-16 flex-wrap items-center justify-between gap-x-3 md:h-16 md:flex-nowrap sm:gap-5`}>
+        <Link to="/" className="sched-focus flex shrink-0 items-center gap-2 rounded" aria-label="Matcha home">
+          <span aria-hidden className="h-3 w-3 shrink-0" style={{ backgroundColor: scrolled ? STAMP : BOARD.STAMP, borderRadius: '50% 2px 50% 50%' }} />
           <span style={{ ...display, fontWeight: 600, fontSize: 21, letterSpacing: '-0.03em' }}>Matcha</span>
         </Link>
-        <TabSwitch tab={tab} scrolled={scrolled} />
-        <nav aria-label="Page sections" className="hidden items-center gap-7 lg:flex">
+        <ProductNav tab={tab} dark={!scrolled} />
+        {steps.length > 0 && <nav aria-label="Page sections" className={`hidden items-center gap-5 ${tab === 'home' ? 'lg:flex' : 'xl:flex'}`}>
           {steps.map((s) => (
-            <a key={s.id} href={`#${s.id}`} className="sched-link sched-focus rounded" style={mono('10.5px', { color: 'inherit' })}>
+            <a key={s.id} href={`#${s.id}`} className="sched-link sched-focus rounded" style={tab === 'home' ? { fontSize: 12, color: 'inherit' } : mono('10.5px', { color: 'inherit' })}>
               {s.label}
             </a>
           ))}
-        </nav>
-        <div className="flex items-center gap-5">
-          {/* under 360px the bar can't hold it; the hero's own Log in link is right below */}
-          <Link to="/login" className="sched-link sched-focus rounded text-[14px] font-medium max-[359px]:hidden">
+        </nav>}
+        <div className="flex h-16 items-center gap-5">
+          <Link to="/login" className="sched-link sched-focus rounded text-[14px] font-medium">
             Log in
           </Link>
           {tab === 'scheduling' ? (
@@ -152,9 +123,9 @@ export function TopBar({ onContact, tab = 'scheduling' }: { onContact: () => voi
             <button
               type="button"
               onClick={onContact}
-              className={`sched-btn ${scrolled ? 'sched-btn-ink' : 'sched-btn-paper'} sched-focus hidden h-10 items-center rounded-full px-4 text-[14px] font-semibold sm:inline-flex`}
+              className={`sched-btn ${scrolled ? 'sched-btn-ink' : 'sched-btn-paper'} sched-focus ${tab === 'home' ? 'inline-flex' : 'hidden sm:inline-flex'} h-10 shrink-0 items-center rounded-full px-4 text-[14px] font-semibold`}
             >
-              Book a walkthrough
+              {tab === 'home' ? 'Let’s talk' : 'Book a walkthrough'}
             </button>
           )}
         </div>
@@ -261,10 +232,12 @@ export function Footer({ tab = 'scheduling' }: { tab?: LandingTab }) {
         <div className="md:col-span-7">
           <div style={{ ...display, fontSize: 'clamp(3rem, 8vw, 6rem)', lineHeight: 0.9 }}>Matcha</div>
           <p className="mt-4 max-w-md text-[0.95rem] leading-[1.6]" style={{ color: hexA(PAPER, 0.62) }}>
-            {tab === 'incidents' ? (
+            {tab === 'home' ? (
+              <>HR, operations, and technology for growing businesses. People and tools to help your next chapter run better.</>
+            ) : tab === 'incidents' ? (
               <>
                 Incidents work alongside{' '}
-                <Link to="/" className="sched-link sched-focus rounded" style={{ color: PAPER }}>
+                <Link to="/scheduling" className="sched-link sched-focus rounded" style={{ color: PAPER }}>
                   Matcha Scheduling
                 </Link>{' '}
                 — the same people, the same locations.
@@ -281,8 +254,9 @@ export function Footer({ tab = 'scheduling' }: { tab?: LandingTab }) {
           </p>
         </div>
         <nav aria-label="Footer" className="flex flex-wrap gap-x-7 gap-y-3 md:col-span-5 md:justify-end" style={mono('10.5px')}>
-          <Link className="sched-link sched-focus rounded" to="/">Scheduling</Link>
-          <Link className="sched-link sched-focus rounded" to="/incidents">Incidents</Link>
+          <Link className="sched-link sched-focus rounded" to="/">Overview</Link>
+          <Link className="sched-link sched-focus rounded" to="/scheduling">Scheduling</Link>
+          <Link className="sched-link sched-focus rounded" to="/incidents">Incident Reporting</Link>
           <Link className="sched-link sched-focus rounded" to="/privacy">Privacy</Link>
           <Link className="sched-link sched-focus rounded" to="/terms">Terms</Link>
           <span style={{ opacity: 0.5 }}>© {new Date().getFullYear()} Matcha</span>
@@ -320,6 +294,10 @@ export function LandingStyles() {
       .is-in .tag-in { opacity: 1; transform: none; }
       .toast-in { opacity: 0; transform: translateY(-12px) scale(.97); transition: opacity .6s ease .7s, transform .7s cubic-bezier(.2,.9,.3,1.2) .7s; }
       .is-in .toast-in { opacity: 1; transform: none; }
+
+      @media (max-width: 767px) {
+        html:has(.sched-root) { scroll-padding-top: 128px; }
+      }
 
       @media (prefers-reduced-motion: reduce) {
         .sent-in, .is-in .sent-in { opacity: 1; transform: none; transition: none; }

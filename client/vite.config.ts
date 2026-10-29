@@ -6,15 +6,15 @@ import { mzFrame } from './vite-mz-frame'
 const backendTarget = process.env.VITE_PROXY_TARGET || 'http://127.0.0.1:8001'
 const backendWsTarget = backendTarget.replace(/^http/, 'ws')
 
-// The landing (`/`, `/incidents`) is a lazy route, so the browser only learns
+// The landing (`/`, `/scheduling`, `/incidents`) is a lazy route, so the browser only learns
 // about its chunks after the entry bundle has downloaded and run. This writes
-// a small inline script into index.html that, on those two paths only, adds
+// a small inline script into index.html that, on those paths only, adds
 // modulepreload links for the route's chunks and preloads its two headline
 // fonts, so they download alongside the entry instead of after it. It also
 // sets the dark page background before any JS runs. Build only; chunk names
 // are read from the bundle, so there is nothing to keep in sync by hand.
-const LANDING = 'src/pages/landing/scheduling/'
-const LANDING_TABS: Record<string, string> = { '/': 'SchedulingTab.tsx', '/incidents': 'IncidentsTab.tsx' }
+const LANDING = 'src/pages/landing/'
+const LANDING_TABS: Record<string, string> = { '/': 'BusinessHome.tsx', '/scheduling': 'scheduling/SchedulingTab.tsx', '/incidents': 'scheduling/IncidentsTab.tsx' }
 const LANDING_FONTS = /^assets\/(hanken-grotesk-latin|instrument-serif-italic-latin)-[\w-]+\.woff2$/
 const cappeHost = process.env.VITE_CAPPE_HOST || 'gummfit.com'
 
@@ -39,7 +39,7 @@ function landingPreload(): Plugin {
         }
         // Not facadeModuleId: Rollup leaves it unset when a lazy module's chunk also carries code shared with others.
         const facade = (file: string) => chunks.find((chunk) => chunk.moduleIds.some((id) => id.endsWith(LANDING + file)))?.fileName
-        const shell = facade('index.tsx')
+        const shell = facade('scheduling/index.tsx')
         if (!shell) return
         // Already fetched by the entry's own <script> and modulepreload tags.
         const entry = closure(chunks.filter((chunk) => chunk.isEntry).map((chunk) => chunk.fileName))

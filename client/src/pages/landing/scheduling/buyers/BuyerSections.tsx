@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react'
 import { ArrowRight, Check, ChevronDown } from 'lucide-react'
 import { Link } from 'react-router-dom'
+import { ProductNav } from '../../ProductNav'
 import { Reveal } from '../../../../components/marketing/kit/motion'
 import { WRAP, display, glassChip, glassPane, mono } from '../../../../components/marketing/kit/styles'
 import { AMBER, INK, INK_SOFT, PAPER, SERIF, STAMP, hexA } from '../../../../components/marketing/kit/theme'
@@ -29,21 +30,18 @@ export function BuyerHeading({ label, eyebrow, title, children, dark = false }: 
 export function BuyerTopBar() {
   return (
     <div className="sticky top-0 z-50" style={{ backgroundColor: hexA(PAPER, 0.94), backdropFilter: 'blur(14px)', borderBottom: `1px solid ${hexA(INK, 0.1)}` }}>
-      <div className={`${WRAP} flex h-16 items-center justify-between gap-3`}>
-        <Link to="/" className="sched-focus rounded" aria-label="Matcha scheduling">
+      <div className={`${WRAP} flex min-h-16 flex-wrap items-center justify-between gap-x-3 md:h-16 md:flex-nowrap`}>
+        <Link to="/" className="sched-focus rounded" aria-label="Matcha home">
           <span style={{ ...display, fontSize: 21, fontWeight: 600 }}>Matcha</span>
         </Link>
-        <nav aria-label="Product" className="flex items-center gap-3 sm:gap-5" style={mono('10.5px')}>
-          <Link to="/" aria-current="page" className="sched-focus rounded" style={{ color: STAMP }}>Scheduling</Link>
-          <Link to="/incidents" className="sched-link sched-focus rounded">Incidents</Link>
-        </nav>
-        <nav aria-label="Buying guide" className="hidden items-center gap-6 lg:flex" style={mono('10.5px')}>
+        <ProductNav tab="scheduling" />
+        <nav aria-label="Buying guide" className="hidden items-center gap-5 xl:flex" style={mono('10.5px')}>
           <a href="#setup" className="sched-link sched-focus rounded">Setup</a>
           <a href="#value" className="sched-link sched-focus rounded">Value</a>
           <a href="#pricing" className="sched-link sched-focus rounded">Pricing</a>
           <a href="#questions" className="sched-link sched-focus rounded">Questions</a>
         </nav>
-        <div className="flex items-center gap-5">
+        <div className="flex h-16 items-center gap-5">
           <Link to="/login" className="sched-link sched-focus rounded text-sm max-[359px]:hidden">Log in</Link>
           <Link to={SCHEDULING_SIGNUP_PATH} className="sched-btn sched-btn-ink sched-focus hidden h-10 items-center rounded-full px-4 text-sm font-medium sm:inline-flex">Start now</Link>
         </div>
