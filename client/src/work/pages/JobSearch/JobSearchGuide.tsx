@@ -46,6 +46,7 @@ const PAGES: Page[] = [
       'Nothing is ever sent, applied for or submitted for you.',
       'Work authorization, sponsorship, clearance, demographic and upload questions are left for you to answer.',
       'Once a search finishes, Draft or Redraft any job from its page. Re-ranking and redrafting don’t use up a search.',
+      'Tailor my résumé rewrites your saved résumé for one job, using only what’s already in it, so you can read it before you apply. Tap a line to see the résumé line it came from. It doesn’t use up a search.',
     ],
   },
   {

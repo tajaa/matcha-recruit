@@ -8,6 +8,7 @@ persists only what survives. A ValueError gets the model one repair.
   discover   links to current postings found on the web (code reads each one)
   screen     relevant or not, and a 0-5 fit, for a batch of jobs by short id
   approach   per job: how to approach, drafts, answers to the real questions
+  tailor     one job: the person's résumé rewritten for it (`tailor.py`)
 
 Checks that matter:
   * a posting's link must be one this run's searches or page loads returned
@@ -17,6 +18,9 @@ Checks that matter:
   * an answer must be to one of the posting's open questions; file,
     authorization and demographic questions are never answered
   * every link must be one this run's searches or page loads returned
+  * a tailored résumé line must quote the résumé lines it rewrites, word for
+    word, and every number in it must be in them; a role, employer, date or
+    skill must be in the résumé as written
 """
 from __future__ import annotations
 
@@ -26,7 +30,7 @@ from typing import Any
 from app.matcha.services.matcha_work.agent_runtime import finish
 
 from . import ats, normalize
-from .comp import verify_quote
+from .comp import amounts_in, numbers_supported, verify_quote
 
 # Titles a plan searches for: what they typed, then kept directions, then the
 # plan's own (`phases.search_titles` says how many the searches take).
@@ -437,3 +441,167 @@ def normalize_approaches(
     if not out:
         raise ValueError(f"give an approach for each job shown, by its short id: {', '.join(batch)}")
     return out, warnings
+
+
+# ── tailored résumé ──────────────────────────────────────────────────────────
+
+MAX_TAILORED_ROLES = 12
+MAX_ROLE_BULLETS = 8
+MAX_TAILORED_SKILLS = 30
+MAX_EXTRA_SECTIONS = 4
+MAX_SECTION_LINES = 8
+MAX_LINE_SOURCES = 3
+
+_LINE = {"type": "object", "properties": {
+    "text": {"type": "string", "description": "The line as it should read for this job"},
+    "sources": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": MAX_LINE_SOURCES,
+                "description": "The résumé lines it rewrites, each copied exactly from the résumé"},
+}, "required": ["text", "sources"]}
+
+TAILOR_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "summary": {"type": "object", "properties": {
+            "text": {"type": "string", "description": "Two to four sentences: who they are, for this job"},
+            "sources": {"type": "array", "items": {"type": "string"}, "maxItems": MAX_LINE_SOURCES,
+                        "description": "Résumé lines it rests on, each copied exactly"},
+        }, "required": ["text", "sources"]},
+        "experience": {
+            "type": "array", "maxItems": MAX_TAILORED_ROLES,
+            "description": "Their roles, most relevant to this job first within the résumé's own order",
+            "items": {"type": "object", "properties": {
+                "role": {"type": "string", "description": "The title exactly as the résumé writes it"},
+                "organization": {"type": "string", "description": "The employer exactly as the résumé writes it"},
+                "dates": {"type": "string", "description": "The dates exactly as the résumé writes them, or ''"},
+                "bullets": {"type": "array", "items": _LINE, "maxItems": MAX_ROLE_BULLETS},
+            }, "required": ["role", "organization", "dates", "bullets"]},
+        },
+        "skills": {"type": "array", "items": {"type": "string"}, "maxItems": MAX_TAILORED_SKILLS,
+                   "description": "Skills from the résumé this job asks for first, each as the résumé writes it"},
+        "sections": {
+            "type": "array", "maxItems": MAX_EXTRA_SECTIONS,
+            "description": "Education, certifications and the like, from the résumé",
+            "items": {"type": "object", "properties": {
+                "heading": {"type": "string"},
+                "lines": {"type": "array", "items": _LINE, "maxItems": MAX_SECTION_LINES},
+            }, "required": ["heading", "lines"]},
+        },
+        "changes": {"type": "array", "items": {"type": "string"}, "maxItems": 6,
+                    "description": "What you changed for this job and why, one short sentence each"},
+        "gaps": {"type": "array", "items": {"type": "string"}, "maxItems": 6,
+                 "description": "What the posting asks for that the résumé doesn't show"},
+    },
+    "required": ["summary", "experience", "skills", "sections", "changes", "gaps"],
+}
+TAILOR_FINISH = finish.tool("Tailored the résumé", "Finish with the résumé tailored to this job.", TAILOR_SCHEMA)
+
+
+def _norm(text: str) -> str:
+    return " ".join(str(text or "").split()).casefold()
+
+
+def _written_in(value: str, resume_norm: str) -> bool:
+    """A role, employer, date or skill as the résumé writes it (case and
+    spacing aside)."""
+    value = _norm(value)
+    return len(value) >= 2 and value in resume_norm
+
+
+def _line(item: Any, resume: str) -> tuple[dict | None, str]:
+    """A rewritten line, kept only when every source is in the résumé word for
+    word and every number in the line is in its sources. (line, why not)."""
+    if not isinstance(item, dict):
+        return None, "not a line"
+    text = _text(item.get("text"), 400)
+    sources = [s for s in (_text(v, 600) for v in (item.get("sources") or [])[:MAX_LINE_SOURCES]) if s] \
+        if isinstance(item.get("sources"), list) else []
+    if not text:
+        return None, "empty"
+    if not sources or not all(verify_quote(source, resume) for source in sources):
+        return None, f"{text[:60]!r}: its sources aren't in the résumé word for word"
+    if not numbers_supported(amounts_in(text), " ".join(sources)):
+        return None, f"{text[:60]!r}: a number in it isn't in its sources"
+    return {"text": text, "sources": sources}, ""
+
+
+def normalize_tailored(args: dict, *, resume: str) -> tuple[dict, list[str]]:
+    """What survives of a tailored résumé: every line traced to the résumé.
+    A line that isn't is dropped (and counted, so the page can say so); a
+    role, employer or date that isn't written in the résumé is left blank,
+    and a role with neither is dropped. Nothing left at all gets the model
+    one repair."""
+    result = finish.answer(args)
+    resume_norm = _norm(resume)
+    warnings: list[str] = []
+    dropped = 0
+
+    summary = result.get("summary") if isinstance(result.get("summary"), dict) else {}
+    summary_text = _text(summary.get("text"), 1200)
+    summary_sources = [s for s in (_text(v, 600) for v in (summary.get("sources") or [])[:MAX_LINE_SOURCES]) if s] \
+        if isinstance(summary.get("sources"), list) else []
+    if summary_text and not (all(verify_quote(s, resume) for s in summary_sources)
+                             and numbers_supported(amounts_in(summary_text), " ".join(summary_sources))):
+        warnings.append("Dropped the summary: a source or number in it isn't in the résumé")
+        summary_text, summary_sources, dropped = "", [], dropped + 1
+
+    experience = []
+    for role in finish.items(result, "experience")[:MAX_TAILORED_ROLES]:
+        if not isinstance(role, dict):
+            continue
+        fields = {}
+        for key, limit in (("role", 160), ("organization", 160), ("dates", 80)):
+            value = _text(role.get(key), limit)
+            if value and not _written_in(value, resume_norm):
+                warnings.append(f"Left out {key} {value[:40]!r}: not written in the résumé")
+                value = ""
+            fields[key] = value
+        bullets = []
+        for item in (role.get("bullets") or [])[:MAX_ROLE_BULLETS] if isinstance(role.get("bullets"), list) else []:
+            line, why = _line(item, resume)
+            if line:
+                bullets.append(line)
+            else:
+                dropped += 1
+                warnings.append(f"Dropped a line: {why}")
+        if not (fields["role"] or fields["organization"]):
+            dropped += len(bullets)
+            continue
+        experience.append({**fields, "bullets": bullets})
+
+    skills: dict[str, str] = {}
+    for skill in result.get("skills") if isinstance(result.get("skills"), list) else []:
+        value = _text(skill, 80)
+        if value and _written_in(value, resume_norm):
+            skills.setdefault(value.casefold(), value)
+        elif value:
+            warnings.append(f"Left out skill {value[:40]!r}: not in the résumé")
+    sections = []
+    for section in finish.items(result, "sections")[:MAX_EXTRA_SECTIONS]:
+        if not isinstance(section, dict):
+            continue
+        heading = _text(section.get("heading"), 60)
+        lines = []
+        for item in (section.get("lines") or [])[:MAX_SECTION_LINES] if isinstance(section.get("lines"), list) else []:
+            line, why = _line(item, resume)
+            if line:
+                lines.append(line)
+            else:
+                dropped += 1
+                warnings.append(f"Dropped a line: {why}")
+        if heading and lines:
+            sections.append({"heading": heading, "lines": lines})
+
+    if not any(role["bullets"] for role in experience):
+        raise ValueError(
+            "no experience line could be traced to the résumé: give each line `sources` copied "
+            "exactly from the résumé, and put no number in a line that isn't in its sources"
+        )
+    return {
+        "summary": {"text": summary_text, "sources": summary_sources},
+        "experience": experience,
+        "skills": list(skills.values())[:MAX_TAILORED_SKILLS],
+        "sections": sections,
+        "changes": _texts(result.get("changes"), items=6, limit=240),
+        "gaps": _texts(result.get("gaps"), items=6, limit=240),
+        "dropped": dropped,
+    }, warnings

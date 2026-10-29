@@ -31,6 +31,9 @@ on each open), what was read from it, and the text Espresso uses, editable in
 place. `hooks/useMyResume.ts` is the one shared, owner-scoped copy, so a résumé
 dropped into a job search form (`ResumeFormField`, drawn for a field with
 `widget: "resume"`) shows in Tasks at once. Rules: `server/.../job_search/CLAUDE.md`.
+A job's pane can tailor that résumé to the posting (`pages/JobSearch/TailoredResume.tsx`,
+"Your résumé for this job"); the rules for what may be rewritten are in the same doc,
+§Tailored résumé.
 
 ## Personal task recaps
 

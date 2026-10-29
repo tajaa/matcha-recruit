@@ -18,7 +18,7 @@ from app.database import connection_or_direct, decode_jsonb
 from app.matcha.models.matcha_work.job_search import JobWeights, LeadPatch
 
 from . import comp as comp_mod
-from . import contracts, normalize, ranking
+from . import contracts, normalize, ranking, tailor
 
 LIVE = ("queued", "planning", "discovering", "screening", "enriching", "approaching")
 TERMINAL = ("done", "failed", "cancelled")
@@ -134,6 +134,9 @@ def lead_summary(row) -> dict:
         "email_draft_id": row.get("email_draft_id"),
         "email_drafted_at": _iso(row.get("email_drafted_at")),
         "email_sent_at": _iso(row.get("email_sent_at")),
+        # Their résumé tailored to this job (`tailor.py`): none, queued,
+        # drafting, done or failed (a run that died reads failed).
+        "resume_status": tailor.status_of(row),
     }
 
 
@@ -152,6 +155,7 @@ def lead_detail(row) -> dict:
         "fit_reasons": decode_jsonb(row.get("fit_reasons"), []) or [],
         "rank_explain": decode_jsonb(row.get("rank_explain"), {}) or {},
         "approach": decode_jsonb(row.get("approach"), {}) or {},
+        "tailored_resume": tailor.view(row),
         "notes": row.get("notes") or "",
     }
 

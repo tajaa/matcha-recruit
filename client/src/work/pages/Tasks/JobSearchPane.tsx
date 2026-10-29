@@ -7,6 +7,7 @@ import { askEspressoPrompt, canDraft, JOB_SEARCH_GUIDE_SEEN_KEY } from '../JobSe
 import { useJobSearch } from '../JobSearch/useJobSearch'
 import SearchDetail from '../JobSearch/SearchDetail'
 import LeadPane from '../JobSearch/LeadPane'
+import { resumePath } from '../../components/resume/paths'
 import JobSearchGuide from '../JobSearch/JobSearchGuide'
 import type { AssistantDraftState } from '../Assistant'
 
@@ -131,12 +132,14 @@ export default function JobSearchPane({
           emailDrafted={draftedLeadId === leadId}
           emailDraftGone={js.emailDraftGone}
           emailPath={`${base}/email`}
+          resumePath={resumePath(base)}
           onClose={() => selectLead(null)}
           onRetry={() => void js.reloadLead()}
           onDismissError={() => js.setLeadError(null)}
           onSetState={(state, id) => void js.setLeadState(state, id)}
           onSaveNotes={(notes, id) => void js.saveNotes(notes, id)}
           onRedraft={() => void js.redraft()}
+          onTailorResume={(id) => void js.tailorResume(id)}
           onDraftEmail={(id) => void draftEmail(id)}
           onEditDraft={(id) => void draftEmail(id, true)}
           onAskEspresso={askEspresso}

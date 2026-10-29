@@ -6,6 +6,7 @@ import {
   GMAIL_DRAFTS_URL, channelLabel, compParts, evidenceLabel, fitText, hostOf, isDrafting, isIrrelevant, partLine, placeholders,
   questionText, tidyPosting, unansweredReason, usableApproach, webUrl,
 } from './jobSearchLogic'
+import TailoredResumeSection from './TailoredResume'
 
 /**
  * One job: pay with the text it came from, how to approach it, and the drafts
@@ -16,8 +17,8 @@ import {
  * job (loading it, saving it, drafting it) is said here, not behind it.
  */
 export default function LeadPane({
-  lead, loadError, error, canDraft, busy, emailNotConnected, emailDrafted, emailDraftGone, emailPath, onClose, onRetry,
-  onDismissError, onSetState, onSaveNotes, onRedraft, onDraftEmail, onEditDraft, onAskEspresso,
+  lead, loadError, error, canDraft, busy, emailNotConnected, emailDrafted, emailDraftGone, emailPath, resumePath, onClose,
+  onRetry, onDismissError, onSetState, onSaveNotes, onRedraft, onTailorResume, onDraftEmail, onEditDraft, onAskEspresso,
 }: {
   lead: JobLeadDetail | null
   /** It couldn't be loaded, and nothing of it is on screen. */
@@ -34,12 +35,16 @@ export default function LeadPane({
   emailDraftGone: boolean
   /** Where Gmail is connected (the Email page). */
   emailPath: string
+  /** Where their saved résumé is kept (Tasks → Résumé). */
+  resumePath: string
   onClose: () => void
   onRetry: () => void
   onDismissError: () => void
   onSetState: (state: string, leadId: string) => void
   onSaveNotes: (notes: string, leadId: string) => void
   onRedraft: () => void
+  /** Tailor their saved résumé to this job, to read before applying. */
+  onTailorResume: (leadId: string) => void
   /** Make the draft (or get back the one still in Gmail). */
   onDraftEmail: (leadId: string) => void
   /** Only the draft already in Gmail: never makes one. */
@@ -72,9 +77,11 @@ export default function LeadPane({
           emailDrafted={emailDrafted}
           emailDraftGone={emailDraftGone}
           emailPath={emailPath}
+          resumePath={resumePath}
           onSetState={onSetState}
           onSaveNotes={onSaveNotes}
           onRedraft={onRedraft}
+          onTailorResume={onTailorResume}
           onDraftEmail={onDraftEmail}
           onEditDraft={onEditDraft}
           onAskEspresso={onAskEspresso}
@@ -95,8 +102,8 @@ export default function LeadPane({
 }
 
 function LeadBody({
-  lead, canDraft, busy, emailNotConnected, emailDrafted, emailDraftGone, emailPath, onSetState, onSaveNotes, onRedraft,
-  onDraftEmail, onEditDraft, onAskEspresso,
+  lead, canDraft, busy, emailNotConnected, emailDrafted, emailDraftGone, emailPath, resumePath, onSetState, onSaveNotes,
+  onRedraft, onTailorResume, onDraftEmail, onEditDraft, onAskEspresso,
 }: {
   lead: JobLeadDetail
   canDraft: boolean
@@ -105,9 +112,11 @@ function LeadBody({
   emailDrafted: boolean
   emailDraftGone: boolean
   emailPath: string
+  resumePath: string
   onSetState: (state: string, leadId: string) => void
   onSaveNotes: (notes: string, leadId: string) => void
   onRedraft: () => void
+  onTailorResume: (leadId: string) => void
   onDraftEmail: (leadId: string) => void
   onEditDraft: (leadId: string) => void
   onAskEspresso: (lead: JobLeadDetail) => void
@@ -224,6 +233,8 @@ function LeadBody({
           </p>
         )}
       </Section>
+
+      <TailoredResumeSection lead={lead} busy={busy} resumePath={resumePath} onTailor={onTailorResume} />
 
       <Section
         title="Your notes"

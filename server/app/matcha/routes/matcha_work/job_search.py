@@ -15,7 +15,7 @@ from app.core.models.auth import CurrentUser
 from app.matcha.dependencies import get_client_company_id, require_admin_or_client
 from app.matcha.models.matcha_work.job_search import EmailDraftRequest, JobSearchCreate, JobWeights, LeadPatch
 from app.matcha.services.matcha_work.agent_runtime import consent
-from app.matcha.services.matcha_work.job_search import enqueue, quota, service
+from app.matcha.services.matcha_work.job_search import enqueue, quota, service, tailor
 
 from .assistant import require_personal_workspace
 
@@ -108,6 +108,17 @@ async def redraft_job_approach(
 ):
     """Draft how to approach this job (again). Free; capped per search."""
     return await _call(enqueue.redraft_approach(current_user, search_id, lead_id))
+
+
+@router.post("/{search_id}/leads/{lead_id}/resume", status_code=202)
+async def tailor_job_resume(
+    search_id: UUID, lead_id: UUID, current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Tailor the caller's saved résumé to this job (again), to read before
+    applying: every line traced to their résumé, nothing added. Returns the
+    job; its `resume_status` moves queued → drafting → done (or failed) and
+    `tailored_resume` holds the result. No allowance units; an hourly limit."""
+    return await _call(tailor.request(current_user, search_id, lead_id))
 
 
 @router.post("/{search_id}/widen", status_code=202)

@@ -92,3 +92,17 @@ async def test_form_setup_does_not_load_search_history(monkeypatch):
     assert result["usage"] == {"remaining": 3} and result["consent"]["granted"] is False
     assert "searches" not in result and result["available"] is True
     history.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_tailoring_passes_the_caller_and_maps_refusals(monkeypatch):
+    from app.matcha.services.matcha_work.job_search.service import JobSearchError
+
+    monkeypatch.setattr(routes.tailor, "request", AsyncMock(return_value={"resume_status": "queued"}))
+    assert await routes.tailor_job_resume(SID, LID, USER) == {"resume_status": "queued"}
+    assert routes.tailor.request.await_args.args == (USER, SID, LID)
+    refusal = {"code": "resume_required", "message": "Add your résumé first."}
+    monkeypatch.setattr(routes.tailor, "request", AsyncMock(side_effect=JobSearchError("x", 422, refusal)))
+    with pytest.raises(HTTPException) as err:
+        await routes.tailor_job_resume(SID, LID, USER)
+    assert err.value.status_code == 422 and err.value.detail == refusal

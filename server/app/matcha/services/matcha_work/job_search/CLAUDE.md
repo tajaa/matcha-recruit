@@ -46,12 +46,13 @@ no source is `web`.
 | One model run | `agent_phase.py` | The search as a `phase_run.RunOwner` (kind `job_search`, counted on the search row); the run itself is `agent_runtime/phase_run.py` |
 | Model contracts | `contracts.py` (pure) | Finish tools + `normalize_plan` / `normalize_postings` / `normalize_screen` / `normalize_approaches` |
 | Prompts | `prompts.py` | Phase instructions and user turns |
+| Tailored résumé | `tailor.py` | One job's résumé, rewritten for it on request (below): `request`, the worker's `run`, `status_of` (stale reads failed), `view`, `as_text` |
 
 REST: `routes/matcha_work/job_search.py` (`/matcha-work/job-searches`).
 Worker: `workers/tasks/job_search.py`. Migrations: `mwjobs01`
 (`mw_job_searches`, `mw_job_leads`, run kind `job_search`), `mwjobs03`
 (`source = 'workable'` allowed), `mwjobs04` (`mw_job_postings`,
-`mw_job_board_searches`).
+`mw_job_board_searches`), `mwjobs05` (`mw_job_leads.resume_*`).
 
 ## How a search finds jobs (call map)
 
@@ -394,6 +395,54 @@ queued (any job can still be drafted). Free and once per search: a search at
 floor 3 is refused 409, which is also the rate limit. The pay-law
 hint (`service.PAY_LAW_STATES`: the employer-side list plus MA) is set at
 re-rank for unposted pay and given to the approach phase.
+
+## Tailored résumé
+
+"Tailor my résumé" on a job (`POST …/leads/{lead}/resume`, 202) rewrites the
+person's saved résumé for that posting, to read before they apply
+(`tailor.py`). On the web it is the job pane's "Your résumé for this job"
+(`pages/JobSearch/TailoredResume.tsx`): each line opens to the résumé lines it
+came from, then what changed and what the posting asks for that the résumé
+doesn't show. The person can edit it on the page (not saved), Copy it or
+Download it as text. Nothing is sent, attached or submitted. The Mac has no
+pane for it yet (the lead JSON only gains fields).
+
+- **Nothing new in anyone's record.** The model gets the posting and the
+  résumé's own text (`user_resumes.raw_text`, ≤20k chars, not the 6k parsed
+  summary the phases get) and no tools. `contracts.normalize_tailored` keeps a
+  line only when each of its `sources` is in the résumé word for word
+  (`comp.verify_quote`) and every number in it is in those sources
+  (`comp.amounts_in` / `numbers_supported`); a role, employer, date or skill
+  is kept only as the résumé writes it (blanked otherwise; a role with
+  neither title nor employer goes). A summary that fails is dropped, not the
+  résumé. `dropped` counts what was left out and the page says so. What the
+  posting asks for and the résumé lacks goes in `gaps`, never into the résumé.
+  Nothing kept at all gets the model one repair, then the job is `failed`.
+  In a 2026-10-29 check with Claude Haiku on a sample résumé, every line
+  survived. The prompt also forbids summary claims worked out from the
+  résumé ("over a decade"): before that, Haiku wrote one.
+- **One run, its own token.** `request` sets `resume_status = 'queued'` with a
+  new `resume_token` and dispatches `workers/tasks/job_search.tailor_job_resume`
+  (same queue as the search, `queue_for`). The task claims `queued → drafting`
+  under that token; only that token writes the outcome (`_finish`), so a newer
+  ask replaces an older run's write. Asked while one runs, the first is left to
+  finish and nothing is spent. A run queued or drafting past `STALE_MINUTES`
+  (7, past the task's 360 s hard limit) died: it reads `failed` everywhere and
+  can be asked again. There is no sweep.
+- **Counted like the search's runs, outside its chain.** The run is a
+  `phase_run` run owned by the search (kind `job_search`, phase
+  `tailor_resume`, counted in `model_runs` / `tokens`, charged to the
+  workspace's tokens), with `dispatch_token` and `recap_generation` cleared,
+  so it never joins a recap and never touches the search's status, cursor or
+  progress note. Delete takes it with the search's runs.
+- **Gates.** Pro (`require_plan`, `job_search`), a posting that has been read
+  (≥200 chars, else 409 `posting_unread`), a saved résumé (else 422
+  `resume_required`), then 10 an hour (`HOURLY_LIMIT`) and the token budget,
+  checked only once it would be accepted. Admins skip the plan, limit and
+  budget. No allowance units: it isn't a search.
+- **The web polls the open job** while it is `queued`/`drafting`
+  (`useJobSearch`): tailoring doesn't move the search's status, so the
+  search's poll never sees it.
 
 ## In the assistant
 
