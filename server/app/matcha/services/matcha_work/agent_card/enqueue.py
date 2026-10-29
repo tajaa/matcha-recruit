@@ -117,7 +117,7 @@ async def enqueue_card_agent(
     # atomic check below correct even for callers that skipped preflight.
     limit: int | None = None
     if not _is_admin(user):
-        limit = allowance.limit_for_plan(await require_plan(user.id, PLAN_PRO, "agent_cards"))
+        limit = await allowance.limit_for_user(user.id, await require_plan(user.id, PLAN_PRO, "agent_cards"))
 
     async with get_connection() as conn:
         async with conn.transaction():

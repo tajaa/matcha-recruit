@@ -114,6 +114,41 @@ describe('compact admin account lists', () => {
     expect(screen.getByRole('menuitem', { name: 'Open Stripe subscription' })).toHaveAttribute('href', 'https://dashboard.stripe.com/subscriptions/sub-0000')
   })
 
+  it('tops up a personal account\'s monthly task units and shows the current top-up', async () => {
+    const { accounts } = setup(3)
+    ;(accounts[1].beta_features as Record<string, boolean | number>).matcha_work_bonus_units = 50
+    const user = userEvent.setup()
+    render(<MemoryRouter><MatchaWork /></MemoryRouter>)
+    await screen.findByText('1–3 of 3')
+    expect(screen.getByText('+50 task units')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Actions for member0001@example.test' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Set extra job searches' }))
+    const input = screen.getByRole('textbox', { name: 'Extra task units' })
+    expect(input).toHaveValue('50')
+    await user.clear(input)
+    await user.click(screen.getByRole('button', { name: '100 units · 20 searches' }))
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(apiMock.patch).toHaveBeenCalledWith('/admin/users/user-0001/beta-flags', { matcha_work_bonus_units: 100 }))
+    await waitFor(() => expect(screen.queryByText('Extra Job Searches')).not.toBeInTheDocument())
+  })
+
+  it('will not save a top-up past the limit or an empty one', async () => {
+    setup(2)
+    const user = userEvent.setup()
+    render(<MemoryRouter><MatchaWork /></MemoryRouter>)
+    await screen.findByText('1–2 of 2')
+    await user.click(screen.getByRole('button', { name: 'Actions for member0001@example.test' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Set extra job searches' }))
+    const input = screen.getByRole('textbox', { name: 'Extra task units' })
+    await user.clear(input)
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
+    await user.type(input, '2001')
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
+    await user.clear(input)
+    await user.type(input, '0')
+    expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled()
+  })
+
   it('paginates business workspaces and keeps their token grant request', async () => {
     setup(60)
     const user = userEvent.setup()

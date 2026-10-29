@@ -26,7 +26,7 @@ routes are `/matcha-work/agent-tasks`.
 |---|---|---|
 | A kind of task | `playbook.py` | `Playbook` (intake, brief check, field library, phases, round entry points, rerank), `IntakeField`, `ItemField`, `Budgets`; `validate()` |
 | Registry | `playbooks.py` | `PLAYBOOKS`, `chain_phases()`; validated at import |
-| Allowance | `allowance.py` | `WEIGHTS` (a task's first round, per playbook), `ROUND_UNITS` (follow-ups), `used_units` (one statement over card runs, job searches and task rounds), `lock` |
+| Allowance | `allowance.py` | `WEIGHTS` (a task's first round, per playbook), `ROUND_UNITS` (follow-ups), `used_units` (one statement over card runs, job searches and task rounds), `lock`, `limit_for_user` (plan limit + the admin's per-person top-up, `users.beta_features.matcha_work_bonus_units`, 0–2000 units, set from Admin → Individuals → "Set extra job searches"; every creator and `task_usage` go through it, never `limit_for_plan` alone) |
 | Start | `enqueue.py` | `preflight`, `create_task`, `start_round` (refine / more / document), `dispatch`, `queue_for`, `tasks_enabled` |
 | Data | `service.py` | Owner-scoped views, list, summary, get (marks seen), status (+ nudge), item patch, cancel, tombstone delete, `close_round`, `end_stale`, `expire_waiting` |
 | Findings | `items.py` | `dedupe_key`, `insert_items` (token-guarded, counts the round), views |

@@ -110,7 +110,7 @@ async def create_search(user, company_id: UUID, body: JobSearchCreate, *,
     if existing is not None:
         return existing
     plan = await preflight(user, company_id, consent_version=body.consent_version)
-    limit = allowance.limit_for_plan(plan) if plan is not None else None
+    limit = await allowance.limit_for_user(user.id, plan) if plan is not None else None
     weights = ranking.clean_weights(body.weights.model_dump() if body.weights else None)
     token = uuid4()
     title = body.title or (body.criteria.titles[0] if body.criteria.titles else body.ask[:80])
