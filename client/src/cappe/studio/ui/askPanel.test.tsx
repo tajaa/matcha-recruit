@@ -3,10 +3,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { CappeApiError } from '../../api'
 import type { Measure } from '../compose/compose'
 import { addItem } from '../model/ops'
-import type { Doc } from '../model/types'
+import type { Doc, RectItem } from '../model/types'
 import { DEFAULT_VIEW, Store, type State } from '../store/store'
-import { studioApi } from '../api'
-import { commandsPayload, conversation, guidePayload, SUGGESTIONS } from './ask/conversation'
+import { studioApi, type MerlinReply } from '../api'
+import { commandsPayload, conversation, guidePayload, MATCH_QUESTION, MERLIN_SUGGESTIONS, roundNotes, SUGGESTIONS } from './ask/conversation'
+import type { Applied } from './ask/merlinOps'
 import { command } from './commands'
 import { StudioContext, type StudioCtx } from './context'
 import { GUIDE } from './guideContent'
@@ -25,8 +26,8 @@ vi.mock('./ask/conversation', async (importOriginal) => {
 })
 
 // Drawing the person's own design needs a real browser: here it gives a stand-in.
-const snap = vi.hoisted(() => ({ calls: 0, result: null as null | { media_type: 'image/jpeg'; data: string; preview: string } }))
-vi.mock('./ask/snapshot', () => ({ snapshot: async () => { snap.calls++; return snap.result } }))
+const snap = vi.hoisted(() => ({ calls: 0, args: [] as unknown[], result: null as null | { media_type: 'image/jpeg'; data: string; preview: string } }))
+vi.mock('./ask/snapshot', () => ({ snapshot: async (...args: unknown[]) => { snap.calls++; snap.args = args; return snap.result } }))
 
 const mono: Measure = { width: (c, t) => [...t].length * 0.5 * c.size, metrics: (c) => ({ asc: 0.8 * c.size, desc: 0.2 * c.size }) }
 const doc = (): Doc => ({
@@ -42,7 +43,8 @@ function studio() {
     overset: new Set(), assets: {}, dialog: null, guide: null, threading: null, snaps: null, marquee: null,
     save: { rev: 1, state: 'saved', message: null, draft: false, live: false },
   } as State, mono)
-  const ctx = { store, siteId: 's1', postId: 'post1' } as unknown as StudioCtx
+  const fonts = { book: { manifest: { faces: [{ family: 'Bebas Neue' }] } }, ensureDoc: vi.fn(async () => {}) }
+  const ctx = { store, siteId: 's1', postId: 'post1', fonts } as unknown as StudioCtx
   render(<StudioContext.Provider value={ctx}><AskPanel /></StudioContext.Provider>)
   return { store, ctx }
 }
@@ -311,5 +313,246 @@ describe('comparing their design with the look they want', () => {
     expect(snap.calls).toBe(1)
     expect(ask.mock.calls[1][2]).toMatchObject({ picture: { data: 'ref2' }, current: null })
     expect(screen.queryByText('Yours now')).toBeNull()
+  })
+})
+
+describe('Merlin', () => {
+  const rect = (store: Store) => store.get().doc.items[0] as RectItem
+  const design = (words: string) => {
+    fireEvent.click(screen.getByRole('radio', { name: /Merlin/ }))
+    fireEvent.change(screen.getByRole('textbox', { name: 'What Merlin should design' }), { target: { value: words } })
+    fireEvent.click(screen.getByRole('button', { name: 'Design it' }))
+  }
+  const later = () => {
+    let resolve!: (r: MerlinReply) => void
+    return { promise: new Promise<MerlinReply>((r) => { resolve = r }), resolve: (r: MerlinReply) => resolve(r) }
+  }
+
+  beforeEach(() => {
+    snap.calls = 0
+    snap.result = { media_type: 'image/jpeg', data: 'page', preview: 'data:image/jpeg;base64,page' }
+  })
+
+  it('designs in rounds, each with the page as it is now, and makes them one undo step', async () => {
+    const merlin = vi.spyOn(studioApi, 'merlin')
+      .mockResolvedValueOnce({ say: 'Made the box red.', ops: [{ op: 'set', id: 'r1', fill: '#ff0000' }], done: false, dropped: 1 })
+      .mockResolvedValueOnce({ say: 'Moved it onto the margin.', ops: [{ op: 'set', id: 'r1', x: 50, y: 50 }, { op: 'set', id: 'zz1', x: 1 }], done: true, dropped: 0 })
+    const { store } = studio()
+    fireEvent.click(screen.getByRole('radio', { name: /Merlin/ }))
+    expect(screen.getByRole('button', { name: MERLIN_SUGGESTIONS[0] })).toBeInTheDocument()
+    const before = store.get().doc
+    design('Make the box bolder')
+    await screen.findByText('Merlin made 2 changes.')
+    expect(merlin).toHaveBeenCalledTimes(2)
+    const [first, second] = merlin.mock.calls.map((call) => call[2])
+    expect(first).toMatchObject({ request: 'Make the box bolder', round: 1, previous: [], picture: null, current: { data: 'page' } })
+    expect(first.page).toContain('[id r1]')
+    expect(snap.args[3]).toEqual({ whole: true })
+    expect(second.round).toBe(2)
+    expect(second.previous).toEqual([{ say: 'Made the box red.', notes: ['Did {"op":"set","id":"r1","fill":"#ff0000"}', '1 edit couldn’t be used and was left out.'], did: 1, skipped: 1 }])
+    expect(first.selected).toBe(0)
+    expect(rect(store)).toMatchObject({ fill: '#ff0000', x: 50, y: 50 })
+    expect(screen.getByText('Made the box red.')).toBeInTheDocument()
+    // Round 1: one made and one the server left out; round 2: one made, one not on the page.
+    expect(screen.getAllByText('1 change · 1 it couldn’t make')).toHaveLength(2)
+    expect(screen.getByText('Before')).toBeInTheDocument()
+    // Both rounds are one step: Undo Merlin takes the page back as it was.
+    fireEvent.click(screen.getByRole('button', { name: 'Undo Merlin' }))
+    expect(store.get().doc.items).toEqual(before.items)
+    expect(screen.getByText('Undone: your page is as it was.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Undo Merlin' })).not.toBeInTheDocument()
+    expect(store.canUndo()).toBe(false)
+  })
+
+  it('stops when the page is changed while it works, keeping what it already did', async () => {
+    const two = later()
+    vi.spyOn(studioApi, 'merlin')
+      .mockResolvedValueOnce({ say: 'Red.', ops: [{ op: 'set', id: 'r1', fill: '#ff0000' }], done: false, dropped: 0 })
+      .mockReturnValueOnce(two.promise)
+    const { store } = studio()
+    design('Bolder')
+    await waitFor(() => expect(rect(store).fill).toBe('#ff0000'))
+    act(() => store.edit((d) => ({ ...d, paper: '#000000' })))
+    await act(async () => two.resolve({ say: 'Moved.', ops: [{ op: 'set', id: 'r1', x: 99 }], done: true, dropped: 0 }))
+    await screen.findByText('You changed the page while Merlin worked, so it stopped there.')
+    expect(rect(store).x).toBe(0)
+    expect(screen.getByText('Merlin made 1 change.')).toBeInTheDocument()
+    // One ⌘Z now undoes the person's change, so Undo Merlin isn't offered.
+    expect(screen.queryByRole('button', { name: 'Undo Merlin' })).not.toBeInTheDocument()
+  })
+
+  it('says how much was selected, so a narrow change can go to the quick model', async () => {
+    const merlin = vi.spyOn(studioApi, 'merlin').mockResolvedValueOnce({ say: 'Done.', ops: [], done: true, dropped: 0 })
+    const { store } = studio()
+    act(() => store.set({ selection: ['r1'] }))
+    design('Make it red')
+    await screen.findByText('Merlin left the page as it was.')
+    expect(merlin.mock.calls[0][2].selected).toBe(1)
+  })
+
+  it('Stop leaves the round it asked for unmade', async () => {
+    const one = later()
+    const merlin = vi.spyOn(studioApi, 'merlin').mockReturnValueOnce(one.promise)
+    const { store } = studio()
+    design('Bolder')
+    fireEvent.click(await screen.findByRole('button', { name: 'Stop' }))
+    expect(screen.getByText('Stopping…')).toBeInTheDocument()
+    expect(merlin.mock.calls[0][3]?.aborted).toBe(true) // the request is called off, not waited for
+    await act(async () => one.resolve({ say: 'Red.', ops: [{ op: 'set', id: 'r1', fill: '#ff0000' }], done: true, dropped: 0 }))
+    await screen.findByText('Stopped.')
+    expect(rect(store).fill).toBe('#d9d4cc')
+    expect(store.canUndo()).toBe(false)
+  })
+
+  it('Stop while a request is called off shows Stopped, not an error', async () => {
+    vi.spyOn(studioApi, 'merlin').mockImplementationOnce((_s, _p, _b, signal) => new Promise((_, reject) => {
+      signal?.addEventListener('abort', () => reject(new DOMException('The operation was aborted.', 'AbortError')))
+    }))
+    studio()
+    design('Bolder')
+    fireEvent.click(await screen.findByRole('button', { name: 'Stop' }))
+    await screen.findByText('Stopped.')
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('Try again after a later round failed carries on from that round, in the same undo step', async () => {
+    const merlin = vi.spyOn(studioApi, 'merlin')
+      .mockResolvedValueOnce({ say: 'Made the box red.', ops: [{ op: 'set', id: 'r1', fill: '#ff0000' }], done: false, dropped: 0 })
+      .mockRejectedValueOnce(new Error('Merlin couldn’t design that this time. Try again.'))
+      .mockResolvedValueOnce({ say: 'Moved it.', ops: [{ op: 'set', id: 'r1', x: 50 }], done: true, dropped: 0 })
+    const { store } = studio()
+    const before = store.get().doc
+    design('Bolder')
+    await screen.findByRole('alert')
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    await screen.findByText('Merlin made 2 changes.')
+    expect(merlin.mock.calls.map((call) => call[2].round)).toEqual([1, 2, 2])
+    expect(merlin.mock.calls[2][2].previous).toHaveLength(1)
+    expect(screen.getAllByText('Bolder')).toHaveLength(1)
+    expect(rect(store)).toMatchObject({ fill: '#ff0000', x: 50 })
+    act(() => store.undo())
+    expect(store.get().doc).toBe(before) // one undo takes both rounds back
+  })
+
+  it('Try again starts over when the page was changed after the failure', async () => {
+    const merlin = vi.spyOn(studioApi, 'merlin')
+      .mockResolvedValueOnce({ say: 'Red.', ops: [{ op: 'set', id: 'r1', fill: '#ff0000' }], done: false, dropped: 0 })
+      .mockRejectedValueOnce(new Error('Try again.'))
+      .mockResolvedValueOnce({ say: 'Done.', ops: [], done: true, dropped: 0 })
+    const { store } = studio()
+    design('Bolder')
+    await screen.findByRole('alert')
+    act(() => store.edit((d) => ({ ...d, paper: '#000000' })))
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    await waitFor(() => expect(merlin).toHaveBeenCalledTimes(3))
+    expect(merlin.mock.calls[2][2]).toMatchObject({ round: 1, previous: [] })
+  })
+
+  it('with no page in view, the request is kept in a turn that says so', () => {
+    const merlin = vi.spyOn(studioApi, 'merlin')
+    const { store } = studio()
+    act(() => store.set({ page: 5 }))
+    design('Bolder')
+    expect(screen.getByRole('alert')).toHaveTextContent('There’s no page in view for Merlin to design.')
+    expect(screen.getByText('Bolder')).toBeInTheDocument()
+    expect(merlin).not.toHaveBeenCalled()
+  })
+
+  it('a Merlin suggestion fills the box rather than changing the page', () => {
+    const merlin = vi.spyOn(studioApi, 'merlin')
+    studio()
+    fireEvent.click(screen.getByRole('radio', { name: /Merlin/ }))
+    fireEvent.change(screen.getByRole('textbox', { name: 'What Merlin should design' }), { target: { value: 'my draft' } })
+    fireEvent.click(screen.getByRole('button', { name: MERLIN_SUGGESTIONS[1] }))
+    expect(screen.getByRole('textbox', { name: 'What Merlin should design' })).toHaveValue(MERLIN_SUGGESTIONS[1])
+    expect(merlin).not.toHaveBeenCalled()
+  })
+
+  it('says when the day’s designs are used up, and tries again', async () => {
+    const merlin = vi.spyOn(studioApi, 'merlin')
+      .mockRejectedValueOnce(new CappeApiError('Too many requests. Please try again later.', undefined, 429))
+      .mockResolvedValueOnce({ say: 'Done.', ops: [], done: true, dropped: 0 })
+    studio()
+    design('Bolder')
+    expect(await screen.findByRole('alert')).toHaveTextContent('Merlin has designed as much as it can for you today.')
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    await screen.findByText('Merlin left the page as it was.')
+    expect(merlin).toHaveBeenCalledTimes(2)
+    expect(screen.getAllByText('Bolder')).toHaveLength(1)
+  })
+
+  it('goes on to the next round when every edit it sent was unusable, telling the next round so', async () => {
+    const merlin = vi.spyOn(studioApi, 'merlin')
+      .mockResolvedValueOnce({ say: 'Tried a grid.', ops: [], done: false, dropped: 3 })
+      .mockResolvedValueOnce({ say: 'Made the box red.', ops: [{ op: 'set', id: 'r1', fill: '#ff0000' }], done: true, dropped: 0 })
+    const { store } = studio()
+    design('Bolder')
+    await screen.findByText('Merlin made 1 change.')
+    expect(merlin).toHaveBeenCalledTimes(2)
+    expect(merlin.mock.calls[1][2].previous).toEqual([
+      { say: 'Tried a grid.', notes: ['3 edits couldn’t be used and were left out.'], did: 0, skipped: 1 }])
+    expect(rect(store).fill).toBe('#ff0000')
+  })
+
+  it('stops when the model sent nothing at all, or says it is done', async () => {
+    const merlin = vi.spyOn(studioApi, 'merlin').mockResolvedValueOnce({ say: 'It already matches.', ops: [], done: false, dropped: 0 })
+    studio()
+    design('Bolder')
+    await screen.findByText('Merlin left the page as it was.')
+    expect(merlin).toHaveBeenCalledTimes(1)
+  })
+
+  it('Ask the Studio and Ask about this answer, even when the panel was last left on Merlin', () => {
+    const { store, ctx } = studio()
+    const id = store.get().doc.items[0].id
+    act(() => command('merlin').run(ctx))
+    expect(conversation(store).get().mode).toBe('merlin')
+    act(() => command('ask').run(ctx))
+    expect(conversation(store).get().mode).toBe('ask')
+    // "Ask about this" starts a question; sent from Merlin's box it would design from the same words.
+    act(() => command('merlin').run(ctx))
+    act(() => store.set({ selection: [id] }))
+    act(() => command('ask-about').run(ctx))
+    expect(conversation(store).get().mode).toBe('ask')
+    expect(box()).toHaveValue(MATCH_QUESTION)
+  })
+
+  it('Help → Design with Merlin opens the panel in Merlin; Merlin isn’t a command Ask offers', () => {
+    const { store, ctx } = studio()
+    act(() => store.set({ panels: [] }))
+    act(() => command('merlin').run(ctx))
+    expect(store.get().panels).toContain('ask')
+    expect(conversation(store).get().mode).toBe('merlin')
+    expect(commandsPayload(store.get()).map((c) => c.id)).not.toContain('merlin')
+  })
+})
+
+describe('what a round tells the next one', () => {
+  const applied = (did: number, skipped: number): Applied => ({
+    doc: doc(),
+    did: Array.from({ length: did }, (_, k) => `Did ${k}`),
+    skipped: Array.from({ length: skipped }, (_, k) => `Skipped ${k}`),
+  })
+
+  it('counts what took and what didn’t, and says how many edits were left out', () => {
+    const r = roundNotes(true, applied(2, 1), 1)
+    expect(r).toEqual({ notes: ['Did 0', 'Did 1', 'Skipped 0', '1 edit couldn’t be used and was left out.'], did: 2, skipped: 2 })
+    expect(roundNotes(true, applied(1, 0), 3).notes.at(-1)).toBe('3 edits couldn’t be used and were left out.')
+  })
+
+  it('counts nothing as done when the page didn’t change', () => {
+    const r = roundNotes(false, applied(2, 1), 0)
+    expect(r.did).toBe(0)
+    expect(r.notes[0]).toMatch(/^None of these edits took/)
+    expect(r.skipped).toBe(2)
+  })
+
+  it('never sends more than the server takes: 60 notes, and no more skipped than that', () => {
+    // 40 edits made and 70 not (many text frames pushed past their size): the next request would be refused over 60.
+    const r = roundNotes(true, applied(40, 70), 2)
+    expect(r.notes).toHaveLength(60)
+    expect(r.did).toBe(40)
+    expect(r.skipped).toBe(60)
+    expect(roundNotes(true, applied(0, 90), 0).skipped).toBe(60)
   })
 })

@@ -90,6 +90,8 @@ GUMMFIT_DIRECTORY = "gummfit.directory"
 GUMMFIT_BOOKING = "gummfit.booking"
 GUMMFIT_MAGAZINE = "gummfit.magazine"
 GUMMFIT_STUDIO = "gummfit.studio"
+GUMMFIT_STUDIO_MERLIN = "gummfit.studio_merlin"
+GUMMFIT_STUDIO_MERLIN_REFINE = "gummfit.studio_merlin_refine"
 GUMMFIT_SOCIAL = "gummfit.social"
 
 # ── Tell-Us ──
@@ -97,6 +99,7 @@ TELLUS_FLYER_AI = "tellus.flyer_ai"
 
 # What `default` runs on the surfaces that were OpenAI Luna (`claude_default`).
 _HAIKU = "Claude Haiku 5.5"
+_SONNET = "Claude Sonnet 5.5"
 _GEMINI = "Gemini"
 
 SURFACES: tuple[SurfaceDef, ...] = (
@@ -181,6 +184,12 @@ SURFACES: tuple[SurfaceDef, ...] = (
                "Ask the Studio: how to do something in Gummfit Studio and how to make a page look a "
                "certain way, from the Studio's guide and the page in view. Answers only; nothing on the "
                "page changes.", _HAIKU),
+    SurfaceDef(GUMMFIT_STUDIO_MERLIN, GUMMFIT, "Merlin in the Studio: design",
+               "Designs the page in view from what the person asks (often with a picture of a look): the "
+               "round that decides the look, and any round after one whose edits mostly didn't take.", _SONNET),
+    SurfaceDef(GUMMFIT_STUDIO_MERLIN_REFINE, GUMMFIT, "Merlin in the Studio: polish",
+               "Merlin's later rounds, which look at what was done and fix fit, alignment and spacing, and "
+               "narrow changes to a frame or two with no picture to match.", _HAIKU),
     SurfaceDef(GUMMFIT_SOCIAL, GUMMFIT, "Social replies and captions",
                "Drafts replies to Instagram and Facebook comments and messages, grounded on the "
                "store's catalog and the owner's notes, and writes caption options for a post.", _HAIKU),

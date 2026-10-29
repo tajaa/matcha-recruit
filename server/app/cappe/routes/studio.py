@@ -29,7 +29,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.routing import APIRoute
 from pydantic import BaseModel, Field
 
-from ...core.services.redis_cache import check_rate_limit
+from ...core.services.redis_cache import check_rate_limit, refund_rate_limit
 from ...database import get_connection
 from ..dependencies import require_cappe_account
 from ..models.cappe import CappeAccount
@@ -40,6 +40,7 @@ from ..services.magazine.story_schema import referenced_asset_ids
 from ..services.magazine.studio import ask
 from ..services.magazine.studio import bank as studio_bank
 from ..services.magazine.studio import custom_fonts
+from ..services.magazine.studio import merlin
 from ..services.magazine.studio.identity import portable_identity
 from ..services.magazine.studio.collections import MAX_COLLECTION_BYTES, MAX_COLLECTIONS, collection_doc
 from ..services.magazine.studio.schema import DocError
@@ -275,6 +276,29 @@ class StudioAsk(BaseModel):
     current: Optional[StudioPicture] = None
 
 
+class StudioMerlinRound(BaseModel):
+    say: str = Field("", max_length=merlin.MAX_SAY)
+    notes: list[Annotated[str, Field(max_length=merlin.MAX_NOTE)]] = Field(default_factory=list,
+                                                                          max_length=merlin.MAX_NOTES)
+    # How many of its edits took and how many didn't (a bad round sends the next to the design model).
+    did: int = Field(0, ge=0, le=merlin.MAX_OPS)
+    skipped: int = Field(0, ge=0, le=merlin.MAX_NOTES)
+
+
+class StudioMerlin(BaseModel):
+    request: str = Field(min_length=1, max_length=ask.MAX_QUESTION)
+    round: int = Field(1, ge=1, le=merlin.MAX_ROUNDS)
+    history: list[StudioAskTurn] = Field(default_factory=list, max_length=ask.MAX_HISTORY)
+    page: str = Field("", max_length=ask.MAX_PAGE_CHARS)
+    # What the earlier rounds of this design said and did.
+    previous: list[StudioMerlinRound] = Field(default_factory=list, max_length=merlin.MAX_ROUNDS - 1)
+    # Frames selected when the design started: one or two, with no picture, is a narrow change.
+    selected: int = Field(0, ge=0, le=6_000)
+    picture: Optional[StudioPicture] = None
+    # The page in view as it looks now.
+    current: Optional[StudioPicture] = None
+
+
 def _stale(rev: int) -> HTTPException:
     return HTTPException(status_code=status.HTTP_409_CONFLICT, detail={
         "code": "stale_rev", "rev": rev,
@@ -478,3 +502,48 @@ async def ask_studio(site_id: UUID, post_id: UUID, body: StudioAsk,
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=ask.UNAVAILABLE) from exc
     except ask.AskFailed as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=ask.FAILED) from exc
+
+
+@router.post("/sites/{site_id}/studio/stories/{post_id}/merlin")
+async def merlin_round(site_id: UUID, post_id: UUID, body: StudioMerlin,
+                       account: CappeAccount = Depends(require_cappe_account)):
+    """One round of Merlin designing the page in view: `{"say", "ops":
+    [edit], "done", "dropped"}`. The Studio checks and applies the edits;
+    nothing is saved here. Each round counts against the day's allowance
+    (`merlin.daily_rounds`: three rounds a design), unless nothing was paid
+    for it (no model, or the provider turned the call away): that one is given
+    back. A round on the design model also takes one of the day's design rounds
+    (`merlin.daily_design_rounds`); with none left it runs on the polish model."""
+    async with get_connection() as conn:
+        await get_owned_site(conn, site_id, account.id)
+        fmt = await conn.fetchval("SELECT format FROM cappe_posts WHERE id = $1 AND site_id = $2", post_id, site_id)
+        if fmt is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Story not found")
+        if fmt != "pages":
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=NOT_PAGES)
+        ent = await resolve_entitlements(account.plan, conn=conn)
+    try:
+        r = merlin.request(body.model_dump())
+    except ask.AskInvalid as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    await check_rate_limit(str(account.id), "cappe_studio_merlin", merlin.daily_rounds(ent.features), 86_400)
+
+    async def may_design() -> bool:
+        try:
+            await check_rate_limit(str(account.id), "cappe_studio_merlin_design",
+                                   merlin.daily_design_rounds(ent.features), 86_400)
+        except HTTPException:
+            return False
+        return True
+
+    try:
+        return await merlin.design(r, may_design=may_design)
+    except merlin.MerlinUnavailable as exc:
+        await refund_rate_limit(str(account.id), "cappe_studio_merlin")
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=merlin.UNAVAILABLE) from exc
+    except merlin.MerlinFailed as exc:
+        # Given back only when nothing was paid for: a timeout or a reply that
+        # couldn't be used cost the same as one that worked.
+        if not exc.billed:
+            await refund_rate_limit(str(account.id), "cappe_studio_merlin")
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=merlin.FAILED) from exc

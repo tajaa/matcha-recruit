@@ -93,6 +93,7 @@ export class Store {
   private future: Doc[] = []
   private lastKey: string | null = null
   private lastAt = 0
+  private changed = 0
   /** Called after each change to the document (autosave). */
   onDocChange: ((doc: Doc) => void) | null = null
 
@@ -109,6 +110,12 @@ export class Store {
 
   get = (): State => this.state
 
+  /** How many times the document has been changed, undone, redone or
+   *  replaced (not recomposed): unchanged means nobody touched it since. */
+  get changes(): number {
+    return this.changed
+  }
+
   subscribe = (fn: Listener): (() => void) => {
     this.listeners.add(fn)
     return () => this.listeners.delete(fn)
@@ -122,8 +129,9 @@ export class Store {
   }
 
   /** Change the document. `key`: edits with the same key within a moment are
-   *  one undo step. */
-  edit(fn: (doc: Doc) => Doc, { key = null, extra }: { key?: string | null; extra?: Partial<State> } = {}): void {
+   *  one undo step. `join`: this edit belongs to the undo step on top (Merlin's
+   *  later rounds, when nothing else has changed the document since). */
+  edit(fn: (doc: Doc) => Doc, { key = null, extra, join = false }: { key?: string | null; extra?: Partial<State>; join?: boolean } = {}): void {
     const before = this.state.doc
     const edited = fn(before)
     if (edited === before) {
@@ -137,13 +145,14 @@ export class Store {
     const problem = doc.identity ? docProblem(doc) : null
     if (problem) { this.set({ notice: problem }); return }
     const now = Date.now()
-    if (!(key && key === this.lastKey && now - this.lastAt < COALESCE_MS)) {
+    if (!(join && this.past.length) && !(key && key === this.lastKey && now - this.lastAt < COALESCE_MS)) {
       this.past.push(before)
       if (this.past.length > HISTORY) this.past.shift()
     }
     this.lastKey = key
     this.lastAt = now
     this.future = []
+    this.changed++
     this.state = within({ ...this.state, ...extra, doc, overset, save: { ...this.state.save, state: 'dirty' } })
     this.emit()
     this.onDocChange?.(doc)
@@ -187,6 +196,7 @@ export class Store {
 
   private restore(doc: Doc): void {
     this.lastKey = null
+    this.changed++
     const composed = composeDoc(doc, this.measure)
     const problem = composed.doc.identity ? docProblem(composed.doc) : null
     const safe = problem ? doc : composed.doc
@@ -202,6 +212,7 @@ export class Store {
     this.past = []
     this.future = []
     this.lastKey = null
+    this.changed++
     const composed = composeDoc(doc, this.measure)
     const problem = composed.doc.identity ? docProblem(composed.doc) : null
     this.state = { ...this.state, ...extra, doc: problem ? doc : composed.doc, overset: composed.overset, ...(problem ? { notice: problem } : {}), selection: [], editing: null,

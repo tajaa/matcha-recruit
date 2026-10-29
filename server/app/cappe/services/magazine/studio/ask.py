@@ -128,7 +128,7 @@ def daily_allowance(features: dict[str, Any]) -> int:
     return MAGAZINE_PER_DAY if features.get("magazine") else FREE_PER_DAY
 
 
-def _picture_block(picture: Optional[dict]) -> Optional[dict]:
+def picture_block(picture: Optional[dict]) -> Optional[dict]:
     """The reference picture as a Messages block. Raises `AskInvalid` unless
     it is a JPEG, PNG or WebP picture of a sensible size."""
     if not picture:
@@ -170,8 +170,8 @@ def question(raw: dict) -> Question:
         raise AskInvalid("Ask a question.")
     if len(_guide_text(q.guide)) > MAX_GUIDE_CHARS or len(q.page) > MAX_PAGE_CHARS:
         raise AskInvalid("There's too much to send with this question. Reload the Studio and try again.")
-    q.picture = _picture_block(raw.get("picture"))
-    q.current = _picture_block(raw.get("current"))
+    q.picture = picture_block(raw.get("picture"))
+    q.current = picture_block(raw.get("current"))
     return q
 
 

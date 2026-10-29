@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { ArrowUp, BookOpen, ImagePlus, Loader2, RotateCcw, Sparkles, Upload, X } from 'lucide-react'
+import { ArrowUp, BookOpen, CircleStop, ImagePlus, Loader2, RotateCcw, Sparkles, Undo2, Upload, WandSparkles, X } from 'lucide-react'
 import { useStudio } from '../../store/store'
 import type { AskLink } from '../../api'
 import { COMMANDS } from '../commands'
 import { useCtx } from '../context'
 import { GUIDE } from '../guideContent'
-import { conversation, MAX_QUESTION, preparePicture, SUGGESTIONS, useConversation, type Picture, type Turn } from '../ask/conversation'
+import { conversation, MAX_QUESTION, MERLIN_ROUNDS, MERLIN_SUGGESTIONS, preparePicture, SUGGESTIONS, useConversation,
+  type Picture, type Turn } from '../ask/conversation'
 
 /** Commands an answer may name but never offers as a button: they take
  *  something away, so the person does them from the menus. */
@@ -63,26 +64,95 @@ function Links({ links }: { links: AskLink[] }) {
   )
 }
 
+const STAGE = { looking: 'Looking at your page…', designing: 'Designing…', applying: 'Making the changes…' } as const
+
+/** What Merlin did with a request: each round's words and changes, what it
+ *  is doing now (with Stop), and Undo Merlin while one undo takes it all back. */
+function MerlinView({ turn, last, onRetry }: { turn: Turn; last: boolean; onRetry: () => void }) {
+  const c = useCtx()
+  const conv = conversation(c.store)
+  const run = turn.merlin!
+  // Redrawn as the document changes: Undo Merlin is offered only while nothing else has.
+  const changes = useStudio(c.store, () => c.store.changes)
+  const made = run.rounds.reduce((n, r) => n + r.did, 0)
+  const canUndo = !run.stage && !run.undone && run.changes !== null && run.changes === changes
+  return (
+    <div className="space-y-2">
+      {run.rounds.map((r, k) => (
+        <div key={k}>
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-violet-300">Merlin · round {k + 1}</p>
+          {r.say && <Answer text={r.say} />}
+          <p className="mt-0.5 text-[10px] text-zinc-500">
+            {r.did ? `${r.did} change${r.did === 1 ? '' : 's'}` : 'No changes'}
+            {r.skipped ? ` · ${r.skipped} it couldn’t make` : ''}
+          </p>
+        </div>
+      ))}
+      {run.stage && (
+        <p role="status" className="flex items-center gap-1.5 text-xs text-zinc-400">
+          <Loader2 className="h-3 w-3 animate-spin" />
+          {run.stopped ?? <>{STAGE[run.stage]} <span className="text-zinc-600">Round {Math.min(run.rounds.length + 1, MERLIN_ROUNDS)} of {MERLIN_ROUNDS}</span></>}
+          {!run.stopped && (
+            <button type="button" onClick={() => conv.stop()}
+              className="ml-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-800 hover:text-white">
+              <CircleStop className="h-3 w-3" />Stop
+            </button>
+          )}
+        </p>
+      )}
+      {!run.stage && run.stopped && <p className="text-xs text-amber-300">{run.stopped}</p>}
+      {turn.error && (
+        <p role="alert" className="text-xs text-red-300">
+          {turn.error}{' '}
+          {last && <button type="button" onClick={onRetry} className="text-emerald-400 hover:text-emerald-300">Try again</button>}
+        </p>
+      )}
+      {!run.stage && (made > 0 || run.undone || (!turn.error && !run.stopped)) && (
+        <div className="flex items-center gap-2 text-[11px] text-zinc-400">
+          <span>{run.undone ? 'Undone: your page is as it was.' : made ? `Merlin made ${made} change${made === 1 ? '' : 's'}.` : 'Merlin left the page as it was.'}</span>
+          {canUndo && (
+            <button type="button" onClick={() => conv.undoMerlin(c, turn.id)}
+              className="ml-auto inline-flex items-center gap-1 rounded border border-zinc-700 px-2 py-0.5 text-zinc-200 hover:border-violet-400 hover:text-white">
+              <Undo2 className="h-3 w-3" />Undo Merlin
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function TurnView({ turn, last, onRetry }: { turn: Turn; last: boolean; onRetry: () => void }) {
   return (
     <div className="space-y-2">
-      <div className="ml-6 rounded-lg bg-zinc-800 px-3 py-2 text-xs text-zinc-100">
-        {turn.picture && (
+      <div className={`ml-6 rounded-lg px-3 py-2 text-xs text-zinc-100 ${turn.merlin ? 'bg-violet-950/60' : 'bg-zinc-800'}`}>
+        {(turn.picture || (turn.merlin && turn.current)) && (
           <div className="mb-2 flex items-end gap-2">
-            <figure className="min-w-0">
-              <img src={turn.picture.preview} alt="Your reference picture" className="max-h-24 rounded" />
-              <figcaption className="mt-0.5 text-[10px] text-zinc-500">The look you want</figcaption>
-            </figure>
+            {turn.picture && (
+              <figure className="min-w-0">
+                <img src={turn.picture.preview} alt="Your reference picture" className="max-h-24 rounded" />
+                <figcaption className="mt-0.5 text-[10px] text-zinc-500">The look you want</figcaption>
+              </figure>
+            )}
             {turn.current && (
               <figure className="min-w-0">
-                <img src={turn.current.preview} alt="Your design, as sent" className="max-h-24 rounded border border-zinc-700" />
-                <figcaption className="mt-0.5 text-[10px] text-zinc-500">Yours now</figcaption>
+                <img src={turn.current.preview} alt={turn.merlin ? 'Your page before Merlin' : 'Your design, as sent'}
+                  className="max-h-24 rounded border border-zinc-700" />
+                <figcaption className="mt-0.5 text-[10px] text-zinc-500">{turn.merlin ? 'Before' : 'Yours now'}</figcaption>
               </figure>
             )}
           </div>
         )}
         <p className="whitespace-pre-wrap">{turn.q}</p>
       </div>
+      {turn.merlin ? <MerlinView turn={turn} last={last} onRetry={onRetry} /> : <AskView turn={turn} last={last} onRetry={onRetry} />}
+    </div>
+  )
+}
+
+function AskView({ turn, last, onRetry }: { turn: Turn; last: boolean; onRetry: () => void }) {
+  return (
+    <>
       {turn.a !== null && (
         <div>
           <Answer text={turn.a} />
@@ -98,17 +168,19 @@ function TurnView({ turn, last, onRetry }: { turn: Turn; last: boolean; onRetry:
       {turn.a === null && !turn.error && (
         <p className="flex items-center gap-1.5 text-xs text-zinc-400"><Loader2 className="h-3 w-3 animate-spin" />Thinking…</p>
       )}
-    </div>
+    </>
   )
 }
 
 /** Ask the Studio: questions about using the Studio or about the page in
  *  view, answered from the guide and the page (ui/ask/conversation.ts).
- *  Answers explain; the person makes every change. */
+ *  Answers explain; the person makes every change. In Merlin mode the
+ *  request is designed instead: Merlin changes the page itself. */
 export function AskPanel() {
   const c = useCtx()
   const conv = conversation(c.store)
-  const { turns, busy, focus, draft } = useConversation(c.store)
+  const { turns, busy, focus, draft, mode } = useConversation(c.store)
+  const merlin = mode === 'merlin'
   const [text, setText] = useState('')
   // Words "Ask about this" started the question with: put in the box once,
   // and taken, so closing and opening the panel doesn't put it back.
@@ -140,7 +212,7 @@ export function AskPanel() {
 
   const send = (q = text) => {
     if (!q.trim() || busy || preparing) return
-    void conv.ask(c, q, picture)
+    void (merlin ? conv.design(c, q, picture) : conv.ask(c, q, picture))
     conv.taken()
     setText('')
     setPicture(null)
@@ -226,10 +298,20 @@ export function AskPanel() {
       <div ref={list} className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 pb-3">
         {turns.length === 0 ? (
           <div className="space-y-2 text-xs text-zinc-400">
-            <p>Ask how to do something in the Studio, or how to make this page look the way you want.</p>
-            <p>To match a look: select the part of your page, then drop, paste or attach a screenshot of a magazine you like and ask how to make yours look like it.</p>
-            {SUGGESTIONS.map((q) => (
-              <button key={q} type="button" onClick={() => send(q)} disabled={busy || preparing}
+            {merlin ? (
+              <>
+                <p>Merlin designs the page in view for you. Say what you want, or drop a picture of a look you like: Merlin makes the changes, looks at the result and refines it, up to three times.</p>
+                <p>It restyles, moves and adds, but never writes your story’s words or deletes anything. One ⌘Z, or Undo Merlin, takes the whole design back.</p>
+              </>
+            ) : (
+              <>
+                <p>Ask how to do something in the Studio, or how to make this page look the way you want.</p>
+                <p>To match a look: select the part of your page, then drop, paste or attach a screenshot of a magazine you like and ask how to make yours look like it.</p>
+              </>
+            )}
+            {(merlin ? MERLIN_SUGGESTIONS : SUGGESTIONS).map((q) => (
+              // Ask answers straight away; Merlin changes the page, so its suggestion only fills the box.
+              <button key={q} type="button" onClick={() => (merlin ? conv.prompt(q) : send(q))} disabled={busy || preparing}
                 className="block w-full rounded border border-zinc-800 px-2.5 py-1.5 text-left text-zinc-300 hover:border-emerald-500 hover:text-white">{q}</button>
             ))}
           </div>
@@ -256,18 +338,32 @@ export function AskPanel() {
             <ImagePlus className="h-3.5 w-3.5" />Drop, paste or choose a picture of the look you want
           </button>
         )}
-        <div className="flex items-end gap-1.5 rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1.5 focus-within:border-emerald-500">
-          <textarea ref={box} value={text} rows={2} maxLength={MAX_QUESTION} aria-label="Your question"
-            placeholder="How do I…?" onChange={(e) => setText(e.target.value)} onKeyDown={onKey} onPaste={onPaste}
+        <div role="radiogroup" aria-label="What happens when you send" className="mb-1.5 flex rounded-md bg-zinc-900 p-0.5 text-[11px]">
+          {([['ask', 'Ask', 'Answers: you make the changes'], ['merlin', 'Merlin', 'Merlin makes the changes for you']] as const).map(([m, label, hint]) => (
+            <button key={m} type="button" role="radio" aria-checked={mode === m} title={hint} disabled={busy}
+              onClick={() => conv.setMode(m)}
+              className={`flex flex-1 items-center justify-center gap-1 rounded px-2 py-1 disabled:opacity-60 ${mode === m
+                ? m === 'merlin' ? 'bg-violet-600 text-white' : 'bg-zinc-700 text-white' : 'text-zinc-400 hover:text-white'}`}>
+              {m === 'merlin' ? <WandSparkles className="h-3 w-3" /> : <Sparkles className="h-3 w-3" />}{label}
+            </button>
+          ))}
+        </div>
+        <div className={`flex items-end gap-1.5 rounded-md border bg-zinc-950 px-2 py-1.5 ${merlin ? 'border-violet-700 focus-within:border-violet-400' : 'border-zinc-700 focus-within:border-emerald-500'}`}>
+          <textarea ref={box} value={text} rows={2} maxLength={MAX_QUESTION} aria-label={merlin ? 'What Merlin should design' : 'Your question'}
+            placeholder={merlin ? 'Tell Merlin what to design…' : 'How do I…?'} onChange={(e) => setText(e.target.value)} onKeyDown={onKey} onPaste={onPaste}
             className="max-h-32 min-h-[2.5rem] flex-1 resize-none bg-transparent text-xs text-zinc-100 placeholder:text-zinc-600 focus:outline-none" />
           <input ref={file} type="file" accept={PICTURE_TYPES.join(',')} className="hidden" aria-label="Attach a picture"
             onChange={(e) => { void attach(e.target.files?.[0]); e.target.value = '' }} />
           <button type="button" onClick={() => file.current?.click()} aria-label="Attach a picture" title="Attach a picture of the look you want"
             className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-white"><ImagePlus className="h-4 w-4" /></button>
-          <button type="button" onClick={() => send()} disabled={busy || preparing || !text.trim()} aria-label="Ask"
-            className="rounded bg-emerald-600 p-1 text-white hover:bg-emerald-500 disabled:opacity-40"><ArrowUp className="h-4 w-4" /></button>
+          <button type="button" onClick={() => send()} disabled={busy || preparing || !text.trim()} aria-label={merlin ? 'Design it' : 'Ask'}
+            className={`rounded p-1 text-white disabled:opacity-40 ${merlin ? 'bg-violet-600 hover:bg-violet-500' : 'bg-emerald-600 hover:bg-emerald-500'}`}>
+            {merlin ? <WandSparkles className="h-4 w-4" /> : <ArrowUp className="h-4 w-4" />}
+          </button>
         </div>
-        <p className="mt-1 px-1 text-[10px] text-zinc-600">Answers come from AI and can be wrong. Nothing on your page changes until you change it.</p>
+        <p className="mt-1 px-1 text-[10px] text-zinc-600">{merlin
+          ? 'Merlin uses AI and changes your page as it works. Check what it did; Undo Merlin or ⌘Z takes it back.'
+          : 'Answers come from AI and can be wrong. Nothing on your page changes until you change it.'}</p>
       </div>
     </section>
   )

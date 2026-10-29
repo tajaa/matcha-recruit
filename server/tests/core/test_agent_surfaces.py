@@ -89,6 +89,10 @@ async def test_claude_default_is_haiku_with_a_key_and_none_without(monkeypatch):
     monkeypatch.setattr(am, "claude_override", override)
     monkeypatch.setattr(am, "anthropic_configured", lambda: True)
     assert await am.claude_default(reg.ESPRESSO_TASKS) == am.CLAUDE_HAIKU
+    # A surface built on another Claude (Merlin in the Studio: Sonnet) names it.
+    assert await am.claude_default(reg.GUMMFIT_STUDIO_MERLIN, builtin=am.CLAUDE_SONNET) == am.CLAUDE_SONNET
+    override.return_value = am.CLAUDE_HAIKU
+    assert await am.claude_default(reg.GUMMFIT_STUDIO_MERLIN, builtin=am.CLAUDE_SONNET) == am.CLAUDE_HAIKU
     override.return_value = am.CLAUDE_SONNET
     assert await am.claude_default(reg.ESPRESSO_TASKS) == am.CLAUDE_SONNET
     override.return_value = None
@@ -123,11 +127,12 @@ def _surfaces_named(node: ast.AST, assigned: dict[str, list[ast.AST]]) -> set[st
     return keys
 
 
-def _surfaces_by_resolver() -> tuple[set[str], set[str], list[str]]:
+def _surfaces_by_resolver() -> tuple[set[str], set[str], set[str], list[str]]:
     """(surfaces some call site reads with `claude_default`/`surface_model`,
+    those of them whose `claude_default` names Sonnet as its `builtin`,
     surfaces read with `claude_override` or `generate_content_routed`, call
     sites whose surface couldn't be worked out)."""
-    haiku, gemini, unresolved = set(), set(), []
+    haiku, sonnet, gemini, unresolved = set(), set(), set(), []
     for path in APP_DIR.rglob("*.py"):
         tree = ast.parse(path.read_text(), filename=str(path))
         assigned: dict[str, list[ast.AST]] = {}
@@ -142,7 +147,9 @@ def _surfaces_by_resolver() -> tuple[set[str], set[str], list[str]]:
             func = node.func
             called = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
             if called in {"claude_default", "surface_model"}:
-                into, args = haiku, node.args[:1]
+                builtin = [k.value for k in node.keywords if k.arg == "builtin"]
+                own = bool(builtin) and getattr(builtin[0], "attr", None) == "CLAUDE_SONNET"
+                into, args = sonnet if own else haiku, node.args[:1]
             elif called == "claude_override":
                 into, args = gemini, node.args[:1]
             elif called == "generate_content_routed":
@@ -153,18 +160,22 @@ def _surfaces_by_resolver() -> tuple[set[str], set[str], list[str]]:
             if not keys and _rel(path) not in _PASS_THROUGH:
                 unresolved.append(f"{_rel(path)}:{node.lineno}")
             into |= keys
-    return haiku, gemini, unresolved
+    return haiku, sonnet, gemini, unresolved
 
 
 def test_each_surfaces_label_names_the_providers_its_code_runs():
     """The admin page's "default runs on" text against the code: a surface
-    read by `claude_default` runs Claude Haiku by default, one read by
-    `claude_override` runs Gemini, and a label names exactly those."""
-    haiku, gemini, unresolved = _surfaces_by_resolver()
+    read by `claude_default` runs Claude Haiku by default (Sonnet when it
+    passes `builtin=CLAUDE_SONNET`), one read by `claude_override` runs
+    Gemini, and a label names exactly those."""
+    haiku, sonnet, gemini, unresolved = _surfaces_by_resolver()
     assert unresolved == [], f"a call site's surface could not be worked out: {unresolved}"
+    assert sonnet, "the Sonnet branch found no call site (Merlin in the Studio has one)"
     for surface in reg.SURFACES:
         says_haiku, says_gemini = "Claude Haiku" in surface.builtin, "Gemini" in surface.builtin
+        says_sonnet = "Claude Sonnet" in surface.builtin
         assert says_haiku == (surface.key in haiku), f"{surface.key}: {surface.builtin!r}"
+        assert says_sonnet == (surface.key in sonnet), f"{surface.key}: {surface.builtin!r}"
         assert says_gemini == (surface.key in gemini), f"{surface.key}: {surface.builtin!r}"
 
 

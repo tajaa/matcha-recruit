@@ -4,6 +4,7 @@ import { cappeApi, cappeApiBase, cappeStreamHeaders } from '../api'
 import type { CappeAsset } from '../types'
 import type { Asset, Doc, Face } from './model/types'
 import type { Recipe } from './picture/recipe'
+import type { MerlinOp } from './ui/ask/merlinOps'
 
 export type StudioPost = {
   id: string; site_id: string; title: string; slug: string; excerpt: string | null; kicker: string | null
@@ -29,6 +30,23 @@ export type AskRequest = {
   /** The selected part of the page as it looks now, to compare with `picture`. */
   current?: { media_type: 'image/jpeg'; data: string } | null
 }
+
+/** One round of Merlin designing the page in view (server studio/merlin.py). */
+export type MerlinRequest = {
+  request: string
+  round: number
+  history: { q: string; a: string }[]
+  page: string
+  /** What the earlier rounds of this design said and did, and how many of
+   *  their edits took (a round that mostly didn't sends the next to Sonnet). */
+  previous: { say: string; notes: string[]; did: number; skipped: number }[]
+  /** Frames selected when it started: one or two with no picture is a narrow change, for Haiku. */
+  selected: number
+  picture: { media_type: 'image/jpeg'; data: string } | null
+  current: { media_type: 'image/jpeg'; data: string } | null
+}
+/** `dropped`: edits the server couldn't use and left out. */
+export type MerlinReply = { say: string; ops: MerlinOp[]; done: boolean; dropped: number }
 
 const base = (siteId: string, postId: string) => `/sites/${siteId}/studio/stories/${postId}`
 
@@ -81,6 +99,9 @@ export const studioApi = {
   },
   /** Ask the Studio: an answer, saved nowhere (server studio/ask.py). */
   ask: (siteId: string, postId: string, body: AskRequest) => cappeApi.post<AskAnswer>(`${base(siteId, postId)}/ask`, body),
+  /** Merlin: one round of edits to the page in view, applied by the Studio (ui/ask/merlinOps.ts). */
+  merlin: (siteId: string, postId: string, body: MerlinRequest, signal?: AbortSignal) =>
+    cappeApi.post<MerlinReply>(`${base(siteId, postId)}/merlin`, body, { signal }),
   preview: (siteId: string, post: StudioPost, doc: Doc) => cappeApi.postHtml(`/sites/${siteId}/stories/preview`, {
     title: post.title, excerpt: post.excerpt, kicker: post.kicker, topic: post.topic, byline: post.byline,
     access: post.access, format: 'pages', content: { doc },
