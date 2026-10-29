@@ -21,4 +21,4 @@ export const INCIDENT_STEPS = [
 export type StepDef = { id: string; time: string; when: string; label: string }
 export type StepId = (typeof STEPS)[number]['id'] | (typeof INCIDENT_STEPS)[number]['id']
 export const ALL_STEPS: readonly StepDef[] = [...STEPS, ...INCIDENT_STEPS]
-export type LandingTab = 'scheduling' | 'incidents'
+export type LandingTab = 'home' | 'scheduling' | 'incidents'

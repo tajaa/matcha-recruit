@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate } from "react-router-dom";
+import { Routes, Route } from "react-router-dom";
 import { lazy, Suspense } from "react";
 import Login from "./pages/Login";
 import RequireBusinessAccount from "./components/auth/RequireBusinessAccount";
@@ -131,7 +131,7 @@ const NotFound = lazy(() => import("./pages/shared/NotFound"));
 import { isCappeHost } from "./cappe/host";
 
 // The landing opens on a dark hero; a white spinner page before it reads as a flash.
-const LANDING_PATHS = ["/", "/incidents"];
+const LANDING_PATHS = ["/", "/scheduling", "/incidents"];
 
 function RouteFallback() {
   const dark = !isCappeHost && LANDING_PATHS.includes(window.location.pathname);
@@ -149,16 +149,17 @@ export default function App() {
       <Routes>
         {/* Exact "/" outranks the isCappeHost "/*" splat below, so the apex
             swap has to happen here: on the Cappe domain "/" renders the
-            Gummfit landing (CappeRoutes index), everywhere else the Matcha home page: the scheduling landing, whose
-            second tab (/incidents) sells the incident workflow. The old
+            Gummfit landing (CappeRoutes index), everywhere else the Matcha business overview. Dedicated
+            /scheduling and /incidents pages sell the software products. The old
             multi-product home lives on at /overview. */}
         <Route path="/" element={isCappeHost ? <CappeRoutes /> : <SchedulingLanding />} />
+        <Route path="/scheduling" element={<SchedulingLanding tab="scheduling" />} />
         <Route path="/incidents" element={<SchedulingLanding tab="incidents" />} />
         <Route path="/scheduling-v2" element={<SchedulingHomeRedirect />} />
         <Route path="/overview" element={<Home />} />
         <Route path="/matcha-work" element={<MatchaWorkPage />} />
         <Route path="/matcha-ops" element={<MatchaOpsPage />} />
-        <Route path="/matcha-scheduling" element={<Navigate to="/" replace />} />
+        <Route path="/matcha-scheduling" element={<SchedulingHomeRedirect />} />
         <Route path="/matcha-lite" element={<SimpleLitePage />} />
         <Route path="/matcha-compliance" element={<SimpleCompliancePage />} />
         <Route path="/matcha-platform" element={<SimplePlatformPage />} />
