@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 
 import MarketingNav from './MarketingNav'
 import MarketingFooter from './MarketingFooter'
@@ -149,7 +149,10 @@ const HERO_STATS = [
 ]
 
 export default function ServicesPage() {
-  const [isPricingOpen, setIsPricingOpen] = useState(false)
+  // ?book=1 opens the consultation form: the booking link consulting
+  // outreach from Espresso sends (sales_playbooks.HOUSE).
+  const [searchParams] = useSearchParams()
+  const [isPricingOpen, setIsPricingOpen] = useState(() => searchParams.get('book') === '1')
 
   return (
     <div style={{ backgroundColor: BG, color: INK }} className="min-h-screen">

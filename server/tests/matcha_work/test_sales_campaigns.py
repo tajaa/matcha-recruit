@@ -212,7 +212,8 @@ async def test_campaign_reads_creation_and_pages_are_owner_scoped(wired):
             CampaignCreate(request_id=uuid4(), title="Dental", footer=FOOTER),
         )
     )["id"] == str(CAMPAIGN)
-    assert wired.ran("INSERT INTO mw_sales_campaigns")[0][2][-1] == FOOTER
+    # project, user, request, title, target, offer, footer, playbook, cta_url
+    assert wired.ran("INSERT INTO mw_sales_campaigns")[0][2][6] == FOOTER
     wired.on("ORDER BY created_at,id OFFSET", [prospect()]).on(
         "GROUP BY status", [{"status": "draft", "count": 1}]
     )

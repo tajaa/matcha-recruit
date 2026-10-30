@@ -48,6 +48,12 @@ async def create(
     return await _call(sales.create_campaign(project_id, user.id, body))
 
 
+# Declared before /sales/{campaign_id} so "playbooks" is never read as an id.
+@router.get("/sales/playbooks")
+async def playbooks(user: CurrentUser = Depends(require_admin_or_client)):
+    return await _call(sales.playbook_options(user.id))
+
+
 @router.get("/sales/{campaign_id}")
 async def read(campaign_id: UUID, user: CurrentUser = Depends(require_admin_or_client)):
     return await _call(sales.read_campaign(campaign_id, user.id))

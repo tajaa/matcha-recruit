@@ -749,6 +749,14 @@ output budget and return `next_offset`; large text is explicitly marked partial.
   in batches of at most 50, before a durable worker sends each message
   separately. Opt-outs (`mw_sales_suppressions`) are honoured at import,
   approval and claim. Details and recovery: `docs/ESPRESSO_SALES.md`.
+- **Consulting playbook.** A campaign with `playbook = 'consulting'`
+  (`../sales_playbooks.py`) makes each prospect carry a segment, service, a
+  why-now `signal` (refused without sources fetched this run) and a fit; a
+  draft the assistant saves must pass `draft_problems` (booking link only,
+  ≤150 words, no number its research/offer lacks, no legal conclusions), or
+  `update_sales_prospect` returns the problems instead. `use_matcha_offer`
+  starts from Matcha's own offer, Matcha staff only. Spec:
+  `docs/ESPRESSO_SALES.md` §Consulting outreach.
 
 ## Optional task recap observation
 

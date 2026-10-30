@@ -51,6 +51,55 @@ and review/send do not require AI consent. The desktop provides campaign
 review/send; the web assistant can work on the same saved campaigns, but its old
 pipeline has no campaign review interface.
 
+## Consulting outreach
+
+A campaign can run the **consulting** playbook (`playbook = 'consulting'`,
+`services/matcha_work/sales_playbooks.py`): outreach that sells advisory work
+(HR, compliance, investigations, AI review) to businesses. A cold message about
+that lands only when it names a real, current reason to talk, so the playbook
+changes who Espresso looks for and how a message may read:
+
+- **Segments.** Four, each with who to write to and where a why-now signal
+  shows up in public: *Growing, no HR lead* (hiring a first HR/People role on
+  their careers page or a Greenhouse/Lever/Ashby board, roles in several
+  states, a funding round); *Healthcare and manufacturing* (an OSHA inspection
+  on osha.gov, a state or CMS survey, a new facility or license); *Adopting AI*
+  (their own announcement of AI in hiring or operations, AI job posts, a vendor
+  case study naming them); *Restaurants and retail* (several locations, a new
+  one opening, hourly hiring, a location in a city with its own scheduling or
+  wage rules).
+- **Per prospect** Espresso saves the segment, the service that fits
+  (`hr`/`grc`/`er`/`ai`), the signal (one factual sentence, saved only with
+  source URLs fetched in that run) and a fit of 1-3 (3: a specific recent
+  signal from a primary source and a named decision-maker). It drafts for fit
+  2-3, best first.
+- **Drafts are checked in code** (`draft_problems`), and Espresso can't save
+  one that fails: a saved signal; a subject under 70 characters with no fake
+  `Re:`/`Fwd:`; a body under 150 words; the campaign's booking link
+  (`cta_url`) and no other link; no number (digits or spelled out) or "doubled"
+  the prospect's research, signal or the campaign's offer doesn't state; and
+  no legal conclusions, penalty warnings or promises ("violates", "fines",
+  "lawsuit", "guarantee"). Your own edits are yours: reading a consulting
+  campaign returns the same checks as `review_flags` on each draft instead.
+- **Matcha's own offer** (`HOUSE`): Matcha staff (an admin account, or the
+  `master_admin_email` identity) can start a campaign from it (`house: true`
+  over REST, `use_matcha_offer` for Espresso, `GET /sales/playbooks` shows
+  it). It fills Matcha's four services (from `/services`, with none of that
+  page's case-study numbers) and the booking link
+  `https://hey-matcha.com/services?book=1`, which opens the consultation form.
+  What the person writes wins; the preset fills only empty fields. Everyone
+  else writes their own offer and booking link.
+
+Ask Espresso, with Sales on: "Start a Matcha consulting campaign in <workspace>
+for growing companies in Texas without an HR lead, find 20, draft for the best".
+The footer (opt-out line and postal address) is still yours to add before
+sending.
+
+`mwsales03` (follows `mwjobs05`) adds `playbook`/`cta_url` to campaigns and
+`segment`/`service`/`signal`/`fit` to prospects; columns only, real downgrade.
+`segment`, `service`, `signal`, `fit` and `stage` are what a prospect *is*, not
+what is sent: they can change at any status and never reopen a frozen message.
+
 ## Delivery and recovery
 
 `mw_sales_campaigns` serializes imports/edits/queue transitions with row locks;
