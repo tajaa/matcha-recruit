@@ -23,6 +23,7 @@ import InventoryWaste from '../pages/InventoryWaste'
 import InventoryBuying from '../pages/InventoryBuying'
 import AssetsHub from '../pages/AssetsHub'
 import Tasks from '../pages/Tasks'
+import Sales from '../pages/Sales'
 import Recap from '../pages/Recap'
 import Recaps from '../pages/Recaps'
 import Assistant from '../pages/Assistant'
@@ -104,6 +105,7 @@ export function WorkRouteTree({ surface }: { surface: WorkSurface }) {
           {!businessWork && <Route path="recaps" element={<Recaps />} />}
           {!businessWork && <Route path="recaps/:recapId" element={<Recap />} />}
           <Route path="tasks" element={<Tasks />} />
+          {!businessWork && <Route path="sales" element={<Sales />} />}
           <Route path="tasks/:taskId" element={<Tasks />} />
           {/* The Espresso assistant: a person's private sessions with
               Espresso, for personal accounts (the page says so to anyone

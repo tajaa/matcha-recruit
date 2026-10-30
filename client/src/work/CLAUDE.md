@@ -35,6 +35,16 @@ A job's pane can tailor that résumé to the posting (`pages/JobSearch/TailoredR
 "Your résumé for this job"); the rules for what may be rewritten are in the same doc,
 §Tailored résumé.
 
+## Sales
+
+`pages/Sales.tsx` (`/espresso/sales`) is the web review-and-send surface for
+sales campaigns, over `api/matchaWork/sales.ts`; the Mac Pipeline is the other.
+`pages/Sales/useSales.ts` tags what it loads with the workspace or campaign it
+is for and polls a sending campaign; `salesLogic.ts` holds the CSV import
+parser (the Mac's header aliases) and what may be sent. The server owns every
+rule (review tokens, footer, opt-outs, the consulting draft checks): the page
+shows them. Rules: `docs/ESPRESSO_SALES.md`.
+
 ## Personal task recaps
 
 Recaps are the Recaps view of Tasks (`pages/Tasks.tsx`, `?view=recaps&recap=<id>`;

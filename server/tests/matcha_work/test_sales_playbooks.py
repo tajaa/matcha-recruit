@@ -217,3 +217,27 @@ async def test_the_assistant_starts_matchas_campaign_with_the_house_offer(monkey
     assert data.house is True
     assert state.sessions["sales"].campaign_info[str(CAMPAIGN)]["cta_url"] == CTA
     assert "use_matcha_offer" in ability.prompt_block(context())
+
+
+# ── routes ───────────────────────────────────────────────────────────────────
+
+def test_named_sales_routes_come_before_the_campaign_id_route():
+    from app.matcha.routes.matcha_work import sales as routes
+
+    paths = [r.path for r in routes.router.routes if "GET" in getattr(r, "methods", set())]
+    by_id = paths.index("/sales/{campaign_id}")
+    assert paths.index("/sales/workspaces") < by_id and paths.index("/sales/playbooks") < by_id
+
+
+@pytest.mark.asyncio
+async def test_workspace_and_playbook_routes_read_for_the_signed_in_user(monkeypatch):
+    from types import SimpleNamespace
+
+    from app.matcha.routes.matcha_work import sales as routes
+
+    monkeypatch.setattr(routes.sales, "list_projects", AsyncMock(return_value=[{"id": "p", "title": "Sales"}]))
+    monkeypatch.setattr(routes.sales, "playbook_options", AsyncMock(return_value={"playbooks": [], "house": None}))
+    user = SimpleNamespace(id=USER)
+    assert await routes.workspaces(user) == {"workspaces": [{"id": "p", "title": "Sales"}]}
+    assert await routes.playbooks(user) == {"playbooks": [], "house": None}
+    routes.sales.list_projects.assert_awaited_once_with(USER)

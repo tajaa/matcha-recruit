@@ -47,9 +47,29 @@ see a summary of them (title, creator, status, counts) under **Other campaigns i
 this workspace**, never their contacts or drafts. Viewers see neither. A campaign
 never uses another collaborator's Gmail. Research/drafting needs a personal
 Espresso assistant account and the Sales AI disclosure. Manual imports, templates
-and review/send do not require AI consent. The desktop provides campaign
-review/send; the web assistant can work on the same saved campaigns, but its old
-pipeline has no campaign review interface.
+and review/send do not require AI consent.
+
+## On the web
+
+`/espresso/sales` (sidebar **Sales**, personal accounts that can make a
+workspace; `client/src/work/pages/Sales.tsx`) is the same campaigns as the Mac
+Pipeline, with the same server rules. Pick a workspace (`GET /sales/workspaces`,
+the collab workspaces a campaign can live in) and a campaign; **New campaign**
+offers *Consulting outreach* and, for Matcha staff, *Start from Matcha's
+consulting offer*. **Import** takes pasted emails or a CSV/TSV with the same
+headers as the Mac (`pages/Sales/salesLogic.ts:parseContacts`). **Research and
+draft with Espresso** opens Ask Espresso with the campaign's ask filled in.
+Prospects list what needs you first (unconfirmed, failed, drafts), best fit
+first in a consulting campaign, with each one's why-now signal and how many
+draft checks it misses. A prospect opens to its signal, research and sources,
+the draft (saved against the version you opened, so a draft Espresso changed
+meanwhile isn't overwritten), its stage, **Do not contact** and **Delete**.
+Tick up to 50 drafts, **Review and send**: every message as it will go out
+(body then footer), from your connected Gmail, flagged ones marked; tick that
+you read them all to send. The page polls a sending campaign every 15 seconds
+and offers Pause, Resume, Release pending drafts and Review failed again, like
+the Mac. The URL holds the open workspace, campaign and prospect
+(`?workspace=&campaign=&prospect=`).
 
 ## Consulting outreach
 
