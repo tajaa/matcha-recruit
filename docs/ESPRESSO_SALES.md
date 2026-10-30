@@ -76,11 +76,19 @@ changes who Espresso looks for and how a message may read:
 - **Drafts are checked in code** (`draft_problems`), and Espresso can't save
   one that fails: a saved signal; a subject under 70 characters with no fake
   `Re:`/`Fwd:`; a body under 150 words; the campaign's booking link
-  (`cta_url`) and no other link; no number (digits or spelled out) or "doubled"
-  the prospect's research, signal or the campaign's offer doesn't state; and
-  no legal conclusions, penalty warnings or promises ("violates", "fines",
-  "lawsuit", "guarantee"). Your own edits are yours: reading a consulting
-  campaign returns the same checks as `review_flags` on each draft instead.
+  (`cta_url`) and no other link; no amount the prospect's research, signal or
+  the campaign's offer doesn't state, read as values (`_amounts`: "two
+  hundred" is 200, "2.5 million" is "$2.5M", "40k" is 40,000; "one" and "a"
+  are no claim; "doubled" must be written too); and no legal conclusions,
+  penalty warnings or promises ("violates", "fined", "lawsuit", "litigation",
+  "guarantee"; not "fine" or "sue", which are everyday words and names). A
+  merge template Espresso fills (`draft_template(checked=True)`) is held to
+  the same checks: a prospect whose rendered draft fails is left undrafted
+  and listed under `skipped`. Your own edits and your own templates are yours:
+  reading a consulting campaign returns the same checks as `review_flags` on
+  each draft instead.
+- **A booking link is required.** A consulting campaign can't be created or
+  switched to consulting without `cta_url` (Matcha's own offer brings one).
 - **Matcha's own offer** (`HOUSE`): Matcha staff (an admin account, or the
   `master_admin_email` identity) can start a campaign from it (`house: true`
   over REST, `use_matcha_offer` for Espresso, `GET /sales/playbooks` shows
@@ -97,8 +105,11 @@ sending.
 
 `mwsales03` (follows `mwjobs05`) adds `playbook`/`cta_url` to campaigns and
 `segment`/`service`/`signal`/`fit` to prospects; columns only, real downgrade.
-`segment`, `service`, `signal`, `fit` and `stage` are what a prospect *is*, not
-what is sent: they can change at any status and never reopen a frozen message.
+`segment`, `service`, `signal`, `fit`, `stage`, `research` and `sources` are
+what a prospect *is*, not what is sent (none is in the reviewed message): they
+can change at any status and never reopen a frozen message. The database
+CHECKs `playbook`, `segment`, `service` and `fit`; a test holds those lists,
+the model's `Literal`s and `sales_playbooks` together.
 
 ## Delivery and recovery
 

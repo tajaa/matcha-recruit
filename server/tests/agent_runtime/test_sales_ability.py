@@ -116,7 +116,8 @@ async def test_tools_save_discovery_research_and_drafts_in_a_reopenable_campaign
         "draft_sales_template", template, s, context(ask="Use a template for the rest")
     )
     assert out.payload == {"drafted": 100} and wired["patch_prospect"].await_count == 2
-    assert wired["draft_template"].call_args.kwargs == {"overwrite": False}
+    # Never over a draft, and a consulting campaign's drafts are checked.
+    assert wired["draft_template"].call_args.kwargs == {"overwrite": False, "checked": True}
 
 
 @pytest.mark.asyncio

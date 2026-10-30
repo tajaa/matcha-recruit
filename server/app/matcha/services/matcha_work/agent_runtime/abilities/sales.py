@@ -109,9 +109,11 @@ write to in each, where a why-now signal shows up, and the services.
 - Draft only for fit 2-3, best fit first. Under 150 words: open with the signal,
   one sentence on the one service that fits from the campaign's offer, then ask for
   a short call with the campaign's booking link (cta_url) and no other link. Cite
-  no number or result the research or offer doesn't state. Never tell them they are
+  no number or result the research or offer doesn't state, and don't count what it
+  lists (three named cities aren't "3 cities"). Never tell them they are
   breaking a law, warn of fines or lawsuits, or promise an outcome. Plain subject,
-  no "Re:". Code checks these and refuses a draft that misses one.
+  no "Re:". Code checks these and refuses a draft that misses one; a merge
+  template's drafts are checked too, and any that fail are skipped and listed.
 - When the person runs Matcha's own consulting (they say Matcha, "our consulting"),
   create the campaign with use_matcha_offer; it fills Matcha's offer and booking
   link, and is refused for anyone but Matcha staff."""
@@ -173,6 +175,10 @@ def build():
                     offset=int(args.get("offset", 0)),
                     limit=25,
                 )
+                # Remembered whole, before the output budget shortens research:
+                # a draft's numbers are checked against all of it.
+                for p in payload["prospects"]:
+                    session.remember_prospect(p)
                 # Preserve valid JSON inside the runtime output budget.
                 budget = max(3000, ctx.limits.max_tool_output_chars - 1000)
                 while (
@@ -192,8 +198,6 @@ def build():
                 session.campaigns.add(args["campaign_id"])
                 session.remember_campaign(payload.get("campaign") or {})
                 session.prospects.update(p["id"] for p in payload["prospects"])
-                for p in payload["prospects"]:
-                    session.remember_prospect(p)
                 session.emails.update(
                     {p["id"]: p.get("email", "") for p in payload["prospects"]}
                 )
@@ -279,6 +283,7 @@ def build():
                         ctx.user_id,
                         Template(subject=args["subject"], body=args["body"]),
                         overwrite=False,
+                        checked=True,
                     )
                 else:
                     raise ValueError("Unknown sales operation.")

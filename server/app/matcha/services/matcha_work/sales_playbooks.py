@@ -104,24 +104,81 @@ MAX_SUBJECT = 70
 
 # A cold message never tells a business it is breaking a law, threatens what
 # could happen, or promises an outcome: that is a legal opinion nobody asked
-# for, and it reads as a scare email.
+# for, and it reads as a scare email. Only words with no everyday meaning:
+# "fine" (fine-tune) and "sue" (a name) are left out on purpose.
 _LEGAL = re.compile(
-    r"\b(violat\w*|illegal\w*|unlawful\w*|non-?complian\w*|out of compliance|lawsuits?|sued|sue|"
-    r"liable|liabilit\w*|penalt\w*|fines?|guarantee\w*)\b",
+    r"\b(violat\w*|illegal\w*|unlawful\w*|non-?complian\w*|out of compliance|lawsuits?|litigation|sued|"
+    r"liable|liabilit\w*|penalt\w*|fined|fines|guarantee\w*)\b",
     re.IGNORECASE,
 )
 _URL = re.compile(r"https?://[^\s<>()\"']+")
-_NUMBER = re.compile(r"\d[\d,]*(?:\.\d+)?")
-# A spelled-out number is the same claim as its digits ("five" is "5"); a
-# size word with no digits ("doubled") has to be written in the evidence.
-_NUMBER_WORDS = {
-    **{w: str(i) for i, w in enumerate(
-        "zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen "
-        "fifteen sixteen seventeen eighteen nineteen twenty".split()) if i >= 2},
-    "thirty": "30", "forty": "40", "fifty": "50", "sixty": "60", "seventy": "70", "eighty": "80",
-    "ninety": "90", "hundred": "100", "thousand": "1000", "million": "1000000", "billion": "1000000000",
-    "dozen": "12", "doubled": "doubled", "tripled": "tripled", "quadrupled": "quadrupled",
+# A number in digits, with the scale written after it ("$2.5M", "2.5 million", "40k").
+_DIGITS = re.compile(
+    r"(\d[\d,]*(?:\.\d+)?)(?:\s*(k|m|mm|bn|b|thousand|million|billion)\b)?", re.IGNORECASE,
+)
+_UNITS = {
+    w: i for i, w in enumerate(
+        "zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen "
+        "sixteen seventeen eighteen nineteen".split())
 }
+_TENS = {"twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90}
+_SCALES = {
+    "hundred": 100, "thousand": 1_000, "million": 1_000_000, "billion": 1_000_000_000,
+    "k": 1_000, "m": 1_000_000, "mm": 1_000_000, "b": 1_000_000_000, "bn": 1_000_000_000,
+}
+# Size claims with no number in them: kept only when the evidence says them too.
+_SIZE_WORDS = {"dozen", "doubled", "tripled", "quadrupled", "tenfold"}
+# "one" and "a" carry no claim ("one call", "a team"), so they don't start a number.
+_QUIET = {"zero", "one"}
+
+
+def _spelled(words: list[str]) -> float | None:
+    """ "two hundred" -> 200, "twenty-five thousand" -> 25000."""
+    total, current, seen = 0, 0, False
+    for word in words:
+        if word in _UNITS:
+            current += _UNITS[word]
+        elif word in _TENS:
+            current += _TENS[word]
+        elif word == "hundred":
+            current = max(current, 1) * 100
+        elif word in ("thousand", "million", "billion"):
+            total += max(current, 1) * _SCALES[word]
+            current = 0
+        else:
+            continue
+        seen = True
+    return float(total + current) if seen else None
+
+
+def _amounts(text: str) -> set:
+    """Every amount `text` states, as values ("2.5 million" == "$2.5M" == 2500000),
+    plus size words with no number ("doubled"). A link's digits aren't claims."""
+    text = _URL.sub(" ", text or "")
+    found: set = set()
+    for digits, scale in _DIGITS.findall(text):
+        try:
+            value = float(digits.replace(",", ""))
+        except ValueError:
+            continue
+        found.add(value * _SCALES.get((scale or "").lower(), 1))
+    run: list[str] = []
+    for word in re.findall(r"[a-z]+", re.sub(r"\d[\d,.]*\s*\w*", " ", text.lower())) + [""]:
+        if word in _UNITS or word in _TENS or word in ("hundred", "thousand", "million", "billion"):
+            run.append(word)
+            continue
+        if word == "and" and run:
+            continue
+        if run and not set(run) <= _QUIET:
+            value = _spelled(run)
+            if value is not None:
+                found.add(value)
+        run = []
+        if word in _SIZE_WORDS:
+            found.add(word)
+    return found
+
+
 _FAKE_THREAD = re.compile(r"^\s*(re|fwd?|fw)\s*:", re.IGNORECASE)
 
 HOUSE = {
@@ -170,10 +227,10 @@ def guide() -> dict:
     }
 
 
-def _numbers(text: str) -> set[str]:
-    found = {n.replace(",", "") for n in _NUMBER.findall(_URL.sub(" ", text or ""))}
-    words = set(re.findall(r"[a-z]+", (text or "").lower()))
-    return found | {value for word, value in _NUMBER_WORDS.items() if word in words}
+def _shown(value) -> str:
+    if isinstance(value, float):
+        return f"{value:,.0f}" if value == int(value) else f"{value:,}"
+    return str(value)
 
 
 def draft_problems(subject: str, body: str, *, cta_url: str, signal: str, evidence: str) -> list[str]:
@@ -192,14 +249,17 @@ def draft_problems(subject: str, body: str, *, cta_url: str, signal: str, eviden
     if words > MAX_WORDS:
         problems.append(f"Keep the message under {MAX_WORDS} words (it has {words}).")
     links = {u.rstrip(".,;:!?") for u in _URL.findall(body)}
-    if cta_url and cta_url not in links:
+    if not cta_url:
+        problems.append("Add the campaign's booking link before drafting: every message asks for it.")
+    elif cta_url not in links:
         problems.append(f"Ask for one thing: include the booking link {cta_url}.")
     if links - {cta_url}:
         problems.append("Include no link but the booking link.")
-    unsupported = sorted(_numbers(subject + "\n" + body) - _numbers(evidence))
+    unsupported = sorted(_amounts(subject + "\n" + body) - _amounts(evidence), key=str)
     if unsupported:
         problems.append(
-            "Cite no number or result the research and offer don't state: " + ", ".join(unsupported[:5]) + "."
+            "Cite no number or result the research and offer don't state: "
+            + ", ".join(_shown(v) for v in unsupported[:5]) + "."
         )
     legal = sorted({m.group(0).lower() for m in _LEGAL.finditer(subject + "\n" + body)})
     if legal:

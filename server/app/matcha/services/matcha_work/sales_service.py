@@ -28,9 +28,10 @@ from app.matcha.models.matcha_work.sales import (
 
 MAX_PROSPECTS = 1000
 EDITABLE = ("prospect", "draft", "failed")
-# What a prospect is, not what it is sent: editable at any status, and never
-# turns a frozen message back into a draft.
-META = {"stage", "segment", "service", "signal", "fit"}
+# What a prospect is, not what it is sent (none of it is in the reviewed
+# message, `review_token`): editable at any status, and never turns a frozen
+# message back into a draft. A signal is saved with its sources and research.
+META = {"stage", "segment", "service", "signal", "fit", "research", "sources"}
 
 
 class SalesError(ValueError):
@@ -231,6 +232,9 @@ async def update_campaign(campaign_id, user_id, data: CampaignPatch):
     changes = data.model_dump(exclude_none=True)
     async with connection_or_direct() as conn, conn.transaction():
         row = await _campaign(conn, campaign_id, user_id, edit=True)
+        merged = dict(row) | changes
+        if merged.get("playbook") == playbooks.CONSULTING and not merged.get("cta_url"):
+            raise SalesError("A consulting campaign needs a booking link.")
         if (
             "footer" in changes
             and changes["footer"] != row["footer"]
@@ -559,14 +563,18 @@ def _label(row):
     return row["name"] or row["company"] or row["email"] or row["website"]
 
 
-async def draft_template(campaign_id, user_id, data: Template, *, overwrite=True):
+async def draft_template(campaign_id, user_id, data: Template, *, overwrite=True, checked=False):
     """Render the template for editable prospects.
 
     `overwrite=False` (the agent's path) fills only prospects without a draft, so a
     template never replaces individually written messages behind the person's back.
+    `checked=True` (the agent's path too) holds a consulting campaign's drafts to
+    `sales_playbooks.draft_problems`: a prospect whose rendered draft fails is
+    left undrafted and reported under `skipped`, never saved.
     """
+    skipped = []
     async with connection_or_direct() as conn, conn.transaction():
-        await _campaign(conn, campaign_id, user_id, edit=True)
+        campaign = await _campaign(conn, campaign_id, user_id, edit=True)
         rows = await conn.fetch(
             "SELECT * FROM mw_sales_prospects WHERE campaign_id = $1 AND status IN ('prospect','draft','failed') "
             "AND ($2 OR subject = '' OR body = '') ORDER BY created_at,id",
@@ -590,6 +598,11 @@ async def draft_template(campaign_id, user_id, data: Template, *, overwrite=True
                 raise SalesError(
                     f"The message for {_label(row)} is empty, too long, or has a multiline subject."
                 )
+            if checked and dict(campaign).get("playbook") == playbooks.CONSULTING:
+                problems = playbooks.review_flags(campaign, dict(row) | {"subject": subject, "body": body})
+                if problems:
+                    skipped.append({"prospect": _label(row), "problems": problems})
+                    continue
             rendered.append((row, subject, body))
         if rendered:
             await conn.execute(
@@ -610,7 +623,7 @@ async def draft_template(campaign_id, user_id, data: Template, *, overwrite=True
                 ),
             )
         await _touch(conn, campaign_id)
-    return {"drafted": len(rendered)}
+    return {"drafted": len(rendered), **({"skipped": skipped[:20], "skipped_count": len(skipped)} if skipped else {})}
 
 
 def footer_problem(footer):
