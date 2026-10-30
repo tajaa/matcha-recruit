@@ -18,9 +18,10 @@ Checks that matter:
   * an answer must be to one of the posting's open questions; file,
     authorization and demographic questions are never answered
   * every link must be one this run's searches or page loads returned
-  * a tailored résumé line must quote the résumé lines it rewrites, word for
-    word, and every number in it must be in them; a role, employer, date or
-    skill must be in the résumé as written
+  * a tailored résumé line must quote the résumé lines it rewrites (from its
+    own role), word for word, and be made of them: its numbers exactly, its
+    names whole, most of its words; a role's title, employer and dates must
+    be written together in the résumé, and a skill as a whole word
 """
 from __future__ import annotations
 
@@ -30,7 +31,7 @@ from typing import Any
 from app.matcha.services.matcha_work.agent_runtime import finish
 
 from . import ats, normalize
-from .comp import amounts_in, numbers_supported, verify_quote
+from .comp import _norm, amounts_in, verify_quote
 
 # Titles a plan searches for: what they typed, then kept directions, then the
 # plan's own (`phases.search_titles` says how many the searches take).
@@ -496,68 +497,168 @@ TAILOR_SCHEMA = {
 TAILOR_FINISH = finish.tool("Tailored the résumé", "Finish with the résumé tailored to this job.", TAILOR_SCHEMA)
 
 
-def _norm(text: str) -> str:
-    return " ".join(str(text or "").split()).casefold()
+# A source shorter than this can be found in almost any résumé ("managed the").
+MIN_SOURCE_WORDS = 3
+# Of a line's own words (four letters or more), at least this share must be in
+# its sources: rewording for the posting is fine, writing new work isn't.
+MIN_SHARED_WORDS = 0.5
+# Spelled-out amounts, checked like digits ("five regions" needs a 5 or a "five").
+_NUMBER_WORDS = {
+    "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+    "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15, "sixteen": 16,
+    "seventeen": 17, "eighteen": 18, "nineteen": 19, "twenty": 20, "thirty": 30, "forty": 40, "fifty": 50,
+    "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90, "hundred": 100, "dozen": 12,
+    "thousand": 1_000, "million": 1_000_000, "billion": 1_000_000_000,
+}
+# Claims of size that no digit carries: kept only when the sources say them too.
+_SCALE_WORDS = {"doubled", "doubling", "tripled", "tripling", "quadrupled", "tenfold", "decade", "decades"}
+_WORD = re.compile(r"[A-Za-z0-9][A-Za-z0-9&+#'.-]*")
+_STOP = {"with", "from", "that", "this", "their", "they", "into", "over", "across", "while", "within",
+         "through", "including", "using", "which", "where", "when", "also", "each", "every", "more"}
 
 
-def _written_in(value: str, resume_norm: str) -> bool:
-    """A role, employer, date or skill as the résumé writes it (case and
-    spacing aside)."""
-    value = _norm(value)
-    return len(value) >= 2 and value in resume_norm
+def _words(text: str) -> list[str]:
+    return [w.rstrip(".-'") for w in _WORD.findall(text or "") if w.rstrip(".-'")]
 
 
-def _line(item: Any, resume: str) -> tuple[dict | None, str]:
-    """A rewritten line, kept only when every source is in the résumé word for
-    word and every number in the line is in its sources. (line, why not)."""
+def _written_in(value: str, text_norm: str) -> bool:
+    """`value` written in `text_norm` as whole words (case and spacing aside):
+    "Excel" isn't in "excellent", nor "AWS" in "laws"."""
+    return len(_norm(value)) >= 2 and _has_word(value, text_norm)
+
+
+def _has_word(value: str, text_norm: str) -> bool:
+    return re.search(rf"(?<!\w){re.escape(_norm(value))}(?!\w)", text_norm) is not None
+
+
+def _numbers_exact(text: str, sources: str) -> bool:
+    """Every number in `text` is written in `sources` exactly: no rounding a
+    year or a headcount, and a spelled-out amount counts as a number."""
+    stated = set(amounts_in(sources))
+    source_words = set(re.findall(r"[a-z]+", sources.casefold()))
+    if any(value not in stated for value in amounts_in(text)):
+        return False
+    for word in re.findall(r"[a-z]+", text.casefold()):  # "forty-five" is two words here
+        if word in _NUMBER_WORDS and word not in source_words and _NUMBER_WORDS[word] not in stated:
+            return False
+        if word in _SCALE_WORDS and word not in source_words:
+            return False
+    return True
+
+
+def _check(text: str, sources: list[str], within: str, *, facts_from: str | None = None, shared: bool = True) -> str:
+    """Why `text` can't be traced to `sources` within `within`, or ''. Its
+    numbers and names must be in `facts_from` (its sources, unless given)."""
+    if not sources:
+        return "it names no résumé line it comes from"
+    if any(len(_words(s)) < MIN_SOURCE_WORDS or not verify_quote(s, within) for s in sources):
+        return "its sources aren't in the résumé word for word"
+    joined = " ".join(sources)
+    facts = joined if facts_from is None else facts_from
+    if not _numbers_exact(text, facts):
+        return "a number in it isn't in its sources"
+    facts_norm = _norm(facts)
+    # A name, product or acronym ("Snowflake", "AWS", "P&L") has to come from
+    # the sources; a capital that only starts a sentence doesn't count.
+    for match in _WORD.finditer(text):
+        word = match.group().rstrip(".-'")
+        starts = not text[:match.start()].rstrip() or text[:match.start()].rstrip()[-1] in ".!?:;"
+        named = any(c.isupper() for c in word[1:]) or any(c.isdigit() for c in word) \
+            or (word[:1].isupper() and not starts)
+        if word and named and not _has_word(word, facts_norm):
+            return f"{word!r} isn't in its sources"
+    words = _words(text)
+    if shared:
+        own = [w.casefold() for w in words if len(w) >= 4 and w.casefold() not in _STOP]
+        stems = {w.casefold()[:5] for w in _words(joined)}
+        if own and sum(w[:5] in stems for w in own) < MIN_SHARED_WORDS * len(own):
+            return "most of its words aren't in its sources"
+    return ""
+
+
+def _sources(item: dict) -> list[str]:
+    raw = item.get("sources")
+    return [s for s in (_text(v, 600) for v in raw[:MAX_LINE_SOURCES]) if s] if isinstance(raw, list) else []
+
+
+def _line(item: Any, within: str) -> tuple[dict | None, str]:
+    """A rewritten line, kept only when it traces to résumé text in `within`
+    (its role's part of the résumé, or all of it). (line, why not)."""
     if not isinstance(item, dict):
         return None, "not a line"
     text = _text(item.get("text"), 400)
-    sources = [s for s in (_text(v, 600) for v in (item.get("sources") or [])[:MAX_LINE_SOURCES]) if s] \
-        if isinstance(item.get("sources"), list) else []
     if not text:
         return None, "empty"
-    if not sources or not all(verify_quote(source, resume) for source in sources):
-        return None, f"{text[:60]!r}: its sources aren't in the résumé word for word"
-    if not numbers_supported(amounts_in(text), " ".join(sources)):
-        return None, f"{text[:60]!r}: a number in it isn't in its sources"
+    sources = _sources(item)
+    why = _check(text, sources, within)
+    if why:
+        return None, f"{text[:60]!r}: {why}"
     return {"text": text, "sources": sources}, ""
+
+
+def _header(fields: dict[str, str], lines: list[str]) -> tuple[int | None, set[str]]:
+    """Where in the résumé this role is written: the first run of up to three
+    lines, starting on one that names it, naming the most of its title,
+    employer and dates together. (line index, the fields found there)."""
+    best: tuple[int | None, set[str]] = (None, set())
+    for i in range(len(lines)):
+        if not any(v and _written_in(v, lines[i]) for v in fields.values()):
+            continue
+        window = " ".join(lines[i:i + 3])
+        found = {k for k, v in fields.items() if v and _written_in(v, window)}
+        if len(found) > len(best[1]):
+            best = (i, found)
+    return best
 
 
 def normalize_tailored(args: dict, *, resume: str) -> tuple[dict, list[str]]:
     """What survives of a tailored résumé: every line traced to the résumé.
-    A line that isn't is dropped (and counted, so the page can say so); a
-    role, employer or date that isn't written in the résumé is left blank,
-    and a role with neither is dropped. Nothing left at all gets the model
-    one repair."""
+    A line that isn't is dropped (and counted, so the page can say so). A
+    role's title, employer and dates are kept only where the résumé writes
+    them together, and its lines only from that role's part of the résumé; a
+    role with neither title nor employer is dropped. Nothing left at all gets
+    the model one repair."""
     result = finish.answer(args)
     resume_norm = _norm(resume)
+    lines_norm = [_norm(line) for line in resume.splitlines() if line.strip()]
     warnings: list[str] = []
     dropped = 0
 
     summary = result.get("summary") if isinstance(result.get("summary"), dict) else {}
     summary_text = _text(summary.get("text"), 1200)
-    summary_sources = [s for s in (_text(v, 600) for v in (summary.get("sources") or [])[:MAX_LINE_SOURCES]) if s] \
-        if isinstance(summary.get("sources"), list) else []
-    if summary_text and not (all(verify_quote(s, resume) for s in summary_sources)
-                             and numbers_supported(amounts_in(summary_text), " ".join(summary_sources))):
-        warnings.append("Dropped the summary: a source or number in it isn't in the résumé")
+    summary_sources = _sources(summary)
+    # A summary draws on the whole résumé: its names and numbers must be in it,
+    # and it must still name the lines it rests on.
+    why = _check(summary_text, summary_sources, resume, facts_from=resume, shared=False) if summary_text else ""
+    if why:
+        warnings.append(f"Dropped the summary: {why}")
         summary_text, summary_sources, dropped = "", [], dropped + 1
 
-    experience = []
+    roles = []
     for role in finish.items(result, "experience")[:MAX_TAILORED_ROLES]:
         if not isinstance(role, dict):
             continue
-        fields = {}
-        for key, limit in (("role", 160), ("organization", 160), ("dates", 80)):
-            value = _text(role.get(key), limit)
-            if value and not _written_in(value, resume_norm):
-                warnings.append(f"Left out {key} {value[:40]!r}: not written in the résumé")
-                value = ""
-            fields[key] = value
+        fields = {key: _text(role.get(key), limit) for key, limit in (("role", 160), ("organization", 160), ("dates", 80))}
+        at, found = _header(fields, lines_norm)
+        for key, value in fields.items():
+            if value and key not in found:
+                warnings.append(f"Left out {key} {value[:40]!r}: not written with this role in the résumé")
+                fields[key] = ""
+        roles.append((role, fields, at))
+
+    # A role's part of the résumé runs from where it is written to where the
+    # next role starts, so a line can't be moved under another job.
+    starts = sorted({at for _, _, at in roles if at is not None})
+    experience = []
+    for role, fields, at in roles:
+        if at is None:
+            within = resume
+        else:
+            end = next((s for s in starts if s > at), len(lines_norm))
+            within = " ".join(lines_norm[at:end])
         bullets = []
         for item in (role.get("bullets") or [])[:MAX_ROLE_BULLETS] if isinstance(role.get("bullets"), list) else []:
-            line, why = _line(item, resume)
+            line, why = _line(item, within)
             if line:
                 bullets.append(line)
             else:
@@ -594,7 +695,8 @@ def normalize_tailored(args: dict, *, resume: str) -> tuple[dict, list[str]]:
     if not any(role["bullets"] for role in experience):
         raise ValueError(
             "no experience line could be traced to the résumé: give each line `sources` copied "
-            "exactly from the résumé, and put no number in a line that isn't in its sources"
+            "exactly from that role's part of the résumé (whole lines, not a few words), keep its "
+            "names and numbers as they are there, and put nothing in it they don't say"
         )
     return {
         "summary": {"text": summary_text, "sources": summary_sources},

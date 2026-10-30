@@ -8,6 +8,7 @@ import { isTailoring, resumeFileName } from './jobSearchLogic'
  * Their résumé, tailored to this job, to read before they apply. The server
  * rewrites only what is already in their saved résumé and drops any line it
  * can't trace to it; each line here opens to the résumé lines it came from.
+ * The last good version stays while a newer one runs or after one fails.
  * What the posting asks for that the résumé doesn't show is listed apart,
  * never written in. Edits stay on this page (Copy or Download takes them);
  * nothing is sent or submitted.
@@ -36,18 +37,25 @@ export default function TailoredResumeSection({ lead, busy, resumePath, onTailor
           </button>
         )}
       </div>
-      {tailoring ? (
+      {tailoring && (
         <p className="flex items-center gap-1.5 text-[11px] text-w-dim">
           <Loader2 size={12} className="animate-spin" />Rewriting your résumé for this posting…
         </p>
-      ) : tailored ? (
+      )}
+      {!tailoring && lead.resume_status === 'failed' && (
+        <p className="text-[11px] leading-4 text-w-dim">
+          {tailored
+            ? "The new version didn't finish. This is the one from before. "
+            : "Tailoring didn't finish for this job. Try again. "}
+        </p>
+      )}
+      {tailored ? (
         // Keyed by when it was made, so a new version starts without old edits.
         <TailoredBody key={tailored.made_at ?? 'tailored'} lead={lead} tailored={tailored} resumePath={resumePath} />
-      ) : (
+      ) : !tailoring && (
         <p className="text-[11px] leading-4 text-w-dim">
-          {lead.resume_status === 'failed'
-            ? "Tailoring didn't finish for this job. Try again. "
-            : "Rewrites your saved résumé for this posting, using only what's already in it, so you can read it before you apply. "}
+          {lead.resume_status !== 'failed' &&
+            "Rewrites your saved résumé for this posting, using only what's already in it, so you can read it before you apply. "}
           <Link to={resumePath} className="text-w-accent hover:underline">Your résumé</Link>
         </p>
       )}
@@ -75,8 +83,12 @@ function TailoredBody({ lead, tailored, resumePath }: { lead: JobLeadDetail; tai
     const link = document.createElement('a')
     link.href = url
     link.download = resumeFileName(lead)
+    // Some browsers only download from a link that is in the page, and read
+    // the file after the click returns.
+    document.body.appendChild(link)
     link.click()
-    URL.revokeObjectURL(url)
+    link.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
 
   const action = 'inline-flex items-center gap-1 text-[11px] font-semibold text-w-accent hover:underline'
@@ -84,7 +96,7 @@ function TailoredBody({ lead, tailored, resumePath }: { lead: JobLeadDetail; tai
     <div className="space-y-3">
       <p className="text-[11px] leading-4 text-w-dim">
         Made from <Link to={resumePath} className="text-w-accent hover:underline">your résumé</Link>
-        {saved ? ` saved ${saved}` : ''}. Every line comes from it; nothing was added.
+        {saved ? ` saved ${saved}` : ''}. Each line was checked against it: open one to see the lines it came from.
         {tailored.dropped > 0 && ` ${tailored.dropped} ${tailored.dropped === 1 ? 'line was' : 'lines were'} left out because ${tailored.dropped === 1 ? "it didn't" : "they didn't"} match your résumé.`}
       </p>
       <div className="flex flex-wrap items-center gap-3">

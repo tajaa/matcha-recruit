@@ -109,9 +109,10 @@ its terms for work the résumé already shows (their "customer onboarding" can b
 already says it best.
 - Keep their roles in the résumé's own order. Role, employer and dates exactly as the résumé \
 writes them, every role you include.
-- Each line gives `sources`: the résumé line or lines it rewrites, copied exactly, word for \
-word. No number, percentage, year, team size or amount in a line that isn't in its sources. \
-Never add an employer, title, degree, certification, tool, skill, metric or responsibility the \
+- Each line gives `sources`: the whole résumé line or lines it rewrites, from under that same \
+role, copied exactly, word for word. Most of a line's words come from its sources; plain words \
+may change, but every name, product, acronym and number (spelled out or not: a percentage, year, \
+team size or amount) must be in its sources as written. Never add an employer, title, degree, certification, tool, skill, metric or responsibility the \
 résumé doesn't show.
 - Summary: two to four sentences on who they are for this job, with its sources. Only what the \
 résumé states: no totals or traits worked out from it ("over a decade", "proven", "strategic") \

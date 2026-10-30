@@ -60,6 +60,13 @@ describe('TailoredResumeSection', () => {
     expect(screen.getByRole('button', { name: 'Tailor my résumé' })).toBeTruthy()
   })
 
+  it('keeps the earlier résumé when a new one fails, and says so', () => {
+    section(job({ resume_status: 'failed', tailored_resume: tailored() }))
+    expect(screen.getByText(/The new version didn't finish. This is the one from before./)).toBeTruthy()
+    expect(screen.getByText('Cut carrier costs 18%.')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Tailor again' })).toBeTruthy()
+  })
+
   it('shows the résumé, where each line came from, what changed and what is missing', () => {
     section(job({ resume_status: 'done', tailored_resume: tailored() }))
     expect(screen.getByText('Operations leader who has run multi-site teams.')).toBeTruthy()
@@ -89,12 +96,21 @@ describe('TailoredResumeSection', () => {
     const create = vi.fn(() => 'blob:x')
     const revoke = vi.fn()
     Object.assign(URL, { createObjectURL: create, revokeObjectURL: revoke })
-    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    let inPage = false
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      inPage = document.body.contains(this)
+    })
     section(job({ resume_status: 'done', tailored_resume: tailored() }))
+    vi.useFakeTimers()
     fireEvent.click(screen.getByRole('button', { name: 'Download' }))
     expect(create).toHaveBeenCalledOnce()
     expect(click).toHaveBeenCalledOnce()
+    expect(inPage).toBe(true)
+    // The file is read after the click returns, so its link is freed later.
+    expect(revoke).not.toHaveBeenCalled()
+    vi.runAllTimers()
     expect(revoke).toHaveBeenCalledWith('blob:x')
+    vi.useRealTimers()
     click.mockRestore()
   })
 })

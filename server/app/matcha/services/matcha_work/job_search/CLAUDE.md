@@ -410,32 +410,58 @@ pane for it yet (the lead JSON only gains fields).
 - **Nothing new in anyone's record.** The model gets the posting and the
   résumé's own text (`user_resumes.raw_text`, ≤20k chars, not the 6k parsed
   summary the phases get) and no tools. `contracts.normalize_tailored` keeps a
-  line only when each of its `sources` is in the résumé word for word
-  (`comp.verify_quote`) and every number in it is in those sources
-  (`comp.amounts_in` / `numbers_supported`); a role, employer, date or skill
-  is kept only as the résumé writes it (blanked otherwise; a role with
-  neither title nor employer goes). A summary that fails is dropped, not the
-  résumé. `dropped` counts what was left out and the page says so. What the
-  posting asks for and the résumé lacks goes in `gaps`, never into the résumé.
-  Nothing kept at all gets the model one repair, then the job is `failed`.
-  In a 2026-10-29 check with Claude Haiku on a sample résumé, every line
-  survived. The prompt also forbids summary claims worked out from the
-  résumé ("over a decade"): before that, Haiku wrote one.
+  line only when (`_check`):
+  - each of its `sources` is at least 3 words and in the résumé word for word
+    (`comp.verify_quote`), and for a role's line, in that role's part of the
+    résumé (from where it is written to where the next role starts), so a
+    line can't move under another job;
+  - every number in it is in its sources **exactly** (`_numbers_exact`: not
+    the pay check's 0.5% leeway, which passes 2009 for 2015), counting
+    spelled-out ones ("five", "forty-five") and "doubled"/"decade";
+  - every name, product or acronym in it ("Snowflake", "AWS", "P&L": a
+    capital not starting a sentence, or a digit) is a whole word in its
+    sources;
+  - at least half its own words (4+ letters) are in its sources (by their
+    first five letters), so plain words can take the posting's terms but a
+    line can't be new work.
+  A role's title, employer and dates are kept only where the résumé writes
+  them together (`_header`: within three lines; the rest blanked; a role
+  with neither title nor employer goes), and a skill only as a whole word
+  ("Excel" isn't in "excellent"). The summary must name its sources too; its
+  names and numbers are checked against the whole résumé, since it draws on
+  all of it. A summary that fails is dropped, not the résumé. `dropped`
+  counts what was left out and the page says so. What the posting asks for
+  and the résumé lacks goes in `gaps`, never into the résumé. Nothing kept at
+  all gets the model one repair, then the job is `failed`. These are
+  heuristics, so the page says each line "was checked", not that nothing was
+  added. In a 2026-10-30 check with Claude Haiku on a sample résumé (4 runs,
+  after the stricter checks) every line and summary survived. The prompt also
+  forbids summary claims worked out from the résumé ("over a decade"):
+  before that, Haiku wrote one.
 - **One run, its own token.** `request` sets `resume_status = 'queued'` with a
   new `resume_token` and dispatches `workers/tasks/job_search.tailor_job_resume`
   (same queue as the search, `queue_for`). The task claims `queued → drafting`
   under that token; only that token writes the outcome (`_finish`), so a newer
   ask replaces an older run's write. Asked while one runs, the first is left to
-  finish and nothing is spent. A run queued or drafting past `STALE_MINUTES`
-  (7, past the task's 360 s hard limit) died: it reads `failed` everywhere and
-  can be asked again. There is no sweep.
+  finish and nothing is spent. The claim resets `resume_requested_at`, so the
+  stale clock starts when the worker does: a run drafting past
+  `STALE_MINUTES` (7, past the task's 360 s hard limit), or queued past
+  `QUEUED_STALE_MINUTES` (30: the one prod worker can be busy for long), died.
+  It reads `failed` everywhere and can be asked again; the new token stops a
+  late-starting old one. There is no sweep. The last good result stays in
+  `resume_tailored` and is shown (`tailor.view`) while a newer ask runs or
+  after it fails.
 - **Counted like the search's runs, outside its chain.** The run is a
   `phase_run` run owned by the search (kind `job_search`, phase
   `tailor_resume`, counted in `model_runs` / `tokens`, charged to the
   workspace's tokens), with `dispatch_token` and `recap_generation` cleared,
   so it never joins a recap and never touches the search's status, cursor or
   progress note. Delete takes it with the search's runs.
-- **Gates.** Pro (`require_plan`, `job_search`), a posting that has been read
+- **Gates.** The search's own standing, for everyone (admins too): a
+  personal workspace (`workspace_enabled`) and the `jobs-2` consent still
+  given (`enqueue.consent_granted`), else 403 `job_search_off`; the worker
+  checks both again, and that the search isn't deleted, before sending the
+  résumé. Then Pro (`require_plan`, `job_search`), a posting that has been read
   (≥200 chars, else 409 `posting_unread`), a saved résumé (else 422
   `resume_required`), then 10 an hour (`HOURLY_LIMIT`) and the token budget,
   checked only once it would be accepted. Admins skip the plan, limit and

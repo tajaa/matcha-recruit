@@ -17,8 +17,11 @@ show is listed apart (`gaps`), never written in. Nothing is sent or submitted.
 The job row holds the result and where its run is (`resume_*`, `mwjobs05`).
 A newer request replaces an older one's token, so only the latest run
 writes. A run that died (the task was killed, the broker lost it) leaves its
-row queued or drafting; one older than `STALE_MINUTES` reads as failed, and
-the person can ask again.
+row queued or drafting. `resume_requested_at` is reset when the worker picks
+the ask up, so time waiting behind other work never counts against a run: one
+queued past `QUEUED_STALE_MINUTES`, or drafting past `STALE_MINUTES`, reads as
+failed, and the person can ask again (the new token keeps the old run from
+starting late). A failed or newer ask leaves the last good résumé shown.
 """
 from __future__ import annotations
 
@@ -39,8 +42,12 @@ from .agent_phase import run_owner
 logger = logging.getLogger(__name__)
 
 TAILORING = ("queued", "drafting")
-# Longer than the task's hard limit (360 s), so a run still going never reads as failed.
+# From when the worker picked it up: longer than the task's hard limit (360 s),
+# so a run still going never reads as failed.
 STALE_MINUTES = 7
+# Waiting in the queue: the one worker can be busy with a search phase or a
+# research task for a long while.
+QUEUED_STALE_MINUTES = 30
 # The whole résumé is what is rewritten, so it gets more room than a search's
 # phases give it (`service.RESUME_CHARS`).
 RESUME_CHARS = 20_000
@@ -52,10 +59,6 @@ LIMITS = RunLimits(max_model_calls=3, wall_seconds=240.0)
 ENTITLEMENT = "job_search"
 
 
-def _iso(value):
-    return value.isoformat() if value is not None and hasattr(value, "isoformat") else value
-
-
 def status_of(row) -> str:
     """The job's tailoring as the person should see it: a run that has been
     queued or drafting past `STALE_MINUTES` died, and reads as failed."""
@@ -63,17 +66,17 @@ def status_of(row) -> str:
     status = row.get("resume_status") or "none"
     if status in TAILORING:
         asked = row.get("resume_requested_at")
-        if asked is None or asked < datetime.now(timezone.utc) - timedelta(minutes=STALE_MINUTES):
+        minutes = QUEUED_STALE_MINUTES if status == "queued" else STALE_MINUTES
+        if asked is None or asked < datetime.now(timezone.utc) - timedelta(minutes=minutes):
             return "failed"
     return status
 
 
 def view(row) -> dict | None:
-    """The tailored résumé for the job pane (with its plain text, for Copy
-    and Download), or None until there is one."""
+    """The last tailored résumé for the job pane (with its plain text, for
+    Copy and Download), or None until there is one. It stays while a newer
+    ask runs or after one fails; `resume_status` says which."""
     row = dict(row)
-    if status_of(row) != "done":
-        return None
     tailored = decode_jsonb(row.get("resume_tailored"), {}) or {}
     if not tailored.get("experience"):
         return None
@@ -111,8 +114,22 @@ async def load_resume(user_id: UUID) -> tuple[str, Any] | None:
     return (text[:RESUME_CHARS], row["updated_at"]) if text else None
 
 
-def _is_admin(user) -> bool:
-    return (getattr(user, "role", "") or "").lower() == "admin"
+async def has_resume(user_id: UUID) -> bool:
+    async with connection_or_direct() as conn:
+        return bool(await conn.fetchval(
+            "SELECT EXISTS (SELECT 1 FROM user_resumes WHERE user_id = $1 AND btrim(COALESCE(raw_text, '')) <> '')",
+            user_id,
+        ))
+
+
+async def _allowed(user_id: UUID, company_id: UUID) -> bool:
+    """The same standing a search needs: a personal workspace, and the job
+    search consent still given (it covers sending their résumé to the model)."""
+    from app.matcha.services.matcha_work.agent_runtime.enqueue import workspace_enabled
+
+    from .enqueue import consent_granted
+
+    return await workspace_enabled(company_id) and await consent_granted(user_id)
 
 
 async def request(user, search_id: UUID, lead_id: UUID) -> dict:
@@ -123,16 +140,26 @@ async def request(user, search_id: UUID, lead_id: UUID) -> dict:
     from app.matcha.services.billing import token_budget_service
     from app.matcha.services.billing.entitlements_service import PLAN_PRO, require_plan
 
-    from .enqueue import queue_for
-    from .service import JobSearchError, lead_detail, owned_search
+    from .enqueue import _is_admin, queue_for
+    from .service import JobSearchError, lead_detail
 
     if not _is_admin(user):
         await require_plan(user.id, PLAN_PRO, ENTITLEMENT)
     async with connection_or_direct() as conn:
-        search = await owned_search(conn, search_id, user.id)
-        row = await conn.fetchrow("SELECT * FROM mw_job_leads WHERE id = $1 AND search_id = $2", lead_id, search_id)
+        row = await conn.fetchrow(
+            """SELECT l.*, s.company_id AS search_company_id FROM mw_job_leads l
+               JOIN mw_job_searches s ON s.id = l.search_id
+               WHERE l.id = $1 AND l.search_id = $2 AND s.user_id = $3 AND s.deleted_at IS NULL""",
+            lead_id, search_id, user.id,
+        )
     if row is None:
         raise JobSearchError("Job not found.", 404)
+    if not await _allowed(user.id, row["search_company_id"]):
+        raise JobSearchError("Job search is off for your account.", 403, {
+            "code": "job_search_off",
+            "message": "Job search is off for your account, so your résumé isn't sent anywhere. "
+                       "Start a job search to turn it back on.",
+        })
     if status_of(row) in TAILORING:
         return lead_detail(row)
     if len((row["description"] or "").strip()) < MIN_POSTING_CHARS:
@@ -140,7 +167,7 @@ async def request(user, search_id: UUID, lead_id: UUID) -> dict:
             "code": "posting_unread",
             "message": "This posting hasn't been read yet, so there's nothing to tailor to.",
         })
-    if await load_resume(user.id) is None:
+    if not await has_resume(user.id):
         raise JobSearchError("Add your résumé first.", 422, {
             "code": "resume_required",
             "message": "Add your résumé in Tasks → Résumé first, then tailor it to this job.",
@@ -148,7 +175,7 @@ async def request(user, search_id: UUID, lead_id: UUID) -> dict:
     if not _is_admin(user):
         # Only once it would be accepted: a refusal above spends nothing.
         await check_rate_limit(str(user.id), "espresso_job_resume_tailor", HOURLY_LIMIT, 3600)
-        await token_budget_service.check_token_budget(search["company_id"])
+        await token_budget_service.check_token_budget(row["search_company_id"])
 
     token = uuid4()
     async with connection_or_direct() as conn, conn.transaction():
@@ -196,8 +223,9 @@ async def _no_note(_text: str) -> None:
 async def run(lead_id: UUID, token: UUID, *, client_factory=phase_run.default_client) -> None:
     """The worker's half: claim the ask, run the model, keep what checks out."""
     async with connection_or_direct() as conn:
+        # The stale clock restarts here: time spent waiting in the queue isn't the run's.
         lead = await conn.fetchrow(
-            """UPDATE mw_job_leads SET resume_status = 'drafting'
+            """UPDATE mw_job_leads SET resume_status = 'drafting', resume_requested_at = NOW()
                WHERE id = $1 AND resume_token = $2 AND resume_status = 'queued'
                RETURNING id, search_id, user_id, title, company, location, description, highlights""",
             lead_id, token,
@@ -207,10 +235,9 @@ async def run(lead_id: UUID, token: UUID, *, client_factory=phase_run.default_cl
         search = await conn.fetchrow(
             "SELECT * FROM mw_job_searches WHERE id = $1 AND deleted_at IS NULL", lead["search_id"],
         )
-    if search is None:
-        return
-    resume = await load_resume(lead["user_id"])
-    if resume is None:  # removed since it was asked for
+    resume = await load_resume(lead["user_id"]) if search is not None else None
+    # The search was deleted, consent withdrawn or the résumé removed since it was asked for.
+    if resume is None or not await _allowed(lead["user_id"], search["company_id"]):
         await _finish(lead_id, token, "failed")
         return
     resume_text, resume_saved = resume
@@ -240,6 +267,8 @@ async def run(lead_id: UUID, token: UUID, *, client_factory=phase_run.default_cl
         logger.exception("résumé tailoring failed lead=%s", lead_id)
         await _finish(lead_id, token, "failed")
         return
+    from .service import _iso
+
     tailored = {
         **(outcome.result or {}),
         "resume_saved_at": _iso(resume_saved),

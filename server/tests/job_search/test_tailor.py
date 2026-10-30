@@ -12,7 +12,7 @@ from app.matcha.services.matcha_work.job_search import contracts, service, tailo
 from app.matcha.services.matcha_work.job_search.service import JobSearchError
 from tests.agent_runtime.helpers import FakeConn, connection
 
-from ._fixtures import LEAD, SEARCH, USER, lead_row, search_row
+from ._fixtures import COMPANY, LEAD, SEARCH, USER, lead_row, search_row
 
 RESUME = """Jane Doe
 Operations Director, Acme Logistics, 2019 - 2024
@@ -53,6 +53,76 @@ def _good(**over):
 
 
 # ── the checks ───────────────────────────────────────────────────────────────
+
+def test_a_number_must_match_exactly_not_nearly():
+    # The pay check's 0.5% leeway would pass 2009 for 2015 and 1,000 for 995.
+    for text in ("Ran a 40-person warehouse team since 2009.", "Ran a 41-person warehouse team across 3 sites.",
+                 "Ran a forty-five person warehouse team across 3 sites.",
+                 "Ran a 40-person warehouse team across three sites, doubled.",
+                 "Ran a 40-person warehouse team across five sites."):
+        line, why = contracts._line({"text": text, "sources": ["Ran a 40-person warehouse team across 3 sites."]}, RESUME)
+        assert line is None and "number" in why, text
+    line, _ = contracts._line({"text": "Ran a 40-person warehouse team across three sites.",
+                               "sources": ["Ran a 40-person warehouse team across 3 sites."]}, RESUME)
+    assert line is not None
+
+
+def test_a_line_must_be_made_of_its_sources():
+    source = ["Ran a 40-person warehouse team across 3 sites."]
+    for text, why in (
+        ("Led the Snowflake migration across 3 sites.", "Snowflake"),
+        ("Owned the AWS warehouse team across 3 sites.", "AWS"),
+        ("Architected distributed streaming platforms company-wide.", "words"),
+    ):
+        line, said = contracts._line({"text": text, "sources": source}, RESUME)
+        assert line is None and why in said, text
+    # A few words found anywhere in the résumé are no source.
+    line, said = contracts._line({"text": "Led the team.", "sources": ["warehouse team"]}, RESUME)
+    assert line is None and "word for word" in said
+
+
+def test_a_summary_needs_sources():
+    result, warnings = contracts.normalize_tailored(_good(summary={
+        "text": "Award-winning operations executive.", "sources": [],
+    }), resume=RESUME)
+    assert result["summary"] == {"text": "", "sources": []} and result["dropped"] == 1
+    assert "names no résumé line" in warnings[0]
+
+
+def test_skills_and_titles_match_whole_words():
+    resume = RESUME + "Known for excellent, scalable work under state laws.\n"
+    result, _ = contracts.normalize_tailored(_good(skills=["Excel", "Scala", "AWS", "SAP"]), resume=resume)
+    assert result["skills"] == ["Excel", "SAP"]  # Excel from its Skills line, not "excellent"
+    result, _ = contracts.normalize_tailored(_good(skills=["Scala", "AWS"]), resume=resume.replace("Excel", ""))
+    assert result["skills"] == []
+
+
+def test_a_role_is_read_where_the_resume_writes_it():
+    # A title from one job put with another employer keeps only what is written together.
+    result, warnings = contracts.normalize_tailored(_good(experience=[
+        {"role": "Operations Director", "organization": "Beta Freight", "dates": "2015 - 2019", "bullets": [
+            {"text": "Managed vendor relationships and business reviews.",
+             "sources": ["Managed vendor relationships and quarterly business reviews."]}]},
+    ]), resume=RESUME)
+    [role] = result["experience"]
+    assert (role["role"], role["organization"], role["dates"]) == ("", "Beta Freight", "2015 - 2019")
+    assert any("Operations Director" in w for w in warnings)
+
+
+def test_a_line_cannot_move_under_another_job():
+    result, warnings = contracts.normalize_tailored(_good(experience=[
+        {"role": "Operations Director", "organization": "Acme Logistics", "dates": "", "bullets": [
+            {"text": "Led a 40-person team across 3 warehouse sites.",
+             "sources": ["Ran a 40-person warehouse team across 3 sites."]}]},
+        {"role": "Operations Manager", "organization": "Beta Freight", "dates": "", "bullets": [
+            {"text": "Cut carrier costs 18% by renegotiating contracts.",
+             "sources": ["Cut shipping costs by 18% by renegotiating carrier contracts."]},
+            {"text": "Managed vendor relationships and business reviews.",
+             "sources": ["Managed vendor relationships and quarterly business reviews."]}]},
+    ]), resume=RESUME)
+    assert [b["text"] for b in result["experience"][1]["bullets"]] == ["Managed vendor relationships and business reviews."]
+    assert result["dropped"] == 1
+
 
 def test_a_true_rewrite_is_kept_whole():
     result, warnings = contracts.normalize_tailored(_good(), resume=RESUME)
@@ -145,13 +215,17 @@ def test_a_run_that_died_reads_failed():
     now = datetime.now(timezone.utc)
     assert tailor.status_of({"resume_status": "drafting", "resume_requested_at": now}) == "drafting"
     old = now - timedelta(minutes=tailor.STALE_MINUTES + 1)
-    assert tailor.status_of({"resume_status": "queued", "resume_requested_at": old}) == "failed"
+    assert tailor.status_of({"resume_status": "drafting", "resume_requested_at": old}) == "failed"
+    # Waiting behind other work in the queue isn't dying.
+    assert tailor.status_of({"resume_status": "queued", "resume_requested_at": old}) == "queued"
+    older = now - timedelta(minutes=tailor.QUEUED_STALE_MINUTES + 1)
+    assert tailor.status_of({"resume_status": "queued", "resume_requested_at": older}) == "failed"
     assert tailor.status_of({"resume_status": "queued", "resume_requested_at": None}) == "failed"
     assert tailor.status_of({"resume_status": "done", "resume_requested_at": old}) == "done"
     assert tailor.status_of({}) == "none"
 
 
-def test_the_job_carries_its_tailored_resume_only_when_done():
+def test_the_job_keeps_its_last_tailored_resume():
     result, _ = contracts.normalize_tailored(_good(), resume=RESUME)
     done = lead_row(resume_status="done", resume_tailored=json.dumps(result))
     detail = service.lead_detail(done)
@@ -159,8 +233,9 @@ def test_the_job_carries_its_tailored_resume_only_when_done():
     assert detail["tailored_resume"]["experience"] and detail["tailored_resume"]["text"].startswith("SUMMARY")
     assert service.lead_detail(lead_row())["tailored_resume"] is None
     assert service.lead_summary(lead_row())["resume_status"] == "none"
-    failed = lead_row(resume_status="failed", resume_tailored=json.dumps(result))
-    assert service.lead_detail(failed)["tailored_resume"] is None
+    # A failed "Tailor again" leaves the last good one to read.
+    failed = service.lead_detail(lead_row(resume_status="failed", resume_tailored=json.dumps(result)))
+    assert failed["resume_status"] == "failed" and failed["tailored_resume"]["experience"]
 
 
 # ── asking for one ───────────────────────────────────────────────────────────
@@ -182,14 +257,15 @@ def gates(monkeypatch):
     from app.workers.tasks import job_search as task_module
 
     monkeypatch.setattr(task_module.tailor_job_resume, "apply_async", seen.dispatch)
-    monkeypatch.setattr(tailor, "load_resume", AsyncMock(return_value=(RESUME, datetime(2026, 10, 1, tzinfo=timezone.utc))))
+    monkeypatch.setattr(tailor, "has_resume", AsyncMock(return_value=True))
+    seen.allowed = AsyncMock(return_value=True)
+    monkeypatch.setattr(tailor, "_allowed", seen.allowed)
     return seen
 
 
 def _conn(monkeypatch, lead, updated=None):
     conn = (FakeConn()
-            .on("FROM mw_job_searches s", search_row())
-            .on("SELECT * FROM mw_job_leads WHERE id = $1 AND search_id = $2", lead)
+            .on("JOIN mw_job_searches s", {**lead, "search_company_id": COMPANY} if lead else None)
             .on("FOR UPDATE", lead)
             .on("SET resume_status = 'queued'", lambda lead_id, token: {**lead, "resume_status": "queued",
                                                                          "resume_token": token,
@@ -211,6 +287,19 @@ async def test_asking_queues_the_job_and_dispatches_its_run(monkeypatch, gates):
     gates.rate.assert_awaited_once()
     assert gates.rate.await_args.args[1:] == ("espresso_job_resume_tailor", tailor.HOURLY_LIMIT, 3600)
     gates.budget.assert_awaited_once()
+    assert gates.budget.await_args.args == (COMPANY,)
+    gates.allowed.assert_awaited_once_with(USER, COMPANY)
+
+
+@pytest.mark.asyncio
+async def test_without_consent_nothing_is_sent(monkeypatch, gates):
+    gates.allowed.return_value = False
+    conn = _conn(monkeypatch, lead_row(description=POSTING))
+    with pytest.raises(JobSearchError) as err:
+        await tailor.request(ADMIN, SEARCH, LEAD)
+    assert err.value.code == 403 and err.value.detail["code"] == "job_search_off"
+    assert not conn.ran("SET resume_status = 'queued'")
+    gates.dispatch.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -241,7 +330,7 @@ async def test_refusals_spend_nothing(monkeypatch, gates):
     assert err.value.code == 409 and err.value.detail["code"] == "posting_unread"
 
     _conn(monkeypatch, lead_row(description=POSTING))
-    monkeypatch.setattr(tailor, "load_resume", AsyncMock(return_value=None))
+    monkeypatch.setattr(tailor, "has_resume", AsyncMock(return_value=False))
     with pytest.raises(JobSearchError) as err:
         await tailor.request(CLIENT, SEARCH, LEAD)
     assert err.value.code == 422 and err.value.detail["code"] == "resume_required"
@@ -289,16 +378,17 @@ def _owner():
     )
 
 
-def _run_conn(monkeypatch, claimed=True):
+def _run_conn(monkeypatch, claimed=True, search=True):
     claim = {"id": LEAD, "search_id": SEARCH, "user_id": USER, "title": "COO", "company": "Acme",
              "location": "Austin, TX", "description": POSTING, "highlights": "[]"} if claimed else None
     conn = (FakeConn()
             .on("SET resume_status = 'drafting'", claim)
-            .on("FROM mw_job_searches WHERE id = $1", search_row())
+            .on("FROM mw_job_searches WHERE id = $1", search_row() if search else None)
             .on("resume_token = NULL", LEAD))
     monkeypatch.setattr(tailor, "connection_or_direct", connection(conn))
     monkeypatch.setattr(tailor, "run_owner", AsyncMock(return_value=_owner()))
     monkeypatch.setattr(tailor, "load_resume", AsyncMock(return_value=(RESUME, datetime(2026, 10, 1, tzinfo=timezone.utc))))
+    monkeypatch.setattr(tailor, "_allowed", AsyncMock(return_value=True))
     return conn
 
 
@@ -318,6 +408,8 @@ async def test_the_run_keeps_what_checks_out_and_never_touches_the_recap(monkeyp
     assert seen["owner"].dispatch_token is None and seen["owner"].recap_generation is None
     assert seen["kwargs"]["abilities"] == () and seen["kwargs"]["phase"] == "tailor_resume"
     assert "<resume>" in seen["kwargs"]["user_text"] and "multi-site operations" in seen["kwargs"]["user_text"]
+    [(_m, claim, _a)] = conn.ran("SET resume_status = 'drafting'")
+    assert "resume_requested_at = NOW()" in claim  # the stale clock starts when the worker does
     [(_m, _q, (lead_id, written_token, status, tailored))] = conn.ran("resume_token = NULL")
     assert (lead_id, written_token, status) == (LEAD, token, "done")
     stored = json.loads(tailored)
@@ -360,6 +452,42 @@ async def test_a_resume_removed_since_fails_it(monkeypatch):
     await tailor.run(LEAD, uuid4())
     model.assert_not_awaited()
     assert conn.ran("resume_token = NULL")[0][2][2] == "failed"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("why", ["search deleted", "consent withdrawn"])
+async def test_a_run_that_may_no_longer_go_ahead_is_failed(monkeypatch, why):
+    conn = _run_conn(monkeypatch, search=why != "search deleted")
+    if why == "consent withdrawn":
+        monkeypatch.setattr(tailor, "_allowed", AsyncMock(return_value=False))
+    model = AsyncMock()
+    monkeypatch.setattr(tailor.phase_run, "run_model_phase", model)
+    await tailor.run(LEAD, uuid4())
+    model.assert_not_awaited()
+    assert conn.ran("resume_token = NULL")[0][2][2] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_allowed_needs_the_workspace_and_the_consent(monkeypatch):
+    from app.matcha.services.matcha_work.agent_runtime import enqueue as runtime_enqueue
+    from app.matcha.services.matcha_work.job_search import enqueue
+
+    monkeypatch.setattr(runtime_enqueue, "workspace_enabled", AsyncMock(return_value=True))
+    monkeypatch.setattr(enqueue, "consent_granted", AsyncMock(return_value=True))
+    assert await tailor._allowed(USER, COMPANY)
+    monkeypatch.setattr(enqueue, "consent_granted", AsyncMock(return_value=False))
+    assert not await tailor._allowed(USER, COMPANY)
+    monkeypatch.setattr(runtime_enqueue, "workspace_enabled", AsyncMock(return_value=False))
+    assert not await tailor._allowed(USER, COMPANY)
+
+
+@pytest.mark.asyncio
+async def test_has_resume_asks_only_whether_there_is_text(monkeypatch):
+    conn = FakeConn().on("FROM user_resumes", True)
+    monkeypatch.setattr(tailor, "connection_or_direct", connection(conn))
+    assert await tailor.has_resume(USER) is True
+    [(method, query, _a)] = conn.ran("FROM user_resumes")
+    assert method == "fetchval" and "raw_text, updated_at" not in query
 
 
 @pytest.mark.asyncio
