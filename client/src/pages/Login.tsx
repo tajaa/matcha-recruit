@@ -57,6 +57,11 @@ function LoginInput({ label, id, ...props }: React.ComponentProps<'input'> & { l
   )
 }
 
+/**
+ * The one Matcha sign-in page. Gummfit's staff console (`/gummfit/admin/login`,
+ * on either host) shows this same page; only what happens after a password
+ * sign-in differs there: administrators only, then on to the console.
+ */
 export default function Login({ surface }: { surface?: 'gummfit-admin' }) {
   const gummfitAdmin = surface === 'gummfit-admin'
   const [email, setEmail] = useState('')
@@ -125,7 +130,7 @@ export default function Login({ surface }: { surface?: 'gummfit-admin' }) {
             className="text-4xl tracking-tight"
             style={{ fontFamily: DISPLAY, fontWeight: 500, color: INK }}
           >
-            {gummfitAdmin ? 'Gummfit' : 'Matcha'}
+            Matcha
           </span>
         </Link>
 
@@ -149,12 +154,10 @@ export default function Login({ surface }: { surface?: 'gummfit-admin' }) {
                 lineHeight: 1.1,
               }}
             >
-              {gummfitAdmin ? 'Admin sign in.' : ssoMode ? 'Sign in with SSO' : 'Sign in.'}
+              {ssoMode ? 'Sign in with SSO' : 'Sign in.'}
             </h1>
             <p className="mt-2 text-sm" style={{ color: MUTED }}>
-              {gummfitAdmin
-                ? 'Use your Matcha staff account to manage Gummfit.'
-                : ssoMode
+              {ssoMode
                 ? 'Enter your work email to continue via your identity provider.'
                 : 'Welcome back. Access your consulting workspace.'}
             </p>
@@ -219,15 +222,16 @@ export default function Login({ surface }: { surface?: 'gummfit-admin' }) {
                 {loading ? 'Signing in…' : 'Sign in'}
               </button>
               <div className="flex items-center justify-between text-sm">
-                {!gummfitAdmin && <button
+                <button
                   type="button"
                   onClick={() => { setSsoMode(true); setError('') }}
                   className="transition-opacity hover:opacity-60"
                   style={{ color: MUTED }}
                 >
                   Sign in with SSO
-                </button>}
+                </button>
                 <Link
+                  // On gummfit.com, /reset-password is Gummfit's own (customer) page.
                   to={gummfitAdmin ? 'https://hey-matcha.com/reset-password' : '/reset-password'}
                   className="transition-opacity hover:opacity-60"
                   style={{ color: MUTED }}
@@ -240,7 +244,7 @@ export default function Login({ surface }: { surface?: 'gummfit-admin' }) {
         </div>
 
         {/* Contact sales */}
-        {!gummfitAdmin && <p className="mt-8 text-center text-sm" style={{ color: MUTED }}>
+        <p className="mt-8 text-center text-sm" style={{ color: MUTED }}>
           Don&apos;t have an account?{' '}
           <button
             type="button"
@@ -250,7 +254,7 @@ export default function Login({ surface }: { surface?: 'gummfit-admin' }) {
           >
             Book a consultation
           </button>
-        </p>}
+        </p>
       </div>
 
       {contactMounted && (
