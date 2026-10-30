@@ -94,9 +94,37 @@ describe('Gummfit staff console', () => {
     auth.role = null
     auth.authFailed = true
     show('/gummfit/admin?view=bank')
-    expect(await screen.findByRole('heading', { name: 'Admin sign in.' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Sign in.' })).toBeInTheDocument()
     expect(screen.getByTestId('location')).toHaveTextContent('/gummfit/admin/login?next=%2Fgummfit%2Fadmin%3Fview%3Dbank')
     expect(api.get).not.toHaveBeenCalled()
+  })
+
+  it('is the same sign-in page as hey-matcha.com', async () => {
+    auth.role = null
+    auth.authFailed = true
+    show('/gummfit/admin/login')
+    expect(await screen.findByText('Matcha')).toBeInTheDocument()
+    expect(screen.getByText('Welcome back. Access your consulting workspace.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Sign in with SSO' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Book a consultation' })).toBeInTheDocument()
+    expect(screen.queryByText('Gummfit')).not.toBeInTheDocument()
+  })
+
+  it('takes Matcha admin credentials only, then opens the console', async () => {
+    auth.role = null
+    auth.authFailed = true
+    vi.mocked(api.post).mockResolvedValueOnce({ access_token: 'a', refresh_token: 'r', user: { role: 'client' } })
+    show('/gummfit/admin/login')
+    fireEvent.change(await screen.findByLabelText('Email'), { target: { value: 'owner@example.com' } })
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'pw' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+    expect(await screen.findByText(/Administrator access is required/)).toBeInTheDocument()
+    expect(getAccessToken()).toBeNull()
+
+    vi.mocked(api.post).mockResolvedValueOnce({ access_token: 'a', refresh_token: 'r', user: { role: 'admin' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(/^\/gummfit\/admin$/))
+    expect(api.post).toHaveBeenLastCalledWith('/auth/login', { email: 'owner@example.com', password: 'pw' })
   })
 
   it('keeps tools unmounted while identity is loading', () => {
@@ -203,7 +231,7 @@ describe('Gummfit staff console', () => {
     auth.role = null
     auth.authFailed = true
     render(<ToastProvider><MemoryRouter initialEntries={[path]}><App /></MemoryRouter></ToastProvider>)
-    expect(await screen.findByRole('heading', { name: 'Admin sign in.' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Sign in.' })).toBeInTheDocument()
     expect(screen.queryByText('Public Gummfit landing')).not.toBeInTheDocument()
   })
 })
