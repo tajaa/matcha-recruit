@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { Loader2, Megaphone, Plus, Settings2, Sparkles } from 'lucide-react'
+import { HelpCircle, Loader2, Megaphone, Plus, Settings2, Sparkles } from 'lucide-react'
 import type { AssistantDraftState } from './Assistant'
 import type { CampaignInput, ProspectStatus, SalesCampaign, SalesProspect } from '../api/matchaWork/sales'
 import { useWorkBase } from '../routes/WorkSurfaceContext'
@@ -9,8 +9,13 @@ import ImportBox from './Sales/ImportBox'
 import ProspectList from './Sales/ProspectList'
 import ProspectPane from './Sales/ProspectPane'
 import ReviewSend from './Sales/ReviewSend'
+import SalesGuide, { SALES_GUIDE_SEEN_KEY } from './Sales/SalesGuide'
 import { MAX_BATCH, STATUS_LABEL, assistantPrompt, footerProblem, orderProspects, sendable } from './Sales/salesLogic'
 import { useSales, type SalesState } from './Sales/useSales'
+
+function guideSeen(): boolean {
+  try { return localStorage.getItem(SALES_GUIDE_SEEN_KEY) === '1' } catch { return true }
+}
 
 /**
  * Sales campaigns on the web: the same campaigns as the Mac Pipeline. Pick a
@@ -28,6 +33,16 @@ export default function Sales() {
   const prospectId = params.get('prospect')
   const s = useSales(projectId, campaignId)
   const [creating, setCreating] = useState(false)
+  const [helpOpen, setHelpOpen] = useState(false)
+  const [guideDone, setGuideDone] = useState(guideSeen)
+  // The guide opens by itself on a first visit, once the page has loaded.
+  const guideOpen = helpOpen || (s.workspaces !== null && !guideDone)
+
+  function closeGuide() {
+    try { localStorage.setItem(SALES_GUIDE_SEEN_KEY, '1') } catch { /* best effort */ }
+    setHelpOpen(false)
+    setGuideDone(true)
+  }
 
   function setParam(changes: Record<string, string | null>) {
     const next = new URLSearchParams(params)
@@ -67,7 +82,13 @@ export default function Sales() {
     <div className="flex h-full min-h-0">
       <aside className={`min-h-0 w-full shrink-0 flex-col border-r border-w-line bg-w-surface md:w-72 ${campaignId ? 'hidden md:flex' : 'flex'}`}>
         <div className="space-y-2 border-b border-w-line px-4 py-3">
-          <h1 className="flex items-center gap-1.5 text-sm font-semibold text-w-text"><Megaphone size={14} />Sales</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="flex flex-1 items-center gap-1.5 text-sm font-semibold text-w-text"><Megaphone size={14} />Sales</h1>
+            <button type="button" onClick={() => setHelpOpen(true)}
+              className="inline-flex items-center gap-1 text-[11px] text-w-dim hover:text-w-text">
+              <HelpCircle size={12} />How it works
+            </button>
+          </div>
           {s.workspaces === null ? (
             <p className="flex items-center gap-1.5 text-[11px] text-w-dim"><Loader2 size={11} className="animate-spin" />Loading…</p>
           ) : s.workspaces.length === 0 ? (
@@ -150,11 +171,11 @@ export default function Sales() {
               const state: AssistantDraftState = { draft: { id: Date.now(), text: assistantPrompt(campaign) } }
               navigate(`${base}/assistant`, { state })
             }}
-            connectionsPath={`${base}/connections`}
+            emailPath={`${base}/email`}
           />
         )}
       </main>
-
+      {guideOpen && <SalesGuide onClose={closeGuide} />}
     </div>
   )
 }
@@ -164,13 +185,13 @@ export default function Sales() {
  * (ticked drafts make a batch) and the open prospect. Keyed by campaign, so
  * the selection and open panels start fresh for each one.
  */
-function CampaignView({ s, prospectId, onOpenProspect, onClose, onAskEspresso, connectionsPath }: {
+function CampaignView({ s, prospectId, onOpenProspect, onClose, onAskEspresso, emailPath }: {
   s: SalesState
   prospectId: string | null
   onOpenProspect: (id: string | null) => void
   onClose: () => void
   onAskEspresso: (campaign: SalesCampaign) => void
-  connectionsPath: string
+  emailPath: string
 }) {
   const detail = s.detail!
   const [editing, setEditing] = useState(false)
@@ -304,7 +325,7 @@ function CampaignView({ s, prospectId, onOpenProspect, onClose, onAskEspresso, c
         // Keyed by the versions shown: when a draft changes under the dialog
         // (a refused send reloads them), it is read again before sending.
         <ReviewSend key={chosen.map((p) => p.review_token).join()} drafts={chosen} footer={detail.campaign.footer}
-          busy={s.busy} error={s.error} connectionsPath={connectionsPath} onApprove={approve}
+          busy={s.busy} error={s.error} emailPath={emailPath} onApprove={approve}
           onClose={() => { setReviewing(false); s.clearError() }} />
       )}
     </div>

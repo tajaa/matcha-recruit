@@ -76,7 +76,9 @@ come back to it, so drafts Espresso writes meanwhile appear; a refused save or
 send reloads it at once. A paused campaign waits for Resume without the fast
 check. Pause, Resume, Release pending drafts and Review failed again work like
 the Mac. Settings save only the fields you changed. The URL holds the open workspace, campaign and prospect
-(`?workspace=&campaign=&prospect=`).
+(`?workspace=&campaign=&prospect=`). A step-by-step guide
+(`pages/Sales/SalesGuide.tsx`) opens on a first visit and from **How it
+works**; its limits and rules repeat this document's, so change both together.
 
 ## Consulting outreach
 

@@ -5,6 +5,7 @@ import Sales from './Sales'
 import type { SalesCampaignDetail } from '../api/matchaWork/sales'
 import { campaign, prospect } from './Sales/testFixtures'
 import { WorkSurfaceProvider } from '../routes/WorkSurfaceContext'
+import { SALES_GUIDE_SEEN_KEY } from './Sales/SalesGuide'
 
 const api = vi.hoisted(() => ({
   listSalesWorkspaces: vi.fn(),
@@ -69,6 +70,8 @@ function renderAt(path: string) {
 }
 
 beforeEach(() => {
+  // The first-visit guide has its own tests below; the rest start past it.
+  localStorage.setItem(SALES_GUIDE_SEEN_KEY, '1')
   api.listSalesWorkspaces.mockResolvedValue({ workspaces: [{ id: 'w1', title: 'Outreach' }] })
   api.getPlaybookOptions.mockResolvedValue({ playbooks: [], house: HOUSE })
   api.listCampaigns.mockResolvedValue({ campaigns: [campaign({ playbook: 'consulting' })], workspace_campaigns: [] })
@@ -303,5 +306,42 @@ describe('Sales', () => {
     renderAt('/espresso/sales?workspace=w1&campaign=c1')
     await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('workspace=w2'))
     expect(screen.getByTestId('where')).toHaveTextContent('campaign=c1')
+  })
+
+  // ── the guide ───────────────────────────────────────────────────────────
+
+  it('walks a first-time visitor through Sales, once', async () => {
+    localStorage.removeItem(SALES_GUIDE_SEEN_KEY)
+    renderAt('/espresso/sales')
+    const guide = await screen.findByRole('dialog', { name: 'How Sales works' })
+    expect(within(guide).getByText('Reach the right people, with a reason to talk')).toBeInTheDocument()
+    const titles = ['Set up a campaign', 'Find people and research them', 'Read the drafts', 'Review and send', 'What to expect']
+    for (const title of titles) {
+      fireEvent.click(within(guide).getByRole('button', { name: /Next/ }))
+      expect(within(guide).getByRole('heading', { name: title })).toBeInTheDocument()
+    }
+    expect(within(guide).getByText(/at most 35 emails an hour and 150 a day/)).toBeInTheDocument()
+    fireEvent.click(within(guide).getByRole('button', { name: 'Got it' }))
+    expect(screen.queryByRole('dialog', { name: 'How Sales works' })).not.toBeInTheDocument()
+    expect(localStorage.getItem(SALES_GUIDE_SEEN_KEY)).toBe('1')
+  })
+
+  it('reopens from How it works, and Escape closes it', async () => {
+    renderAt('/espresso/sales')
+    await screen.findByRole('combobox', { name: 'Workspace' })
+    expect(screen.queryByRole('dialog', { name: 'How Sales works' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'How it works' }))
+    expect(screen.getByRole('dialog', { name: 'How Sales works' })).toBeInTheDocument()
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByRole('dialog', { name: 'How Sales works' })).not.toBeInTheDocument()
+  })
+
+  it('tells someone without Gmail where to connect it', async () => {
+    agent.agentEmailStatus.mockResolvedValue({ connected: false, email: null, snapshot_max_emails: 0 })
+    renderAt('/espresso/sales?workspace=w1&campaign=c1')
+    fireEvent.click(await screen.findByRole('button', { name: 'Select 2' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Review and send 2' }))
+    const link = await screen.findByRole('link', { name: 'open Email' })
+    expect(link).toHaveAttribute('href', '/espresso/email')
   })
 })

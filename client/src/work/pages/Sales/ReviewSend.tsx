@@ -11,14 +11,14 @@ import { composeBody, footerProblem } from './salesLogic'
  * versions shown (their review tokens); if any changed since, the server
  * refuses the batch and nothing is sent. Each person gets their own email.
  */
-export default function ReviewSend({ drafts, footer, busy, error, connectionsPath, onApprove, onClose }: {
+export default function ReviewSend({ drafts, footer, busy, error, emailPath, onApprove, onClose }: {
   drafts: SalesProspect[]
   footer: string
   busy: boolean
   /** Why the server refused the last approval, shown here, over the page. */
   error: string | null
-  /** Where Gmail is connected (Connections). */
-  connectionsPath: string
+  /** Where Gmail is connected (the Email page). */
+  emailPath: string
   onApprove: (sender: string, requestId: string) => Promise<boolean>
   onClose: () => void
 }) {
@@ -57,7 +57,7 @@ export default function ReviewSend({ drafts, footer, busy, error, connectionsPat
             <p className="text-xs text-w-text">From <span className="font-semibold">{sender}</span>, one email per person, paced to stay inside Gmail's limits.</p>
           ) : (
             <p role="alert" className="text-xs text-red-400">
-              Connect Gmail to send. <Link to={connectionsPath} className="underline">Connections</Link>
+              Connect Gmail to send: <Link to={emailPath} className="underline">open Email</Link> and connect it there.
             </p>
           )}
           {problem && <p role="alert" className="text-xs text-red-400">{problem} Open the campaign's settings to add it.</p>}

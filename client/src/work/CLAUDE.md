@@ -43,7 +43,9 @@ sales campaigns, over `api/matchaWork/sales.ts`; the Mac Pipeline is the other.
 is for and polls a sending campaign; `salesLogic.ts` holds the CSV import
 parser (the Mac's header aliases) and what may be sent. The server owns every
 rule (review tokens, footer, opt-outs, the consulting draft checks): the page
-shows them. Rules: `docs/ESPRESSO_SALES.md`.
+shows them. `Sales/SalesGuide.tsx` is the how-it-works wizard (first visit,
+and "How it works"), in the same shape as `Tasks/TasksGuide.tsx`. Rules:
+`docs/ESPRESSO_SALES.md`.
 
 ## Personal task recaps
 
