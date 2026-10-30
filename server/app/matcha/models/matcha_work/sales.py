@@ -4,10 +4,11 @@ from typing import Literal
 from uuid import UUID
 from urllib.parse import urlsplit
 import re
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 Stage = Literal["lead", "qualified", "proposal", "negotiation", "closed"]
-# `services/matcha_work/sales_playbooks.py` holds what each one means.
+# `services/matcha_work/sales_playbooks.py` holds what each one means; a test
+# keeps these lists and its SEGMENTS/SERVICES the same, and mwsales03's CHECKs too.
 Playbook = Literal["", "consulting"]
 Segment = Literal["", "growing", "regulated", "ai", "hourly"]
 Service = Literal["", "hr", "grc", "er", "ai"]
@@ -39,6 +40,13 @@ class CampaignCreate(Body):
         if value:
             public_url(value)
         return value
+
+    @model_validator(mode="after")
+    def booking_link(self):
+        # Every consulting message asks for it; Matcha's own offer brings one.
+        if self.playbook == "consulting" and not self.cta_url and not self.house:
+            raise ValueError("A consulting campaign needs a booking link (cta_url).")
+        return self
 
 
 class CampaignPatch(Body):

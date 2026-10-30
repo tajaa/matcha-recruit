@@ -219,6 +219,123 @@ async def test_the_assistant_starts_matchas_campaign_with_the_house_offer(monkey
     assert "use_matcha_offer" in ability.prompt_block(context())
 
 
+# ── review fixes (#921) ──────────────────────────────────────────────────────
+
+def test_everyday_words_are_not_legal_threats():
+    # "fine-tune" and a contact named Sue pass; real threats still don't.
+    assert problems(body=GOOD.replace("Hi Ana", "Hi Sue") + "\nHappy to fine-tune it with you.") == []
+    assert problems(body=GOOD + "\nYou could be fined.")
+    assert problems(body=GOOD + "\nThis avoids litigation.")
+
+
+@pytest.mark.parametrize("draft, research", [
+    ("two hundred staff", "a team of 200 people"),
+    ("a $2.5 million budget", "owns a $2.5M budget"),
+    ("twenty-five thousand square feet", "25,000 sq ft"),
+    ("40k members", "40,000 members"),
+])
+def test_spelled_out_and_scaled_numbers_match_their_digits(draft, research):
+    body = GOOD.replace("4 clinics", f"4 clinics and {draft}")
+    assert problems(body=body, evidence="\n".join([RESEARCH, research, SIGNAL, playbooks.HOUSE["offer"]])) == []
+    assert problems(body=body)  # and still refused without that research
+
+
+def test_a_consulting_campaign_needs_its_booking_link():
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="booking link"):
+        CampaignCreate(request_id=uuid4(), title="x", playbook="consulting")
+    assert CampaignCreate(request_id=uuid4(), title="x", playbook="consulting", house=True).house
+    found = playbooks.draft_problems("Hi", GOOD, cta_url="", signal=SIGNAL, evidence=RESEARCH)
+    assert any("booking link before drafting" in p for p in found)
+
+
+@pytest.mark.asyncio
+async def test_a_campaign_cant_become_consulting_without_a_booking_link(wired):
+    from app.matcha.models.matcha_work.sales import CampaignPatch
+
+    wired.on("SELECT * FROM mw_sales_campaigns", campaign())
+    with pytest.raises(sales.SalesError, match="booking link"):
+        await sales.update_campaign(CAMPAIGN, USER, CampaignPatch(playbook="consulting"))
+    wired.on("UPDATE mw_sales_campaigns SET", campaign(playbook="consulting", cta_url=CTA))
+    await sales.update_campaign(CAMPAIGN, USER, CampaignPatch(playbook="consulting", cta_url=CTA))
+
+
+@pytest.mark.asyncio
+async def test_a_signal_with_its_sources_saves_on_a_sent_message(wired):
+    sent = prospect(status="sent")
+    wired.on("SELECT * FROM mw_sales_campaigns", campaign())
+    wired.on("FROM mw_sales_prospects WHERE campaign_id = $1 AND id = $2 FOR UPDATE", sent)
+    wired.on("UPDATE mw_sales_prospects SET", sent)
+    await sales.patch_prospect(CAMPAIGN, ITEM, USER, ProspectPatch(
+        signal=SIGNAL, sources=["https://boards.greenhouse.io/acme/jobs/1"], research=RESEARCH))
+    [(_m, query, _a)] = wired.ran("UPDATE mw_sales_prospects SET")
+    assert "status" not in query.split("WHERE")[0]
+
+
+@pytest.mark.asyncio
+async def test_template_drafts_in_a_consulting_campaign_are_checked(wired):
+    from app.matcha.models.matcha_work.sales import Template
+
+    wired.on("SELECT * FROM mw_sales_campaigns", campaign(playbook="consulting", cta_url=CTA, offer=playbooks.HOUSE["offer"]))
+    ready = prospect(id=uuid4(), subject="", body="", signal=SIGNAL, research=RESEARCH)
+    bare = prospect(id=uuid4(), name="Bo", subject="", body="", signal="", research="")
+    wired.on("status IN ('prospect','draft','failed')", [ready, bare])
+    template = Template(subject="Your first HR hire", body=f"Hi {{{{name}}}}, saw {{{{research}}}} Worth a call? {CTA}")
+    out = await sales.draft_template(CAMPAIGN, USER, template, overwrite=False, checked=True)
+    assert out["drafted"] == 1 and out["skipped_count"] == 1
+    assert out["skipped"][0]["prospect"] == "Bo" and any("signal" in p for p in out["skipped"][0]["problems"])
+    # The person's own template from the Mac isn't held back: they review every message.
+    out = await sales.draft_template(CAMPAIGN, USER, template)
+    assert out["drafted"] == 2
+
+
+@pytest.mark.asyncio
+async def test_the_assistant_checks_numbers_against_research_before_it_was_shortened(monkeypatch):
+    from app.matcha.services.matcha_work.agent_runtime.abilities import sales as ability
+    from app.matcha.services.matcha_work.agent_runtime.context import RunState
+    from tests.agent_runtime.helpers import context
+
+    cid, pid = str(CAMPAIGN), str(ITEM)
+    long_research = "x " * 600 + "Acme Dental runs 4 clinics."  # the number is past 1,000 characters
+    monkeypatch.setattr(ability.store, "read_campaign", AsyncMock(return_value={
+        "campaign": {"id": cid, "playbook": "consulting", "offer": playbooks.HOUSE["offer"], "cta_url": CTA},
+        "prospects": [{"id": pid, "research": long_research, "signal": SIGNAL, "subject": "", "body": "",
+                       "notes": "n" * 3000, "sources": []} for _ in range(1)],
+    }))
+    monkeypatch.setattr(ability.store, "patch_prospect", AsyncMock(return_value={"id": pid}))
+    state = RunState(started=0, sessions={"sales": ability.SalesSession()})
+    tools = {t.name: t for t in ability.build().tools}
+    from app.matcha.services.matcha_work.agent_runtime.context import RunLimits
+
+    ctx = context(limits=RunLimits(max_tool_output_chars=2000))
+    out = await tools["read_sales_campaign"].handler(ctx, state, {"campaign_id": cid}, 60)
+    assert out.payload["prospects"][0].get("text_truncated")
+    out = await tools["update_sales_prospect"].handler(ctx, state, {
+        "campaign_id": cid, "prospect_id": pid, "changes": {"subject": "Your first HR hire", "body": GOOD}}, 60)
+    assert out.status == "ok", out.payload
+
+
+def test_segment_and_service_lists_agree_everywhere():
+    import re as _re
+    from pathlib import Path
+    from typing import get_args
+
+    from app.matcha.models.matcha_work import sales as models
+
+    assert set(get_args(models.Segment)) - {""} == set(playbooks.SEGMENTS)
+    assert set(get_args(models.Service)) - {""} == set(playbooks.SERVICES)
+    assert set(get_args(models.Playbook)) == set(playbooks.PLAYBOOKS)
+    migration = (Path(__file__).parents[2] / "alembic/versions/mwsales03_sales_playbooks.py").read_text()
+
+    def listed(column):
+        return set(_re.findall(r"'(\w*)'", _re.search(rf"CHECK \({column} IN \(([^)]*)\)", migration).group(1)))
+
+    assert listed("segment") == set(get_args(models.Segment))
+    assert listed("service") == set(get_args(models.Service))
+    assert listed("playbook") == set(get_args(models.Playbook))
+
+
 # ── routes ───────────────────────────────────────────────────────────────────
 
 def test_named_sales_routes_come_before_the_campaign_id_route():
