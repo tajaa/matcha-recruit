@@ -48,7 +48,14 @@ async def create(
     return await _call(sales.create_campaign(project_id, user.id, body))
 
 
-# Declared before /sales/{campaign_id} so "playbooks" is never read as an id.
+# Declared before /sales/{campaign_id} so these are never read as an id.
+@router.get("/sales/workspaces")
+async def workspaces(user: CurrentUser = Depends(require_admin_or_client)):
+    """The collab workspaces the person can make a campaign in (the web Sales
+    page's picker): a viewer or commenter's workspaces are left out."""
+    return {"workspaces": await _call(sales.list_projects(user.id, editable=True))}
+
+
 @router.get("/sales/playbooks")
 async def playbooks(user: CurrentUser = Depends(require_admin_or_client)):
     return await _call(sales.playbook_options(user.id))

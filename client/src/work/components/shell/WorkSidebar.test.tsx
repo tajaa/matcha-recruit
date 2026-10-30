@@ -4,9 +4,9 @@ import { MemoryRouter, useLocation } from 'react-router-dom'
 import { WorkSurfaceProvider } from '../../routes/WorkSurfaceContext'
 import WorkSidebar from './WorkSidebar'
 
-const account = vi.hoisted(() => ({ personal: true, tasksEnabled: true, jobSearchEnabled: true }))
+const account = vi.hoisted(() => ({ personal: true, tasksEnabled: true, jobSearchEnabled: true, projects: true }))
 vi.mock('../../../hooks/useMe', () => ({ useMe: () => ({ isPersonal: account.personal, hasFeature: () => false }) }))
-vi.mock('../../hooks/useEntitlements', () => ({ useEntitlements: () => ({ ...account, can: () => false, plan: 'pro' }) }))
+vi.mock('../../hooks/useEntitlements', () => ({ useEntitlements: () => ({ ...account, can: (k: string) => k === 'projects_solo' && account.projects, plan: 'pro' }) }))
 vi.mock('../../hooks/useTasksSummary', () => ({ useTasksSummary: () => ({ count: 0, attention: false }) }))
 vi.mock('../../hooks/useHrCaseAccess', () => ({ useHrCaseAccess: () => false }))
 vi.mock('../../hooks/useStars', () => ({ useStars: () => [], getStarredFileMeta: () => [] }))
@@ -36,7 +36,7 @@ function sidebar(open: boolean) {
   )
 }
 
-beforeEach(() => { account.personal = true; account.tasksEnabled = true; account.jobSearchEnabled = true })
+beforeEach(() => { account.personal = true; account.tasksEnabled = true; account.jobSearchEnabled = true; account.projects = true })
 
 describe.each([true, false])('sidebar open=%s', (open) => {
   it('has Tasks and no separate Job search entry', () => {
@@ -63,5 +63,23 @@ describe.each([true, false])('sidebar open=%s', (open) => {
     account.personal = false
     sidebar(open)
     expect(screen.queryByRole('button', { name: 'Tasks' })).not.toBeInTheDocument()
+  })
+
+  it('has Sales for personal accounts that can make a workspace', () => {
+    sidebar(open)
+    fireEvent.click(screen.getByRole('button', { name: 'Sales' }))
+    expect(screen.getByTestId('location')).toHaveTextContent('/espresso/sales')
+  })
+
+  it('has Sales for editors of shared workspaces on plans without their own', () => {
+    account.projects = false
+    sidebar(open)
+    expect(screen.getByRole('button', { name: 'Sales' })).toBeInTheDocument()
+  })
+
+  it('keeps Sales out of business workspaces', () => {
+    account.personal = false
+    sidebar(open)
+    expect(screen.queryByRole('button', { name: 'Sales' })).not.toBeInTheDocument()
   })
 })

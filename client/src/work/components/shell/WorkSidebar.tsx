@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { PanelLeftClose, Home, Search, ClipboardList, BookOpenCheck, Package, Archive, NotebookPen, CheckSquare, Star, MessagesSquare, Sparkles, HardDrive, Briefcase, FileSignature } from 'lucide-react'
+import { PanelLeftClose, Home, Search, ClipboardList, BookOpenCheck, Package, Archive, NotebookPen, CheckSquare, Star, MessagesSquare, Sparkles, HardDrive, Briefcase, FileSignature, Megaphone } from 'lucide-react'
 import { logoutSession } from '../../../api/client'
 import type { ChannelSummary } from '../../api/channels'
 import { createProjectNew, createThread, archiveThread, notifyThreadsChanged } from '../../api/matchaWork'
@@ -50,6 +50,9 @@ export default function WorkSidebar({ open, onToggle }: Props) {
   // (job searches are tasks too), with how many run and a dot when one needs them.
   const showTasks = isPersonal && (tasksEnabled || jobSearchEnabled)
   const tasksBadge = useTasksSummary(showTasks)
+  // Sales campaigns live in a shared workspace (one they made, or one they
+  // edit); the web page is Espresso's, and says so when there is none.
+  const showSales = isPersonal
   const canCreate = surface !== 'matcha-work' && canCreateChannel(me?.user?.role)
   const opsAccess = me?.ops_access ?? me?.work_access
   const showEvents = surface !== 'matcha-work' && canReviewEvents(opsAccess) && hasFeature('ems')
@@ -222,6 +225,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
         isActive={isActive}
         showProjects={showProjects}
         showTasks={showTasks}
+        showSales={showSales}
         tasksBadge={tasksBadge}
         totalChannelUnread={totalChannelUnread}
         pendingConnections={pendingConnections}
@@ -288,6 +292,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
               badge={<TasksBadge count={tasksBadge.count} attention={tasksBadge.attention} />}
             />
           )}
+          {showSales && <SidebarNavButton icon={Megaphone} label="Sales" active={location.pathname.startsWith(`${base}/sales`)} onClick={() => navigate(`${base}/sales`)} />}
           <SidebarNavButton icon={NotebookPen} label="Journals" active={location.pathname.startsWith(`${base}/journals`)} onClick={() => navigate(`${base}/journals`)} />
           <SidebarNavButton icon={CheckSquare} label="To-dos" active={location.pathname.startsWith(`${base}/productivity`)} onClick={() => navigate(`${base}/productivity`)} />
           {showSymChat && <SidebarNavButton icon={MessagesSquare} label="Sym-chats" active={location.pathname.startsWith(`${base}/sym-chat`)} onClick={() => navigate(`${base}/sym-chat`)} />}

@@ -334,3 +334,39 @@ def test_segment_and_service_lists_agree_everywhere():
     assert listed("segment") == set(get_args(models.Segment))
     assert listed("service") == set(get_args(models.Service))
     assert listed("playbook") == set(get_args(models.Playbook))
+
+
+# ── routes ───────────────────────────────────────────────────────────────────
+
+def test_named_sales_routes_come_before_the_campaign_id_route():
+    from app.matcha.routes.matcha_work import sales as routes
+
+    paths = [r.path for r in routes.router.routes if "GET" in getattr(r, "methods", set())]
+    by_id = paths.index("/sales/{campaign_id}")
+    assert paths.index("/sales/workspaces") < by_id and paths.index("/sales/playbooks") < by_id
+
+
+@pytest.mark.asyncio
+async def test_workspace_and_playbook_routes_read_for_the_signed_in_user(monkeypatch):
+    from types import SimpleNamespace
+
+    from app.matcha.routes.matcha_work import sales as routes
+
+    monkeypatch.setattr(routes.sales, "list_projects", AsyncMock(return_value=[{"id": "p", "title": "Sales"}]))
+    monkeypatch.setattr(routes.sales, "playbook_options", AsyncMock(return_value={"playbooks": [], "house": None}))
+    user = SimpleNamespace(id=USER)
+    assert await routes.workspaces(user) == {"workspaces": [{"id": "p", "title": "Sales"}]}
+    assert await routes.playbooks(user) == {"playbooks": [], "house": None}
+    routes.sales.list_projects.assert_awaited_once_with(USER, editable=True)
+
+
+@pytest.mark.asyncio
+async def test_the_picker_leaves_out_workspaces_the_person_only_views(wired):
+    wired.on("SELECT DISTINCT", [
+        access_row() | {"id": uuid4(), "title": "Mine"},
+        access_row(role="viewer") | {"id": uuid4(), "title": "Viewing"},
+        access_row(role="commenter") | {"id": uuid4(), "title": "Commenting"},
+    ])
+    assert [w["title"] for w in await sales.list_projects(USER, editable=True)] == ["Mine"]
+    # The assistant's list still shows every workspace it can read.
+    assert len(await sales.list_projects(USER)) == 3

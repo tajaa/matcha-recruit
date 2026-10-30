@@ -47,9 +47,38 @@ see a summary of them (title, creator, status, counts) under **Other campaigns i
 this workspace**, never their contacts or drafts. Viewers see neither. A campaign
 never uses another collaborator's Gmail. Research/drafting needs a personal
 Espresso assistant account and the Sales AI disclosure. Manual imports, templates
-and review/send do not require AI consent. The desktop provides campaign
-review/send; the web assistant can work on the same saved campaigns, but its old
-pipeline has no campaign review interface.
+and review/send do not require AI consent.
+
+## On the web
+
+`/espresso/sales` (sidebar **Sales**, personal accounts;
+`client/src/work/pages/Sales.tsx`) is the same campaigns as the Mac Pipeline,
+with the same server rules. Pick a workspace (`GET /sales/workspaces`: the
+collab workspaces you can make a campaign in, so not ones you only view or
+comment on) and a campaign; a campaign link opens under its own workspace; **New campaign**
+offers *Consulting outreach* and, for Matcha staff, *Start from Matcha's
+consulting offer*. **Import** takes pasted emails or a CSV/TSV with the same
+headers as the Mac (`pages/Sales/salesLogic.ts:parseContacts`). **Research and
+draft with Espresso** opens Ask Espresso with the campaign's ask filled in.
+Prospects list what needs you first (unconfirmed, failed, drafts), best fit
+first in a consulting campaign, with each one's why-now signal and how many
+draft checks it misses. A prospect opens to its signal, research and sources,
+the draft (saved against the version you opened, so a draft Espresso changed
+meanwhile isn't overwritten), its stage, **Do not contact** and **Delete**.
+Tick up to 50 drafts, **Review and send**: every message as it will go out
+(body then footer), from your connected Gmail, flagged ones marked; tick that
+you read them all to send. A refused approval (a draft changed, an opted-out or
+test address, a pending batch) says why inside the dialog, which redraws with
+the current versions to read again. Only drafts that can still be sent count
+toward the 50. The page checks a campaign that is sending every 15 seconds,
+and any other open campaign every minute while the tab is visible and when you
+come back to it, so drafts Espresso writes meanwhile appear; a refused save or
+send reloads it at once. A paused campaign waits for Resume without the fast
+check. Pause, Resume, Release pending drafts and Review failed again work like
+the Mac. Settings save only the fields you changed. The URL holds the open workspace, campaign and prospect
+(`?workspace=&campaign=&prospect=`). A step-by-step guide
+(`pages/Sales/SalesGuide.tsx`) opens on a first visit and from **How it
+works**; its limits and rules repeat this document's, so change both together.
 
 ## Consulting outreach
 
