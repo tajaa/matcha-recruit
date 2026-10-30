@@ -71,7 +71,13 @@ describe.each([true, false])('sidebar open=%s', (open) => {
     expect(screen.getByTestId('location')).toHaveTextContent('/espresso/sales')
   })
 
-  it('keeps Sales out of business workspaces and accounts without workspaces', () => {
+  it('has Sales for editors of shared workspaces on plans without their own', () => {
+    account.projects = false
+    sidebar(open)
+    expect(screen.getByRole('button', { name: 'Sales' })).toBeInTheDocument()
+  })
+
+  it('keeps Sales out of business workspaces', () => {
     account.personal = false
     sidebar(open)
     expect(screen.queryByRole('button', { name: 'Sales' })).not.toBeInTheDocument()

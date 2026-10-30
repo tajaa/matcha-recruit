@@ -11,10 +11,12 @@ import { composeBody, footerProblem } from './salesLogic'
  * versions shown (their review tokens); if any changed since, the server
  * refuses the batch and nothing is sent. Each person gets their own email.
  */
-export default function ReviewSend({ drafts, footer, busy, connectionsPath, onApprove, onClose }: {
+export default function ReviewSend({ drafts, footer, busy, error, connectionsPath, onApprove, onClose }: {
   drafts: SalesProspect[]
   footer: string
   busy: boolean
+  /** Why the server refused the last approval, shown here, over the page. */
+  error: string | null
   /** Where Gmail is connected (Connections). */
   connectionsPath: string
   onApprove: (sender: string, requestId: string) => Promise<boolean>
@@ -36,7 +38,7 @@ export default function ReviewSend({ drafts, footer, busy, connectionsPath, onAp
   }, [])
 
   const sender = gmail?.connected ? gmail.email : null
-  const ready = !!sender && !problem && read && !busy
+  const ready = !!sender && !problem && read && !busy && drafts.length > 0
 
   return (
     <div role="dialog" aria-modal="true" aria-label="Review and send"
@@ -59,6 +61,12 @@ export default function ReviewSend({ drafts, footer, busy, connectionsPath, onAp
             </p>
           )}
           {problem && <p role="alert" className="text-xs text-red-400">{problem} Open the campaign's settings to add it.</p>}
+          {error && (
+            <p role="alert" className="rounded-md border border-red-500/30 bg-red-500/5 px-2.5 py-1.5 text-xs text-red-400">
+              {error} The messages below are the current versions.
+            </p>
+          )}
+          {drafts.length === 0 && <p className="text-xs text-w-dim">None of the selected messages can be sent any more.</p>}
           {flagged.length > 0 && (
             <p className="flex items-start gap-1.5 text-[11px] text-amber-400">
               <AlertTriangle size={12} className="mt-0.5 shrink-0" />

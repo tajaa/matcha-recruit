@@ -14,7 +14,8 @@ export default function CampaignForm({ campaign, house, busy, onSave, onCancel }
   campaign?: SalesCampaign
   house: HouseOffer | null
   busy: boolean
-  onSave: (input: CampaignInput) => Promise<unknown>
+  /** A new campaign gets every field; settings get only what changed. */
+  onSave: (input: Partial<CampaignInput>) => Promise<unknown>
   onCancel?: () => void
 }) {
   const [title, setTitle] = useState(campaign?.title ?? '')
@@ -36,15 +37,28 @@ export default function CampaignForm({ campaign, house, busy, onSave, onCancel }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
-    await onSave({
+    const values = {
       title: title.trim(),
       target: target.trim(),
       offer: offer.trim(),
       footer: footer.trim(),
-      playbook: consulting ? 'consulting' : '',
+      playbook: (consulting ? 'consulting' : '') as SalesPlaybook,
       cta_url: consulting ? ctaUrl.trim() : '',
-      ...(campaign ? {} : { house: useHouse }),
-    })
+    }
+    if (!campaign) {
+      await onSave({ ...values, house: useHouse })
+      return
+    }
+    // Settings send only what was changed here: a stored value with stray
+    // whitespace (saved from the Mac or by Espresso) isn't a change, so it
+    // can't trip "the footer is frozen while messages are pending".
+    const typed = { title, target, offer, footer, playbook: values.playbook, cta_url: consulting ? ctaUrl : '' }
+    const changes = Object.fromEntries(
+      (Object.keys(values) as (keyof typeof values)[])
+        .filter((key) => typed[key] !== (campaign[key] ?? ''))
+        .map((key) => [key, values[key]]),
+    )
+    await onSave(changes)
   }
 
   return (

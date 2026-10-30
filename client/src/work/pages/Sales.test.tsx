@@ -193,4 +193,115 @@ describe('Sales', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(15_000) })
     await waitFor(() => expect(api.getCampaign).toHaveBeenCalledTimes(2))
   })
+
+  // ── review fixes (#922) ─────────────────────────────────────────────────
+
+  it('shows a refused send in the dialog, with the current versions to read again', async () => {
+    const { ApiError } = await import('../../api/client')
+    api.sendBatch.mockRejectedValue(new ApiError('Conflict', 409, { detail: 'Some drafts changed or are not ready. Reload and review them again.' }))
+    renderAt('/espresso/sales?workspace=w1&campaign=c1')
+    fireEvent.click(await screen.findByRole('button', { name: 'Select 2' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Review and send 2' }))
+    let dialog = await screen.findByRole('dialog', { name: 'Review and send' })
+    await within(dialog).findByText('diego@example.com')
+    // Espresso redrafted one meanwhile: the refused send brings its new version.
+    api.getCampaign.mockResolvedValue(detail({
+      prospects: detail().prospects.map((p) => (p.id === 'weak' ? { ...p, body: 'Redrafted', review_token: 'tw2' } : p)),
+    }))
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: "I've read every message above" }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Send 2' }))
+    // The dialog is drawn again for the new versions, with the refusal in it.
+    await screen.findByText(/Redrafted/)
+    dialog = screen.getByRole('dialog', { name: 'Review and send' })
+    expect(within(dialog).getByText(/Redrafted/)).toBeInTheDocument()
+    expect(within(dialog).getAllByRole('alert').map((a) => a.textContent).join('|'))
+      .toMatch(/Some drafts changed.*The messages below are the current versions/)
+    // Read again before sending again; then the new version goes out.
+    expect(within(dialog).getByRole('checkbox', { name: "I've read every message above" })).not.toBeChecked()
+    api.sendBatch.mockResolvedValue({ status: 'sending' })
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: "I've read every message above" }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Send 2' }))
+    await waitFor(() => expect(api.sendBatch).toHaveBeenCalledTimes(2))
+    expect(api.sendBatch.mock.calls[1][2]).toContainEqual({ id: 'weak', review_token: 'tw2' })
+  })
+
+  it('picks up drafts Espresso writes while the page is open', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const idle = detail()
+    api.getCampaignStatus.mockResolvedValue({
+      campaign: idle.campaign, counts: idle.counts,
+      prospects: [...idle.prospects.map((p) => ({ id: p.id, status: p.status, error: null, review_token: p.review_token })),
+        { id: 'new', status: 'draft', error: null, review_token: 'tn' }],
+    })
+    renderAt('/espresso/sales?workspace=w1&campaign=c1')
+    await screen.findAllByRole('listitem')
+    api.getCampaign.mockResolvedValue(detail({ prospects: [...idle.prospects, prospect({ id: 'new', name: 'Cy New', review_token: 'tn' })] }))
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000) })
+    expect(api.getCampaignStatus).not.toHaveBeenCalled()  // not sending: the slow check
+    await act(async () => { await vi.advanceTimersByTimeAsync(45_000) })
+    expect(await screen.findByText('Cy New')).toBeInTheDocument()
+  })
+
+  it('doesn’t fast-poll a paused campaign waiting for Resume', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    api.getCampaign.mockResolvedValue(detail({ campaign: campaign({ status: 'paused' }), counts: { approved: 2 } }))
+    api.getCampaignStatus.mockResolvedValue({ campaign: campaign({ status: 'paused' }), counts: {}, prospects: [] })
+    renderAt('/espresso/sales?workspace=w1&campaign=c1')
+    expect(await screen.findByRole('button', { name: 'Resume' })).toBeInTheDocument()
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000) })
+    expect(api.getCampaignStatus).not.toHaveBeenCalled()
+  })
+
+  it('saves only the settings that changed', async () => {
+    api.getCampaign.mockResolvedValue(detail({ campaign: campaign({ footer: 'Reply stop.\nAcme, 1 Main St\n  ', playbook: 'consulting', cta_url: HOUSE.cta_url }) }))
+    api.updateCampaign.mockResolvedValue(campaign())
+    renderAt('/espresso/sales?workspace=w1&campaign=c1')
+    fireEvent.click(await screen.findByRole('button', { name: 'Campaign settings' }))
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Clinics TX' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(api.updateCampaign).toHaveBeenCalledWith('c1', { title: 'Clinics TX' }))
+  })
+
+  it('counts only drafts that can still be sent toward the batch', async () => {
+    const many = Array.from({ length: 51 }, (_, i) => prospect({ id: `p${i}`, name: `P${i}`, review_token: `t${i}` }))
+    api.getCampaign.mockResolvedValue(detail({ prospects: many, counts: { draft: 51 } }))
+    api.optOutProspect.mockResolvedValue(prospect())
+    renderAt('/espresso/sales?workspace=w1&campaign=c1&prospect=p0')
+    fireEvent.click(await screen.findByRole('button', { name: 'Select 50' }))
+    expect(screen.getByRole('checkbox', { name: 'Select P50' })).toBeDisabled()
+    // P0 is marked do not contact: 49 left, and P50 can be added.
+    api.getCampaign.mockResolvedValue(detail({
+      prospects: many.map((p) => (p.id === 'p0' ? { ...p, status: 'opted_out' as const } : p)), counts: { draft: 50 },
+    }))
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    fireEvent.click(await screen.findByRole('button', { name: 'Do not contact' }))
+    expect(await screen.findByText('49 selected')).toBeInTheDocument()
+    expect(screen.getByRole('checkbox', { name: 'Select P50' })).not.toBeDisabled()
+  })
+
+  it('says a deleted campaign is gone instead of loading forever', async () => {
+    const { ApiError } = await import('../../api/client')
+    api.getCampaign.mockRejectedValue(new ApiError('Not Found', 404, { detail: 'Campaign not found.' }))
+    renderAt('/espresso/sales?workspace=w1&campaign=gone')
+    expect(await screen.findByText(/no longer available/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Back to campaigns' }))
+    await waitFor(() => expect(screen.getByTestId('where')).not.toHaveTextContent('campaign='))
+  })
+
+  it('lets the only workspace be unchosen, and opens a campaign under its own workspace', async () => {
+    renderAt('/espresso/sales')
+    await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('workspace=w1'))
+    fireEvent.change(screen.getByRole('combobox', { name: 'Workspace' }), { target: { value: '' } })
+    await waitFor(() => expect(screen.getByTestId('where')).not.toHaveTextContent('workspace='))
+    await act(async () => { await Promise.resolve() })
+    expect(screen.getByTestId('where')).not.toHaveTextContent('workspace=')
+  })
+
+  it('moves to the workspace a linked campaign belongs to', async () => {
+    api.listSalesWorkspaces.mockResolvedValue({ workspaces: [{ id: 'w1', title: 'Outreach' }, { id: 'w2', title: 'Other' }] })
+    api.getCampaign.mockResolvedValue(detail({ campaign: campaign({ project_id: 'w2' }) }))
+    renderAt('/espresso/sales?workspace=w1&campaign=c1')
+    await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('workspace=w2'))
+    expect(screen.getByTestId('where')).toHaveTextContent('campaign=c1')
+  })
 })

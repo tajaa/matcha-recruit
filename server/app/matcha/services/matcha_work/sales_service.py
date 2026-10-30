@@ -129,7 +129,9 @@ async def _campaign(conn, campaign_id, user_id, *, edit=False, lock=True):
     return row
 
 
-async def list_projects(user_id):
+async def list_projects(user_id, *, editable=False):
+    """The collab workspaces a campaign can live in. `editable` leaves out the
+    ones where the person is only a viewer or commenter (they can't make one)."""
     async with connection_or_direct() as conn:
         rows = await conn.fetch(
             f"SELECT DISTINCT {_ACCESS_COLUMNS} {_ACCESS_FROM.format(user='$1')} "
@@ -137,7 +139,10 @@ async def list_projects(user_id):
             user_id,
         )
     return [
-        {"id": str(r["id"]), "title": r["title"]} for r in rows if _feature_enabled(r)
+        {"id": str(r["id"]), "title": r["title"]}
+        for r in rows
+        if _feature_enabled(r)
+        and not (editable and r["collaborator_role"] in ("viewer", "commenter"))
     ]
 
 

@@ -240,4 +240,16 @@ async def test_workspace_and_playbook_routes_read_for_the_signed_in_user(monkeyp
     user = SimpleNamespace(id=USER)
     assert await routes.workspaces(user) == {"workspaces": [{"id": "p", "title": "Sales"}]}
     assert await routes.playbooks(user) == {"playbooks": [], "house": None}
-    routes.sales.list_projects.assert_awaited_once_with(USER)
+    routes.sales.list_projects.assert_awaited_once_with(USER, editable=True)
+
+
+@pytest.mark.asyncio
+async def test_the_picker_leaves_out_workspaces_the_person_only_views(wired):
+    wired.on("SELECT DISTINCT", [
+        access_row() | {"id": uuid4(), "title": "Mine"},
+        access_row(role="viewer") | {"id": uuid4(), "title": "Viewing"},
+        access_row(role="commenter") | {"id": uuid4(), "title": "Commenting"},
+    ])
+    assert [w["title"] for w in await sales.list_projects(USER, editable=True)] == ["Mine"]
+    # The assistant's list still shows every workspace it can read.
+    assert len(await sales.list_projects(USER)) == 3

@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Loader2, Megaphone, Plus, Settings2, Sparkles } from 'lucide-react'
 import type { AssistantDraftState } from './Assistant'
-import type { ProspectStatus, SalesCampaign, SalesProspect } from '../api/matchaWork/sales'
+import type { CampaignInput, ProspectStatus, SalesCampaign, SalesProspect } from '../api/matchaWork/sales'
 import { useWorkBase } from '../routes/WorkSurfaceContext'
 import CampaignForm from './Sales/CampaignForm'
 import ImportBox from './Sales/ImportBox'
@@ -38,13 +38,24 @@ export default function Sales() {
     setParams(next)
   }
 
-  // One workspace: open it. A stale workspace in the URL is dropped.
+  // On arrival only: with one workspace, open it; a workspace the person
+  // can't use (gone, or only viewing) is dropped. Choosing "Choose a
+  // workspace" afterwards stays chosen.
+  const arrived = useRef(false)
   useEffect(() => {
-    if (!s.workspaces) return
+    if (!s.workspaces || arrived.current) return
+    arrived.current = true
     if (projectId && !s.workspaces.some((w) => w.id === projectId)) setParam({ workspace: null, campaign: null, prospect: null })
-    else if (!projectId && s.workspaces.length === 1) setParam({ workspace: s.workspaces[0].id })
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only when the list or choice changes
-  }, [s.workspaces, projectId])
+    else if (!projectId && !campaignId && s.workspaces.length === 1) setParam({ workspace: s.workspaces[0].id })
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, when the list arrives
+  }, [s.workspaces])
+
+  // A campaign link names its campaign; its workspace is the campaign's own.
+  const campaignProject = s.detail?.campaign.project_id
+  useEffect(() => {
+    if (campaignProject && campaignProject !== projectId) setParam({ workspace: campaignProject })
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- when the open campaign's workspace differs
+  }, [campaignProject])
 
   async function created(campaign: SalesCampaign | null) {
     if (!campaign) return
@@ -110,7 +121,7 @@ export default function Sales() {
           <div className="max-w-xl p-4">
             <h2 className="mb-3 text-sm font-semibold text-w-text">New campaign</h2>
             <CampaignForm house={s.options?.house ?? null} busy={s.busy}
-              onSave={async (input) => created(await s.create(input))} onCancel={() => setCreating(false)} />
+              onSave={async (input) => created(await s.create(input as CampaignInput))} onCancel={() => setCreating(false)} />
           </div>
         ) : !campaignId ? (
           <div className="flex h-full flex-col items-center justify-center gap-2 p-8 text-center">
@@ -119,6 +130,12 @@ export default function Sales() {
             <p className="max-w-sm text-xs text-w-dim">
               Import contacts or have Espresso find them, read each draft, then review a batch and send it from your Gmail.
             </p>
+          </div>
+        ) : s.failure ? (
+          <div className="space-y-2 p-4">
+            <p role="alert" className="text-xs text-red-400">{s.failure.message}</p>
+            <button type="button" onClick={() => setParam({ campaign: null, prospect: null })}
+              className="text-[11px] font-semibold text-w-accent hover:underline">Back to campaigns</button>
           </div>
         ) : !s.detail ? (
           <p className="flex items-center gap-1.5 p-4 text-xs text-w-dim"><Loader2 size={12} className="animate-spin" />Loading the campaign…</p>
@@ -163,17 +180,17 @@ function CampaignView({ s, prospectId, onOpenProspect, onClose, onAskEspresso, c
   const consulting = detail.campaign.playbook === 'consulting'
   const prospects = useMemo(() => orderProspects(detail.prospects, consulting), [detail, consulting])
   const open = prospects.find((p) => p.id === prospectId) ?? null
-  // A selection only ever holds drafts that are still ready.
+  // A selection only ever holds drafts that are still ready: one opted out,
+  // sent or redrafted since drops out, and stops counting toward the batch.
   const chosen = prospects.filter((p) => selected.has(p.id) && sendable(p))
+  const live = new Set(chosen.map((p) => p.id))
   const readyCount = prospects.filter(sendable).length
 
   function toggle(p: SalesProspect) {
-    setSelected((prev) => {
-      const next = new Set(prev)
-      if (next.has(p.id)) next.delete(p.id)
-      else if (next.size < MAX_BATCH) next.add(p.id)
-      return next
-    })
+    const next = new Set(live)
+    if (next.has(p.id)) next.delete(p.id)
+    else if (next.size < MAX_BATCH) next.add(p.id)
+    setSelected(next)
   }
 
   async function removeCampaign() {
@@ -263,7 +280,7 @@ function CampaignView({ s, prospectId, onOpenProspect, onClose, onAskEspresso, c
             </>
           )}
         </div>
-        <ProspectList prospects={prospects} consulting={consulting} selected={selected} openId={prospectId}
+        <ProspectList prospects={prospects} consulting={consulting} selected={live} openId={prospectId}
           onToggle={toggle} onOpen={(p) => onOpenProspect(p.id)} />
       </div>
 
@@ -284,8 +301,11 @@ function CampaignView({ s, prospectId, onOpenProspect, onClose, onAskEspresso, c
       )}
 
       {reviewing && (
-        <ReviewSend drafts={chosen} footer={detail.campaign.footer} busy={s.busy}
-          connectionsPath={connectionsPath} onApprove={approve} onClose={() => setReviewing(false)} />
+        // Keyed by the versions shown: when a draft changes under the dialog
+        // (a refused send reloads them), it is read again before sending.
+        <ReviewSend key={chosen.map((p) => p.review_token).join()} drafts={chosen} footer={detail.campaign.footer}
+          busy={s.busy} error={s.error} connectionsPath={connectionsPath} onApprove={approve}
+          onClose={() => { setReviewing(false); s.clearError() }} />
       )}
     </div>
   )

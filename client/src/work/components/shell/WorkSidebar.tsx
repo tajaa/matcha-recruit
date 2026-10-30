@@ -50,8 +50,9 @@ export default function WorkSidebar({ open, onToggle }: Props) {
   // (job searches are tasks too), with how many run and a dot when one needs them.
   const showTasks = isPersonal && (tasksEnabled || jobSearchEnabled)
   const tasksBadge = useTasksSummary(showTasks)
-  // Sales campaigns live in a shared workspace; the web page is Espresso's.
-  const showSales = isPersonal && showProjects
+  // Sales campaigns live in a shared workspace (one they made, or one they
+  // edit); the web page is Espresso's, and says so when there is none.
+  const showSales = isPersonal
   const canCreate = surface !== 'matcha-work' && canCreateChannel(me?.user?.role)
   const opsAccess = me?.ops_access ?? me?.work_access
   const showEvents = surface !== 'matcha-work' && canReviewEvents(opsAccess) && hasFeature('ems')
