@@ -15,6 +15,7 @@ from types import SimpleNamespace
 from app.database import connection_or_direct, decode_jsonb
 from app.core.feature_flags import merge_company_features
 from app.core.services.email._shared import _is_reserved_test_domain
+from . import sales_playbooks as playbooks
 from app.matcha.models.matcha_work.sales import (
     FOOTER_PLACEHOLDER,
     CampaignCreate,
@@ -27,6 +28,10 @@ from app.matcha.models.matcha_work.sales import (
 
 MAX_PROSPECTS = 1000
 EDITABLE = ("prospect", "draft", "failed")
+# What a prospect is, not what it is sent (none of it is in the reviewed
+# message, `review_token`): editable at any status, and never turns a frozen
+# message back into a draft. A signal is saved with its sources and research.
+META = {"stage", "segment", "service", "signal", "fit", "research", "sources"}
 
 
 class SalesError(ValueError):
@@ -169,19 +174,45 @@ async def workspace_campaigns(project_id, user_id):
     return [view(row) for row in rows]
 
 
+async def _house_available(conn, user_id):
+    row = await conn.fetchrow("SELECT role, email FROM users WHERE id = $1", user_id)
+    return bool(row) and playbooks.house_available(row["role"], row["email"])
+
+
+async def playbook_options(user_id):
+    """The playbooks a new campaign can run, and Matcha's own consulting
+    offer for Matcha staff."""
+    async with connection_or_direct() as conn:
+        house = await _house_available(conn, user_id)
+    return {
+        "playbooks": [playbooks.guide()],
+        "house": dict(playbooks.HOUSE, playbook=playbooks.CONSULTING) if house else None,
+    }
+
+
 async def create_campaign(project_id, user_id, data: CampaignCreate):
+    target, offer, cta_url, playbook = data.target, data.offer, data.cta_url, data.playbook
     async with connection_or_direct() as conn, conn.transaction():
         await project_access(conn, project_id, user_id, edit=True)
+        if data.house:
+            if not await _house_available(conn, user_id):
+                raise SalesError("Matcha's consulting offer is for Matcha staff.", 403)
+            # What the person wrote wins; the preset fills what they left empty.
+            house = playbooks.HOUSE
+            target, offer = target or house["target"], offer or house["offer"]
+            cta_url, playbook = cta_url or house["cta_url"], playbooks.CONSULTING
         row = await conn.fetchrow(
-            """INSERT INTO mw_sales_campaigns(project_id,user_id,request_id,title,target,offer,footer)
-            VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(user_id,request_id) DO UPDATE SET request_id = EXCLUDED.request_id RETURNING *""",
+            """INSERT INTO mw_sales_campaigns(project_id,user_id,request_id,title,target,offer,footer,playbook,cta_url)
+            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(user_id,request_id) DO UPDATE SET request_id = EXCLUDED.request_id RETURNING *""",
             project_id,
             user_id,
             data.request_id,
             data.title,
-            data.target,
-            data.offer,
+            target,
+            offer,
             data.footer,
+            playbook,
+            cta_url,
         )
         if row["project_id"] != project_id:
             raise SalesError(
@@ -201,6 +232,9 @@ async def update_campaign(campaign_id, user_id, data: CampaignPatch):
     changes = data.model_dump(exclude_none=True)
     async with connection_or_direct() as conn, conn.transaction():
         row = await _campaign(conn, campaign_id, user_id, edit=True)
+        merged = dict(row) | changes
+        if merged.get("playbook") == playbooks.CONSULTING and not merged.get("cta_url"):
+            raise SalesError("A consulting campaign needs a booking link.")
         if (
             "footer" in changes
             and changes["footer"] != row["footer"]
@@ -257,12 +291,22 @@ async def read_campaign(campaign_id, user_id, *, offset=0, limit=1000):
             limit,
         )
         counts = await _counts(conn, campaign_id)
-    return {
+    consulting = dict(row).get("playbook") == playbooks.CONSULTING
+    prospects = []
+    for item in items:
+        prospect = view(item, row["footer"])
+        if consulting:
+            prospect["review_flags"] = playbooks.review_flags(row, item)
+        prospects.append(prospect)
+    result = {
         "campaign": view(row),
-        "prospects": [view(item, row["footer"]) for item in items],
+        "prospects": prospects,
         "counts": counts,
         "offset": offset,
     }
+    if consulting:
+        result["playbook"] = playbooks.guide()
+    return result
 
 
 async def campaign_status(campaign_id, user_id):
@@ -386,7 +430,7 @@ async def patch_prospect(campaign_id, item_id, user_id, data: ProspectPatch):
             raise SalesError(
                 "The draft changed. Reload and review the current version.", 409
             )
-        if set(changes) - {"stage"} and row["status"] not in EDITABLE:
+        if set(changes) - META and row["status"] not in EDITABLE:
             raise SalesError(
                 "This message is frozen for delivery or opted out. Release pending messages before editing.",
                 409,
@@ -409,7 +453,7 @@ async def patch_prospect(campaign_id, item_id, user_id, data: ProspectPatch):
             if duplicate:
                 raise SalesError("That recipient is already in this campaign.", 409)
             changes["dedupe_key"] = key
-        if set(changes) - {"stage"}:
+        if set(changes) - META:
             changes["status"] = (
                 "draft"
                 if merged["email"] and merged["subject"] and merged["body"]
@@ -519,14 +563,18 @@ def _label(row):
     return row["name"] or row["company"] or row["email"] or row["website"]
 
 
-async def draft_template(campaign_id, user_id, data: Template, *, overwrite=True):
+async def draft_template(campaign_id, user_id, data: Template, *, overwrite=True, checked=False):
     """Render the template for editable prospects.
 
     `overwrite=False` (the agent's path) fills only prospects without a draft, so a
     template never replaces individually written messages behind the person's back.
+    `checked=True` (the agent's path too) holds a consulting campaign's drafts to
+    `sales_playbooks.draft_problems`: a prospect whose rendered draft fails is
+    left undrafted and reported under `skipped`, never saved.
     """
+    skipped = []
     async with connection_or_direct() as conn, conn.transaction():
-        await _campaign(conn, campaign_id, user_id, edit=True)
+        campaign = await _campaign(conn, campaign_id, user_id, edit=True)
         rows = await conn.fetch(
             "SELECT * FROM mw_sales_prospects WHERE campaign_id = $1 AND status IN ('prospect','draft','failed') "
             "AND ($2 OR subject = '' OR body = '') ORDER BY created_at,id",
@@ -550,6 +598,11 @@ async def draft_template(campaign_id, user_id, data: Template, *, overwrite=True
                 raise SalesError(
                     f"The message for {_label(row)} is empty, too long, or has a multiline subject."
                 )
+            if checked and dict(campaign).get("playbook") == playbooks.CONSULTING:
+                problems = playbooks.review_flags(campaign, dict(row) | {"subject": subject, "body": body})
+                if problems:
+                    skipped.append({"prospect": _label(row), "problems": problems})
+                    continue
             rendered.append((row, subject, body))
         if rendered:
             await conn.execute(
@@ -570,7 +623,7 @@ async def draft_template(campaign_id, user_id, data: Template, *, overwrite=True
                 ),
             )
         await _touch(conn, campaign_id)
-    return {"drafted": len(rendered)}
+    return {"drafted": len(rendered), **({"skipped": skipped[:20], "skipped_count": len(skipped)} if skipped else {})}
 
 
 def footer_problem(footer):

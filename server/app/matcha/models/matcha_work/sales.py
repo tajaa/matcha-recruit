@@ -4,9 +4,14 @@ from typing import Literal
 from uuid import UUID
 from urllib.parse import urlsplit
 import re
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 Stage = Literal["lead", "qualified", "proposal", "negotiation", "closed"]
+# `services/matcha_work/sales_playbooks.py` holds what each one means; a test
+# keeps these lists and its SEGMENTS/SERVICES the same, and mwsales03's CHECKs too.
+Playbook = Literal["", "consulting"]
+Segment = Literal["", "growing", "regulated", "ai", "hourly"]
+Service = Literal["", "hr", "grc", "er", "ai"]
 
 
 class Body(BaseModel):
@@ -23,6 +28,25 @@ class CampaignCreate(Body):
     target: str = Field(default="", max_length=2000)
     offer: str = Field(default="", max_length=4000)
     footer: str = Field(default="", max_length=1000)
+    playbook: Playbook = ""
+    # The one link every consulting message asks for (a booking page).
+    cta_url: str = Field(default="", max_length=2000)
+    # Start from Matcha's own consulting offer (Matcha staff only).
+    house: bool = False
+
+    @field_validator("cta_url")
+    @classmethod
+    def cta(cls, value):
+        if value:
+            public_url(value)
+        return value
+
+    @model_validator(mode="after")
+    def booking_link(self):
+        # Every consulting message asks for it; Matcha's own offer brings one.
+        if self.playbook == "consulting" and not self.cta_url and not self.house:
+            raise ValueError("A consulting campaign needs a booking link (cta_url).")
+        return self
 
 
 class CampaignPatch(Body):
@@ -31,6 +55,13 @@ class CampaignPatch(Body):
     offer: str | None = Field(default=None, max_length=4000)
     # The opt-out line and postal address every commercial message carries.
     footer: str | None = Field(default=None, max_length=1000)
+    playbook: Playbook | None = None
+    cta_url: str | None = Field(default=None, max_length=2000)
+
+    @field_validator("cta_url")
+    @classmethod
+    def cta(cls, value):
+        return CampaignCreate.cta(value) if value is not None else value
 
 
 class Prospect(Body):
@@ -88,6 +119,11 @@ class ProspectPatch(Body):
     subject: str | None = Field(default=None, max_length=300)
     body: str | None = Field(default=None, max_length=12000)
     email: str | None = Field(default=None, max_length=254)
+    # Consulting playbook: who they are, what fits, and why write now.
+    segment: Segment | None = None
+    service: Service | None = None
+    signal: str | None = Field(default=None, max_length=400)
+    fit: int | None = Field(default=None, ge=1, le=3)
     # Compare against the draft the person actually opened, not an intervening agent edit.
     review_token: str | None = Field(default=None, max_length=64)
 
