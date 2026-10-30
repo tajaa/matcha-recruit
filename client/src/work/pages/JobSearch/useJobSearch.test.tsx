@@ -6,7 +6,7 @@ import type { JobLeadDetail, JobSearchDetail } from '../../api/matchaWork/jobSea
 
 const mock = vi.hoisted(() => ({
   get: vi.fn(), status: vi.fn(), lead: vi.fn(), update: vi.fn(), redraft: vi.fn(), rerank: vi.fn(),
-  email: vi.fn(), cancel: vi.fn(), widen: vi.fn(),
+  email: vi.fn(), cancel: vi.fn(), widen: vi.fn(), tailor: vi.fn(),
 }))
 vi.mock('../../api/matchaWork/jobSearch', () => ({
   getJobSearch: mock.get,
@@ -18,6 +18,7 @@ vi.mock('../../api/matchaWork/jobSearch', () => ({
   draftJobEmail: mock.email,
   widenJobSearch: mock.widen,
   cancelJobSearch: mock.cancel,
+  tailorJobResume: mock.tailor,
 }))
 
 const job = (over: Partial<JobLeadDetail> = {}): JobLeadDetail => ({
@@ -200,6 +201,41 @@ describe('useJobSearch Edit draft', () => {
 
 describe('useJobSearch inside Tasks', () => {
   afterEach(() => vi.useRealTimers())
+
+  it('tailors the résumé and reads the open job until it lands, then stops', async () => {
+    vi.useFakeTimers()
+    mock.get.mockResolvedValue(search())
+    mock.lead.mockResolvedValueOnce(job())
+    const { result } = renderHook(() => useJobSearch('s1', 'l1'))
+    await act(async () => {})
+    mock.tailor.mockResolvedValue(job({ resume_status: 'queued' }))
+    await act(async () => { await result.current.tailorResume('l1') })
+    expect(mock.tailor).toHaveBeenCalledWith('s1', 'l1')
+    expect(result.current.lead?.resume_status).toBe('queued')
+
+    mock.lead.mockResolvedValueOnce(job({ resume_status: 'drafting' }))
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000) })
+    expect(result.current.lead?.resume_status).toBe('drafting')
+    mock.lead.mockResolvedValueOnce(job({ resume_status: 'done' }))
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000) })
+    expect(result.current.lead?.resume_status).toBe('done')
+    const reads = mock.lead.mock.calls.length
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000) })
+    expect(mock.lead.mock.calls.length).toBe(reads)
+    // The finished search's own status was never polled for it.
+    expect(mock.status).not.toHaveBeenCalled()
+  })
+
+  it("says in the job's pane why tailoring was refused", async () => {
+    mock.get.mockResolvedValue(search())
+    mock.lead.mockResolvedValue(job())
+    const { result } = renderHook(() => useJobSearch('s1', 'l1'))
+    await act(async () => {})
+    mock.tailor.mockRejectedValue(new ApiError('Add your résumé in Tasks → Résumé first, then tailor it to this job.', 422, { detail: { code: 'resume_required' } }))
+    await act(async () => { await result.current.tailorResume('l1') })
+    expect(result.current.leadError).toBe('Add your résumé in Tasks → Résumé first, then tailor it to this job.')
+    expect(result.current.error).toBeNull()
+  })
 
   it('loads and polls the search', async () => {
     vi.useFakeTimers()

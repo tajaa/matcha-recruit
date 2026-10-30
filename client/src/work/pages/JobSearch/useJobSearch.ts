@@ -2,9 +2,10 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { ApiError } from '../../../api/client'
 import {
   cancelJobSearch, draftJobEmail, getJobLead, getJobSearch, getJobSearchStatus, redraftJobApproach,
-  rerankJobSearch, updateJobLead, widenJobSearch, type JobLeadDetail, type JobSearchDetail, type JobWeights,
+  rerankJobSearch, tailorJobResume, updateJobLead, widenJobSearch, type JobLeadDetail, type JobSearchDetail,
+  type JobWeights,
 } from '../../api/matchaWork/jobSearch'
-import { errorCode, errorLead, errorText, needsPolling, statusChanged } from './jobSearchLogic'
+import { errorCode, errorLead, errorText, isTailoring, needsPolling, statusChanged } from './jobSearchLogic'
 
 /** How often a running search (or a job being drafted) checks its cheap status. */
 const POLL_MS = 5_000
@@ -163,6 +164,17 @@ export function useJobSearch(
     return () => window.clearInterval(timer)
   }, [searchId, loadDetail, refreshLead])
 
+  // The open job while its résumé is tailored: that doesn't move the
+  // search's status, so the job itself is read until the result lands.
+  const tailoringId = lead && isTailoring(lead) ? lead.id : null
+  useEffect(() => {
+    if (!searchId || !tailoringId) return
+    const timer = window.setInterval(() => {
+      if (!document.hidden && leadRef.current === tailoringId) void refreshLead(tailoringId)
+    }, POLL_MS)
+    return () => window.clearInterval(timer)
+  }, [searchId, tailoringId, refreshLead])
+
   /** One change at a time. A change made from a job's pane reports there
    *  (`fromLead`), since below the widest layout the pane covers the search. */
   const perform = useCallback(async (fallback: string, action: () => Promise<void>, fromLead?: string) => {
@@ -254,6 +266,17 @@ export function useJobSearch(
     }, id)
   }, [perform, change, refreshLead])
 
+  /** Tailor their résumé to a job, to read before applying. Spends no
+   *  search; the job is read until it lands. Asked again while it runs, the
+   *  server leaves the first one going. */
+  const tailorResume = useCallback((id: string) => {
+    const search = searchRef.current
+    if (!search) return Promise.resolve()
+    return perform("Couldn't start tailoring your résumé.", async () => {
+      await changeLead(id, () => tailorJobResume(search, id))
+    }, id)
+  }, [perform, changeLead])
+
   const cancel = useCallback(() => {
     const search = searchRef.current
     if (!search) return Promise.resolve()
@@ -312,7 +335,7 @@ export function useJobSearch(
     busy, error, setError,
     emailNotConnected: issue === 'not_connected',
     emailDraftGone: issue === 'draft_gone',
-    setLeadState, saveNotes, rerank, widen, redraft, cancel, draftEmail,
+    setLeadState, saveNotes, rerank, widen, redraft, tailorResume, cancel, draftEmail,
   }
 }
 

@@ -78,6 +78,9 @@ export interface JobLeadSummary {
   email_draft_id: string | null
   email_drafted_at: string | null
   email_sent_at: string | null
+  /** Their résumé tailored to this job: `none`, `queued`, `drafting`, `done`
+   *  or `failed` (a run that died reads failed). Older servers leave it out. */
+  resume_status?: string
   /** The suggested direction (a role beyond their title) this job is, if any. */
   direction?: string | null
 }
@@ -152,6 +155,31 @@ export interface JobApproach {
   sources?: string[]
 }
 
+/** One line of a tailored résumé and the résumé lines it rewrites (checked
+ *  word for word against the résumé, as is every number in it). */
+export interface TailoredLine {
+  text: string
+  sources: string[]
+}
+
+/** Their saved résumé, rewritten for one job. Nothing in it is new: the
+ *  server drops any line it can't trace to the résumé (`dropped` counts them)
+ *  and lists what the posting asks for that the résumé doesn't show (`gaps`). */
+export interface TailoredResume {
+  summary: { text: string; sources: string[] }
+  experience: { role: string; organization: string; dates: string; bullets: TailoredLine[] }[]
+  skills: string[]
+  sections: { heading: string; lines: TailoredLine[] }[]
+  changes: string[]
+  gaps: string[]
+  dropped: number
+  /** When the résumé it was made from was saved, and when it was made. */
+  resume_saved_at: string | null
+  made_at: string | null
+  /** The whole thing as plain text, for Copy and Download. */
+  text: string
+}
+
 export interface JobLeadDetail extends JobLeadSummary {
   description: string
   comp: { base?: JobCompPart | null; bonus?: JobCompPart | null; equity?: JobCompPart | null } | null
@@ -159,6 +187,7 @@ export interface JobLeadDetail extends JobLeadSummary {
   screen_reason: string | null
   fit_reasons: string[]
   approach: JobApproach | null
+  tailored_resume?: TailoredResume | null
   notes: string
 }
 
@@ -216,6 +245,12 @@ export const rerankJobSearch = (id: string, weights: JobWeights) =>
   api.put<JobSearchDetail>(`${searchPath(id)}/weights`, weights)
 /** Add a finished search's 3/5 matches. Free, once a search. */
 export const widenJobSearch = (id: string) => api.post<JobSearchDetail>(`${searchPath(id)}/widen`)
+/** Tailor their saved résumé to this job (again), to read before applying.
+ *  Returns the job: `resume_status` moves queued → drafting → done (or
+ *  failed). Refused 422 `resume_required` with no résumé saved, 409
+ *  `posting_unread` when the posting hasn't been read. */
+export const tailorJobResume = (searchId: string, leadId: string) =>
+  api.post<JobLeadDetail>(`${leadPath(searchId, leadId)}/resume`)
 export const redraftJobApproach = (searchId: string, leadId: string) =>
   api.post<JobSearchDetail>(`${leadPath(searchId, leadId)}/approach`)
 /** Put a job's first message in the person's Gmail drafts. Nothing is sent.

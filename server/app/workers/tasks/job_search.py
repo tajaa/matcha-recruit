@@ -1,5 +1,6 @@
 """Espresso job search: one phase per task (`job_search/orchestrator.py`)."""
 
+import asyncio
 from uuid import UUID
 
 from app.workers.celery_app import celery_app
@@ -18,6 +19,19 @@ def run_job_search_phase(search_id, token):
     # A phase that ends the search posts its card and bell through the socket
     # fan-out, which needs the worker's own Redis client (`run_with_chat_fanout`).
     run_with_chat_fanout(orchestrator.run_phase(UUID(search_id), UUID(token)))
+
+
+@celery_app.task(
+    name="app.workers.tasks.job_search.tailor_job_resume",
+    soft_time_limit=300,
+    time_limit=360,
+)
+def tailor_job_resume(lead_id, token):
+    """A résumé tailored to one job (`job_search/tailor.py`). It posts nothing
+    to chat: the job pane polls the job until it is done."""
+    from app.matcha.services.matcha_work.job_search import tailor
+
+    asyncio.run(tailor.run(UUID(lead_id), UUID(token)))
 
 
 @celery_app.task(

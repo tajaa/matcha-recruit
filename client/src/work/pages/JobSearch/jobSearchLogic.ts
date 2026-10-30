@@ -71,6 +71,15 @@ export const isIrrelevant = (lead: JobLeadSummary) => lead.screen_status === 'ir
 export const isBelowFloor = (lead: JobLeadSummary) => lead.rank_band === BELOW_FLOOR_BAND
 export const isDrafting = (lead: JobLeadSummary) => lead.approach_status === 'queued' || lead.approach_status === 'drafting'
 export const hasApproach = (lead: JobLeadSummary) => lead.approach_status === 'done'
+/** A tailored résumé's download name ("Resume - Acme - COO.txt"), with only
+ *  letters, digits and plain punctuation so it saves on any system. */
+export function resumeFileName(lead: { company: string; title: string }): string {
+  const part = (text: string) => text.replace(/[^\p{L}\p{N} .,&()'-]+/gu, ' ').replace(/\s+/g, ' ').trim().slice(0, 60)
+  return `${['Resume', part(lead.company), part(lead.title)].filter(Boolean).join(' - ')}.txt`
+}
+
+/** Their résumé is being tailored to this job: the open job polls until it lands. */
+export const isTailoring = (lead: JobLeadSummary) => lead.resume_status === 'queued' || lead.resume_status === 'drafting'
 /** In Gmail drafts, waiting to be edited and sent. */
 export const emailWaiting = (lead: JobLeadSummary) => !!lead.email_draft_id && !lead.email_sent_at
 

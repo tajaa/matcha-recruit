@@ -26,9 +26,11 @@ function pane(props: Partial<Parameters<typeof LeadPane>[0]> = {}) {
         emailDrafted={false}
         emailDraftGone={false}
         emailPath="/espresso/email"
+        resumePath="/espresso/tasks?view=resume"
         onSetState={vi.fn()}
         onSaveNotes={vi.fn()}
         onRedraft={vi.fn()}
+        onTailorResume={vi.fn()}
         onAskEspresso={vi.fn()}
         {...handlers}
         {...props}
